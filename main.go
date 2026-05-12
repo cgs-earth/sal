@@ -1,32 +1,44 @@
 package main
 
 import (
-	"compress/gzip"
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
+	"sync"
 
 	"github.com/apache/arrow-go/v18/arrow"
-	"github.com/apache/arrow-go/v18/arrow/array"
-	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/iceberg-go"
 	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/catalog/hadoop"
 	_ "github.com/apache/iceberg-go/catalog/hadoop"
 	"github.com/apache/iceberg-go/table"
-	rdf "github.com/tggo/goRDFlib"
-	"github.com/tggo/goRDFlib/nq"
 )
 
-const batchSize = 10_000
+const defaultBatchSize = 131_072
+
+type loadConfig struct {
+	reset               bool
+	inputDir            string
+	batchSize           int
+	workers             int
+	parquetCompression  string
+	metricsMode         string
+	targetFileSizeBytes int64
+}
+
+type triple struct{ s, p, o string }
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("Usage: loader <path-to-nq-gz-directory>")
+		log.Fatal("Usage: loader [--reset] [--workers N] [--batch-size N] [--compression CODEC] [--metrics-mode MODE] [--target-file-size-bytes N] <path-to-nq-gz-directory>")
 	}
-	inputDir := os.Args[1]
+	cfg := parseArgs(os.Args[1:])
 
 	ctx := context.Background()
 
@@ -53,13 +65,35 @@ func main() {
 	)
 
 	tableIdent := catalog.ToIdentifier("default", "triples")
-	tbl, err := cat.CreateTable(ctx, tableIdent, icebergSchema,
-		catalog.WithProperties(map[string]string{"owner": "me"}),
-	)
-	if err != nil {
-		log.Print("Failed to create table:", err)
+	if cfg.reset {
+		if err := cat.DropTable(ctx, tableIdent); err != nil && !errors.Is(err, catalog.ErrNoSuchTable) {
+			log.Fatal("Failed to reset table:", err)
+		}
+		log.Println("Reset table default.triples")
 	}
-	log.Println("Table created successfully")
+
+	tbl, err := cat.CreateTable(ctx, tableIdent, icebergSchema,
+		catalog.WithProperties(map[string]string{
+			"owner": "me",
+			table.MetadataDeleteAfterCommitEnabledKey: "true",
+			table.MetadataPreviousVersionsMaxKey:      strconv.Itoa(1),
+			table.ManifestMergeEnabledKey:             "true",
+			table.ManifestMinMergeCountKey:            strconv.Itoa(1),
+			"write.parquet.compression-codec":         cfg.parquetCompression,
+			"write.metadata.metrics.default":          cfg.metricsMode,
+			table.WriteTargetFileSizeBytesKey:         strconv.FormatInt(cfg.targetFileSizeBytes, 10),
+		}),
+	)
+	createdTable := err == nil
+	if err != nil {
+		log.Print("Failed to create table, loading existing table:", err)
+		tbl, err = cat.LoadTable(ctx, tableIdent)
+		if err != nil {
+			log.Fatalf("Failed to load existing table: %v. If this table was created with compressed metadata during a previous run, rerun with --reset.", err)
+		}
+	} else {
+		log.Println("Table created successfully")
+	}
 
 	arrowSchema := arrow.NewSchema(
 		[]arrow.Field{
@@ -70,146 +104,219 @@ func main() {
 		nil,
 	)
 
-	pattern := filepath.Join(inputDir, "*.nq.gz")
+	pattern := filepath.Join(cfg.inputDir, "*.nq.gz")
 	files, err := filepath.Glob(pattern)
 	if err != nil {
 		log.Fatal("Glob error:", err)
 	}
 	if len(files) == 0 {
-		log.Fatalf("No .nq.gz files found in %s", inputDir)
+		log.Fatalf("No .nq.gz files found in %s", cfg.inputDir)
 	}
 	log.Printf("Found %d .nq.gz file(s)", len(files))
 
-	for _, fpath := range files {
-		log.Printf("Processing: %s", fpath)
-		if err := processFile(ctx, fpath, cat, tableIdent, arrowSchema); err != nil {
-			log.Fatalf("Error processing %s: %v", fpath, err)
+	writeProps := iceberg.Properties{
+		"write.parquet.compression-codec": cfg.parquetCompression,
+		"write.metadata.metrics.default":  cfg.metricsMode,
+		table.WriteTargetFileSizeBytesKey: strconv.FormatInt(cfg.targetFileSizeBytes, 10),
+	}
+	if !createdTable {
+		if err := applyWriteProperties(ctx, tbl, writeProps); err != nil {
+			log.Fatalf("Failed to configure table write properties: %v", err)
 		}
+	}
+	log.Printf("Write settings: workers=%d batch-size=%d compression=%s metrics=%s target-file-size=%d",
+		cfg.workers, cfg.batchSize, cfg.parquetCompression, cfg.metricsMode, cfg.targetFileSizeBytes)
+
+	if err := processFiles(ctx, files, cat, tableIdent, arrowSchema, cfg.batchSize, cfg.workers); err != nil {
+		log.Fatalf("Error processing files: %v", err)
 	}
 
 	log.Println("All files loaded successfully.")
 	log.Println("Table location:", tbl.Location())
 }
 
-// processFile streams a single .nq.gz file into the Iceberg table in batches.
-// It reloads the table from the catalog before every flush so that each Append
-// sees a fresh snapshot and avoids "branch was created concurrently" conflicts.
-func processFile(
+func parseArgs(args []string) loadConfig {
+	fs := flag.NewFlagSet("loader", flag.ExitOnError)
+	cfg := loadConfig{}
+	fs.BoolVar(&cfg.reset, "reset", false, "drop and recreate the table before loading")
+	fs.IntVar(&cfg.batchSize, "batch-size", defaultBatchSize, "Arrow records per batch")
+	fs.IntVar(&cfg.workers, "workers", runtime.GOMAXPROCS(0), "number of input files to convert to Parquet in parallel")
+	fs.StringVar(&cfg.parquetCompression, "compression", "snappy", "Parquet compression codec: snappy, zstd, gzip, brotli, lz4, uncompressed")
+	fs.StringVar(&cfg.metricsMode, "metrics-mode", "counts", "Iceberg metrics mode: none, counts, truncate(N), full")
+	fs.Int64Var(&cfg.targetFileSizeBytes, "target-file-size-bytes", table.WriteTargetFileSizeBytesDefault, "target Iceberg data file size")
+
+	if err := fs.Parse(args); err != nil {
+		log.Fatal(err)
+	}
+	if fs.NArg() != 1 {
+		log.Fatal("Usage: loader [--reset] [--workers N] [--batch-size N] [--compression CODEC] [--metrics-mode MODE] [--target-file-size-bytes N] <path-to-nq-gz-directory>")
+	}
+	if cfg.batchSize <= 0 {
+		log.Fatal("--batch-size must be positive")
+	}
+	if cfg.workers <= 0 {
+		log.Fatal("--workers must be positive")
+	}
+	if cfg.targetFileSizeBytes <= 0 {
+		log.Fatal("--target-file-size-bytes must be positive")
+	}
+	cfg.inputDir = fs.Arg(0)
+	return cfg
+}
+
+func applyWriteProperties(ctx context.Context, tbl *table.Table, props iceberg.Properties) error {
+	txn := tbl.NewTransaction()
+	if err := txn.SetProperties(props); err != nil {
+		return fmt.Errorf("set table properties: %w", err)
+	}
+	if _, err := txn.Commit(ctx); err != nil {
+		return fmt.Errorf("commit table properties: %w", err)
+	}
+	return nil
+}
+
+// processFiles writes each .nq.gz input to Iceberg data files in parallel, then
+// commits all of the produced data files in one table snapshot.
+func processFiles(
 	ctx context.Context,
-	fpath string,
+	files []string,
 	cat catalog.Catalog,
 	tableIdent table.Identifier,
 	arrowSchema *arrow.Schema,
+	batchSize int,
+	workers int,
 ) error {
-	f, err := os.Open(fpath)
+	tbl, err := cat.LoadTable(ctx, tableIdent)
 	if err != nil {
-		return fmt.Errorf("open: %w", err)
+		return fmt.Errorf("load table: %w", err)
 	}
-	defer f.Close()
 
-	gz, err := gzip.NewReader(f)
+	dataFiles, rows, err := writeFilesInParallel(ctx, tbl, files, arrowSchema, batchSize, workers)
 	if err != nil {
-		return fmt.Errorf("gzip: %w", err)
+		return err
 	}
-	defer gz.Close()
-
-	pool := memory.NewGoAllocator()
-
-	// tripleC receives parsed triples from the QuadHandler goroutine.
-	type triple struct{ s, p, o string }
-	tripleC := make(chan triple, batchSize)
-
-	// Parse in background; the QuadHandler feeds tripleC.
-	parseErr := make(chan error, 1)
-	go func() {
-		g := rdf.NewGraph()
-		err := nq.Parse(g, gz,
-			nq.WithQuadHandler(
-				func(s rdf.Subject, p rdf.URIRef, o rdf.Term, _ rdf.Term) {
-					tripleC <- triple{
-						s: s.String(),
-						p: p.String(),
-						o: o.String(),
-					}
-				},
-			),
-			nq.WithErrorHandler(func(lineNum int, line string, err error) (string, bool) {
-				// Skip lines that are too long (or any other parse error)
-				log.Printf("  skipping line %d: %v", lineNum, err)
-				return "", false // false = don't retry
-			}),
-		)
-		close(tripleC)
-		parseErr <- nil
-		if err != nil {
-			log.Printf("Parse error: %v", err)
-		}
-	}()
-
-	// Drain tripleC in batches and write each batch to Iceberg.
-	buf := make([]triple, 0, batchSize)
-
-	flush := func() error {
-		if len(buf) == 0 {
-			return nil
-		}
-
-		b := array.NewRecordBuilder(pool, arrowSchema)
-		defer b.Release()
-
-		subjects := make([]string, len(buf))
-		predicates := make([]string, len(buf))
-		objects := make([]string, len(buf))
-		for i, t := range buf {
-			subjects[i] = t.s
-			predicates[i] = t.p
-			objects[i] = t.o
-		}
-		b.Field(0).(*array.StringBuilder).AppendValues(subjects, nil)
-		b.Field(1).(*array.StringBuilder).AppendValues(predicates, nil)
-		b.Field(2).(*array.StringBuilder).AppendValues(objects, nil)
-
-		rec := b.NewRecordBatch()
-		defer rec.Release()
-
-		itr, err := array.NewRecordReader(arrowSchema, []arrow.RecordBatch{rec})
-		if err != nil {
-			return fmt.Errorf("record reader: %w", err)
-		}
-		defer itr.Release()
-
-		// Reload the table so Append sees the latest committed snapshot.
-		tbl, err := cat.LoadTable(ctx, tableIdent)
-		if err != nil {
-			return fmt.Errorf("reload table: %w", err)
-		}
-
-		if _, err = tbl.Append(ctx, itr, iceberg.Properties(nil)); err != nil {
-			return fmt.Errorf("iceberg append: %w", err)
-		}
-
-		log.Printf("  flushed %d triples", len(buf))
-		buf = buf[:0]
+	if len(dataFiles) == 0 {
+		log.Printf("  no triples found")
 		return nil
 	}
 
-	for t := range tripleC {
-		buf = append(buf, t)
-		if len(buf) >= batchSize {
-			err := flush()
-			if err != nil {
-				return err
-			}
-		}
+	txn := tbl.NewTransaction()
+	if err := txn.AddDataFiles(ctx, dataFiles, iceberg.Properties(nil), table.WithoutDuplicateCheck()); err != nil {
+		return fmt.Errorf("stage data files: %w", err)
 	}
-	// Flush any remaining triples.
-	if err := flush(); err != nil {
-		return err
+	if _, err := txn.Commit(ctx); err != nil {
+		return fmt.Errorf("commit data files: %w", err)
 	}
 
-	// Check parse error from goroutine.
-	if err := <-parseErr; err != nil {
-		return fmt.Errorf("parse: %w", err)
-	}
+	log.Printf("  committed %d parquet data file(s) with %d triples in one snapshot", len(dataFiles), rows)
 	return nil
+}
+
+func writeFilesInParallel(
+	ctx context.Context,
+	tbl *table.Table,
+	files []string,
+	arrowSchema *arrow.Schema,
+	batchSize int,
+	workers int,
+) ([]iceberg.DataFile, int64, error) {
+	if workers > len(files) {
+		workers = len(files)
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	type result struct {
+		dataFiles []iceberg.DataFile
+		rows      int64
+		err       error
+	}
+
+	jobs := make(chan string)
+	results := make(chan result, len(files))
+	var wg sync.WaitGroup
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range jobs {
+				dataFiles, rows, err := writeOneInputFile(ctx, tbl, path, arrowSchema, batchSize)
+				if err != nil {
+					cancel()
+				}
+				results <- result{dataFiles: dataFiles, rows: rows, err: err}
+			}
+		}()
+	}
+
+	go func() {
+		defer close(jobs)
+		for _, path := range files {
+			select {
+			case jobs <- path:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var allDataFiles []iceberg.DataFile
+	var totalRows int64
+	for res := range results {
+		if res.err != nil {
+			return nil, 0, res.err
+		}
+		allDataFiles = append(allDataFiles, res.dataFiles...)
+		totalRows += res.rows
+	}
+
+	return allDataFiles, totalRows, nil
+}
+
+func writeOneInputFile(
+	ctx context.Context,
+	tbl *table.Table,
+	path string,
+	arrowSchema *arrow.Schema,
+	batchSize int,
+) ([]iceberg.DataFile, int64, error) {
+	rdr := newNQuadRecordReader([]string{path}, arrowSchema, batchSize)
+	defer rdr.Release()
+
+	records := retainedRecordIterator(rdr)
+	var dataFiles []iceberg.DataFile
+	for df, err := range table.WriteRecords(ctx, tbl, arrowSchema, records) {
+		if err != nil {
+			return nil, 0, fmt.Errorf("write %s: %w", path, err)
+		}
+		dataFiles = append(dataFiles, df)
+	}
+	if err := rdr.Err(); err != nil {
+		return nil, 0, fmt.Errorf("read %s: %w", path, err)
+	}
+
+	log.Printf("  wrote %s as %d parquet data file(s), %d triples", path, len(dataFiles), rdr.RowsRead())
+	return dataFiles, rdr.RowsRead(), nil
+}
+
+func retainedRecordIterator(rdr *nquadRecordReader) func(func(arrow.RecordBatch, error) bool) {
+	return func(yield func(arrow.RecordBatch, error) bool) {
+		for rdr.Next() {
+			rec := rdr.RecordBatch()
+			rec.Retain()
+			if !yield(rec, nil) {
+				return
+			}
+		}
+		if err := rdr.Err(); err != nil {
+			yield(nil, err)
+		}
+	}
 }

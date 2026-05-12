@@ -5,7 +5,6 @@ go 1.25.5
 require (
 	github.com/apache/arrow-go/v18 v18.6.0
 	github.com/apache/iceberg-go v0.5.1-0.20260512095853-be4cf4cfed61
-	github.com/tggo/goRDFlib v0.1.6
 )
 
 require (
