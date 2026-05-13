@@ -138,11 +138,11 @@ func main() {
 func parseArgs(args []string) loadConfig {
 	fs := flag.NewFlagSet("loader", flag.ExitOnError)
 	cfg := loadConfig{}
-	fs.BoolVar(&cfg.reset, "reset", false, "drop and recreate the table before loading")
+	fs.BoolVar(&cfg.reset, "reset", true, "drop and recreate the table before loading")
 	fs.IntVar(&cfg.batchSize, "batch-size", defaultBatchSize, "Arrow records per batch")
 	fs.IntVar(&cfg.workers, "workers", runtime.GOMAXPROCS(0), "number of input files to convert to Parquet in parallel")
 	fs.StringVar(&cfg.parquetCompression, "compression", "snappy", "Parquet compression codec: snappy, zstd, gzip, brotli, lz4, uncompressed")
-	fs.StringVar(&cfg.metricsMode, "metrics-mode", "counts", "Iceberg metrics mode: none, counts, truncate(N), full")
+	fs.StringVar(&cfg.metricsMode, "metrics-mode", "truncate(16)", "Iceberg metrics mode: none, counts, truncate(N), full")
 	fs.Int64Var(&cfg.targetFileSizeBytes, "target-file-size-bytes", table.WriteTargetFileSizeBytesDefault, "target Iceberg data file size")
 
 	if err := fs.Parse(args); err != nil {
@@ -196,8 +196,7 @@ func processFiles(
 		return err
 	}
 	if len(dataFiles) == 0 {
-		log.Printf("  no triples found")
-		return nil
+		return fmt.Errorf("no triples found")
 	}
 
 	txn := tbl.NewTransaction()
@@ -238,9 +237,7 @@ func writeFilesInParallel(
 	var wg sync.WaitGroup
 
 	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for path := range jobs {
 				dataFiles, rows, err := writeOneInputFile(ctx, tbl, path, arrowSchema, batchSize)
 				if err != nil {
@@ -248,7 +245,7 @@ func writeFilesInParallel(
 				}
 				results <- result{dataFiles: dataFiles, rows: rows, err: err}
 			}
-		}()
+		})
 	}
 
 	go func() {
