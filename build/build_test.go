@@ -348,7 +348,7 @@ func TestSeedCoreVocabularyCache(t *testing.T) {
 			switch u {
 			case "http://schema.org/", "https://schema.org/":
 				return []byte(schemaOrgTurtleVocabulary(u)), "text/turtle", nil
-			case "https://www.opengis.net/def/schema/hy_features/hyf/":
+			case "https://www.opengis.net/def/schema/hy_features/hyf":
 				return []byte(`@prefix hyf: <https://www.opengis.net/def/schema/hy_features/hyf/> .
 hyf:HY_HydrometricFeature a hyf:Class .
 hyf:HY_HydroLocation a hyf:Class .
@@ -497,6 +497,31 @@ func TestVocabularyCacheFallsBackToBundledVocabulary(t *testing.T) {
 		if !vocab.terms[term] {
 			t.Fatalf("expected bundled schema.org vocabulary to define %s", term)
 		}
+	}
+}
+
+func TestVocabularyCacheStripsTrailingSlashForOpenGIS(t *testing.T) {
+	var calls atomic.Int64
+	cache := vocabularyCache{
+		cacheDir: t.TempDir(),
+		cache:    map[string]vocabulary{},
+		failures: map[string]error{},
+		fetch: func(u string) ([]byte, string, error) {
+			calls.Add(1)
+			if u != "https://www.opengis.net/def/schema/hy_features/hyf" {
+				return nil, "", fmt.Errorf("unexpected url %s", u)
+			}
+			return []byte(`@prefix hyf: <https://www.opengis.net/def/schema/hy_features/hyf/> .
+hyf:HY_HydrometricFeature a hyf:Class .
+`), "text/turtle", nil
+		},
+	}
+
+	if _, err := cache.load("https://www.opengis.net/def/schema/hy_features/hyf/"); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("fetch calls = %d, want 1", calls.Load())
 	}
 }
 

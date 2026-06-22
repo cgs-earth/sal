@@ -675,6 +675,9 @@ func vocabularyDocumentURL(base string) string {
 	if index := strings.IndexByte(base, '#'); index >= 0 {
 		return base[:index]
 	}
+	if strings.Contains(base, "opengis.net") && strings.HasSuffix(base, "/") {
+		return strings.TrimSuffix(base, "/")
+	}
 	return base
 }
 
