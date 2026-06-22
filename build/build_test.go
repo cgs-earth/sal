@@ -3,6 +3,7 @@ package build
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,6 +162,87 @@ ex:Known ex:Known ex:Known .
 	}
 }
 
+func TestRunValidatesBuiltinXSDDatatype(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "thing.ttl")
+	writeTestFile(t, path, `@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+[] <https://example.com/prop> "value"^^xsd:string .
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{path},
+		&stdout,
+		&stderr,
+		exampleVocabularyLoader{},
+		func(u string) ([]byte, string, error) { return nil, "", fmt.Errorf("unexpected url %s", u) },
+	)
+
+	if code != 0 {
+		t.Fatalf("Run() code = %d, stderr = %s", code, stderr.String())
+	}
+}
+
+func TestRunReportsUnknownXSDDatatypeAsUndefinedTerm(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "thing.ttl")
+	writeTestFile(t, path, `@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+[] <https://example.com/prop> "value"^^xsd:madeUpType .
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{path},
+		&stdout,
+		&stderr,
+		exampleVocabularyLoader{},
+		func(u string) ([]byte, string, error) { return nil, "", fmt.Errorf("unexpected url %s", u) },
+	)
+
+	if code != 1 {
+		t.Fatalf("Run() code = %d, want 1", code)
+	}
+	got := stderr.String()
+	if !strings.Contains(got, "undefined term xsd:madeUpType") {
+		t.Fatalf("Run() stderr = %q, want undefined xsd:madeUpType", got)
+	}
+}
+
+func TestRunValidatesTermFromRDFXMLVocabulary(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "person.ttl")
+	writeTestFile(t, path, `@prefix ex: <http://example.org/> .
+
+ex:Alice ex:name "Alice" .
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{path},
+		&stdout,
+		&stderr,
+		exampleVocabularyLoader{},
+		func(u string) ([]byte, string, error) {
+			if u != "http://example.org/" {
+				return nil, "", fmt.Errorf("unexpected url %s", u)
+			}
+			return []byte(`<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:ex="http://example.org/">
+  <ex:Person rdf:about="http://example.org/Alice">
+    <ex:name>Alice</ex:name>
+  </ex:Person>
+</rdf:RDF>`), "application/rdf+xml; qs=0.9", nil
+		},
+	)
+
+	if code != 0 {
+		t.Fatalf("Run() code = %d, stderr = %s", code, stderr.String())
+	}
+}
+
 func TestRunExpandsInputDirectories(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "person.jsonld"), `{
@@ -181,9 +263,86 @@ func TestRunExpandsInputDirectories(t *testing.T) {
 	}
 }
 
+func TestExtractRDFXMLVocabularyTermsTypedNode(t *testing.T) {
+	terms, err := extractVocabularyTerms("http://example.org/", "application/rdf+xml; qs=0.9", []byte(`<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:ex="http://example.org/">
+  <ex:Person rdf:about="http://example.org/Alice">
+    <ex:name>Alice</ex:name>
+  </ex:Person>
+</rdf:RDF>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, term := range []string{
+		"http://example.org/Alice",
+		"http://example.org/Person",
+		"http://example.org/name",
+	} {
+		if !terms[term] {
+			t.Fatalf("expected %s in %#v", term, terms)
+		}
+	}
+}
+
+func TestExtractTurtleVocabularyTermsQUDTSyntax(t *testing.T) {
+	terms, err := extractVocabularyTerms("http://qudt.org/schema/qudt/", "text/turtle; charset=utf-8", []byte(`@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix qudt: <http://qudt.org/schema/qudt/> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+<http://qudt.org/schema/qudt>
+  a owl:Ontology ;
+  owl:imports <http://www.w3.org/2004/02/skos/core> ;
+  rdfs:label "QUDT Schema - Version 3.3.0" .
+
+qudt:AbstractQuantityKind
+  a owl:Class ;
+  rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:allValuesFrom qudt:QuantityKind ;
+    owl:onProperty skos:broader ;
+  ] .
+
+qudt:Aspect
+  a owl:Class, qudt:AspectClass ;
+  dcterms:description "An aspect is an abstract type class that defines properties that can be reused."^^rdf:HTML .
+
+qudt:hasQuantityKind
+  a owl:ObjectProperty .
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !terms["http://qudt.org/schema/qudt/hasQuantityKind"] {
+		t.Fatalf("expected QUDT hasQuantityKind in %#v", terms)
+	}
+}
+
+func TestExtractVocabularyTermsExplicitMimeReportsOnlyThatParser(t *testing.T) {
+	_, err := extractVocabularyTerms("http://example.org/vocab", "text/turtle; charset=utf-8", []byte(`not valid turtle`))
+	if err == nil {
+		t.Fatal("expected invalid Turtle to fail")
+	}
+
+	got := err.Error()
+	if !strings.Contains(got, "turtle:") {
+		t.Fatalf("error = %q, want Turtle parse error", got)
+	}
+	for _, parser := range []string{"json-ld:", "rdfxml:"} {
+		if strings.Contains(got, parser) {
+			t.Fatalf("error = %q, should not include %s parser error for explicit text/turtle", got, parser)
+		}
+	}
+}
+
 func TestSeedCoreVocabularyCache(t *testing.T) {
 	cache := vocabularyCache{
-		cacheDir: defaultVocabularyCacheDir(),
+		cacheDir: t.TempDir(),
 		cache:    map[string]vocabulary{},
 		fetch: func(u string) ([]byte, string, error) {
 			switch u {
@@ -236,6 +395,7 @@ func TestCachedDocumentLoaderPersistsBetweenCalls(t *testing.T) {
 	cache := vocabularyCache{
 		cacheDir: dir,
 		cache:    map[string]vocabulary{},
+		failures: map[string]error{},
 		fetch: func(u string) ([]byte, string, error) {
 			calls.Add(1)
 			if u != "https://example.com/vocab" {
@@ -260,6 +420,83 @@ ex:Thing a ex:Thing .`), "text/turtle", nil
 	}
 	if !first.terms["https://example.com/vocab#Thing"] || !second.terms["https://example.com/vocab#Thing"] {
 		t.Fatalf("cache did not retain expected term: %#v %#v", first.terms, second.terms)
+	}
+}
+
+func TestVocabularyCachePersistsFailuresBetweenCalls(t *testing.T) {
+	var calls atomic.Int64
+	cache := vocabularyCache{
+		cacheDir: t.TempDir(),
+		cache:    map[string]vocabulary{},
+		failures: map[string]error{},
+		fetch: func(u string) ([]byte, string, error) {
+			calls.Add(1)
+			return nil, "", fmt.Errorf("cannot dereference %s", u)
+		},
+	}
+
+	for range 2 {
+		if _, err := cache.load("https://example.invalid/vocab/"); err == nil {
+			t.Fatal("expected vocabulary load to fail")
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("fetch calls = %d, want 1", calls.Load())
+	}
+}
+
+func TestValidateTermsLogsRepeatedVocabularyFailureOnce(t *testing.T) {
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelError})))
+	t.Cleanup(func() {
+		slog.SetDefault(previousLogger)
+	})
+
+	err := validateTerms(
+		"input.ttl",
+		[]usedTerm{
+			{iri: "https://example.invalid/vocab/Missing", line: 1},
+			{iri: "https://example.invalid/vocab/Missing", line: 2},
+		},
+		jsonLDContext{prefixes: map[string]string{"ex": "https://example.invalid/vocab/"}},
+		func(u string) ([]byte, string, error) {
+			return nil, "", fmt.Errorf("cannot dereference %s", u)
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(logs.String(), "Failed to check vocabulary definition"); got != 1 {
+		t.Fatalf("logged vocabulary failures = %d, want 1; logs:\n%s", got, logs.String())
+	}
+}
+
+func TestVocabularyCacheFallsBackToBundledVocabulary(t *testing.T) {
+	cache := vocabularyCache{
+		cacheDir: t.TempDir(),
+		cache:    map[string]vocabulary{},
+		failures: map[string]error{},
+		fetch: func(u string) ([]byte, string, error) {
+			return nil, "", fmt.Errorf("cannot dereference %s", u)
+		},
+	}
+
+	vocab, err := cache.load("https://schema.org/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !vocab.terms["https://schema.org/Person"] {
+		t.Fatalf("expected bundled schema.org vocabulary to define Person")
+	}
+	for _, term := range []string{
+		"https://schema.org/ImageObject",
+		"https://schema.org/MediaObject",
+		"https://schema.org/BreadcrumbList",
+	} {
+		if !vocab.terms[term] {
+			t.Fatalf("expected bundled schema.org vocabulary to define %s", term)
+		}
 	}
 }
 

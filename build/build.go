@@ -5,11 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/cgs-earth/json-gold/ld"
+	"github.com/cgs-earth/sal-cli/build/vocab"
 	"github.com/knakk/rdf"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/turtle"
@@ -61,11 +65,67 @@ type vocabulary struct {
 type vocabularyCache struct {
 	cacheDir string
 	cache    map[string]vocabulary
+	failures map[string]error
 	fetch    func(string) ([]byte, string, error)
 }
 
-const vocabularyCacheVersion = 7
+const vocabularyCacheVersion = 9
 const rdfLangStringIRI = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString"
+const rdfNamespaceIRI = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+const xsdNamespaceIRI = "http://www.w3.org/2001/XMLSchema#"
+
+var xsdBuiltinDatatypeLocalNames = map[string]bool{
+	"anyAtomicType":      true,
+	"anySimpleType":      true,
+	"anyURI":             true,
+	"base64Binary":       true,
+	"boolean":            true,
+	"byte":               true,
+	"date":               true,
+	"dateTime":           true,
+	"dateTimeStamp":      true,
+	"dayTimeDuration":    true,
+	"decimal":            true,
+	"double":             true,
+	"duration":           true,
+	"ENTITIES":           true,
+	"ENTITY":             true,
+	"float":              true,
+	"gDay":               true,
+	"gMonth":             true,
+	"gMonthDay":          true,
+	"gYear":              true,
+	"gYearMonth":         true,
+	"hexBinary":          true,
+	"ID":                 true,
+	"IDREF":              true,
+	"IDREFS":             true,
+	"int":                true,
+	"integer":            true,
+	"language":           true,
+	"long":               true,
+	"Name":               true,
+	"NCName":             true,
+	"negativeInteger":    true,
+	"NMTOKEN":            true,
+	"NMTOKENS":           true,
+	"nonNegativeInteger": true,
+	"nonPositiveInteger": true,
+	"normalizedString":   true,
+	"NOTATION":           true,
+	"positiveInteger":    true,
+	"QName":              true,
+	"short":              true,
+	"string":             true,
+	"time":               true,
+	"token":              true,
+	"unsignedByte":       true,
+	"unsignedInt":        true,
+	"unsignedLong":       true,
+	"unsignedShort":      true,
+	"untypedAtomic":      true,
+	"yearMonthDuration":  true,
+}
 
 type usedTerm struct {
 	iri  string
@@ -241,10 +301,12 @@ func validateTerms(path string, terms []usedTerm, ctx jsonLDContext, vocabFetch 
 	vocabs := vocabularyCache{
 		cacheDir: defaultVocabularyCacheDir(),
 		cache:    map[string]vocabulary{},
+		failures: map[string]error{},
 		fetch:    vocabFetch,
 	}
 
 	var errs multiError
+	loggedVocabularyErrors := map[string]bool{}
 	for _, term := range terms {
 		display, ok := displayTerm(term.iri, ctx)
 		if !ok {
@@ -252,7 +314,12 @@ func validateTerms(path string, terms []usedTerm, ctx jsonLDContext, vocabFetch 
 		}
 		defined, err := vocabs.isDefined(term.iri, ctx)
 		if err != nil {
-			return fmt.Errorf("%s:%d: validate term %s: %w", path, term.line, display, err)
+			logKey := term.iri + "\x00" + err.Error()
+			if !loggedVocabularyErrors[logKey] {
+				slog.Error("Failed to check vocabulary definition", "path", path, "term", term.iri, "error", err)
+				loggedVocabularyErrors[logKey] = true
+			}
+			continue
 		}
 		if defined {
 			continue
@@ -462,6 +529,10 @@ func longestPrefixBase(iri string, ctx jsonLDContext) (string, string, bool) {
 }
 
 func (c *vocabularyCache) isDefined(iri string, ctx jsonLDContext) (bool, error) {
+	if strings.HasPrefix(iri, xsdNamespaceIRI) {
+		return xsdBuiltinDatatypeLocalNames[strings.TrimPrefix(iri, xsdNamespaceIRI)], nil
+	}
+
 	_, base, ok := longestPrefixBase(iri, ctx)
 	if !ok {
 		return true, nil
@@ -478,9 +549,16 @@ func (c *vocabularyCache) load(base string) (vocabulary, error) {
 	if vocab, ok := c.cache[base]; ok {
 		return vocab, nil
 	}
+	if c.failures == nil {
+		c.failures = map[string]error{}
+	}
+	if err, ok := c.failures[base]; ok {
+		return vocabulary{}, err
+	}
 
 	terms, err := c.loadTerms(base)
 	if err != nil {
+		c.failures[base] = err
 		return vocabulary{}, err
 	}
 	vocab := vocabulary{terms: terms}
@@ -493,18 +571,41 @@ func (c *vocabularyCache) loadTerms(base string) (map[string]bool, error) {
 		return terms, nil
 	}
 
+	var fetchErr error
 	body, contentType, err := c.fetch(base)
 	if err != nil {
-		return nil, err
+		fetchErr = err
+	} else {
+		terms, err := extractVocabularyTerms(base, contentType, body)
+		if err == nil {
+			if err := c.storeTermsToDisk(base, terms); err != nil {
+				return nil, err
+			}
+			return terms, nil
+		}
+		fetchErr = err
 	}
-	terms, err := extractVocabularyTerms(base, contentType, body)
+
+	terms, err := loadBundledVocabularyTerms(base)
 	if err != nil {
-		return nil, err
+		return nil, fetchErr
 	}
+
 	if err := c.storeTermsToDisk(base, terms); err != nil {
 		return nil, err
 	}
 	return terms, nil
+}
+
+func loadBundledVocabularyTerms(base string) (map[string]bool, error) {
+	body, contentType, ok, err := vocab.Load(base)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, vocab.MissingError(base)
+	}
+	return extractVocabularyTerms(base, contentType, body)
 }
 
 func defaultVocabularyCacheDir() string {
@@ -591,10 +692,16 @@ func extractVocabularyTerms(base, contentType string, body []byte) (map[string]b
 	}
 
 	switch {
-	case strings.Contains(mediaType, "json") || looksLikeJSON(body):
+	case mediaType == "application/ld+json" || mediaType == "application/json" || strings.HasSuffix(mediaType, "+json"):
+		parsers = parsers[:1]
+	case mediaType == "text/turtle" || mediaType == "application/n-triples" || mediaType == "application/n-quads":
+		parsers = parsers[1:2]
+	case mediaType == "application/rdf+xml" || strings.HasSuffix(mediaType, "+xml"):
+		parsers = parsers[2:]
+	case looksLikeJSON(body):
 	case strings.Contains(mediaType, "xml"):
 		parsers[0], parsers[1], parsers[2] = parsers[2], parsers[0], parsers[1]
-	case strings.Contains(mediaType, "turtle") || strings.Contains(mediaType, "n-triples") || strings.Contains(mediaType, "nquads") || looksLikeTurtle(body):
+	case looksLikeTurtle(body):
 		parsers[0], parsers[1] = parsers[1], parsers[0]
 	}
 
@@ -673,11 +780,41 @@ func collectExpandedIDs(node any, terms map[string]bool) {
 }
 
 func extractTurtleVocabularyTerms(base string, body []byte) (map[string]bool, error) {
-	return extractTriplesVocabularyTerms(base, body, rdf.Turtle)
+	g := rdflibgo.NewGraph(rdflibgo.WithBase(vocabularyDocumentURL(base)))
+	if err := turtle.Parse(g, bytes.NewReader(body)); err != nil {
+		return nil, err
+	}
+
+	terms := map[string]bool{}
+	g.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+		if subj, ok := triple.Subject.(rdflibgo.URIRef); ok {
+			terms[subj.Value()] = true
+		}
+		return true
+	})
+	return terms, nil
 }
 
 func extractRDFXMLVocabularyTerms(base string, body []byte) (map[string]bool, error) {
-	return extractTriplesVocabularyTerms(base, body, rdf.RDFXML)
+	decoder := xml.NewDecoder(bytes.NewReader(body))
+	base = vocabularyDocumentURL(base)
+	terms := map[string]bool{}
+
+	for {
+		tok, err := decoder.Token()
+		if err == io.EOF {
+			return terms, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		start, ok := tok.(xml.StartElement)
+		if !ok {
+			continue
+		}
+		collectRDFXMLElementTerms(base, start, terms)
+	}
 }
 
 func extractTriplesVocabularyTerms(base string, body []byte, format rdf.Format) (map[string]bool, error) {
@@ -699,6 +836,43 @@ func extractTriplesVocabularyTerms(base string, body []byte, format rdf.Format) 
 			terms[subj.String()] = true
 		}
 	}
+}
+
+func collectRDFXMLElementTerms(base string, elem xml.StartElement, terms map[string]bool) {
+	if elem.Name.Space != "" && elem.Name.Space != rdfNamespaceIRI {
+		terms[elem.Name.Space+elem.Name.Local] = true
+	}
+
+	for _, attr := range elem.Attr {
+		if attr.Name.Space != rdfNamespaceIRI {
+			continue
+		}
+		switch attr.Name.Local {
+		case "about":
+			if iri := resolveRDFXMLIRI(base, attr.Value); iri != "" {
+				terms[iri] = true
+			}
+		case "ID":
+			if iri := resolveRDFXMLIRI(base, "#"+attr.Value); iri != "" {
+				terms[iri] = true
+			}
+		}
+	}
+}
+
+func resolveRDFXMLIRI(base, value string) string {
+	iri, err := url.Parse(value)
+	if err != nil {
+		return ""
+	}
+	if iri.IsAbs() {
+		return iri.String()
+	}
+	baseIRI, err := url.Parse(base)
+	if err != nil {
+		return value
+	}
+	return baseIRI.ResolveReference(iri).String()
 }
 
 func fetchVocabularyDocument(u string) ([]byte, string, error) {
