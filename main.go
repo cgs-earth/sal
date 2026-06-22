@@ -54,7 +54,7 @@ func parseArgs() args {
 		os.Exit(1)
 	}
 	err = parser.Parse(os.Args[1:])
-	if err == arg.ErrHelp {
+	if err == arg.ErrHelp || len(os.Args) == 1 {
 		parser.WriteHelp(os.Stdout)
 		os.Exit(0)
 	}
