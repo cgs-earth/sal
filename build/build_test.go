@@ -558,6 +558,45 @@ hyf:HY_HydrometricFeature a hyf:Class .
 	}
 }
 
+func TestPrefixMappedVocabularyFetchOverridesSourceURL(t *testing.T) {
+	const source = "https://www.opengis.net/def/schema/hy_features/hyf/"
+	const mapped = "https://raw.githubusercontent.com/opengeospatial/HY_Features/refs/heads/master/ontology/ogc_ready/hyf.ttl"
+
+	mappings, err := parsePrefixMaps([]string{
+		source,
+		mapped,
+		"https://schema.org/=https://example.com/schema.jsonld",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := mappings[vocabularyDocumentURL(source)]; got != mapped {
+		t.Fatalf("mapping for %s = %s, want %s", source, got, mapped)
+	}
+	if got := mappings[vocabularyDocumentURL("https://schema.org/")]; got != "https://example.com/schema.jsonld" {
+		t.Fatalf("mapping for schema.org = %s, want example.com/schema.jsonld", got)
+	}
+
+	var fetched string
+	wrapped, err := prefixMappedVocabularyFetch([]string{
+		source,
+		mapped,
+	}, func(u string) ([]byte, string, error) {
+		fetched = u
+		return []byte("@prefix hyf: <https://www.opengis.net/def/schema/hy_features/hyf/> .\nhyf:HY_HydrometricFeature a hyf:Class .\n"), "text/turtle", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := wrapped(source); err != nil {
+		t.Fatal(err)
+	}
+	if fetched != mapped {
+		t.Fatalf("fetched URL = %s, want %s", fetched, mapped)
+	}
+}
+
 func writeTestFile(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
