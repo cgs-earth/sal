@@ -14,11 +14,12 @@ import (
 )
 
 type args struct {
-	Load *load.LoadCmd `arg:"subcommand:load" help:"Load N-Quads gzip files into a local Iceberg triples table."`
+	Load  *load.LoadCmd   `arg:"subcommand:load" help:"Load N-Quads gzip files into a local Iceberg triples table."`
+	Build *build.BuildCmd `arg:"subcommand:build" help:"Build a vocabulary."`
 }
 
 func (args) Description() string {
-	return "Load N-Quads gzip files into a local Iceberg triples table."
+	return "Validate and process RDF data"
 }
 
 func main() {
@@ -29,14 +30,19 @@ func main() {
 		}),
 	))
 
-	if len(os.Args) > 1 {
+	if len(os.Args) <= 1 {
+		parseArgs()
+		return
+	}
+
+	switch os.Args[1] {
+	case "build":
+		build.Run(os.Args[2:], os.Stdout, os.Stderr)
+	case "load":
 		args := parseArgs()
-		switch os.Args[1] {
-		case "build":
-			os.Exit(build.Run(os.Args[2:], os.Stdout, os.Stderr))
-		case "load":
-			load.RunLoadCommand(args.Load)
-		}
+		load.RunLoadCommand(args.Load)
+	default:
+		parseArgs()
 	}
 }
 

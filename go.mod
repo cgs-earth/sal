@@ -9,6 +9,7 @@ require (
 	github.com/knakk/rdf v0.0.0-20260317081859-15b52521cde6
 	github.com/lmittmann/tint v1.1.3
 	github.com/piprate/json-gold v0.8.0
+	github.com/tggo/goRDFlib v0.1.12
 )
 
 require (

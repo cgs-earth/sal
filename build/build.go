@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"mime"
@@ -19,7 +18,13 @@ import (
 
 	"github.com/cgs-earth/json-gold/ld"
 	"github.com/knakk/rdf"
+	rdflibgo "github.com/tggo/goRDFlib"
+	"github.com/tggo/goRDFlib/turtle"
 )
+
+type BuildCmd struct {
+	paths []string `arg:"positional"`
+}
 
 type validationError struct {
 	Path string
@@ -60,42 +65,32 @@ type vocabularyCache struct {
 }
 
 const vocabularyCacheVersion = 7
+const rdfLangStringIRI = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString"
 
 type usedTerm struct {
 	iri  string
 	line int
 }
 
-// Run validates JSON-LD files for terms that are not defined by their vocabularies.
+// Run validates RDF files for terms that are not defined by their vocabularies.
 func Run(args []string, stdout, stderr io.Writer) int {
 	return run(args, stdout, stderr, ld.NewDefaultDocumentLoader(nil), fetchVocabularyDocument)
 }
 
-func run(args []string, stdout, stderr io.Writer, loader ld.DocumentLoader, vocabFetch func(string) ([]byte, string, error)) int {
-	fs := flag.NewFlagSet("build", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	paths := fs.Args()
-	if len(paths) == 0 {
-		fmt.Fprintln(stderr, "build: at least one JSON-LD file or directory is required")
-		return 2
-	}
-
+func run(paths []string, stdout, stderr io.Writer, loader ld.DocumentLoader, vocabFetch func(string) ([]byte, string, error)) int {
 	files, err := expandInputs(paths)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	if len(files) == 0 {
-		fmt.Fprintln(stderr, "build: no JSON-LD files found")
+		fmt.Fprintln(stderr, "build: no RDF files found")
 		return 1
 	}
 
 	var errs multiError
 	for _, file := range files {
-		if err := validateJSONLDFile(file, loader, vocabFetch); err != nil {
+		if err := validateRDFFile(file, loader, vocabFetch); err != nil {
 			if nested, ok := err.(multiError); ok {
 				errs = append(errs, nested...)
 			} else {
@@ -108,7 +103,7 @@ func run(args []string, stdout, stderr io.Writer, loader ld.DocumentLoader, voca
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "Validated %d JSON-LD file(s).\n", len(files))
+	fmt.Fprintf(stdout, "Validated %d RDF file(s).\n", len(files))
 	return 0
 }
 
@@ -120,7 +115,7 @@ func expandInputs(paths []string) ([]string, error) {
 			return nil, fmt.Errorf("build: %s: %w", path, err)
 		}
 		if !info.IsDir() {
-			if includeJSONLD(path) {
+			if includeRDFInput(path) {
 				files = append(files, path)
 			}
 			continue
@@ -129,7 +124,7 @@ func expandInputs(paths []string) ([]string, error) {
 			if err != nil {
 				return err
 			}
-			if !d.IsDir() && includeJSONLD(p) {
+			if !d.IsDir() && includeRDFInput(p) {
 				files = append(files, p)
 			}
 			return nil
@@ -142,9 +137,18 @@ func expandInputs(paths []string) ([]string, error) {
 	return files, nil
 }
 
-func includeJSONLD(path string) bool {
+func includeRDFInput(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
-	return ext == ".jsonld" || ext == ".json"
+	return ext == ".jsonld" || ext == ".json" || ext == ".ttl" || ext == ".turtle"
+}
+
+func validateRDFFile(path string, loader ld.DocumentLoader, vocabFetch func(string) ([]byte, string, error)) error {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".ttl", ".turtle":
+		return validateTurtleFile(path, vocabFetch)
+	default:
+		return validateJSONLDFile(path, loader, vocabFetch)
+	}
 }
 
 func validateJSONLDFile(path string, loader ld.DocumentLoader, vocabFetch func(string) ([]byte, string, error)) error {
@@ -171,6 +175,69 @@ func validateJSONLDFile(path string, loader ld.DocumentLoader, vocabFetch func(s
 		return fmt.Errorf("%s: load JSON-LD context: %w", path, err)
 	}
 	terms := collectUsedTerms(doc, splitLines(content), ctx, loader)
+	return validateTerms(path, terms, ctx, vocabFetch)
+}
+
+func validateTurtleFile(path string, vocabFetch func(string) ([]byte, string, error)) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("build: read %s: %w", path, err)
+	}
+
+	var terms []usedTerm
+	g := rdflibgo.NewGraph()
+	err = turtle.Parse(g, bytes.NewReader(content), turtle.WithProvenance(
+		func(s rdflibgo.Subject, p rdflibgo.URIRef, o rdflibgo.Term, lineNum int) {
+			appendRDFTerm(&terms, s, lineNum)
+			appendRDFTerm(&terms, p, lineNum)
+			appendRDFTerm(&terms, o, lineNum)
+			if lit, ok := o.(rdflibgo.Literal); ok {
+				datatype := lit.Datatype()
+				if datatype.Value() != rdflibgo.XSDString.Value() && datatype.Value() != rdfLangStringIRI {
+					appendRDFTerm(&terms, datatype, lineNum)
+				}
+			}
+		}))
+	if err != nil {
+		return fmt.Errorf("%s: invalid Turtle: %w", path, err)
+	}
+
+	ctx := jsonLDContext{prefixes: turtleDeclaredPrefixes(g, content)}
+	return validateTerms(path, terms, ctx, vocabFetch)
+}
+
+func appendRDFTerm(terms *[]usedTerm, term rdflibgo.Term, line int) {
+	if uri, ok := term.(rdflibgo.URIRef); ok {
+		*terms = append(*terms, usedTerm{iri: uri.Value(), line: line})
+	}
+}
+
+func turtleDeclaredPrefixes(g *rdflibgo.Graph, content []byte) map[string]string {
+	declared := turtleDeclaredPrefixNames(content)
+	prefixes := map[string]string{}
+	g.Namespaces()(func(prefix string, ns rdflibgo.URIRef) bool {
+		if declared[prefix] {
+			prefixes[prefix] = normalizeVocabularyBase(ns.Value())
+		}
+		return true
+	})
+	return prefixes
+}
+
+func turtleDeclaredPrefixNames(content []byte) map[string]bool {
+	declared := map[string]bool{}
+	for _, pattern := range []*regexp.Regexp{
+		regexp.MustCompile(`(?im)^\s*@prefix\s+([A-Za-z][A-Za-z0-9_.-]*|):\s*<[^>]*>\s*\.`),
+		regexp.MustCompile(`(?im)^\s*PREFIX\s+([A-Za-z][A-Za-z0-9_.-]*|):\s*<[^>]*>`),
+	} {
+		for _, match := range pattern.FindAllSubmatch(content, -1) {
+			declared[string(match[1])] = true
+		}
+	}
+	return declared
+}
+
+func validateTerms(path string, terms []usedTerm, ctx jsonLDContext, vocabFetch func(string) ([]byte, string, error)) error {
 	vocabs := vocabularyCache{
 		cacheDir: defaultVocabularyCacheDir(),
 		cache:    map[string]vocabulary{},

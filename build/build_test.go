@@ -50,7 +50,7 @@ func TestRunValidatesSchemaOrgJSONLD(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run() code = %d, stderr = %s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Validated 1 JSON-LD file(s).") {
+	if !strings.Contains(stdout.String(), "Validated 1 RDF file(s).") {
 		t.Fatalf("Run() stdout = %q", stdout.String())
 	}
 }
@@ -106,6 +106,61 @@ func TestRunValidatesArbitraryVocabularyTerm(t *testing.T) {
 	}
 }
 
+func TestRunReportsUndefinedTurtleTermWithLineNumber(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "thing.ttl")
+	writeTestFile(t, path, `@prefix ex: <https://example.com/vocab#> .
+
+ex:Known ex:Known ex:Known ,
+                   ex:Missing .
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{path},
+		&stdout,
+		&stderr,
+		exampleVocabularyLoader{},
+		exampleVocabularyFetch,
+	)
+
+	if code != 1 {
+		t.Fatalf("Run() code = %d, want 1", code)
+	}
+	got := stderr.String()
+	if !strings.Contains(got, path+":4:") {
+		t.Fatalf("Run() stderr = %q, want line 4", got)
+	}
+	if !strings.Contains(got, "undefined term ex:Missing") {
+		t.Fatalf("Run() stderr = %q, want undefined ex:Missing", got)
+	}
+}
+
+func TestRunValidatesTurtleTerm(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "thing.ttl")
+	writeTestFile(t, path, `@prefix ex: <https://example.com/vocab#> .
+
+ex:Known ex:Known ex:Known .
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{path},
+		&stdout,
+		&stderr,
+		exampleVocabularyLoader{},
+		exampleVocabularyFetch,
+	)
+
+	if code != 0 {
+		t.Fatalf("Run() code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Validated 1 RDF file(s).") {
+		t.Fatalf("Run() stdout = %q", stdout.String())
+	}
+}
+
 func TestRunExpandsInputDirectories(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "person.jsonld"), `{
@@ -121,7 +176,7 @@ func TestRunExpandsInputDirectories(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run() code = %d, stderr = %s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Validated 1 JSON-LD file(s).") {
+	if !strings.Contains(stdout.String(), "Validated 2 RDF file(s).") {
 		t.Fatalf("Run() stdout = %q", stdout.String())
 	}
 }
