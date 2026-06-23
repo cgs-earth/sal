@@ -2,13 +2,10 @@ package load
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"log/slog"
-	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -26,80 +23,24 @@ type LoadCmd struct {
 	TargetFileSizeBytes int64  `arg:"--target-file-size-bytes" help:"target Iceberg data file size"`
 	InputDir            string `arg:"positional,required" placeholder:"PATH" help:"path to a directory containing .nq.gz files"`
 	MaxFiles            int    `arg:"--max-files" help:"maximum number of input files to process" default:"0"`
+	Warehouse           string `arg:"--warehouse" help:"Iceberg warehouse directory" default:"/tmp/iceberg-warehouse"`
+	Namespace           string `arg:"--namespace" help:"Iceberg namespace" default:"default"`
 }
 
 func Run(cfg *LoadCmd) {
 
 	ctx := context.Background()
 
-	if err := os.MkdirAll("/tmp/iceberg-warehouse/default", 0755); err != nil {
-		log.Fatal("Failed to create warehouse directory:", err)
-	}
-
-	cat, err := hadoop.NewCatalog("local-catalog", "/tmp/iceberg-warehouse", nil)
+	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
 	if err != nil {
 		log.Fatal("Failed to create catalog:", err)
 	}
 
-	defaultNS := catalog.ToIdentifier("default")
-	if err := cat.CreateNamespace(ctx, defaultNS, nil); err != nil &&
-		err.Error() != "namespace already exists: default" {
-		log.Fatal("Failed to create default namespace:", err)
-	}
-	log.Println("Namespace ready")
-
-	icebergSchema := iceberg.NewSchemaWithIdentifiers(1, []int{3},
-		iceberg.NestedField{ID: 1, Name: "subject", Type: iceberg.PrimitiveTypes.String, Required: true},
-		iceberg.NestedField{ID: 2, Name: "predicate", Type: iceberg.PrimitiveTypes.String, Required: true},
-		iceberg.NestedField{ID: 3, Name: "object", Type: iceberg.PrimitiveTypes.String, Required: true},
-	)
-
-	tableIdent := catalog.ToIdentifier("default", "triples")
-	if err := cat.DropTable(ctx, tableIdent); err != nil && !errors.Is(err, catalog.ErrNoSuchTable) {
-		log.Fatal("Failed to reset table:", err)
-	}
-	log.Println("Reset table default.triples")
-
-	partitionSpec := iceberg.NewPartitionSpec(
-		iceberg.PartitionField{SourceIDs: []int{2}, Transform: iceberg.TruncateTransform{Width: 20}, Name: "predicate_partition"},
-	)
-
-	sortField := table.SortField{SourceIDs: []int{2}, Direction: table.SortASC, Transform: iceberg.IdentityTransform{}}
-	sortOrder, err := table.NewSortOrder(table.InitialSortOrderID, []table.SortField{sortField})
-
-	tbl, err := cat.CreateTable(ctx, tableIdent, icebergSchema,
-		catalog.WithPartitionSpec(&partitionSpec),
-		catalog.WithSortOrder(sortOrder),
-		catalog.WithProperties(map[string]string{
-			table.MetadataDeleteAfterCommitEnabledKey: "true",
-			table.MetadataPreviousVersionsMaxKey:      strconv.Itoa(1),
-			table.ManifestMergeEnabledKey:             "true",
-			table.ManifestMinMergeCountKey:            strconv.Itoa(1),
-			"write.parquet.compression-codec":         cfg.ParquetCompression,
-			"write.metadata.metrics.default":          cfg.MetricsMode,
-			table.WriteTargetFileSizeBytesKey:         strconv.FormatInt(cfg.TargetFileSizeBytes, 10),
-			table.WriteDeleteModeKey:                  table.WriteModeMergeOnRead,
-		}),
-	)
-	createdTable := err == nil
+	tbl, err := NewIcebergTableFromCfg(ctx, cat, cfg)
 	if err != nil {
-		slog.Error("Failed to create table, loading existing table", "error", err)
-		tbl, err = cat.LoadTable(ctx, tableIdent)
-		if err != nil {
-			log.Fatalf("Failed to load existing table: %v.", err)
-		}
-	} else {
-		log.Println("Table created successfully")
+		slog.Error("Failed to create Iceberg table", "err", err)
+		return
 	}
-
-	arrowSchema := arrow.NewSchema(
-		[]arrow.Field{
-			{Name: "subject", Type: arrow.BinaryTypes.String},
-			{Name: "predicate", Type: arrow.BinaryTypes.String},
-			{Name: "object", Type: arrow.BinaryTypes.String},
-		},
-		nil,
-	)
 
 	pattern := filepath.Join(cfg.InputDir, "*.nq.gz")
 	files, err := filepath.Glob(pattern)
@@ -115,36 +56,19 @@ func Run(cfg *LoadCmd) {
 	}
 	log.Printf("Found %d .nq.gz file(s)", len(files))
 
-	writeProps := iceberg.Properties{
-		"write.parquet.compression-codec": cfg.ParquetCompression,
-		"write.metadata.metrics.default":  cfg.MetricsMode,
-		table.WriteTargetFileSizeBytesKey: strconv.FormatInt(cfg.TargetFileSizeBytes, 10),
+	if err := applyWriteProperties(ctx, tbl, cfg); err != nil {
+		log.Fatal("Failed to apply write properties:", err)
 	}
-	if !createdTable {
-		if err := applyWriteProperties(ctx, tbl, writeProps); err != nil {
-			log.Fatalf("Failed to configure table write properties: %v", err)
-		}
-	}
+
 	log.Printf("Write settings: workers=%d batch-size=%d compression=%s metrics=%s target-file-size=%d",
 		cfg.Workers, cfg.BatchSize, cfg.ParquetCompression, cfg.MetricsMode, cfg.TargetFileSizeBytes)
 
-	if err := processFiles(ctx, files, cat, tableIdent, arrowSchema, cfg.BatchSize, cfg.Workers); err != nil {
+	if err := processFiles(ctx, files, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, cfg.Workers); err != nil {
 		log.Fatalf("Error processing files: %v", err)
 	}
 
 	log.Println("All files loaded successfully.")
 	log.Println("Table location:", tbl.Location())
-}
-
-func applyWriteProperties(ctx context.Context, tbl *table.Table, props iceberg.Properties) error {
-	txn := tbl.NewTransaction()
-	if err := txn.SetProperties(props); err != nil {
-		return fmt.Errorf("set table properties: %w", err)
-	}
-	if _, err := txn.Commit(ctx); err != nil {
-		return fmt.Errorf("commit table properties: %w", err)
-	}
-	return nil
 }
 
 // processFiles writes each .nq.gz input to Iceberg data files in parallel, then
