@@ -8,6 +8,7 @@ require (
 	github.com/apache/iceberg-go v0.5.1-0.20260512095853-be4cf4cfed61
 	github.com/cgs-earth/json-gold v0.0.0-20260623123334-63cdb5b88cb8
 	github.com/lmittmann/tint v1.1.3
+	github.com/stretchr/testify v1.11.1
 	github.com/tggo/goRDFlib v0.1.12
 )
 
@@ -99,7 +100,6 @@ require (
 	github.com/pterm/pterm v0.12.83 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
-	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/substrait-io/substrait v0.87.0 // indirect
 	github.com/substrait-io/substrait-go/v8 v8.1.0 // indirect
 	github.com/substrait-io/substrait-protobuf/go v0.85.0 // indirect

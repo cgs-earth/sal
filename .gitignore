@@ -2,3 +2,4 @@ testdata/latest
 __pycache__
 .tmp/
 sal_cli
+*.nq.gz

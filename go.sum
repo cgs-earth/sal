@@ -148,8 +148,6 @@ github.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1x
 github.com/cenkalti/backoff/v5 v5.0.3/go.mod h1:rkhZdG3JZukswDf7f0cwqPNk4K0sa+F97BxZthm/crw=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
-github.com/cgs-earth/json-gold v0.0.0-20260622135313-62ce2b83a4a6 h1:9bMfiY/ss+HnQCr2FF4x/4+oS4399Od6sq8E9Ehvzbk=
-github.com/cgs-earth/json-gold v0.0.0-20260622135313-62ce2b83a4a6/go.mod h1:WFPeT4TJTTTB5uIrdm6B1wa2VQenylCjF4bKkZ/uj0Y=
 github.com/cgs-earth/json-gold v0.0.0-20260623123334-63cdb5b88cb8 h1:3Px2s3lQ3i+cBHwXgLoKuYmWh0rFWmvcrHfNMALiQ/s=
 github.com/cgs-earth/json-gold v0.0.0-20260623123334-63cdb5b88cb8/go.mod h1:WFPeT4TJTTTB5uIrdm6B1wa2VQenylCjF4bKkZ/uj0Y=
 github.com/clipperhouse/uax29/v2 v2.7.0 h1:+gs4oBZ2gPfVrKPthwbMzWZDaAFPGYK72F0NJv2v7Vk=

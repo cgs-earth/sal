@@ -33,26 +33,37 @@ var icebergSchema = iceberg.NewSchemaWithIdentifiers(1, []int{3},
 func NewIcebergTableFromCfg(ctx context.Context, cat catalog.Catalog, cfg *LoadCmd) (*table.Table, error) {
 
 	if err := os.MkdirAll(cfg.Warehouse+"/"+cfg.Namespace, 0755); err != nil {
-		log.Fatal("Failed to create warehouse directory:", err)
+		slog.Error("Failed to create warehouse directory:", "error", err)
+		return nil, err
 	}
 
 	defaultNS := catalog.ToIdentifier(cfg.Namespace)
 	if err := cat.CreateNamespace(ctx, defaultNS, nil); err != nil &&
-		err.Error() != "namespace already exists" {
-		log.Fatal("Failed to create default namespace:", err)
+		!errors.Is(err, catalog.ErrNamespaceAlreadyExists) {
+		slog.Error("Failed to create default namespace:", "error", err)
+		return nil, err
 	}
 
 	tableIdent := catalog.ToIdentifier(cfg.Namespace, "triples")
 	if err := cat.DropTable(ctx, tableIdent); err != nil && !errors.Is(err, catalog.ErrNoSuchTable) {
 		log.Fatal("Failed to reset table:", err)
 	}
-	slog.Info("Reset table")
+	slog.Info("Table reset successfully")
 
 	partitionSpec := iceberg.NewPartitionSpec(
-		iceberg.PartitionField{SourceIDs: []int{2}, Transform: iceberg.TruncateTransform{Width: 20}, Name: "predicate_partition"},
+		iceberg.PartitionField{
+			SourceIDs: []int{2},
+			Transform: iceberg.TruncateTransform{Width: 20},
+			Name:      "predicate_partition",
+		},
 	)
 
-	sortField := table.SortField{SourceIDs: []int{2}, Direction: table.SortASC, Transform: iceberg.IdentityTransform{}}
+	sortField := table.SortField{
+		SourceIDs: []int{2},
+		Transform: iceberg.IdentityTransform{},
+		Direction: table.SortASC,
+		NullOrder: table.NullsLast,
+	}
 	sortOrder, err := table.NewSortOrder(table.InitialSortOrderID, []table.SortField{sortField})
 	if err != nil {
 		return nil, err
