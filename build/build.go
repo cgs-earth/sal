@@ -3,7 +3,6 @@ package build
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -440,8 +439,8 @@ func longestPrefixBase(iri string, ctx jsonLDContext) (string, string, bool) {
 }
 
 func vocabularyDocumentURL(base string) string {
-	if index := strings.IndexByte(base, '#'); index >= 0 {
-		return base[:index]
+	if before, _, ok := strings.Cut(base, "#"); ok {
+		return before
 	}
 	if strings.Contains(base, "opengis.net") && strings.HasSuffix(base, "/") {
 		return strings.TrimSuffix(base, "/")
@@ -589,55 +588,6 @@ func fetchVocabularyDocument(u string) ([]byte, string, error) {
 	return body, res.Header.Get("Content-Type"), nil
 }
 
-func prefixMappedVocabularyFetch(entries []string, fetch func(string) ([]byte, string, error)) (func(string) ([]byte, string, error), error) {
-	mappings, err := parsePrefixMaps(entries)
-	if err != nil {
-		return nil, err
-	}
-
-	return func(u string) ([]byte, string, error) {
-		if mapped, ok := mappings[vocabularyDocumentURL(u)]; ok {
-			u = mapped
-		}
-		return fetch(u)
-	}, nil
-}
-
-func parsePrefixMaps(entries []string) (map[string]string, error) {
-	mappings := map[string]string{}
-	for i := 0; i < len(entries); {
-		entry := entries[i]
-		if key, value, ok := strings.Cut(entry, "="); ok {
-			if key == "" || value == "" {
-				return nil, fmt.Errorf("invalid prefix map %q: expected source target or source=target", entry)
-			}
-			mappings[vocabularyDocumentURL(key)] = value
-			i++
-			continue
-		}
-		if i+1 >= len(entries) {
-			return nil, fmt.Errorf("invalid prefix map %q: expected source target or source=target", entry)
-		}
-		mappings[vocabularyDocumentURL(entry)] = entries[i+1]
-		i += 2
-	}
-	return mappings, nil
-}
-
-func looksLikeJSON(body []byte) bool {
-	for _, b := range body {
-		switch b {
-		case ' ', '\t', '\n', '\r':
-			continue
-		case '{', '[':
-			return true
-		default:
-			return false
-		}
-	}
-	return false
-}
-
 func looksLikeTurtle(body []byte) bool {
 	s := strings.TrimSpace(string(body))
 	return strings.HasPrefix(s, "@prefix") || strings.HasPrefix(s, "PREFIX") || strings.HasPrefix(s, "@base") || strings.HasPrefix(s, "BASE ")
@@ -653,22 +603,4 @@ func looksLikeVocabularyBase(value string) bool {
 
 func isAbsoluteIRI(value string) bool {
 	return strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") || strings.HasPrefix(value, "urn:")
-}
-
-func jsonErrorLine(content []byte, err error) int {
-	var syntaxErr *json.SyntaxError
-	var typeErr *json.UnmarshalTypeError
-	var offset int64
-	switch {
-	case errors.As(err, &syntaxErr):
-		offset = syntaxErr.Offset
-	case errors.As(err, &typeErr):
-		offset = typeErr.Offset
-	default:
-		return 1
-	}
-	if offset <= 0 {
-		return 1
-	}
-	return 1 + bytes.Count(content[:min(int(offset), len(content))], []byte("\n"))
 }
