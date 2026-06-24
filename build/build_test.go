@@ -11,15 +11,54 @@ import (
 	"testing"
 
 	"github.com/cgs-earth/json-gold/ld"
+	salpkg "github.com/cgs-earth/sal/pkg"
 	"github.com/stretchr/testify/require"
 )
 
 const testSchemaOrgBase = "http://schema.org/"
 
+func TestBuildPathsKeepsExplicitPaths(t *testing.T) {
+	called := false
+	withFindSALProjectDir(t, func(func() (string, error)) (string, error) {
+		called = true
+		return "", nil
+	})
+
+	paths, err := buildPaths([]string{"one.ttl", "two.jsonld"})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"one.ttl", "two.jsonld"}, paths)
+	require.False(t, called)
+}
+
+func TestBuildPathsDefaultsToSALProjectDir(t *testing.T) {
+	projectDir := filepath.Join(t.TempDir(), "project")
+	withFindSALProjectDir(t, func(func() (string, error)) (string, error) {
+		return projectDir, nil
+	})
+
+	paths, err := buildPaths(nil)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{projectDir}, paths)
+}
+
+func TestBuildPathsReturnsSALProjectDirError(t *testing.T) {
+	withFindSALProjectDir(t, func(func() (string, error)) (string, error) {
+		return "", salpkg.ErrSalDirNotFound
+	})
+
+	paths, err := buildPaths(nil)
+
+	require.Nil(t, paths)
+	require.ErrorIs(t, err, salpkg.ErrSalDirNotFound)
+	require.Contains(t, err.Error(), "build: find SAL project directory")
+}
+
 func TestRunReportsUndefinedSchemaOrgTermWithLineNumber(t *testing.T) {
 	path := filepath.Join("testdata", "incorrect", "name.jsonld")
 
-	err := run([]string{path}, nil, nil, schemaOrgTestLoader{}, schemaOrgVocabularyFetch)
+	err := run([]string{path}, schemaOrgTestLoader{}, schemaOrgVocabularyFetch)
 	require.Error(t, err)
 	got := err.Error()
 	if !strings.Contains(got, path+":4:") {
@@ -42,7 +81,7 @@ func TestRunValidatesSchemaOrgJSONLD(t *testing.T) {
   "url": "http://www.janedoe.com"
 }`)
 
-	err := run([]string{path}, nil, nil, schemaOrgTestLoader{}, schemaOrgVocabularyFetch)
+	err := run([]string{path}, schemaOrgTestLoader{}, schemaOrgVocabularyFetch)
 	require.NoError(t, err)
 }
 
@@ -89,8 +128,6 @@ func TestRunReportsUndefinedTermFromArbitraryVocabulary(t *testing.T) {
 
 	err := run(
 		[]string{path},
-		nil,
-		nil,
 		exampleVocabularyLoader{},
 		exampleVocabularyFetch,
 	)
@@ -115,8 +152,6 @@ func TestRunValidatesArbitraryVocabularyTerm(t *testing.T) {
 
 	err := run(
 		[]string{path},
-		nil,
-		nil,
 		exampleVocabularyLoader{},
 		exampleVocabularyFetch,
 	)
@@ -135,8 +170,6 @@ ex:Known ex:Known ex:Known ,
 
 	err := run(
 		[]string{path},
-		nil,
-		nil,
 		exampleVocabularyLoader{},
 		exampleVocabularyFetch,
 	)
@@ -161,8 +194,6 @@ ex:Known ex:Known ex:Known .
 
 	err := run(
 		[]string{path},
-		nil,
-		nil,
 		exampleVocabularyLoader{},
 		exampleVocabularyFetch,
 	)
@@ -180,8 +211,6 @@ func TestRunValidatesBuiltinXSDDatatype(t *testing.T) {
 
 	err := run(
 		[]string{path},
-		nil,
-		nil,
 		exampleVocabularyLoader{},
 		func(u string) ([]byte, string, error) { return nil, "", fmt.Errorf("unexpected url %s", u) },
 	)
@@ -214,7 +243,7 @@ func TestRunValidatesJSONLDTestdata(t *testing.T) {
 
 		for _, path := range paths {
 			t.Run(filepath.ToSlash(path), func(t *testing.T) {
-				err := run([]string{path}, nil, nil, schemaOrgTestLoader{}, schemaOrgVocabularyFetch)
+				err := run([]string{path}, schemaOrgTestLoader{}, schemaOrgVocabularyFetch)
 				if tc.wantErr {
 					require.Error(t, err)
 				} else {
@@ -235,8 +264,6 @@ func TestRunReportsUnknownXSDDatatypeAsUndefinedTerm(t *testing.T) {
 
 	err := run(
 		[]string{path},
-		nil,
-		nil,
 		exampleVocabularyLoader{},
 		func(u string) ([]byte, string, error) { return nil, "", fmt.Errorf("unexpected url %s", u) },
 	)
@@ -258,8 +285,6 @@ ex:Alice ex:name "Alice" .
 
 	err := run(
 		[]string{path},
-		nil,
-		nil,
 		exampleVocabularyLoader{},
 		func(u string) ([]byte, string, error) {
 			if u != "http://example.org/" {
@@ -287,7 +312,7 @@ func TestRunExpandsInputDirectories(t *testing.T) {
 }`)
 	writeTestFile(t, filepath.Join(dir, "skip.ttl"), "@prefix ex: <https://example.com/> .\n")
 
-	err := run([]string{dir}, nil, nil, schemaOrgTestLoader{}, schemaOrgVocabularyFetch)
+	err := run([]string{dir}, schemaOrgTestLoader{}, schemaOrgVocabularyFetch)
 	require.NoError(t, err)
 }
 
@@ -597,6 +622,15 @@ func writeTestFile(t *testing.T, path string, content string) {
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func withFindSALProjectDir(t *testing.T, fn func(func() (string, error)) (string, error)) {
+	t.Helper()
+	previous := findSALProjectDir
+	findSALProjectDir = fn
+	t.Cleanup(func() {
+		findSALProjectDir = previous
+	})
 }
 
 type schemaOrgTestLoader struct{}

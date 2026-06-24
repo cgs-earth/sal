@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	_ "embed"
+
+	"github.com/cgs-earth/sal/pkg"
 )
 
 //go:embed sal_config_example.jsonld
@@ -19,6 +21,19 @@ type InitCmd struct {
 }
 
 func Run(cmd *InitCmd) error {
+
+	// if cwd is home return an error
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	if cwd == home {
+		return pkg.ErrCantMakeSalDirInHome
+	}
 
 	gitCmd := exec.Command("git", "remote", "-v")
 	out, err := gitCmd.CombinedOutput()
@@ -46,7 +61,7 @@ func Run(cmd *InitCmd) error {
 		return fmt.Errorf("git repository has no remotes configured; you must specify a remote before running init")
 	}
 
-	cwd, err := os.Getwd()
+	cwd, err = os.Getwd()
 	if err != nil {
 		return err
 	}
@@ -57,7 +72,7 @@ func Run(cmd *InitCmd) error {
 		return err
 	}
 
-	home, err := os.UserHomeDir()
+	home, err = os.UserHomeDir()
 	if err != nil {
 		return err
 	}

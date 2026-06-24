@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/cgs-earth/json-gold/ld"
+	salpkg "github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/turtle"
 )
@@ -38,29 +39,45 @@ type usedTerm struct {
 	line int
 }
 
+var findSALProjectDir = salpkg.FindSALProjectDir
+
 // Run validates RDF files for terms that are not defined by their vocabularies.
 func Run(cfg *BuildCmd, stdout, stderr io.Writer) error {
 	if cfg == nil {
 		return fmt.Errorf("build: missing arguments")
 	}
+	paths, err := buildPaths(cfg.Paths)
+	if err != nil {
+		return err
+	}
 	fetch := fetchVocabularyDocument
 	if len(cfg.PrefixMaps) > 0 {
-		var err error
 		fetch, err = prefixMappedVocabularyFetch(cfg.PrefixMaps, fetchVocabularyDocument)
 		if err != nil {
 			return err
 		}
 	}
-	return run(cfg.Paths, stdout, stderr, ld.NewDefaultDocumentLoader(nil), fetch)
+	return run(paths, ld.NewDefaultDocumentLoader(nil), fetch)
 }
 
-func run(paths []string, stdout, stderr io.Writer, loader ld.DocumentLoader, vocabFetch func(string) ([]byte, string, error)) error {
+func buildPaths(paths []string) ([]string, error) {
+	if len(paths) > 0 {
+		return paths, nil
+	}
+	projectDir, err := findSALProjectDir(os.UserHomeDir)
+	if err != nil {
+		return nil, fmt.Errorf("build: find SAL project directory: %w", err)
+	}
+	return []string{projectDir}, nil
+}
+
+func run(paths []string, loader ld.DocumentLoader, vocabFetch func(string) ([]byte, string, error)) error {
 	files, err := expandInputs(paths)
 	if err != nil {
 		return err
 	}
 	if len(files) == 0 {
-		return fmt.Errorf("no files found")
+		return fmt.Errorf("no JSON-LD or TTL files found in %s", strings.Join(paths, ", "))
 	}
 
 	var errs multiError
@@ -77,7 +94,7 @@ func run(paths []string, stdout, stderr io.Writer, loader ld.DocumentLoader, voc
 		return errs
 	}
 
-	slog.Info("Validated" + fmt.Sprint(len(files)) + " file(s)")
+	slog.Info("Validated " + fmt.Sprint(len(files)) + " file(s)")
 	return nil
 }
 
