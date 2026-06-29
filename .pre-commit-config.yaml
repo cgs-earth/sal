@@ -50,4 +50,4 @@ repos:
         entry: go test ./...
         language: system
         types: [go]
-        pass_filenames: false # lint handles files itself
+        pass_filenames: false # test handles files itself
