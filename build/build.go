@@ -70,6 +70,11 @@ func Run(cfg *BuildCmd) (*rdflibgo.Graph, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	if err := NewTermsHaveClassDefinitions(graph); err != nil {
+		return nil, err
+	}
+
 	switch cfg.Format {
 	case "nq":
 		dataDir, err := pkg.SalDataDir()
@@ -153,6 +158,9 @@ func run(paths []string, loader ld.DocumentLoader, vocabFetch func(string) ([]by
 	}
 	if len(errs) > 0 {
 		return nil, errs
+	}
+	if err := NewTermsHaveClassDefinitions(finalGraph); err != nil {
+		return nil, err
 	}
 
 	slog.Info("Validated " + fmt.Sprint(len(files)) + " file(s)")
