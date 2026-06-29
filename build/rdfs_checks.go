@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cgs-earth/sal/build/validate"
 	"github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
@@ -43,7 +44,7 @@ func NewTermsHaveClassDefinitions(g *rdflibgo.Graph) error {
 		return true
 	})
 
-	var errs multiError
+	var errs validate.MultiError
 	for iri := range localSubjects {
 		if !typedSubjects[iri] {
 			errs = append(errs, fmt.Errorf("%s must have an rdf:type definition", iri))

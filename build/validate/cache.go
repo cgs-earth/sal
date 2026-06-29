@@ -1,4 +1,4 @@
-package build
+package validate
 
 import (
 	"crypto/sha256"
@@ -16,7 +16,7 @@ import (
 
 type vocabularyCache struct {
 	cacheDir string
-	cache    map[string]vocabulary
+	cache    map[string]Vocabulary
 	failures map[string]error
 	fetch    func(string) ([]byte, string, error)
 	base     string
@@ -87,7 +87,22 @@ func (c *vocabularyCache) cachePath(base string) string {
 	return filepath.Join(c.cacheDir, hex.EncodeToString(sum[:])+".json")
 }
 
-func (c *vocabularyCache) isDefined(iri string, ctx jsonLDContext) (bool, error) {
+func longestPrefixBase(iri string, ctx RdfContext) (string, string, bool) {
+	bestPrefix := ""
+	bestBase := ""
+	if ctx.Vocab != "" && strings.HasPrefix(iri, ctx.Vocab) {
+		bestBase = ctx.Vocab
+	}
+	for prefix, base := range ctx.Prefixes {
+		if strings.HasPrefix(iri, base) && len(base) >= len(bestBase) {
+			bestPrefix = prefix
+			bestBase = base
+		}
+	}
+	return bestPrefix, bestBase, bestBase != ""
+}
+
+func (c *vocabularyCache) isDefined(iri string, ctx RdfContext) (bool, error) {
 	if iriWithoutXsdNamepace, found := strings.CutPrefix(iri, xsdNamespaceIRI); found {
 		return slices.Contains(xsdBuiltinDatatypeLocalNames, iriWithoutXsdNamepace), nil
 	}
@@ -103,7 +118,7 @@ func (c *vocabularyCache) isDefined(iri string, ctx jsonLDContext) (bool, error)
 	return vocab.terms[iri], nil
 }
 
-func (c *vocabularyCache) load(base string) (vocabulary, error) {
+func (c *vocabularyCache) load(base string) (Vocabulary, error) {
 	base = vocabularyDocumentURL(base)
 	if vocab, ok := c.cache[base]; ok {
 		return vocab, nil
@@ -112,15 +127,15 @@ func (c *vocabularyCache) load(base string) (vocabulary, error) {
 		c.failures = map[string]error{}
 	}
 	if err, ok := c.failures[base]; ok {
-		return vocabulary{}, err
+		return Vocabulary{}, err
 	}
 
 	terms, err := c.loadTerms(base)
 	if err != nil {
 		c.failures[base] = err
-		return vocabulary{}, err
+		return Vocabulary{}, err
 	}
-	vocab := vocabulary{terms: terms}
+	vocab := Vocabulary{terms: terms}
 	c.cache[base] = vocab
 	return vocab, nil
 }

@@ -1,40 +1,17 @@
 package build
 
 import (
-	"fmt"
-	"strings"
+	rdflibgo "github.com/tggo/goRDFlib"
 )
 
-type validationError struct {
-	Path string
-	Line int
-	Term string
-}
-
-func (e validationError) Error() string {
-	return fmt.Sprintf("%s:%d: undefined term %s", e.Path, e.Line, e.Term)
-}
-
-type vocabularyLookupError struct {
-	Path string
-	Line int
-	Term string
-	Err  error
-}
-
-func (e vocabularyLookupError) Error() string {
-	return fmt.Sprintf("%s:%d: failed to check vocabulary for %s: %v", e.Path, e.Line, e.Term, e.Err)
-}
-
-type multiError []error
-
-func (e multiError) Error() string {
-	var sb strings.Builder
-	for i, err := range e {
-		if i > 0 {
-			sb.WriteByte('\n')
-		}
-		sb.WriteString(err.Error())
-	}
-	return sb.String()
+// mergeGraph copies namespaces and triples from src into dst.
+func mergeGraph(dst, src *rdflibgo.Graph) {
+	src.Namespaces()(func(prefix string, ns rdflibgo.URIRef) bool {
+		dst.Bind(prefix, ns)
+		return true
+	})
+	src.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+		dst.Add(triple.Subject, triple.Predicate, triple.Object)
+		return true
+	})
 }

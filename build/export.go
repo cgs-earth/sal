@@ -64,7 +64,7 @@ func ExportGraph(graph *rdflibgo.Graph, format GraphExportFormat) error {
 		}
 		slog.Info("Saved built RDF data to Iceberg", "warehouse", dataDir, "namespace", gitProject)
 	default:
-		return fmt.Errorf("unknown output format: '%s'. Must be iceberg or nq", cfg.Format)
+		return fmt.Errorf("unknown output format: '%s'. Must be iceberg or nq", format)
 	}
 
 	return nil

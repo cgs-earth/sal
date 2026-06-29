@@ -2,42 +2,25 @@ package build
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"mime"
 	"net/http"
 	"os"
-	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/cgs-earth/json-gold/ld"
+	"github.com/cgs-earth/sal/build/validate"
 	"github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
-	"github.com/tggo/goRDFlib/turtle"
 )
 
 type BuildCmd struct {
 	Paths      []string          `arg:"positional" help:"RDF files to validate"`
 	PrefixMaps []string          `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
 	Format     GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
-}
-
-type jsonLDContext struct {
-	prefixes map[string]string
-	vocab    string
-}
-
-type vocabulary struct {
-	terms map[string]bool
-}
-
-type usedTerm struct {
-	iri  string
-	line int
 }
 
 var findSALProjectDir = pkg.SALProjectDir
@@ -59,47 +42,11 @@ func Run(cfg *BuildCmd) (*rdflibgo.Graph, error) {
 		paths = []string{projectDir}
 	}
 
-	fetch := fetchVocabularyDocument
-	if len(cfg.PrefixMaps) > 0 {
-		fetch, err := prefixMappedVocabularyFetch(cfg.PrefixMaps, fetchVocabularyDocument)
-		if err != nil {
-			return nil, err
-		}
-	}
 	base, err := pkg.DefaultSalBase()
 	if err != nil {
 		return nil, err
 	}
-
-	graph, err := run(paths, fetch, base)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := NewTermsHaveClassDefinitions(graph); err != nil {
-		return nil, err
-	}
-
-	if err := ExportGraph(graph, cfg.Format); err != nil {
-		return nil, err
-	}
-
-	return graph, err
-}
-
-func buildPaths(paths []string) ([]string, error) {
-	if len(paths) > 0 {
-		return paths, nil
-	}
-	projectDir, err := findSALProjectDir(os.UserHomeDir)
-	if err != nil {
-		return nil, fmt.Errorf("build: find SAL project directory: %w", err)
-	}
-	return []string{projectDir}, nil
-}
-
-func run(paths []string, vocabsToReplace map[string]string, base string) (*rdflibgo.Graph, error) {
-	files, err := expandInputs(paths)
+	files, err := pkg.FindRdfDataInPaths(paths)
 	if err != nil {
 		return nil, err
 	}
@@ -108,11 +55,12 @@ func run(paths []string, vocabsToReplace map[string]string, base string) (*rdfli
 	}
 
 	finalGraph := rdflibgo.NewGraph(rdflibgo.WithBase(base))
-	var errs multiError
+	var errs validate.MultiError
 	for _, file := range files {
-		graph, err := validateRDFFile(file, vocabsToReplace, base)
+		// TODO do this in parallel and fill in the vocabularies to replace logic
+		graph, err := validate.ValidateRDFFile(file, make(map[string]string), base)
 		if err != nil {
-			if nested, ok := err.(multiError); ok {
+			if nested, ok := err.(validate.MultiError); ok {
 				errs = append(errs, nested...)
 			} else {
 				errs = append(errs, err)
@@ -129,207 +77,27 @@ func run(paths []string, vocabsToReplace map[string]string, base string) (*rdfli
 	}
 
 	slog.Info("Validated " + fmt.Sprint(len(files)) + " file(s)")
-	return finalGraph, nil
-}
 
-func expandInputs(paths []string) ([]string, error) {
-	var files []string
-	for _, path := range paths {
-		info, err := os.Stat(path)
-		if err != nil {
-			return nil, fmt.Errorf("build: %s: %w", path, err)
-		}
-		if !info.IsDir() {
-			if includeRDFInput(path) {
-				files = append(files, path)
-			}
-			continue
-		}
-		err = filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if !d.IsDir() && includeRDFInput(p) {
-				files = append(files, p)
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, fmt.Errorf("build: walk %s: %w", path, err)
-		}
-	}
-	sort.Strings(files)
-	return files, nil
-}
-
-func includeRDFInput(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	return ext == ".jsonld" || ext == ".json" || ext == ".ttl" || ext == ".turtle"
-}
-
-func validateRDFFile(path string, vocabsToReplace map[string]string, base string) (*rdflibgo.Graph, error) {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".ttl", ".turtle":
-		return validateTurtleFile(path, vocabsToReplace, base)
-	default:
-		return validateJSONLDFile(path, ld.NewDefaultDocumentLoader(nil), vocabsToReplace, base)
-	}
-}
-
-func validateJSONLDFile(path string, loader ld.DocumentLoader, vocabsToReplace map[string]string, base string) (*rdflibgo.Graph, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("build: read %s: %w", path, err)
-	}
-
-	var doc any
-	decoder := json.NewDecoder(bytes.NewReader(content))
-	if err := decoder.Decode(&doc); err != nil {
-		return nil, fmt.Errorf("%s:%d: invalid JSON-LD: %w", path, jsonErrorLine(content, err), err)
-	}
-
-	ctx, err := collectContext(doc, loader)
-	if err != nil {
-		return nil, fmt.Errorf("%s: load JSON-LD context: %w", path, err)
-	}
-	terms, err := collectJSONLDTerms(content, loader)
-	if err != nil {
-		return nil, fmt.Errorf("%s: invalid JSON-LD: %w", path, err)
-	}
-	if err := validateTerms(path, terms, ctx, vocabsToReplace, base); err != nil {
+	if err := NewTermsHaveClassDefinitions(finalGraph); err != nil {
 		return nil, err
 	}
-	_, graph, err := serializeRdfDataAndGetVocab("application/ld+json", content, base)
-	if err != nil {
-		return nil, fmt.Errorf("%s: invalid JSON-LD: %w", path, err)
-	}
-	return graph, nil
-}
 
-func validateTurtleFile(path string, vocabsToReplace map[string]string, base string) (*rdflibgo.Graph, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("build: read %s: %w", path, err)
-	}
-
-	appendRDFTerm := func(terms *[]usedTerm, term rdflibgo.Term, line int) {
-		if uri, ok := term.(rdflibgo.URIRef); ok {
-			*terms = append(*terms, usedTerm{iri: uri.Value(), line: line})
-		}
-	}
-
-	var terms []usedTerm
-	g := rdflibgo.NewGraph(rdflibgo.WithBase(base))
-	err = turtle.Parse(g, bytes.NewReader(content), turtle.WithProvenance(
-		func(s rdflibgo.Subject, p rdflibgo.URIRef, o rdflibgo.Term, lineNum int) {
-			appendRDFTerm(&terms, s, lineNum)
-			appendRDFTerm(&terms, p, lineNum)
-			appendRDFTerm(&terms, o, lineNum)
-			if lit, ok := o.(rdflibgo.Literal); ok {
-				datatype := lit.Datatype()
-				if datatype.Value() != rdflibgo.XSDString.Value() && datatype.Value() != rdfLangStringIRI {
-					appendRDFTerm(&terms, datatype, lineNum)
-				}
-			}
-		}), turtle.WithBase(base))
-	if err != nil {
-		return nil, fmt.Errorf("%s: invalid Turtle: %w", path, err)
-	}
-
-	ctx := jsonLDContext{prefixes: turtleDeclaredPrefixes(g, content)}
-	if err := validateTerms(path, terms, ctx, vocabFetch, base); err != nil {
+	if err := ExportGraph(finalGraph, cfg.Format); err != nil {
 		return nil, err
 	}
-	_, graph, err := serializeRdfDataAndGetVocab("text/turtle", content, base)
-	if err != nil {
-		return nil, fmt.Errorf("%s: invalid Turtle: %w", path, err)
-	}
-	return graph, nil
+
+	return finalGraph, err
 }
 
-// mergeGraph copies namespaces and triples from src into dst.
-func mergeGraph(dst, src *rdflibgo.Graph) {
-	src.Namespaces()(func(prefix string, ns rdflibgo.URIRef) bool {
-		dst.Bind(prefix, ns)
-		return true
-	})
-	src.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
-		dst.Add(triple.Subject, triple.Predicate, triple.Object)
-		return true
-	})
-}
-
-func turtleDeclaredPrefixes(g *rdflibgo.Graph, content []byte) map[string]string {
-	declared := turtleDeclaredPrefixNames(content)
-	prefixes := map[string]string{}
-	g.Namespaces()(func(prefix string, ns rdflibgo.URIRef) bool {
-		if declared[prefix] {
-			prefixes[prefix] = ns.Value()
-		}
-		return true
-	})
-	return prefixes
-}
-
-func turtleDeclaredPrefixNames(content []byte) map[string]bool {
-	declared := map[string]bool{}
-	for _, pattern := range []*regexp.Regexp{
-		regexp.MustCompile(`(?im)^\s*@prefix\s+([A-Za-z][A-Za-z0-9_.-]*|):\s*<[^>]*>\s*\.`),
-		regexp.MustCompile(`(?im)^\s*PREFIX\s+([A-Za-z][A-Za-z0-9_.-]*|):\s*<[^>]*>`),
-	} {
-		for _, match := range pattern.FindAllSubmatch(content, -1) {
-			declared[string(match[1])] = true
-		}
-	}
-	return declared
-}
-
-func validateTerms(path string, terms []usedTerm, ctx jsonLDContext, vocabFetch func(string) ([]byte, string, error), base string) error {
-	vocabs := vocabularyCache{
-		cacheDir: defaultVocabularyCacheDir(),
-		cache:    map[string]vocabulary{},
-		failures: map[string]error{},
-		fetch:    vocabFetch,
-		base:     base,
-	}
-
-	var errs multiError
-	loggedVocabularyErrors := map[string]bool{}
-	for _, term := range terms {
-		display, ok := displayTerm(term.iri, ctx)
-		if !ok {
-			continue
-		}
-		defined, err := vocabs.isDefined(term.iri, ctx)
-		if err != nil {
-			logKey := term.iri + "\x00" + err.Error()
-			if !loggedVocabularyErrors[logKey] {
-				slog.Error("Failed to check vocabulary definition", "path", path, "term", term.iri, "error", err)
-				loggedVocabularyErrors[logKey] = true
-			}
-			errs = append(errs, vocabularyLookupError{Path: path, Line: term.line, Term: display, Err: err})
-			continue
-		}
-		if defined {
-			continue
-		}
-		errs = append(errs, validationError{Path: path, Line: term.line, Term: display})
-	}
-	if len(errs) > 0 {
-		return errs
-	}
-	return nil
-}
-
-func collectContext(doc any, loader ld.DocumentLoader) (jsonLDContext, error) {
-	ctx := jsonLDContext{prefixes: map[string]string{}}
+func collectContext(doc any, loader ld.DocumentLoader) (validate.RdfContext, error) {
+	ctx := validate.RdfContext{prefixes: map[string]string{}}
 	if err := collectContextFromNode(doc, &ctx, loader, map[string]bool{}); err != nil {
 		return ctx, err
 	}
 	return ctx, nil
 }
 
-func collectContextFromNode(node any, ctx *jsonLDContext, loader ld.DocumentLoader, seen map[string]bool) error {
+func collectContextFromNode(node any, ctx *validate.RdfContext, loader ld.DocumentLoader, seen map[string]bool) error {
 	switch n := node.(type) {
 	case map[string]any:
 		if value, ok := n["@context"]; ok {
@@ -354,7 +122,7 @@ func collectContextFromNode(node any, ctx *jsonLDContext, loader ld.DocumentLoad
 	return nil
 }
 
-func readContext(value any, ctx *jsonLDContext, loader ld.DocumentLoader, seen map[string]bool) error {
+func readContext(value any, ctx *RdfContext, loader ld.DocumentLoader, seen map[string]bool) error {
 	switch c := value.(type) {
 	case string:
 		if seen[c] {
@@ -459,37 +227,6 @@ func collectJSONLDTerms(content []byte, loader ld.DocumentLoader) ([]usedTerm, e
 		return terms[i].iri < terms[j].iri
 	})
 	return terms, nil
-}
-
-func displayTerm(iri string, ctx jsonLDContext) (string, bool) {
-	prefix, base, ok := longestPrefixBase(iri, ctx)
-	if ok && prefix != "" {
-		return prefix + ":" + strings.TrimPrefix(iri, base), true
-	}
-	if ok {
-		return iri, true
-	}
-	for prefix, base := range ctx.prefixes {
-		if strings.HasPrefix(iri, base) {
-			return prefix + ":" + strings.TrimPrefix(iri, base), true
-		}
-	}
-	return iri, true
-}
-
-func longestPrefixBase(iri string, ctx jsonLDContext) (string, string, bool) {
-	bestPrefix := ""
-	bestBase := ""
-	if ctx.vocab != "" && strings.HasPrefix(iri, ctx.vocab) {
-		bestBase = ctx.vocab
-	}
-	for prefix, base := range ctx.prefixes {
-		if strings.HasPrefix(iri, base) && len(base) >= len(bestBase) {
-			bestPrefix = prefix
-			bestBase = base
-		}
-	}
-	return bestPrefix, bestBase, bestBase != ""
 }
 
 func vocabularyDocumentURL(base string) string {
