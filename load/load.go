@@ -259,7 +259,7 @@ func writeGraph(
 		return nil, 0, fmt.Errorf("read graph: %w", err)
 	}
 
-	log.Printf("  wrote graph as %d parquet data file(s), %d triples", len(dataFiles), rdr.RowsRead())
+	slog.Info("Successfully wrote to iceberg table with" + fmt.Sprint(len(dataFiles)) + " data files and " + fmt.Sprint(rdr.RowsRead()) + " triples")
 	return dataFiles, rdr.RowsRead(), nil
 }
 
@@ -276,8 +276,6 @@ func commitDataFiles(ctx context.Context, tbl *table.Table, dataFiles []iceberg.
 	if _, err := txn.Commit(ctx); err != nil {
 		return fmt.Errorf("commit data files: %w", err)
 	}
-
-	log.Printf("  committed %d parquet data file(s) with %d triples in one snapshot", len(dataFiles), rows)
 	return nil
 }
 
