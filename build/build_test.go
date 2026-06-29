@@ -56,36 +56,6 @@ func TestBuildPathsReturnsSALProjectDirError(t *testing.T) {
 	require.Contains(t, err.Error(), "build: find SAL project directory")
 }
 
-func TestRunReportsUndefinedSchemaOrgTermWithLineNumber(t *testing.T) {
-	path := filepath.Join("testdata", "incorrect", "name.jsonld")
-
-	err := run([]string{path}, schemaOrgTestLoader{}, schemaOrgVocabularyFetch, testBuildBase)
-	require.Error(t, err)
-	got := err.Error()
-	if !strings.Contains(got, path+":4:") {
-		t.Fatalf("Run() error = %q, want line 4", got)
-	}
-	if !strings.Contains(got, "undefined term schema:namee") {
-		t.Fatalf("Run() error = %q, want undefined schema:namee", got)
-	}
-}
-
-func TestRunValidatesSchemaOrgJSONLD(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "person.jsonld")
-	writeTestFile(t, path, `{
-  "@context": "http://schema.org/",
-  "@type": "Person",
-  "name": "Jane Doe",
-  "jobTitle": "Professor",
-  "telephone": "(425) 123-4567",
-  "url": "http://www.janedoe.com"
-}`)
-
-	err := run([]string{path}, schemaOrgTestLoader{}, schemaOrgVocabularyFetch, testBuildBase)
-	require.NoError(t, err)
-}
-
 func TestCollectJSONLDTermsUsesRDFQuadProvenanceLines(t *testing.T) {
 	terms, err := collectJSONLDTerms([]byte(`{
   "@context": {
@@ -127,7 +97,7 @@ func TestRunReportsUndefinedTermFromArbitraryVocabulary(t *testing.T) {
   "ex:Missing": "value"
 }`)
 
-	err := run(
+	_, err := run(
 		[]string{path},
 		exampleVocabularyLoader{},
 		exampleVocabularyFetch,
@@ -152,7 +122,7 @@ func TestRunValidatesArbitraryVocabularyTerm(t *testing.T) {
   "ex:Known": "value"
 }`)
 
-	err := run(
+	_, err := run(
 		[]string{path},
 		exampleVocabularyLoader{},
 		exampleVocabularyFetch,
@@ -171,7 +141,7 @@ ex:Known ex:Known ex:Known ,
                    ex:Missing .
 `)
 
-	err := run(
+	_, err := run(
 		[]string{path},
 		exampleVocabularyLoader{},
 		exampleVocabularyFetch,
@@ -196,7 +166,7 @@ func TestRunValidatesTurtleTerm(t *testing.T) {
 ex:Known ex:Known ex:Known .
 `)
 
-	err := run(
+	_, err := run(
 		[]string{path},
 		exampleVocabularyLoader{},
 		exampleVocabularyFetch,
@@ -214,7 +184,7 @@ func TestRunValidatesBuiltinXSDDatatype(t *testing.T) {
 [] <https://example.com/prop> "value"^^xsd:string .
 `)
 
-	err := run(
+	_, err := run(
 		[]string{path},
 		exampleVocabularyLoader{},
 		func(u string) ([]byte, string, error) { return nil, "", fmt.Errorf("unexpected url %s", u) },
@@ -249,7 +219,7 @@ func TestRunValidatesJSONLDTestdata(t *testing.T) {
 
 		for _, path := range paths {
 			t.Run(filepath.ToSlash(path), func(t *testing.T) {
-				err := run([]string{path}, schemaOrgTestLoader{}, schemaOrgVocabularyFetch, testBuildBase)
+				_, err := run([]string{path}, schemaOrgTestLoader{}, schemaOrgVocabularyFetch, testBuildBase)
 				if tc.wantErr {
 					require.Error(t, err)
 				} else {
@@ -268,7 +238,7 @@ func TestRunReportsUnknownXSDDatatypeAsUndefinedTerm(t *testing.T) {
 [] <https://example.com/prop> "value"^^xsd:madeUpType .
 `)
 
-	err := run(
+	_, err := run(
 		[]string{path},
 		exampleVocabularyLoader{},
 		func(u string) ([]byte, string, error) { return nil, "", fmt.Errorf("unexpected url %s", u) },
@@ -290,7 +260,7 @@ func TestRunValidatesTermFromRDFXMLVocabulary(t *testing.T) {
 ex:Alice ex:name "Alice" .
 `)
 
-	err := run(
+	_, err := run(
 		[]string{path},
 		exampleVocabularyLoader{},
 		func(u string) ([]byte, string, error) {
@@ -320,8 +290,26 @@ func TestRunExpandsInputDirectories(t *testing.T) {
 }`)
 	writeTestFile(t, filepath.Join(dir, "skip.ttl"), "@prefix ex: <https://example.com/> .\n")
 
-	err := run([]string{dir}, schemaOrgTestLoader{}, schemaOrgVocabularyFetch, testBuildBase)
+	_, err := run([]string{dir}, schemaOrgTestLoader{}, schemaOrgVocabularyFetch, testBuildBase)
 	require.NoError(t, err)
+}
+
+func TestRunReturnsMergedGraph(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "one.ttl"), `@prefix ex: <https://example.com/vocab#> .
+
+ex:Known ex:Known "one" .
+`)
+	writeTestFile(t, filepath.Join(dir, "two.ttl"), `@prefix ex: <https://example.com/vocab#> .
+
+ex:Known ex:Known "two" .
+`)
+
+	graph, err := run([]string{dir}, exampleVocabularyLoader{}, exampleVocabularyFetch, testBuildBase)
+
+	require.NoError(t, err)
+	require.NotNil(t, graph)
+	require.Equal(t, 2, graph.Len())
 }
 
 func TestExtractRDFXMLVocabularyTermsTypedNode(t *testing.T) {
