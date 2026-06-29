@@ -1,0 +1,47 @@
+# Copyright 2025 Lincoln Institute of Land Policy
+# SPDX-License-Identifier: Apache-2.0
+
+minimum_pre_commit_version: "2.9.0"
+ci:
+  autoupdate_schedule: monthly
+  skip: [golang lint, gofmt]
+repos:
+  - repo: meta
+    hooks:
+      - id: check-useless-excludes
+  - repo: local
+    hooks:
+      - id: forbid-symlinks
+        name: Forbid symlinks
+        entry: Forbid symlinks
+        language: fail
+        types: [symlink]
+  - repo: https://github.com/Lucas-C/pre-commit-hooks
+    rev: v1.5.6
+    hooks:
+      - id: forbid-crlf
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-case-conflict
+      - id: check-executables-have-shebangs
+      - id: check-merge-conflict
+      - id: check-shebang-scripts-are-executable
+      - id: destroyed-symlinks
+      - id: detect-private-key
+      - id: fix-byte-order-marker
+      - id: mixed-line-ending
+  - repo: local
+    hooks: 
+      - id: gofmt
+        name: Format go code
+        entry: go fmt ./...
+        language: system
+        types: [go]
+        pass_filenames: false # go fmt handles files itself
+      - id: golang lint
+        name: Lint go code
+        entry: golangci-lint run
+        language: system
+        types: [go]
+        pass_filenames: false # lint handles files itself

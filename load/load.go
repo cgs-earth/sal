@@ -33,12 +33,12 @@ func Run(cfg *LoadCmd) error {
 
 	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
 	if err != nil {
-		return fmt.Errorf("Failed to create catalog: %w", err)
+		return fmt.Errorf("failed to create catalog: %w", err)
 	}
 
 	tbl, err := NewIcebergTableFromCfg(ctx, cat, cfg)
 	if err != nil {
-		return fmt.Errorf("Failed to create Iceberg table: %w", err)
+		return fmt.Errorf("failed to create Iceberg table: %w", err)
 	}
 
 	pattern := filepath.Join(cfg.InputDir, "*.nq.gz")

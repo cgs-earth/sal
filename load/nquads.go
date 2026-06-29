@@ -19,7 +19,7 @@ var (
 
 type triple struct{ s, p, o string }
 
-func parseNQuads(r io.Reader, handle func(triple) error) error {
+func ParseNQuads(r io.Reader, handle func(triple) error) error {
 	br := bufio.NewReader(r)
 	lineNum := 0
 
