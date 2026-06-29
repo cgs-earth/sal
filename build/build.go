@@ -2,7 +2,6 @@ package build
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,17 +15,15 @@ import (
 	"strings"
 
 	"github.com/cgs-earth/json-gold/ld"
-	"github.com/cgs-earth/sal/load"
 	"github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
-	"github.com/tggo/goRDFlib/nq"
 	"github.com/tggo/goRDFlib/turtle"
 )
 
 type BuildCmd struct {
-	Paths      []string `arg:"positional" help:"RDF files to validate"`
-	PrefixMaps []string `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
-	Format     string   `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
+	Paths      []string          `arg:"positional" help:"RDF files to validate"`
+	PrefixMaps []string          `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
+	Format     GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
 }
 
 type jsonLDContext struct {
@@ -50,13 +47,21 @@ func Run(cfg *BuildCmd) (*rdflibgo.Graph, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("build: missing arguments")
 	}
-	paths, err := buildPaths(cfg.Paths)
-	if err != nil {
-		return nil, err
+
+	var paths []string
+	if len(cfg.Paths) > 0 {
+		paths = cfg.Paths
+	} else {
+		projectDir, err := findSALProjectDir(os.UserHomeDir)
+		if err != nil {
+			return nil, fmt.Errorf("build: find SAL project directory: %w", err)
+		}
+		paths = []string{projectDir}
 	}
+
 	fetch := fetchVocabularyDocument
 	if len(cfg.PrefixMaps) > 0 {
-		fetch, err = prefixMappedVocabularyFetch(cfg.PrefixMaps, fetchVocabularyDocument)
+		fetch, err := prefixMappedVocabularyFetch(cfg.PrefixMaps, fetchVocabularyDocument)
 		if err != nil {
 			return nil, err
 		}
@@ -65,7 +70,7 @@ func Run(cfg *BuildCmd) (*rdflibgo.Graph, error) {
 	if err != nil {
 		return nil, err
 	}
-	ctx := context.Background()
+
 	graph, err := run(paths, fetch, base)
 	if err != nil {
 		return nil, err
@@ -75,50 +80,10 @@ func Run(cfg *BuildCmd) (*rdflibgo.Graph, error) {
 		return nil, err
 	}
 
-	switch cfg.Format {
-	case "nq":
-		dataDir, err := pkg.SalDataDir()
-		if err != nil {
-			return nil, err
-		}
-		gitProject, err := pkg.GitProjectName()
-		if err != nil {
-			return nil, err
-		}
-		fullOutPath := filepath.Join(dataDir, fmt.Sprintf("%s.nq", gitProject))
-		file, err := os.Create(fullOutPath)
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = file.Close() }()
-
-		err = nq.Serialize(graph, file)
-		if err == nil {
-			slog.Info("Saved built RDF data to " + fullOutPath)
-		}
-	case "iceberg":
-		dataDir, err := pkg.SalDataDir()
-		if err != nil {
-			return nil, err
-		}
-		gitProject, err := pkg.GitProjectName()
-		if err != nil {
-			return nil, err
-		}
-		err = load.WriteGraphToIceberg(ctx, graph, &load.LoadCmd{
-			BatchSize:          131072,
-			ParquetCompression: "snappy",
-			MetricsMode:        "none",
-			Warehouse:          dataDir,
-			Namespace:          gitProject,
-		})
-		if err != nil {
-			return nil, err
-		}
-		slog.Info("Saved built RDF data to Iceberg", "warehouse", dataDir, "namespace", gitProject)
-	default:
-		return nil, fmt.Errorf("unknown output format: '%s'. Must be iceberg or nq", cfg.Format)
+	if err := ExportGraph(graph, cfg.Format); err != nil {
+		return nil, err
 	}
+
 	return graph, err
 }
 
