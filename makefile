@@ -10,3 +10,6 @@ copy_geoconnex_graph:
 install:
 	go build -o sal . 
 	mv ./sal ~/.local/bin
+
+deadcode:
+	deadcode ./...

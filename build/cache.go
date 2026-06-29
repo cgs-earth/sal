@@ -21,7 +21,7 @@ type vocabularyCache struct {
 	fetch    func(string) ([]byte, string, error)
 }
 
-const vocabularyCacheVersion = 9
+const vocabularyCacheVersion = 10
 
 func defaultVocabularyCacheDir() string {
 	return filepath.Join("/tmp", "sal", "cache", "vocab")

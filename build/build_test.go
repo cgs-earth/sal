@@ -339,6 +339,31 @@ func TestExtractRDFXMLVocabularyTermsTypedNode(t *testing.T) {
 	}
 }
 
+func TestExtractJSONLDVocabularyTermsUsesGoRDFlibParser(t *testing.T) {
+	terms, err := extractVocabularyTerms("https://example.com/vocab/", "application/ld+json", []byte(`{
+  "@context": {
+    "ex": "https://example.com/vocab/",
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
+  },
+  "@graph": [
+    {
+      "@id": "ex:Known",
+      "@type": "rdfs:Class"
+    },
+    {
+      "@id": "ex:relatedTo",
+      "@type": "rdf:Property",
+      "rdfs:range": {"@id": "ex:Known"}
+    }
+  ]
+}`))
+
+	require.NoError(t, err)
+	require.True(t, terms["https://example.com/vocab/Known"])
+	require.True(t, terms["https://example.com/vocab/relatedTo"])
+}
+
 func TestExtractTurtleVocabularyTermsQUDTSyntax(t *testing.T) {
 	terms, err := extractVocabularyTerms("http://qudt.org/schema/qudt/", "text/turtle; charset=utf-8", []byte(`@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
@@ -517,9 +542,9 @@ func TestValidateTermsLogsRepeatedVocabularyFailureOnce(t *testing.T) {
 			return nil, "", fmt.Errorf("cannot dereference %s", u)
 		},
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "input.ttl:1: failed to check vocabulary for ex:Missing")
+	require.Contains(t, err.Error(), "input.ttl:2: failed to check vocabulary for ex:Missing")
 	if got := strings.Count(logs.String(), "Failed to check vocabulary definition"); got != 1 {
 		t.Fatalf("logged vocabulary failures = %d, want 1; logs:\n%s", got, logs.String())
 	}

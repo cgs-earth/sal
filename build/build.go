@@ -17,6 +17,7 @@ import (
 	"github.com/cgs-earth/json-gold/ld"
 	salpkg "github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
+	"github.com/tggo/goRDFlib/jsonld"
 	"github.com/tggo/goRDFlib/turtle"
 )
 
@@ -204,7 +205,7 @@ func turtleDeclaredPrefixes(g *rdflibgo.Graph, content []byte) map[string]string
 	prefixes := map[string]string{}
 	g.Namespaces()(func(prefix string, ns rdflibgo.URIRef) bool {
 		if declared[prefix] {
-			prefixes[prefix] = normalizeVocabularyBase(ns.Value())
+			prefixes[prefix] = ns.Value()
 		}
 		return true
 	})
@@ -246,6 +247,7 @@ func validateTerms(path string, terms []usedTerm, ctx jsonLDContext, vocabFetch 
 				slog.Error("Failed to check vocabulary definition", "path", path, "term", term.iri, "error", err)
 				loggedVocabularyErrors[logKey] = true
 			}
+			errs = append(errs, vocabularyLookupError{Path: path, Line: term.line, Term: display, Err: err})
 			continue
 		}
 		if defined {
@@ -318,13 +320,13 @@ func readContext(value any, ctx *jsonLDContext, loader ld.DocumentLoader, seen m
 			switch {
 			case key == "@vocab":
 				if vocab, ok := item.(string); ok {
-					ctx.vocab = normalizeVocabularyBase(vocab)
+					ctx.vocab = vocab
 				}
 			case strings.HasPrefix(key, "@"):
 				continue
 			case !strings.Contains(key, ":"):
 				if base, ok := contextTermBase(item); ok {
-					ctx.prefixes[key] = normalizeVocabularyBase(base)
+					ctx.prefixes[key] = base
 				}
 			}
 		}
@@ -399,27 +401,6 @@ func collectJSONLDTerms(content []byte, loader ld.DocumentLoader) ([]usedTerm, e
 	return terms, nil
 }
 
-func expandTerm(term string, ctx jsonLDContext) (string, bool) {
-	if strings.HasPrefix(term, "@") {
-		return "", false
-	}
-	if colon := strings.IndexByte(term, ':'); colon > 0 {
-		prefix := term[:colon]
-		suffix := term[colon+1:]
-		if base, ok := ctx.prefixes[prefix]; ok {
-			return base + suffix, true
-		}
-		if isAbsoluteIRI(term) {
-			return term, true
-		}
-		return "", false
-	}
-	if ctx.vocab != "" {
-		return ctx.vocab + term, true
-	}
-	return "", false
-}
-
 func displayTerm(iri string, ctx jsonLDContext) (string, bool) {
 	prefix, base, ok := longestPrefixBase(iri, ctx)
 	if ok && prefix != "" {
@@ -469,7 +450,7 @@ func extractVocabularyTerms(base, contentType string, body []byte) (map[string]b
 
 	mediaType, _, _ := mime.ParseMediaType(contentType)
 	parsers := []parserFn{
-		{name: "json-ld", fn: func(_ string, body []byte) (map[string]bool, error) { return extractJSONLDVocabularyTerms(body) }},
+		{name: "json-ld", fn: extractJSONLDVocabularyTerms},
 		{name: "turtle", fn: extractTurtleVocabularyTerms},
 		{name: "rdfxml", fn: extractRDFXMLVocabularyTerms},
 	}
@@ -499,67 +480,28 @@ func extractVocabularyTerms(base, contentType string, body []byte) (map[string]b
 	return nil, fmt.Errorf("unsupported vocabulary serialization for %s (%s): %s", base, contentType, strings.Join(errs, "; "))
 }
 
-func extractJSONLDVocabularyTerms(body []byte) (map[string]bool, error) {
-	var doc any
-	if err := json.Unmarshal(body, &doc); err != nil {
+func extractJSONLDVocabularyTerms(base string, body []byte) (map[string]bool, error) {
+	g := rdflibgo.NewGraph(rdflibgo.WithBase(vocabularyDocumentURL(base)))
+	if err := jsonld.Parse(g, bytes.NewReader(body), jsonld.WithUnboundedLines()); err != nil {
 		return nil, err
 	}
-
 	terms := map[string]bool{}
-	if ctx, err := collectContext(doc, ld.NewDefaultDocumentLoader(nil)); err == nil {
-		collectRawVocabularyIDs(doc, ctx, terms, ld.NewDefaultDocumentLoader(nil))
-	}
-
-	processor := ld.NewJsonLdProcessor()
-	options := ld.NewJsonLdOptions("")
-	options.DocumentLoader = ld.NewDefaultDocumentLoader(nil)
-	expanded, err := processor.Expand(doc, options)
-	if err != nil {
-		return nil, err
-	}
-
-	collectExpandedIDs(expanded, terms)
+	g.Namespaces()(func(_ string, ns rdflibgo.URIRef) bool {
+		if ns.Value() != "" {
+			terms[ns.Value()] = true
+		}
+		return true
+	})
+	g.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+		if subj, ok := triple.Subject.(rdflibgo.URIRef); ok {
+			terms[subj.Value()] = true
+		}
+		if obj, ok := triple.Object.(rdflibgo.URIRef); ok {
+			terms[obj.Value()] = true
+		}
+		return true
+	})
 	return terms, nil
-}
-
-func collectRawVocabularyIDs(node any, ctx jsonLDContext, terms map[string]bool, loader ld.DocumentLoader) {
-	switch n := node.(type) {
-	case []any:
-		for _, item := range n {
-			collectRawVocabularyIDs(item, ctx, terms, loader)
-		}
-	case map[string]any:
-		if value, ok := n["@context"]; ok {
-			_ = readContext(value, &ctx, loader, map[string]bool{})
-		}
-		if id, ok := n["@id"].(string); ok {
-			if iri, expanded := expandTerm(id, ctx); expanded {
-				terms[iri] = true
-			}
-		}
-		for key, value := range n {
-			if key == "@context" {
-				continue
-			}
-			collectRawVocabularyIDs(value, ctx, terms, loader)
-		}
-	}
-}
-
-func collectExpandedIDs(node any, terms map[string]bool) {
-	switch n := node.(type) {
-	case []any:
-		for _, item := range n {
-			collectExpandedIDs(item, terms)
-		}
-	case map[string]any:
-		if id, ok := n["@id"].(string); ok && id != "" && !strings.HasPrefix(id, "_:") {
-			terms[id] = true
-		}
-		for _, value := range n {
-			collectExpandedIDs(value, terms)
-		}
-	}
 }
 
 func extractTurtleVocabularyTerms(base string, body []byte) (map[string]bool, error) {
@@ -606,14 +548,6 @@ func looksLikeTurtle(body []byte) bool {
 	return strings.HasPrefix(s, "@prefix") || strings.HasPrefix(s, "PREFIX") || strings.HasPrefix(s, "@base") || strings.HasPrefix(s, "BASE ")
 }
 
-func normalizeVocabularyBase(value string) string {
-	return value
-}
-
 func looksLikeVocabularyBase(value string) bool {
 	return strings.HasSuffix(value, "/") || strings.HasSuffix(value, "#")
-}
-
-func isAbsoluteIRI(value string) bool {
-	return strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") || strings.HasPrefix(value, "urn:")
 }

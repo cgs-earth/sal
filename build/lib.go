@@ -15,6 +15,17 @@ func (e validationError) Error() string {
 	return fmt.Sprintf("%s:%d: undefined term %s", e.Path, e.Line, e.Term)
 }
 
+type vocabularyLookupError struct {
+	Path string
+	Line int
+	Term string
+	Err  error
+}
+
+func (e vocabularyLookupError) Error() string {
+	return fmt.Sprintf("%s:%d: failed to check vocabulary for %s: %v", e.Path, e.Line, e.Term, e.Err)
+}
+
 type multiError []error
 
 func (e multiError) Error() string {
