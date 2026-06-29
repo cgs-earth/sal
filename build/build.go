@@ -43,7 +43,7 @@ type usedTerm struct {
 var findSALProjectDir = salpkg.FindSALProjectDir
 
 // Run validates RDF files for terms that are not defined by their vocabularies.
-func Run(cfg *BuildCmd, stdout, stderr io.Writer) error {
+func Run(cfg *BuildCmd) error {
 	if cfg == nil {
 		return fmt.Errorf("build: missing arguments")
 	}

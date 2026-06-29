@@ -45,7 +45,7 @@ func main() {
 	var err error
 	switch {
 	case cli.Build != nil:
-		err = build.Run(cli.Build, os.Stdout, os.Stderr)
+		err = build.Run(cli.Build)
 		// Errors from build should be directly written to stdout
 		// not written as a log which adds extra noise
 		if err != nil {
