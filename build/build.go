@@ -17,7 +17,6 @@ import (
 	"github.com/cgs-earth/json-gold/ld"
 	salpkg "github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
-	"github.com/tggo/goRDFlib/jsonld"
 	"github.com/tggo/goRDFlib/turtle"
 )
 
@@ -447,62 +446,46 @@ func vocabularyDocumentURL(base string) string {
 	return base
 }
 
-func extractVocabularyTerms(contentType string, body []byte, base string) (map[string]bool, error) {
-	type parserFn struct {
-		name string
-		fn   func([]byte) (map[string]bool, error)
-	}
+// serialize rdf data into a graph and get the vocab terms for validation
+func serializeRdfDataAndGetVocab(contentType string, body []byte, base string) (map[string]bool, *rdflibgo.Graph, error) {
+
+	parsersToTry := []RDFFormat{}
 
 	mediaType, _, _ := mime.ParseMediaType(contentType)
-	jsonLDParser := parserFn{name: "json-ld", fn: func(body []byte) (map[string]bool, error) {
-		return extractJSONLDVocabularyTerms(body, base)
-	}}
-	turtleParser := parserFn{name: "turtle", fn: func(body []byte) (map[string]bool, error) {
-		return extractTurtleVocabularyTerms(body, base)
-	}}
-	rdfXMLParser := parserFn{name: "rdfxml", fn: func(body []byte) (map[string]bool, error) {
-		return extractRDFXMLVocabularyTerms(body, base)
-	}}
-
-	var parsers []parserFn
 	switch {
 	case mediaType == "application/ld+json" || mediaType == "application/json" || strings.HasSuffix(mediaType, "+json"):
-		parsers = []parserFn{jsonLDParser}
+		parsersToTry = append(parsersToTry, JSONLD)
 	case mediaType == "text/turtle" || mediaType == "application/n-triples" || mediaType == "application/n-quads":
-		parsers = []parserFn{turtleParser}
-	case mediaType == "application/rdf+xml" || strings.HasSuffix(mediaType, "+xml"):
-		parsers = []parserFn{rdfXMLParser}
-
+		parsersToTry = append(parsersToTry, TURTLE)
+	case mediaType == "application/rdf+xml" || strings.HasSuffix(mediaType, "+xml") || strings.Contains(mediaType, "xml"):
+		parsersToTry = append(parsersToTry, RDFXML)
 	// if it looks like a specific RDF format,
 	// you default to parsing that option first,
 	// but also fall back to the other options if needed
 	// (i.e. if the input has no content type)
 	case looksLikeJSON(body):
-		parsers = []parserFn{jsonLDParser, turtleParser, rdfXMLParser}
-	case strings.Contains(mediaType, "xml"):
-		parsers = []parserFn{rdfXMLParser, jsonLDParser, turtleParser}
+		parsersToTry = append(parsersToTry, JSONLD)
 	case looksLikeTurtle(body):
-		parsers = []parserFn{turtleParser, jsonLDParser, rdfXMLParser}
+		parsersToTry = append(parsersToTry, TURTLE)
 	default:
-		parsers = []parserFn{jsonLDParser, turtleParser, rdfXMLParser}
+		parsersToTry = append(parsersToTry, RDFXML)
 	}
 
 	var errs []string
-	for _, parser := range parsers {
-		terms, err := parser.fn(body)
+	for _, parser := range parsersToTry {
+		graph, err := parseRdf(body, base, parser)
 		if err == nil {
-			return terms, nil
+			terms := extractVocabularyTermsFromGraph(graph)
+			finalGraph := rdflibgo.NewGraph(rdflibgo.WithBase(base))
+			return terms, finalGraph, nil
 		}
-		errs = append(errs, parser.name+": "+err.Error())
+		errs = append(errs, fmt.Errorf("failed to parse as %s: %w", parser, err).Error())
 	}
-	return nil, fmt.Errorf("unsupported vocabulary serialization (%s): %s", contentType, strings.Join(errs, "; "))
+	return nil, nil, fmt.Errorf("unsupported vocabulary serialization (%s): %s", contentType, strings.Join(errs, "; "))
 }
 
-func extractJSONLDVocabularyTerms(body []byte, base string) (map[string]bool, error) {
-	g := rdflibgo.NewGraph(rdflibgo.WithBase(base))
-	if err := jsonld.Parse(g, bytes.NewReader(body), jsonld.WithBase(base), jsonld.WithUnboundedLines()); err != nil {
-		return nil, err
-	}
+// extractVocabularyTermsFromGraph collects every URI-backed vocabulary term after RDF parsing has completed.
+func extractVocabularyTermsFromGraph(g *rdflibgo.Graph) map[string]bool {
 	terms := map[string]bool{}
 	g.Namespaces()(func(_ string, ns rdflibgo.URIRef) bool {
 		if ns.Value() != "" {
@@ -514,28 +497,16 @@ func extractJSONLDVocabularyTerms(body []byte, base string) (map[string]bool, er
 		if subj, ok := triple.Subject.(rdflibgo.URIRef); ok {
 			terms[subj.Value()] = true
 		}
+		terms[triple.Predicate.Value()] = true
 		if obj, ok := triple.Object.(rdflibgo.URIRef); ok {
 			terms[obj.Value()] = true
 		}
-		return true
-	})
-	return terms, nil
-}
-
-func extractTurtleVocabularyTerms(body []byte, base string) (map[string]bool, error) {
-	g := rdflibgo.NewGraph(rdflibgo.WithBase(base))
-	if err := turtle.Parse(g, bytes.NewReader(body), turtle.WithBase(base)); err != nil {
-		return nil, err
-	}
-
-	terms := map[string]bool{}
-	g.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
-		if subj, ok := triple.Subject.(rdflibgo.URIRef); ok {
-			terms[subj.Value()] = true
+		if lit, ok := triple.Object.(rdflibgo.Literal); ok {
+			terms[lit.Datatype().Value()] = true
 		}
 		return true
 	})
-	return terms, nil
+	return terms
 }
 
 func fetchVocabularyDocument(u string) ([]byte, string, error) {

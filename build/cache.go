@@ -135,7 +135,7 @@ func (c *vocabularyCache) loadTerms(base string) (map[string]bool, error) {
 	if err != nil {
 		fetchErr = err
 	} else {
-		terms, err := extractVocabularyTerms(contentType, body, c.base)
+		terms, _, err := serializeRdfDataAndGetVocab(contentType, body, c.base)
 		if err == nil {
 			if err := c.storeTermsToDisk(base, terms); err != nil {
 				return nil, err
@@ -164,5 +164,6 @@ func loadBundledVocabularyTerms(base, buildBase string) (map[string]bool, error)
 	if !ok {
 		return nil, vocab.MissingError(base)
 	}
-	return extractVocabularyTerms(contentType, body, buildBase)
+	terms, _, err := serializeRdfDataAndGetVocab(contentType, body, buildBase)
+	return terms, err
 }

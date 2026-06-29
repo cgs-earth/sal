@@ -325,16 +325,15 @@ func TestRunExpandsInputDirectories(t *testing.T) {
 }
 
 func TestExtractRDFXMLVocabularyTermsTypedNode(t *testing.T) {
-	terms, err := extractVocabularyTerms("application/rdf+xml; qs=0.9", []byte(`<?xml version="1.0"?>
+	terms, graph, err := serializeRdfDataAndGetVocab("application/rdf+xml; qs=0.9", []byte(`<?xml version="1.0"?>
 <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
          xmlns:ex="http://example.org/">
   <ex:Person rdf:about="http://example.org/Alice">
     <ex:name>Alice</ex:name>
   </ex:Person>
 </rdf:RDF>`), testBuildBase)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, graph)
 
 	for _, term := range []string{
 		"http://example.org/Alice",
@@ -348,7 +347,7 @@ func TestExtractRDFXMLVocabularyTermsTypedNode(t *testing.T) {
 }
 
 func TestExtractJSONLDVocabularyTermsUsesGoRDFlibParser(t *testing.T) {
-	terms, err := extractVocabularyTerms("application/ld+json", []byte(`{
+	terms, graph, err := serializeRdfDataAndGetVocab("application/ld+json", []byte(`{
   "@context": {
     "ex": "https://example.com/vocab/",
     "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
@@ -368,12 +367,13 @@ func TestExtractJSONLDVocabularyTermsUsesGoRDFlibParser(t *testing.T) {
 }`), testBuildBase)
 
 	require.NoError(t, err)
+	require.NotNil(t, graph)
 	require.True(t, terms["https://example.com/vocab/Known"])
 	require.True(t, terms["https://example.com/vocab/relatedTo"])
 }
 
 func TestExtractTurtleVocabularyTermsQUDTSyntax(t *testing.T) {
-	terms, err := extractVocabularyTerms("text/turtle; charset=utf-8", []byte(`@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+	terms, graph, err := serializeRdfDataAndGetVocab("text/turtle; charset=utf-8", []byte(`@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -401,16 +401,13 @@ qudt:Aspect
 qudt:hasQuantityKind
   a owl:ObjectProperty .
 `), testBuildBase)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !terms["http://qudt.org/schema/qudt/hasQuantityKind"] {
-		t.Fatalf("expected QUDT hasQuantityKind in %#v", terms)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, graph)
+	require.True(t, terms["http://qudt.org/schema/qudt/hasQuantityKind"], "expected QUDT hasQuantityKind in %#v", terms)
 }
 
 func TestExtractVocabularyTermsExplicitMimeReportsOnlyThatParser(t *testing.T) {
-	_, err := extractVocabularyTerms("text/turtle; charset=utf-8", []byte(`not valid turtle`), testBuildBase)
+	_, _, err := serializeRdfDataAndGetVocab("text/turtle; charset=utf-8", []byte(`not valid turtle`), testBuildBase)
 	if err == nil {
 		t.Fatal("expected invalid Turtle to fail")
 	}

@@ -16,6 +16,7 @@ SAL, (semantic accessibility layer), is a CLI tool for creating RDF data and met
 - If a function would only be called from one other function and it is short, try to just condense it into the function that calls it.
 - If some functionality would be very complex, duplicative, and better handled by an underlying library like json-gold or goRDFlib, say so and mark it as TODO in the code.
 - Any function with functionality that is non trivial should be documented with a succinct comment of what it does.
+- Don't create functions that are very small and only used in a single place.
 
 ## Development 
 
