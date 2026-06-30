@@ -1,7 +1,10 @@
 package pkg
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -41,4 +44,26 @@ func FindRdfDataInPaths(paths []string) ([]string, error) {
 func isRdfData(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	return ext == ".jsonld" || ext == ".json" || ext == ".ttl" || ext == ".turtle"
+}
+
+func HashAllFiles(paths []string) (string, error) {
+	h := sha256.New()
+
+	for _, path := range paths {
+		file, err := os.Open(path)
+		if err != nil {
+			return "", err
+		}
+
+		_, err = io.Copy(h, file)
+		if err != nil {
+			return "", err
+		}
+		err = file.Close()
+		if err != nil {
+			return "", err
+		}
+	}
+
+	return hex.EncodeToString(h.Sum(nil)), nil
 }

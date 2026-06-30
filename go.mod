@@ -8,6 +8,7 @@ require (
 	github.com/apache/iceberg-go v0.6.1-0.20260623164312-30cc631eb24a
 	github.com/cgs-earth/json-gold v0.0.0-20260623123334-63cdb5b88cb8
 	github.com/lmittmann/tint v1.1.3
+	github.com/piprate/json-gold v0.8.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tggo/goRDFlib v0.1.12
 )
@@ -95,7 +96,6 @@ require (
 	github.com/mattn/go-runewidth v0.0.20 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.27 // indirect
-	github.com/piprate/json-gold v0.8.0 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect

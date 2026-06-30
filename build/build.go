@@ -48,6 +48,11 @@ func Run(cfg *BuildCmd) (*rdflibgo.Graph, error) {
 		return nil, fmt.Errorf("no JSON-LD or TTL files found in %s", strings.Join(paths, ", "))
 	}
 
+	hash, err := pkg.HashAllFiles(files)
+	if err != nil {
+		return nil, err
+	}
+
 	vocabsToReplace, err := parsePrefixMaps(cfg.PrefixMaps)
 	if err != nil {
 		return nil, err
@@ -83,7 +88,7 @@ func Run(cfg *BuildCmd) (*rdflibgo.Graph, error) {
 	if cfg.Format == GraphExportFormatNQuads {
 		slog.Warn("Exporting as NQuads. Note this will create a larger and less efficient file than iceberg")
 	}
-	if err := ExportGraph(finalGraph, cfg.Format); err != nil {
+	if err := ExportGraph(finalGraph, cfg.Format, hash); err != nil {
 		return nil, err
 	}
 

@@ -75,7 +75,7 @@ func Run(cfg *LoadCmd) error {
 }
 
 // WriteGraphToIceberg writes an RDF graph into the configured Iceberg triples table.
-func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCmd) error {
+func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCmd, customMetadata map[string]string) error {
 	if graph == nil {
 		return fmt.Errorf("load graph: missing graph")
 	}
@@ -97,7 +97,18 @@ func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCm
 		return err
 	}
 
-	return processGraph(ctx, graph, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize)
+	err = processGraph(ctx, graph, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize)
+	if err != nil {
+		return err
+	}
+
+	tx := tbl.NewTransaction()
+	if err = tx.SetProperties(customMetadata); err != nil {
+		return err
+	}
+
+	_, err = tx.Commit(context.Background())
+	return err
 }
 
 // processFiles writes each .nq.gz input to Iceberg data files in parallel, then

@@ -12,7 +12,7 @@ import (
 )
 
 type QueryCmd struct {
-	Info string `help:"Retrieve quick info about the data product. Options: head, snapshots, column-stats" default:"head"`
+	Info string `help:"Retrieve quick info about the data product. Options: head, snapshots, column-stats properties" default:"head"`
 }
 
 func Run(cmd *QueryCmd) error {
@@ -95,12 +95,28 @@ func queryForInfo(info string, escapedTablePath string) (string, error) {
 	switch info {
 	case "", "head":
 		return "SELECT * FROM triples LIMIT 20", nil
+	case "properties":
+		return fmt.Sprintf(`
+WITH latest_metadata AS (
+	SELECT
+		filename,
+		content::JSON AS metadata_json
+	FROM read_text('%s/metadata/*.metadata.json')
+	ORDER BY regexp_extract(filename, 'v([0-9]+)\.metadata\.json', 1)::BIGINT DESC
+	LIMIT 1
+)
+SELECT
+	prop.key,
+	json_extract_string(prop.value, '$') AS value
+FROM latest_metadata,
+json_each(json_extract(metadata_json, '$.properties')) AS prop
+ORDER BY prop.key`, escapedTablePath), nil
 	case "snapshots":
 		return fmt.Sprintf("SELECT * FROM iceberg_snapshots('%s')", escapedTablePath), nil
 	case "column-stats":
 		return fmt.Sprintf("SELECT * FROM iceberg_column_stats('%s')", escapedTablePath), nil
 	default:
-		return "", fmt.Errorf("unknown info option %q; expected one of: head, snapshots, column-stats", info)
+		return "", fmt.Errorf("unknown info option %q; expected one of: head, properties, snapshots, column-stats", info)
 	}
 }
 
