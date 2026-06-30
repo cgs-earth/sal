@@ -71,13 +71,18 @@ func Run(cfg *BuildCmd) (*rdflibgo.Graph, error) {
 	if len(errs) > 0 {
 		return nil, errs
 	}
-
-	slog.Info("Validated " + fmt.Sprint(len(files)) + " file(s)")
+	if len(files) == 1 {
+		slog.Info("Validated 1 file")
+	} else {
+		slog.Info("Validated " + fmt.Sprint(len(files)) + " files")
+	}
 
 	if err := NewTermsHaveClassDefinitions(finalGraph); err != nil {
 		return nil, err
 	}
-
+	if cfg.Format == GraphExportFormatNQuads {
+		slog.Warn("Exporting as NQuads. Note this will create a larger and less efficient file than iceberg")
+	}
 	if err := ExportGraph(finalGraph, cfg.Format); err != nil {
 		return nil, err
 	}
