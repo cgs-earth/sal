@@ -59,7 +59,7 @@ func parseJSONLDFile(path string, base string) (*rdfDocument, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: invalid JSON-LD: %w", path, err)
 	}
-	terms = append(terms, sourceTerms...)
+	terms = mergeJSONLDTerms(terms, sourceTerms)
 	if err := validateJSONLDLocalTypes(path, doc, base); err != nil {
 		return nil, err
 	}
@@ -225,6 +225,30 @@ func contextTermBase(value any) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// mergeJSONLDTerms keeps source-scanned JSON-LD terms authoritative over RDF
+// provenance for the same IRI because expansion can attach @type values to the
+// @type key line instead of the value line.
+func mergeJSONLDTerms(rdfTerms, sourceTerms []UsedTermsInFile) []UsedTermsInFile {
+	sourceIRIs := map[string]bool{}
+	terms := make([]UsedTermsInFile, 0, len(rdfTerms)+len(sourceTerms))
+	for _, term := range sourceTerms {
+		sourceIRIs[term.iri] = true
+		terms = append(terms, term)
+	}
+	for _, term := range rdfTerms {
+		if !sourceIRIs[term.iri] {
+			terms = append(terms, term)
+		}
+	}
+	sort.Slice(terms, func(i, j int) bool {
+		if terms[i].line != terms[j].line {
+			return terms[i].line < terms[j].line
+		}
+		return terms[i].iri < terms[j].iri
+	})
+	return terms
 }
 
 // collectJSONLDSourceTerms resolves source-level compact terms with token

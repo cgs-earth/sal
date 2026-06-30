@@ -106,6 +106,30 @@ func TestValidateJSONLDFileReportsUndefinedTypeLine(t *testing.T) {
 	require.Contains(t, err.Error(), path+":5:")
 }
 
+func TestValidateJSONLDFileReportsUndefinedArrayTypeValueLineOnce(t *testing.T) {
+	path := writeJSONLDTestFile(t, `{
+		"@context": {
+			"@vocab": "https://schema.org/",
+			"schema": "https://schema.org/",
+			"hyf": "https://www.opengis.net/def/schema/hy_features/hyf/"
+		},
+		"@id": "https://geoconnex.us/iow/wqp/NALMS-F871468",
+		"@type": [
+			"hyf:HY_HydrometricFeature",
+			"hyf:HY_HydroLocation",
+			"PlaceEE"
+		]
+	}`)
+
+	_, err := ValidateRDFFile(path, nil, testBase)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "undefined term")
+	require.Contains(t, err.Error(), "schema:PlaceEE")
+	require.Contains(t, err.Error(), path+":11:")
+	require.NotContains(t, err.Error(), path+":8:")
+}
+
 func TestValidateJSONLDFileSkipsRelativeIDUnderBase(t *testing.T) {
 	path := writeJSONLDTestFile(t, `{
 		"@context": {
