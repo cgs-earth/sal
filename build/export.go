@@ -60,7 +60,7 @@ func ExportGraph(graph *rdflibgo.Graph, format GraphExportFormat, hash string) e
 			MetricsMode:        "none",
 			Warehouse:          dataDir,
 			Namespace:          gitProject,
-		}, map[string]string{"sal-hash": hash})
+		}, map[string]string{"sal.hash": hash})
 		if err != nil {
 			return err
 		}
