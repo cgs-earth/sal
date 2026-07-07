@@ -51,7 +51,7 @@ func TestPullRestoresArtifactFilesToDestination(t *testing.T) {
 	require.Equal(t, "nested", string(nestedBytes))
 }
 
-func TestPullManifestLayersStripsArtifactNamePrefix(t *testing.T) {
+func TestPullManifestLayersPreservesArtifactNamePrefix(t *testing.T) {
 	ctx := context.Background()
 	store := memory.New()
 
@@ -65,19 +65,13 @@ func TestPullManifestLayersStripsArtifactNamePrefix(t *testing.T) {
 		Layers: []ocispec.Descriptor{layer},
 	}
 	destination := t.TempDir()
-	err = pullManifestLayers(ctx, store, manifest, ocispec.Descriptor{}, "latest", destination, "sal")
+	err = pullManifestLayers(ctx, store, manifest, ocispec.Descriptor{}, "latest", destination)
 
 	require.NoError(t, err)
-	got, err := os.ReadFile(filepath.Join(destination, "triples"))
+	got, err := os.ReadFile(filepath.Join(destination, "sal", "triples"))
 	require.NoError(t, err)
 	require.Equal(t, "triples", string(got))
-	require.NoFileExists(t, filepath.Join(destination, "sal", "triples"))
-}
-
-func TestNormalizeLayerTitleKeepsUnrelatedPrefix(t *testing.T) {
-	got := normalizeLayerTitle("other/triples", "sal")
-
-	require.Equal(t, "other/triples", got)
+	require.NoFileExists(t, filepath.Join(destination, "triples"))
 }
 
 func TestParseArtifactDefaultsReferenceToLatest(t *testing.T) {

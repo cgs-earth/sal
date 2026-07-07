@@ -122,19 +122,8 @@ func initializeSALProject(ctx context.Context, repoDir string, run commandRunner
 }
 
 // pullManifestLayers copies a SAL OCI artifact into destination, restoring
-// layers according to their org.opencontainers.image.title annotations.
-func normalizeLayerTitle(title string, artifactName string) string {
-	if artifactName == "" {
-		return title
-	}
-	prefix := artifactName + "/"
-	if strings.HasPrefix(title, prefix) {
-		return strings.TrimPrefix(title, prefix)
-	}
-	return title
-}
-
-func pullManifestLayers(ctx context.Context, src oras.ReadOnlyTarget, manifest ocispec.Manifest, desc ocispec.Descriptor, reference string, destination string, artifactName string) error {
+// layers according to their exact org.opencontainers.image.title annotations.
+func pullManifestLayers(ctx context.Context, src oras.ReadOnlyTarget, manifest ocispec.Manifest, desc ocispec.Descriptor, reference string, destination string) error {
 	if err := os.MkdirAll(destination, 0755); err != nil {
 		return fmt.Errorf("create pull destination %s: %w", destination, err)
 	}
@@ -151,7 +140,7 @@ func pullManifestLayers(ctx context.Context, src oras.ReadOnlyTarget, manifest o
 
 	var pulledFiles int
 	for _, layer := range manifest.Layers {
-		title := normalizeLayerTitle(layer.Annotations[ocispec.AnnotationTitle], artifactName)
+		title := layer.Annotations[ocispec.AnnotationTitle]
 		if title == "" {
 			continue
 		}
@@ -185,7 +174,7 @@ func pull(ctx context.Context, src oras.ReadOnlyTarget, reference string, destin
 	if err != nil {
 		return err
 	}
-	return pullManifestLayers(ctx, src, manifest, desc, reference, destination, "")
+	return pullManifestLayers(ctx, src, manifest, desc, reference, destination)
 }
 
 type artifactReference struct {
@@ -272,5 +261,5 @@ func Run(cfg *PullCmd) error {
 	}
 
 	dataDir := filepath.Join(repoDir, ".sal", "data")
-	return pullManifestLayers(ctx, repo, manifest, desc, ref.reference, dataDir, ref.artifactName)
+	return pullManifestLayers(ctx, repo, manifest, desc, ref.reference, dataDir)
 }
