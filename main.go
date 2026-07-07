@@ -10,6 +10,7 @@ import (
 	"github.com/cgs-earth/sal/clean"
 	"github.com/cgs-earth/sal/initialization"
 	"github.com/cgs-earth/sal/load"
+	"github.com/cgs-earth/sal/push"
 	"github.com/cgs-earth/sal/query"
 	"github.com/cgs-earth/sal/salmodule"
 
@@ -25,6 +26,7 @@ type args struct {
 	Build     *build.BuildCmd         `arg:"subcommand:build" help:"Build a vocabulary."`
 	Query     *query.QueryCmd         `arg:"subcommand:query" help:"Use duckdb to query a built SAL data product."`
 	Clean     *clean.CleanCmd         `arg:"subcommand:clean" help:"Clean build artifacts produced by a SAL project."`
+	Push      *push.PushCmd           `arg:"subcommand:push" help:"Push a built SAL data product to an OCI registry."`
 	SalModule *salmodule.SalModuleCmd `arg:"subcommand:salmodule" help:"Output salmodule information about this project."`
 }
 
@@ -68,6 +70,8 @@ func main() {
 		err = clean.Run(cli.Clean)
 	case cli.SalModule != nil:
 		err = salmodule.Run(cli.SalModule)
+	case cli.Push != nil:
+		err = push.Run(cli.Push)
 	}
 	if err != nil {
 		slog.Error(err.Error())
