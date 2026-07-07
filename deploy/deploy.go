@@ -55,68 +55,11 @@ func updateHash(ctx context.Context, repo *remote.Repository) error {
 	return nil
 }
 
-// Run executes the push command, which pushes all files in the SAL data directory
-// to the specified OCI registry.
-func Run(p *DeployCmd) error {
-	if p.Password == "" {
-		return fmt.Errorf("password is required for deploying to an OCI registry. See https://oras.land/docs/how_to_guides/remote_registries/#authentication for more information")
-	}
-
-	username := p.Username
-	if username == "" {
-		owner, err := pkg.GitProjectOwner()
-		if err != nil {
-			return fmt.Errorf("failed to get Git project owner: %w", err)
-		}
-		if owner == "" {
-			return fmt.Errorf("username is required for deploying to an OCI registry and could not be inferred from the git project URL. Please provide a username using the --username flag")
-		}
-		username = owner
-	}
-	destination := p.Repository
-	if destination == "" {
-		projectName, err := pkg.GitProjectName()
-		if err != nil {
-			return fmt.Errorf("failed to get Git project name: %w", err)
-		}
-		destination = defaultRegistry + "/" + username + "/" + projectName
-		slog.Info("No registry/repository specified, using " + destination + " as the default registry.")
-	} else {
-		destination = strings.TrimPrefix(destination, "https://")
-		destination = strings.TrimPrefix(destination, "http://")
-	}
-
-	dataDir, err := pkg.SalDataDir()
-	if err != nil {
-		return err
-	}
-
-	ctx := context.Background()
-
-	repo, err := remote.NewRepository(destination)
-	if err != nil {
-		return fmt.Errorf("failed creating OCI registry client: %w", err)
-	}
-
-	credential := auth.Credential{
-		Username: username,
-		Password: p.Password,
-	}
-
-	repo.Client = &auth.Client{
-		Client:     retry.DefaultClient,
-		Cache:      auth.NewCache(),
-		Credential: auth.StaticCredential(repo.Reference.Registry, credential),
-	}
-
-	if p.UpdateHash {
-		return updateHash(ctx, repo)
-	}
-
+func deploy(ctx context.Context, dataDir string, repo *remote.Repository, destination string) error {
 	var layers []ocispec.Descriptor
 	slog.Info("Deploying SAL data product in " + dataDir + " to " + destination)
 
-	err = filepath.WalkDir(dataDir, func(path string, d os.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(dataDir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -173,6 +116,66 @@ func Run(p *DeployCmd) error {
 		return fmt.Errorf("tag artifact: %w", err)
 	}
 	slog.Info("Deployed data product to " + destination + ":latest")
-
 	return nil
+}
+
+// Run executes the push command, which pushes all files in the SAL data directory
+// to the specified OCI registry.
+func Run(p *DeployCmd) error {
+	if p.Password == "" {
+		return fmt.Errorf("password is required for deploying to an OCI registry. See https://oras.land/docs/how_to_guides/remote_registries/#authentication for more information")
+	}
+
+	username := p.Username
+	if username == "" {
+		owner, err := pkg.GitProjectOwner()
+		if err != nil {
+			return fmt.Errorf("failed to get Git project owner: %w", err)
+		}
+		if owner == "" {
+			return fmt.Errorf("username is required for deploying to an OCI registry and could not be inferred from the git project URL. Please provide a username using the --username flag")
+		}
+		username = owner
+	}
+	destination := p.Repository
+	if destination == "" {
+		projectName, err := pkg.GitProjectName()
+		if err != nil {
+			return fmt.Errorf("failed to get Git project name: %w", err)
+		}
+		destination = defaultRegistry + "/" + username + "/" + projectName
+		slog.Info("No registry/repository specified, using " + destination + " as the default registry.")
+	} else {
+		destination = strings.TrimPrefix(destination, "https://")
+		destination = strings.TrimPrefix(destination, "http://")
+	}
+
+	dataDir, err := pkg.SalDataDir()
+	if err != nil {
+		return err
+	}
+
+	repo, err := remote.NewRepository(destination)
+	if err != nil {
+		return fmt.Errorf("failed creating OCI registry client: %w", err)
+	}
+
+	credential := auth.Credential{
+		Username: username,
+		Password: p.Password,
+	}
+
+	repo.Client = &auth.Client{
+		Client:     retry.DefaultClient,
+		Cache:      auth.NewCache(),
+		Credential: auth.StaticCredential(repo.Reference.Registry, credential),
+	}
+	ctx := context.Background()
+	if !p.UpdateHash {
+		err := deploy(ctx, dataDir, repo, destination)
+		if err != nil {
+			return err
+		}
+	}
+	return updateHash(ctx, repo)
 }
