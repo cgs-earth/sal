@@ -10,6 +10,15 @@ SAL, (semantic accessibility layer), is a CLI tool for creating RDF data and met
 - For all input RDF data, if there is a term that is not defined in the provided prefixes, SAL will throw an error which calls out the specific line number with the offending term.
     - For instance, if the user makes a typo and specifies `schema:nameee` in their JSON-LD, SAL build will throw an error saying that `nameee` is not a defined term in the RDF vocab. This should be supported for any generalized RDF vocabulary.
 
+### `clone`
+
+- Takes in a full URL to an OCI artifact. 
+- It uses oras to introspect the manifest info about the artifact. It retrieves the value of the `org.opencontainers.image.source` to determine the location of the source code. It finds the pinned commit hash using the value of `sal.git-commit-hash`.
+    - It then clones the source code into the current working directory.
+    - It checks out the commit hash specified in the manifest.
+    - Within the newly cloned repo directory, it should run `sal init` to initialize a sal project.
+    - Within the new cloned repo directory, it should pull the OCI artifact and place it in the `.sal/data` directory.
+
 ## Code Style
 
 - Use testify for writing succinct tests; avoid just the standard library and if statements with `t.Error()`.

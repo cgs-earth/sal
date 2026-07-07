@@ -120,6 +120,7 @@ func push(ctx context.Context, dataDir string, repo *remote.Repository, destinat
 		Layers: layers,
 		ManifestAnnotations: map[string]string{
 			"org.opencontainers.image.source": gitRemote,
+			"sal.git-commit-hash":             gitHash,
 		},
 		// TODO add more metadata and digest info about the sal config itself
 		ConfigDescriptor: &ocispec.Descriptor{
