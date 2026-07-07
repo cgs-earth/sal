@@ -1,10 +1,7 @@
 package load
 
 import (
-	"bufio"
 	"fmt"
-	"io"
-	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,34 +15,6 @@ var (
 )
 
 type triple struct{ s, p, o string }
-
-func ParseNQuads(r io.Reader, handle func(triple) error) error {
-	br := bufio.NewReader(r)
-	lineNum := 0
-
-	for {
-		raw, err := br.ReadString('\n')
-		if len(raw) > 0 {
-			lineNum++
-			line := cleanNQuadLine(raw)
-			if line != "" {
-				t, parseErr := parseNQuadLine(line)
-				if parseErr != nil {
-					log.Printf("  skipping line %d: %v", lineNum, parseErr)
-				} else if err := handle(t); err != nil {
-					return err
-				}
-			}
-		}
-		if err == nil {
-			continue
-		}
-		if err == io.EOF {
-			return nil
-		}
-		return fmt.Errorf("read nquads: %w", err)
-	}
-}
 
 func cleanNQuadLine(raw string) string {
 	line := strings.TrimSpace(raw)
