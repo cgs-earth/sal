@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var ErrSalDirNotFound = errors.New("sal directory not found")
+var ErrSalDirNotFound = errors.New("sal directory not found. Have you initialized your project with `sal init`?")
 var ErrCantMakeSalDirInHome = errors.New("a sal project directory should not be the home directory; ~/.sal is intended for user-wide configuration")
 
 // DefaultGitRemote returns the default git remote repository URL.
@@ -70,6 +70,20 @@ func GitProjectName() (string, error) {
 	return strings.TrimSuffix(filepath.Base(remote), ".git"), nil
 }
 
+// GitProjectOwner returns the owner of the git repository according to the url
+func GitProjectOwner() (string, error) {
+	remote, err := DefaultGitRemote()
+	if err != nil {
+		return "", err
+	}
+	remote = strings.TrimSuffix(remote, ".git")
+	parts := strings.Split(remote, "/")
+	if len(parts) < 2 {
+		return "", fmt.Errorf("unexpected git remote format: %s", remote)
+	}
+	return parts[len(parts)-2], nil
+}
+
 // SALProjectDir walks up from the current directory to find the nearest
 // project-local .sal directory without crossing the user's home directory.
 func SALProjectDir(getHomeDir func() (string, error)) (string, error) {
@@ -91,9 +105,16 @@ func SALProjectDir(getHomeDir func() (string, error)) (string, error) {
 		return "", fmt.Errorf("failed to resolve home directory: %w", err)
 	}
 
+	if cwd == home {
+		return "", ErrCantMakeSalDirInHome
+	}
+
 	for {
+		// if we have recursed up to the home directory, the error should be generic
+		// since a sal dir wasn't found in general and we don't want to suggest
+		// anything about the home dir walk that was an internal implementation detail
 		if cwd == home {
-			return "", ErrCantMakeSalDirInHome
+			return "", ErrSalDirNotFound
 		}
 
 		salDir := filepath.Join(cwd, ".sal")
@@ -118,6 +139,20 @@ func SalDataDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(salDir, ".sal", "data"), nil
+}
+
+func SalDataHeadFile() (*os.File, error) {
+	salDir, err := SALProjectDir(os.UserHomeDir)
+	if err != nil {
+		return nil, err
+	}
+	dataHeadPath := filepath.Join(salDir, ".sal", "DATAHEAD")
+	// if the file doesn't exist, create it with 0644 permissions
+	file, err := os.OpenFile(dataHeadPath, os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open or create DATAHEAD file: %w", err)
+	}
+	return file, nil
 }
 
 func canonicalPath(path string) (string, error) {

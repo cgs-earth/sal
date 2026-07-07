@@ -39,7 +39,7 @@ func TestFindSALProjectDirFailsForHomeSALDir(t *testing.T) {
 	})
 
 	require.Empty(t, got)
-	require.True(t, errors.Is(err, ErrCantMakeSalDirInHome), "error = %v", err)
+	require.True(t, errors.Is(err, ErrSalDirNotFound), "error = %v", err)
 }
 
 func TestFindSALProjectDirDoesNotSearchAboveHome(t *testing.T) {
@@ -55,7 +55,7 @@ func TestFindSALProjectDirDoesNotSearchAboveHome(t *testing.T) {
 	})
 
 	require.Empty(t, got)
-	require.True(t, errors.Is(err, ErrCantMakeSalDirInHome), "error = %v", err)
+	require.True(t, errors.Is(err, ErrSalDirNotFound), "error = %v", err)
 }
 
 func testHome(t *testing.T) string {
