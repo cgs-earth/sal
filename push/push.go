@@ -1,9 +1,8 @@
-package deploy
+package push
 
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -20,44 +19,15 @@ import (
 
 const defaultRegistry = "ghcr.io"
 
-type DeployCmd struct {
+type PushCmd struct {
 	Repository string `arg:"positional" help:"Full URL of the OCI registry and repository to push the built SAL data product to. Example: ghcr.io/my-username/my-repository"`
 	Username   string `arg:"--username,env:OCI_USERNAME" help:"Username for the OCI registry. This should match the username used to create the password token"`
 	Password   string `arg:"--password,env:OCI_PASSWORD" help:"Password or access token for the OCI registry."`
-	UpdateHash bool   `arg:"--update-hash" help:"Update the hash of the SAL data product based on the remote OCI registry"`
 }
 
-// updateHash retrieves the hash of the latest pushed SAL data product from the remote OCI registry and writes it to the DATAHEAD file in the local SAL data directory.
-func updateHash(ctx context.Context, repo *remote.Repository) error {
-	desc, err := repo.Resolve(ctx, "latest")
-	if err != nil {
-		return fmt.Errorf("resolve latest: %w", err)
-	}
-
-	slog.Info(desc.Digest.String())
-
-	salDataHeadFile, err := pkg.SalDataHeadFile()
-	if err != nil {
-		return fmt.Errorf("failed to open DATAHEAD file: %w", err)
-	}
-	defer func() {
-		err = salDataHeadFile.Close()
-		if err != nil {
-			slog.Error("failed to close DATAHEAD file", "error", err)
-		}
-	}()
-
-	_, err = io.WriteString(salDataHeadFile, desc.Digest.String())
-	if err != nil {
-		return fmt.Errorf("failed to write descriptor to DATAHEAD file: %w", err)
-	}
-
-	return nil
-}
-
-func deploy(ctx context.Context, dataDir string, repo *remote.Repository, destination string) error {
+func push(ctx context.Context, dataDir string, repo *remote.Repository, destination string) error {
 	var layers []ocispec.Descriptor
-	slog.Info("Deploying SAL data product in " + dataDir + " to " + destination)
+	slog.Info("Pushing SAL data product in " + dataDir + " to " + destination)
 
 	err := filepath.WalkDir(dataDir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -102,28 +72,44 @@ func deploy(ctx context.Context, dataDir string, repo *remote.Repository, destin
 		slog.Warn("failed to get git remote URL for artifact annotation: " + err.Error())
 	}
 
+	gitHash, err := pkg.GitCommitHash()
+	if err != nil {
+		slog.Warn("failed to get git commit hash for artifact annotation: " + err.Error())
+	}
 	desc, err := oras.PackManifest(ctx, repo, oras.PackManifestVersion1_1, "application/octet-stream", oras.PackManifestOptions{
 		Layers: layers,
 		ManifestAnnotations: map[string]string{
 			"org.opencontainers.image.source": gitRemote,
+		},
+		// TODO add more metadata and digest info about the sal config itself
+		ConfigDescriptor: &ocispec.Descriptor{
+			MediaType: "application/vnd.cgs-earth.sal.config.v1+json",
+			Annotations: map[string]string{
+				"sal.git-commit-hash": gitHash,
+			},
 		},
 	})
 	if err != nil {
 		return fmt.Errorf("pack manifest: %w", err)
 	}
 
+	// tag and push
 	if err := repo.Tag(ctx, desc, "latest"); err != nil {
 		return fmt.Errorf("tag artifact: %w", err)
 	}
-	slog.Info("Deployed data product to " + destination + ":latest")
+	if err := repo.Tag(ctx, desc, gitHash); err != nil {
+		return fmt.Errorf("push artifact: %w", err)
+	}
+
+	slog.Info("Pushed data product to " + destination + ":latest")
 	return nil
 }
 
 // Run executes the push command, which pushes all files in the SAL data directory
 // to the specified OCI registry.
-func Run(p *DeployCmd) error {
+func Run(p *PushCmd) error {
 	if p.Password == "" {
-		return fmt.Errorf("password is required for deploying to an OCI registry. See https://oras.land/docs/how_to_guides/remote_registries/#authentication for more information")
+		return fmt.Errorf("password is required for pushing to an OCI registry. See https://oras.land/docs/how_to_guides/remote_registries/#authentication for more information")
 	}
 
 	username := p.Username
@@ -171,11 +157,5 @@ func Run(p *DeployCmd) error {
 		Credential: auth.StaticCredential(repo.Reference.Registry, credential),
 	}
 	ctx := context.Background()
-	if !p.UpdateHash {
-		err := deploy(ctx, dataDir, repo, destination)
-		if err != nil {
-			return err
-		}
-	}
-	return updateHash(ctx, repo)
+	return push(ctx, dataDir, repo, destination)
 }

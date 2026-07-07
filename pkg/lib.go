@@ -162,3 +162,11 @@ func canonicalPath(path string) (string, error) {
 	}
 	return filepath.EvalSymlinks(abs)
 }
+
+func GitCommitHash() (string, error) {
+	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get git commit hash: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
