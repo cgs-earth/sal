@@ -141,20 +141,6 @@ func SalDataDir() (string, error) {
 	return filepath.Join(salDir, ".sal", "data"), nil
 }
 
-func SalDataHeadFile() (*os.File, error) {
-	salDir, err := SALProjectDir(os.UserHomeDir)
-	if err != nil {
-		return nil, err
-	}
-	dataHeadPath := filepath.Join(salDir, ".sal", "DATAHEAD")
-	// if the file doesn't exist, create it with 0644 permissions
-	file, err := os.OpenFile(dataHeadPath, os.O_RDWR|os.O_CREATE, 0644)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open or create DATAHEAD file: %w", err)
-	}
-	return file, nil
-}
-
 func canonicalPath(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
