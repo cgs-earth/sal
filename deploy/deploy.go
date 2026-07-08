@@ -24,10 +24,19 @@ import (
 
 const maxConcurrentDeployUploads = 4
 
+// Deploy deploys a built SAL data product to a bucket.
+// Authentication is handled by tools like gsutil or aws s3
+// which manage credentials.
+// After upload, files then can be queried via a service like duckdb
+// using a query like the following
+// SELECT subject, predicate, object
+// FROM iceberg_scan(
+//
+//	'gs://sal-test-bucket/sal/triples'
+//
+// )LIMIT 5;
 type DeployCmd struct {
-	Bucket   string `arg:"--bucket" help:"The scheme and name of the bucket to deploy a built SAL data product to. Example: s3://my-bucket or gcs://my-bucket"`
-	Username string `arg:"--username" help:"Username for the bucket"`
-	Password string `arg:"--password" help:"Password for the bucket"`
+	Bucket string `arg:"--bucket" help:"The scheme and name of the bucket to deploy a built SAL data product to. Example: s3://my-bucket or gcs://my-bucket"`
 }
 
 func (c *DeployCmd) Run() error {
@@ -44,7 +53,7 @@ func (c *DeployCmd) Run() error {
 	}
 
 	ctx := context.Background()
-	return deploy(ctx, salDataDir, c.Bucket, c.Username, c.Password, blob.OpenBucket)
+	return deploy(ctx, salDataDir, c.Bucket, blob.OpenBucket)
 }
 
 type bucketOpener func(context.Context, string) (*blob.Bucket, error)
@@ -56,7 +65,7 @@ type deployFile struct {
 }
 
 // deploy uploads every file under dataDir to bucketURL, preserving relative paths as blob keys.
-func deploy(ctx context.Context, dataDir string, bucketURL string, username string, password string, openBucket bucketOpener) error {
+func deploy(ctx context.Context, dataDir string, bucketURL string, openBucket bucketOpener) error {
 	stagedDataDir, cleanup, err := stagedDataDirForDeploy(dataDir, bucketURL)
 	if err != nil {
 		return err
@@ -71,12 +80,6 @@ func deploy(ctx context.Context, dataDir string, bucketURL string, username stri
 	if len(files) == 0 {
 		return fmt.Errorf("no files found in SAL data directory: %s", dataDir)
 	}
-
-	restoreEnv, err := applyCredentialEnvironment(openedBucketURL, username, password)
-	if err != nil {
-		return err
-	}
-	defer restoreEnv()
 
 	bucket, err := openBucket(ctx, openedBucketURL)
 	if err != nil {
@@ -123,19 +126,11 @@ func deploy(ctx context.Context, dataDir string, bucketURL string, username stri
 	return nil
 }
 
-func normalizeBucketURL(bucketURL string) string {
-	if strings.HasPrefix(bucketURL, "gcs://") {
-		return "gs://" + strings.TrimPrefix(bucketURL, "gcs://")
-	}
-	return bucketURL
-}
-
 // bucketOpenURL converts user-facing bucket URLs into the format expected by Go Cloud blob drivers.
 func bucketOpenURL(bucketURL string) string {
-	normalized := normalizeBucketURL(bucketURL)
-	u, err := url.Parse(normalized)
+	u, err := url.Parse(bucketURL)
 	if err != nil || u.Scheme == "" {
-		return normalized
+		return bucketURL
 	}
 
 	switch u.Scheme {
@@ -398,52 +393,4 @@ func uploadFile(ctx context.Context, bucket *blob.Bucket, file deployFile) (err 
 		return fmt.Errorf("close blob %s: %w", file.key, err)
 	}
 	return nil
-}
-
-func applyCredentialEnvironment(bucketURL string, username string, password string) (func(), error) {
-	if username == "" && password == "" {
-		return func() {}, nil
-	}
-	if username == "" || password == "" {
-		return nil, fmt.Errorf("both --username and --password are required when providing bucket credentials")
-	}
-
-	switch {
-	case strings.HasPrefix(bucketURL, "s3://"):
-		return setTemporaryEnv(map[string]string{
-			"AWS_ACCESS_KEY_ID":     username,
-			"AWS_SECRET_ACCESS_KEY": password,
-		}), nil
-	case strings.HasPrefix(bucketURL, "azblob://"):
-		return setTemporaryEnv(map[string]string{
-			"AZURE_STORAGE_ACCOUNT": username,
-			"AZURE_STORAGE_KEY":     password,
-		}), nil
-	default:
-		slog.Warn("bucket credentials were provided, but this bucket scheme does not have a generic username/password mapping; relying on Go Cloud driver authentication")
-		return func() {}, nil
-	}
-}
-
-func setTemporaryEnv(values map[string]string) func() {
-	type oldValue struct {
-		value string
-		set   bool
-	}
-	old := make(map[string]oldValue, len(values))
-	for key, value := range values {
-		prev, ok := os.LookupEnv(key)
-		old[key] = oldValue{value: prev, set: ok}
-		_ = os.Setenv(key, value)
-	}
-
-	return func() {
-		for key, prev := range old {
-			if prev.set {
-				_ = os.Setenv(key, prev.value)
-			} else {
-				_ = os.Unsetenv(key)
-			}
-		}
-	}
 }

@@ -36,7 +36,7 @@ func TestDeployUploadsAllFilesToBucket(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "project", "triples", "metadata", "v1.metadata.json"), []byte(`{"location":"`+filepath.ToSlash(filepath.Join(dataDir, "project", "triples"))+`"}`), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "project", "triples", "data", "file.parquet"), []byte("parquet bytes"), 0644))
 
-	err := deploy(ctx, dataDir, "file://"+destination, "", "", blob.OpenBucket)
+	err := deploy(ctx, dataDir, "file://"+destination, blob.OpenBucket)
 	require.NoError(t, err)
 
 	metadata, err := os.ReadFile(filepath.Join(destination, "project", "triples", "metadata", "v1.metadata.json"))
@@ -49,7 +49,7 @@ func TestDeployUploadsAllFilesToBucket(t *testing.T) {
 }
 
 func TestDeployReturnsErrorWhenDataDirIsEmpty(t *testing.T) {
-	err := deploy(context.Background(), t.TempDir(), "mem://", "", "", blob.OpenBucket)
+	err := deploy(context.Background(), t.TempDir(), "mem://", blob.OpenBucket)
 	require.ErrorContains(t, err, "no files found")
 }
 
@@ -58,7 +58,7 @@ func TestDeployNormalizesGCSBucketURL(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "file.txt"), []byte("contents"), 0644))
 
 	var openedURL string
-	err := deploy(context.Background(), dataDir, "gcs://my-bucket?prefix=data/", "", "", func(_ context.Context, url string) (*blob.Bucket, error) {
+	err := deploy(context.Background(), dataDir, "gs://my-bucket?prefix=data/", func(_ context.Context, url string) (*blob.Bucket, error) {
 		openedURL = url
 		return nil, fmt.Errorf("stop after URL capture")
 	})
@@ -71,7 +71,7 @@ func TestDeployConvertsGCSPathToUploadPrefix(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "file.txt"), []byte("contents"), 0644))
 
 	var openedURL string
-	err := deploy(context.Background(), dataDir, "gcs://my-bucket/sal/", "", "", func(_ context.Context, url string) (*blob.Bucket, error) {
+	err := deploy(context.Background(), dataDir, "gs://my-bucket/sal/", func(_ context.Context, url string) (*blob.Bucket, error) {
 		openedURL = url
 		return nil, fmt.Errorf("stop after URL capture")
 	})
@@ -79,30 +79,7 @@ func TestDeployConvertsGCSPathToUploadPrefix(t *testing.T) {
 	require.Equal(t, "gs://my-bucket?prefix=sal%2F", openedURL)
 }
 
-func TestNormalizeBucketURLLeavesNativeGSSchemeAlone(t *testing.T) {
-	require.Equal(t, "gs://my-bucket", normalizeBucketURL("gs://my-bucket"))
-}
-
 func TestObjectBaseURLIncludesPathAndPrefix(t *testing.T) {
-	require.Equal(t, "gcs://my-bucket/sal/project/triples", joinRemote(objectBaseURL("gcs://my-bucket/sal/"), "project/triples"))
-	require.Equal(t, "gcs://my-bucket/sal/project/triples", joinRemote(objectBaseURL("gcs://my-bucket?prefix=sal/"), "project/triples"))
-}
-
-func TestApplyCredentialEnvironmentMapsS3Credentials(t *testing.T) {
-	t.Setenv("AWS_ACCESS_KEY_ID", "old-key")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "old-secret")
-
-	restore, err := applyCredentialEnvironment("s3://my-bucket", "new-key", "new-secret")
-	require.NoError(t, err)
-	require.Equal(t, "new-key", os.Getenv("AWS_ACCESS_KEY_ID"))
-	require.Equal(t, "new-secret", os.Getenv("AWS_SECRET_ACCESS_KEY"))
-
-	restore()
-	require.Equal(t, "old-key", os.Getenv("AWS_ACCESS_KEY_ID"))
-	require.Equal(t, "old-secret", os.Getenv("AWS_SECRET_ACCESS_KEY"))
-}
-
-func TestApplyCredentialEnvironmentRequiresUsernameAndPasswordTogether(t *testing.T) {
-	_, err := applyCredentialEnvironment("s3://my-bucket", "new-key", "")
-	require.ErrorContains(t, err, "both --username and --password")
+	require.Equal(t, "gs://my-bucket/sal/project/triples", joinRemote(objectBaseURL("gs://my-bucket/sal/"), "project/triples"))
+	require.Equal(t, "gs://my-bucket/sal/project/triples", joinRemote(objectBaseURL("gs://my-bucket?prefix=sal/"), "project/triples"))
 }
