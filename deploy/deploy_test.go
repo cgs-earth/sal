@@ -33,7 +33,7 @@ func TestDeployUploadsAllFilesToBucket(t *testing.T) {
 	destination := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "project", "triples", "metadata"), 0755))
 	require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "project", "triples", "data"), 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "project", "triples", "metadata", "v1.metadata.json"), []byte(`{"location":"test"}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "project", "triples", "metadata", "v1.metadata.json"), []byte(`{"location":"`+filepath.ToSlash(filepath.Join(dataDir, "project", "triples"))+`"}`), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "project", "triples", "data", "file.parquet"), []byte("parquet bytes"), 0644))
 
 	err := deploy(ctx, dataDir, "file://"+destination, "", "", blob.OpenBucket)
@@ -41,7 +41,7 @@ func TestDeployUploadsAllFilesToBucket(t *testing.T) {
 
 	metadata, err := os.ReadFile(filepath.Join(destination, "project", "triples", "metadata", "v1.metadata.json"))
 	require.NoError(t, err)
-	require.Equal(t, []byte(`{"location":"test"}`), metadata)
+	require.Contains(t, string(metadata), `"location": "file://`+filepath.ToSlash(filepath.Join(destination, "project", "triples"))+`"`)
 
 	parquet, err := os.ReadFile(filepath.Join(destination, "project", "triples", "data", "file.parquet"))
 	require.NoError(t, err)
@@ -66,8 +66,26 @@ func TestDeployNormalizesGCSBucketURL(t *testing.T) {
 	require.Equal(t, "gs://my-bucket?prefix=data/", openedURL)
 }
 
+func TestDeployConvertsGCSPathToUploadPrefix(t *testing.T) {
+	dataDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "file.txt"), []byte("contents"), 0644))
+
+	var openedURL string
+	err := deploy(context.Background(), dataDir, "gcs://my-bucket/sal/", "", "", func(_ context.Context, url string) (*blob.Bucket, error) {
+		openedURL = url
+		return nil, fmt.Errorf("stop after URL capture")
+	})
+	require.ErrorContains(t, err, "stop after URL capture")
+	require.Equal(t, "gs://my-bucket?prefix=sal%2F", openedURL)
+}
+
 func TestNormalizeBucketURLLeavesNativeGSSchemeAlone(t *testing.T) {
 	require.Equal(t, "gs://my-bucket", normalizeBucketURL("gs://my-bucket"))
+}
+
+func TestObjectBaseURLIncludesPathAndPrefix(t *testing.T) {
+	require.Equal(t, "gcs://my-bucket/sal/project/triples", joinRemote(objectBaseURL("gcs://my-bucket/sal/"), "project/triples"))
+	require.Equal(t, "gcs://my-bucket/sal/project/triples", joinRemote(objectBaseURL("gcs://my-bucket?prefix=sal/"), "project/triples"))
 }
 
 func TestApplyCredentialEnvironmentMapsS3Credentials(t *testing.T) {

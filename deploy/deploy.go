@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 
+	"github.com/cgs-earth/sal/edit"
 	"github.com/cgs-earth/sal/pkg"
 	"gocloud.dev/blob"
 	_ "gocloud.dev/blob/azureblob"
@@ -55,8 +57,14 @@ type deployFile struct {
 
 // deploy uploads every file under dataDir to bucketURL, preserving relative paths as blob keys.
 func deploy(ctx context.Context, dataDir string, bucketURL string, username string, password string, openBucket bucketOpener) error {
-	openedBucketURL := normalizeBucketURL(bucketURL)
-	files, err := filesToDeploy(dataDir)
+	stagedDataDir, cleanup, err := stagedDataDirForDeploy(dataDir, bucketURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	openedBucketURL := bucketOpenURL(bucketURL)
+	files, err := filesToDeploy(stagedDataDir)
 	if err != nil {
 		return err
 	}
@@ -120,6 +128,215 @@ func normalizeBucketURL(bucketURL string) string {
 		return "gs://" + strings.TrimPrefix(bucketURL, "gcs://")
 	}
 	return bucketURL
+}
+
+// bucketOpenURL converts user-facing bucket URLs into the format expected by Go Cloud blob drivers.
+func bucketOpenURL(bucketURL string) string {
+	normalized := normalizeBucketURL(bucketURL)
+	u, err := url.Parse(normalized)
+	if err != nil || u.Scheme == "" {
+		return normalized
+	}
+
+	switch u.Scheme {
+	case "gs", "s3", "azblob":
+		pathPrefix := strings.Trim(u.EscapedPath(), "/")
+		if pathPrefix == "" {
+			return u.String()
+		}
+		query := u.Query()
+		prefix := strings.Trim(query.Get("prefix"), "/")
+		if prefix != "" {
+			pathPrefix += "/" + prefix
+		}
+		query.Set("prefix", pathPrefix+"/")
+		u.RawQuery = query.Encode()
+		u.Path = ""
+		u.RawPath = ""
+	}
+
+	return u.String()
+}
+
+// stagedDataDirForDeploy rewrites Iceberg metadata in a temporary copy so local data remains unchanged.
+func stagedDataDirForDeploy(dataDir string, bucketURL string) (string, func(), error) {
+	stagedDataDir, err := os.MkdirTemp("", "sal-deploy-*")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create deployment staging directory: %w", err)
+	}
+	cleanup := func() {
+		if err := os.RemoveAll(stagedDataDir); err != nil {
+			slog.Warn("failed to remove deployment staging directory: " + err.Error())
+		}
+	}
+	if err := copyDir(dataDir, stagedDataDir); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	if err := rewriteStagedIcebergRoots(stagedDataDir, bucketURL); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	return stagedDataDir, cleanup, nil
+}
+
+// copyDir copies regular files from src to dst while preserving permissions and relative paths.
+func copyDir(src string, dst string) error {
+	return filepath.WalkDir(src, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return fmt.Errorf("relative path for %s: %w", path, err)
+		}
+		if rel == "." {
+			return nil
+		}
+		target := filepath.Join(dst, rel)
+
+		info, err := entry.Info()
+		if err != nil {
+			return fmt.Errorf("stat %s: %w", path, err)
+		}
+		if entry.IsDir() {
+			return os.MkdirAll(target, info.Mode())
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+
+		return copyFile(path, target, info.Mode())
+	})
+}
+
+func copyFile(src string, dst string, mode os.FileMode) (err error) {
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", src, err)
+	}
+	defer func() {
+		if closeErr := in.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close %s: %w", src, closeErr)
+		}
+	}()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", dst, err)
+	}
+	defer func() {
+		if closeErr := out.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close %s: %w", dst, closeErr)
+		}
+	}()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return fmt.Errorf("copy %s to %s: %w", src, dst, err)
+	}
+	return nil
+}
+
+// rewriteStagedIcebergRoots points each staged Iceberg table at its final remote object URI.
+func rewriteStagedIcebergRoots(stagedDataDir string, bucketURL string) error {
+	tables, err := icebergTablePaths(stagedDataDir)
+	if err != nil {
+		return err
+	}
+	if len(tables) == 0 {
+		return nil
+	}
+
+	baseRoot := objectBaseURL(bucketURL)
+	for _, tablePath := range tables {
+		rel, err := filepath.Rel(stagedDataDir, tablePath)
+		if err != nil {
+			return fmt.Errorf("relative table path for %s: %w", tablePath, err)
+		}
+		newRoot := joinRemote(baseRoot, filepath.ToSlash(rel))
+		changes, err := edit.RewriteIcebergTableRoot(tablePath, newRoot)
+		if err != nil {
+			return err
+		}
+		slog.Info("Prepared Iceberg table metadata for deploy",
+			"table", rel,
+			"new_root", newRoot,
+			"files_changed", changes,
+		)
+	}
+	return nil
+}
+
+func icebergTablePaths(root string) ([]string, error) {
+	var tables []string
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		if path == root || entry.Name() != "metadata" {
+			return nil
+		}
+		tablePath := filepath.Dir(path)
+		matches, err := filepath.Glob(filepath.Join(path, "*.metadata.json"))
+		if err != nil {
+			return err
+		}
+		if len(matches) > 0 {
+			tables = append(tables, tablePath)
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("find Iceberg tables in %s: %w", root, err)
+	}
+	return tables, nil
+}
+
+func objectBaseURL(bucketURL string) string {
+	u, err := url.Parse(bucketURL)
+	if err != nil || u.Scheme == "" {
+		return strings.TrimSuffix(bucketURL, "/")
+	}
+	if u.Scheme != "gcs" && u.Scheme != "gs" && u.Scheme != "s3" && u.Scheme != "azblob" {
+		u.RawQuery = ""
+		return strings.TrimSuffix(u.String(), "/")
+	}
+
+	prefix := strings.Trim(u.Path, "/")
+	query := u.Query()
+	if queryPrefix := strings.Trim(query.Get("prefix"), "/"); queryPrefix != "" {
+		if prefix == "" {
+			prefix = queryPrefix
+		} else {
+			prefix += "/" + queryPrefix
+		}
+	}
+	u.RawQuery = ""
+	u.Path = ""
+	u.RawPath = ""
+
+	base := strings.TrimSuffix(u.String(), "/")
+	if prefix == "" {
+		return base
+	}
+	return base + "/" + prefix
+}
+
+func joinRemote(base string, parts ...string) string {
+	joined := strings.Trim(strings.Join(parts, "/"), "/")
+	if joined == "" {
+		return strings.TrimSuffix(base, "/")
+	}
+	return strings.TrimSuffix(base, "/") + "/" + joined
 }
 
 func filesToDeploy(dataDir string) ([]deployFile, error) {

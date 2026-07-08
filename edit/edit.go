@@ -29,13 +29,13 @@ func (cfg *EditCmd) Run() error {
 		return err
 	}
 
-	tablePaths, err := icebergTablePaths(dataProductPath)
+	tablePaths, err := IcebergTablePaths(dataProductPath)
 	if err != nil {
 		return err
 	}
 
 	for _, tablePath := range tablePaths {
-		changes, err := rewriteIcebergTableRoot(tablePath, cfg.NewTableRoot)
+		changes, err := RewriteIcebergTableRoot(tablePath, cfg.NewTableRoot)
 		if err != nil {
 			return err
 		}
@@ -49,8 +49,8 @@ func (cfg *EditCmd) Run() error {
 	return nil
 }
 
-// icebergTablePaths finds Iceberg table directories inside a built SAL data product.
-func icebergTablePaths(dataProductPath string) ([]string, error) {
+// IcebergTablePaths finds Iceberg table directories inside a built SAL data product.
+func IcebergTablePaths(dataProductPath string) ([]string, error) {
 	if hasMetadataDir(dataProductPath) {
 		return []string{dataProductPath}, nil
 	}
@@ -82,8 +82,8 @@ func hasMetadataDir(tablePath string) bool {
 	return err == nil && info.IsDir()
 }
 
-// rewriteIcebergTableRoot updates Iceberg metadata files so a copied table can be read from newRoot.
-func rewriteIcebergTableRoot(tablePath string, newRoot string) (int, error) {
+// RewriteIcebergTableRoot updates Iceberg metadata files so a copied table can be read from newRoot.
+func RewriteIcebergTableRoot(tablePath string, newRoot string) (int, error) {
 	metadataDir := filepath.Join(tablePath, "metadata")
 	oldRoot, err := currentTableRoot(tablePath)
 	if err != nil {

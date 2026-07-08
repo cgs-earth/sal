@@ -135,7 +135,7 @@ func TestRewriteIcebergTableRootLeavesParquetFilesUntouched(t *testing.T) {
 		"snapshots": [{"manifest-list": "`+filepath.ToSlash(filepath.Join(tablePath, "metadata", "snap.avro"))+`"}]
 	}`), 0644))
 
-	changedFiles, err := rewriteIcebergTableRoot(tablePath, "s3://my_test_bucket")
+	changedFiles, err := RewriteIcebergTableRoot(tablePath, "s3://my_test_bucket")
 	require.NoError(t, err)
 	require.Equal(t, 1, changedFiles)
 
