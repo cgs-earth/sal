@@ -37,6 +37,8 @@ type BuildCmd struct {
 
 var findSALProjectDir = pkg.SALProjectDir
 
+var ErrUncommittedChanges = fmt.Errorf("git repository has uncommitted changes; please commit and finalize changes before creating a new build snapshot")
+
 // Run validates RDF files for terms that are not defined by their vocabularies and returns their merged RDF graph.
 func Run(cfg *BuildCmd) (*rdflibgo.Graph, error) {
 	if cfg == nil {
@@ -110,6 +112,14 @@ func Run(cfg *BuildCmd) (*rdflibgo.Graph, error) {
 	if cfg.skipCommit {
 		return finalGraph, nil
 	}
+	hasChanges, err := pkg.UncommittedChangesInGit()
+	if err != nil {
+		return nil, err
+	}
+	if hasChanges {
+		return finalGraph, ErrUncommittedChanges
+	}
+
 	if err := ExportGraph(finalGraph, cfg.Format, hash); err != nil {
 		return nil, err
 	}
