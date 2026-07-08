@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -59,7 +60,9 @@ func main() {
 		_, err = build.Run(cli.Build)
 		// Errors from build should be directly written to stdout
 		// not written as a log which adds extra noise
-		if err != nil {
+		// Special errors like UncommittedChangesErr should be handled normally
+		// since they belong in the log
+		if err != nil && !errors.Is(err, build.ErrUncommittedChanges) {
 			fmt.Println(err.Error())
 			os.Exit(1)
 		}

@@ -156,3 +156,17 @@ func GitCommitHash() (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// UncommittedChangesInGit returns true if the current git worktree contains
+// uncommitted changes
+func UncommittedChangesInGit() (bool, error) {
+	out, err := exec.Command("git", "status", "-s").Output()
+	if err != nil {
+		return false, fmt.Errorf("failed to get git status: %w", err)
+	}
+	if len(out) != 0 {
+		return true, nil
+	}
+
+	return false, nil
+}
