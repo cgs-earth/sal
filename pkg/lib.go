@@ -141,6 +141,20 @@ func SalDataDir() (string, error) {
 	return filepath.Join(salDir, ".sal", "data"), nil
 }
 
+// Return the path to the build iceberg data product in the .sal/data directory
+func SalBuiltDataProductPath() (string, error) {
+	salDataDir, err := SalDataDir()
+	if err != nil {
+		return "", err
+	}
+
+	projectName, err := GitProjectName()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(salDataDir, projectName), nil
+}
+
 func canonicalPath(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {

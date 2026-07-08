@@ -12,6 +12,8 @@ require (
 	github.com/piprate/json-gold v0.8.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tggo/goRDFlib v0.1.12
+	github.com/twmb/avro v1.7.2
+	gocloud.dev v0.46.0
 	golang.org/x/sync v0.21.0
 	oras.land/oras-go/v2 v2.6.1
 )
@@ -111,7 +113,6 @@ require (
 	github.com/substrait-io/substrait v0.87.0 // indirect
 	github.com/substrait-io/substrait-go/v8 v8.1.1 // indirect
 	github.com/substrait-io/substrait-protobuf/go v0.85.0 // indirect
-	github.com/twmb/avro v1.7.2 // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
@@ -124,7 +125,6 @@ require (
 	go.opentelemetry.io/otel/sdk v1.43.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
-	gocloud.dev v0.46.0 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976 // indirect
 	golang.org/x/net v0.55.0 // indirect

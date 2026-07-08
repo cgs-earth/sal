@@ -9,6 +9,8 @@ import (
 
 	"github.com/cgs-earth/sal/build"
 	"github.com/cgs-earth/sal/clean"
+	"github.com/cgs-earth/sal/deploy"
+	"github.com/cgs-earth/sal/edit"
 	"github.com/cgs-earth/sal/initialization"
 	"github.com/cgs-earth/sal/load"
 	"github.com/cgs-earth/sal/pull"
@@ -32,6 +34,8 @@ type args struct {
 	Push      *push.PushCmd           `arg:"subcommand:push" help:"Push a built SAL data product to an OCI registry."`
 	SalModule *salmodule.SalModuleCmd `arg:"subcommand:salmodule" help:"Output salmodule information about this project."`
 	Pull      *pull.PullCmd           `arg:"subcommand:pull" help:"Pull an OCI artifact of a built SAL data product."`
+	Edit      *edit.EditCmd           `arg:"subcommand:edit" help:"Edit a built SAL data product."`
+	Deploy    *deploy.DeployCmd       `arg:"subcommand:deploy" help:"Deploy a built SAL data product."`
 }
 
 func (args) Description() string {
@@ -80,6 +84,10 @@ func main() {
 		err = push.Run(cli.Push)
 	case cli.Pull != nil:
 		err = pull.Run(cli.Pull)
+	case cli.Edit != nil:
+		err = cli.Edit.Run()
+	case cli.Deploy != nil:
+		err = cli.Deploy.Run()
 	case cli.Validate != nil:
 		_, err = cli.Validate.Run()
 		if err != nil {
