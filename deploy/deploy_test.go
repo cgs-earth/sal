@@ -27,6 +27,29 @@ func TestFilesToDeployPreservesRelativeKeys(t *testing.T) {
 	require.Contains(t, keys, "project/triples/data.parquet")
 }
 
+func TestDeployUploadPhasesPublishMetadataAfterDataAndVersionHintLast(t *testing.T) {
+	files := []deployFile{
+		{key: "sal/triples/metadata/version-hint.text"},
+		{key: "sal/triples/metadata/v1.metadata.json"},
+		{key: "sal/triples/data/file.parquet"},
+		{key: "README.md"},
+		{key: "sal/triples/metadata/manifest.avro"},
+	}
+
+	phases := deployUploadPhases(files)
+	require.Len(t, phases, 3)
+
+	require.ElementsMatch(t, []deployFile{
+		{key: "sal/triples/data/file.parquet"},
+		{key: "README.md"},
+	}, phases[0])
+	require.ElementsMatch(t, []deployFile{
+		{key: "sal/triples/metadata/v1.metadata.json"},
+		{key: "sal/triples/metadata/manifest.avro"},
+	}, phases[1])
+	require.Equal(t, []deployFile{{key: "sal/triples/metadata/version-hint.text"}}, phases[2])
+}
+
 func TestDeployUploadsAllFilesToBucket(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
@@ -39,11 +62,11 @@ func TestDeployUploadsAllFilesToBucket(t *testing.T) {
 	err := deploy(ctx, dataDir, "file://"+destination, blob.OpenBucket)
 	require.NoError(t, err)
 
-	metadata, err := os.ReadFile(filepath.Join(destination, "project", "triples", "metadata", "v1.metadata.json"))
+	metadata, err := os.ReadFile(filepath.Join(destination, "metadata", "v1.metadata.json"))
 	require.NoError(t, err)
-	require.Contains(t, string(metadata), `"location": "file://`+filepath.ToSlash(filepath.Join(destination, "project", "triples"))+`"`)
+	require.Contains(t, string(metadata), `"location": "file://`+filepath.ToSlash(destination)+`"`)
 
-	parquet, err := os.ReadFile(filepath.Join(destination, "project", "triples", "data", "file.parquet"))
+	parquet, err := os.ReadFile(filepath.Join(destination, "data", "file.parquet"))
 	require.NoError(t, err)
 	require.Equal(t, []byte("parquet bytes"), parquet)
 }
@@ -82,4 +105,31 @@ func TestDeployConvertsGCSPathToUploadPrefix(t *testing.T) {
 func TestObjectBaseURLIncludesPathAndPrefix(t *testing.T) {
 	require.Equal(t, "gs://my-bucket/sal/project/triples", joinRemote(objectBaseURL("gs://my-bucket/sal/"), "project/triples"))
 	require.Equal(t, "gs://my-bucket/sal/project/triples", joinRemote(objectBaseURL("gs://my-bucket?prefix=sal/"), "project/triples"))
+}
+
+func TestRewriteStagedIcebergRootsUsesExactBucketURLForSingleTable(t *testing.T) {
+	dataDir := t.TempDir()
+	tablePath := filepath.Join(dataDir, "sal", "triples")
+	require.NoError(t, os.MkdirAll(filepath.Join(tablePath, "metadata"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tablePath, "metadata", "v1.metadata.json"), []byte(`{
+		"location": "`+filepath.ToSlash(tablePath)+`",
+		"snapshots": []
+	}`), 0644))
+
+	require.NoError(t, rewriteStagedIcebergRoots(dataDir, "gs://sal-test-bucket/sal/triples"))
+
+	metadata, err := os.ReadFile(filepath.Join(tablePath, "metadata", "v1.metadata.json"))
+	require.NoError(t, err)
+	require.Contains(t, string(metadata), `"location": "gs://sal-test-bucket/sal/triples"`)
+}
+
+func TestDeployUploadRootUsesSingleIcebergTableDirectory(t *testing.T) {
+	dataDir := t.TempDir()
+	tablePath := filepath.Join(dataDir, "sal", "triples")
+	require.NoError(t, os.MkdirAll(filepath.Join(tablePath, "metadata"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tablePath, "metadata", "v1.metadata.json"), []byte("{}"), 0644))
+
+	uploadRoot, err := deployUploadRoot(dataDir)
+	require.NoError(t, err)
+	require.Equal(t, tablePath, uploadRoot)
 }

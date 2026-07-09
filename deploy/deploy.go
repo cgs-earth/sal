@@ -36,7 +36,7 @@ const maxConcurrentDeployUploads = 4
 //
 // )LIMIT 5;
 type DeployCmd struct {
-	Bucket string `arg:"--bucket" help:"The scheme and name of the bucket to deploy a built SAL data product to. Example: s3://my-bucket or gcs://my-bucket"`
+	Bucket string `arg:"--bucket" help:"The scheme and name of the bucket to deploy a built SAL data product to. Example: s3://my-bucket/sal/triples or gs://my-bucket/sal/triples"`
 }
 
 func (c *DeployCmd) Run() error {
@@ -66,14 +66,22 @@ type deployFile struct {
 
 // deploy uploads every file under dataDir to bucketURL, preserving relative paths as blob keys.
 func deploy(ctx context.Context, dataDir string, bucketURL string, openBucket bucketOpener) error {
+	openedBucketURL, err := bucketOpenURL(bucketURL)
+	if err != nil {
+		return err
+	}
+
 	stagedDataDir, cleanup, err := stagedDataDirForDeploy(dataDir, bucketURL)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
-	openedBucketURL := bucketOpenURL(bucketURL)
-	files, err := filesToDeploy(stagedDataDir)
+	uploadRoot, err := deployUploadRoot(stagedDataDir)
+	if err != nil {
+		return err
+	}
+	files, err := filesToDeploy(uploadRoot)
 	if err != nil {
 		return err
 	}
@@ -91,66 +99,49 @@ func deploy(ctx context.Context, dataDir string, bucketURL string, openBucket bu
 		}
 	}()
 
-	var deployedFiles atomic.Int64
-	var deployedBytes atomic.Int64
-	group, uploadCtx := errgroup.WithContext(ctx)
-	group.SetLimit(maxConcurrentDeployUploads)
-	for _, file := range files {
-		group.Go(func() error {
-			if err := uploadFile(uploadCtx, bucket, file); err != nil {
-				return err
-			}
-
-			completed := deployedFiles.Add(1)
-			deployedBytes.Add(file.size)
-			if completed%5 == 0 {
-				slog.Info("Deployed files",
-					"completed", completed,
-					"total", len(files),
-					"bytes", deployedBytes.Load(),
-				)
-			}
-			return nil
-		})
-	}
-	if err := group.Wait(); err != nil {
+	deployedFiles, deployedBytes, err := uploadFiles(ctx, bucket, files)
+	if err != nil {
 		return err
 	}
 
 	slog.Info("Deployed SAL data directory",
 		"source", dataDir,
 		"bucket", bucketURL,
-		"files", deployedFiles.Load(),
-		"bytes", deployedBytes.Load(),
+		"files", deployedFiles,
+		"bytes", deployedBytes,
 	)
 	return nil
 }
 
 // bucketOpenURL converts user-facing bucket URLs into the format expected by Go Cloud blob drivers.
-func bucketOpenURL(bucketURL string) string {
+func bucketOpenURL(bucketURL string) (string, error) {
 	u, err := url.Parse(bucketURL)
 	if err != nil || u.Scheme == "" {
-		return bucketURL
+		return bucketURL, nil
 	}
 
 	switch u.Scheme {
 	case "gs", "s3", "azblob":
-		pathPrefix := strings.Trim(u.EscapedPath(), "/")
-		if pathPrefix == "" {
-			return u.String()
-		}
-		query := u.Query()
-		prefix := strings.Trim(query.Get("prefix"), "/")
-		if prefix != "" {
-			pathPrefix += "/" + prefix
-		}
-		query.Set("prefix", pathPrefix+"/")
-		u.RawQuery = query.Encode()
-		u.Path = ""
-		u.RawPath = ""
+		withPathPrefix(u)
 	}
 
-	return u.String()
+	return u.String(), nil
+}
+
+func withPathPrefix(u *url.URL) {
+	pathPrefix := strings.Trim(u.EscapedPath(), "/")
+	if pathPrefix == "" {
+		return
+	}
+	query := u.Query()
+	prefix := strings.Trim(query.Get("prefix"), "/")
+	if prefix != "" {
+		pathPrefix += "/" + prefix
+	}
+	query.Set("prefix", pathPrefix+"/")
+	u.RawQuery = query.Encode()
+	u.Path = ""
+	u.RawPath = ""
 }
 
 // stagedDataDirForDeploy rewrites Iceberg metadata in a temporary copy so local data remains unchanged.
@@ -173,6 +164,18 @@ func stagedDataDirForDeploy(dataDir string, bucketURL string) (string, func(), e
 		return "", func() {}, err
 	}
 	return stagedDataDir, cleanup, nil
+}
+
+// deployUploadRoot returns the directory whose contents should be uploaded to the provided bucket URL.
+func deployUploadRoot(stagedDataDir string) (string, error) {
+	tables, err := icebergTablePaths(stagedDataDir)
+	if err != nil {
+		return "", err
+	}
+	if len(tables) == 1 {
+		return tables[0], nil
+	}
+	return stagedDataDir, nil
 }
 
 // copyDir copies regular files from src to dst while preserving permissions and relative paths.
@@ -253,7 +256,10 @@ func rewriteStagedIcebergRoots(stagedDataDir string, bucketURL string) error {
 		if err != nil {
 			return fmt.Errorf("relative table path for %s: %w", tablePath, err)
 		}
-		newRoot := joinRemote(baseRoot, filepath.ToSlash(rel))
+		newRoot := baseRoot
+		if len(tables) > 1 {
+			newRoot = joinRemote(baseRoot, filepath.ToSlash(rel))
+		}
 		changes, err := edit.RewriteIcebergTableRoot(tablePath, newRoot)
 		if err != nil {
 			return err
@@ -301,9 +307,8 @@ func objectBaseURL(bucketURL string) string {
 	if err != nil || u.Scheme == "" {
 		return strings.TrimSuffix(bucketURL, "/")
 	}
-	if u.Scheme != "gcs" && u.Scheme != "gs" && u.Scheme != "s3" && u.Scheme != "azblob" {
-		u.RawQuery = ""
-		return strings.TrimSuffix(u.String(), "/")
+	if u.Scheme != "gs" && u.Scheme != "s3" && u.Scheme != "azblob" {
+		return strings.TrimSuffix(bucketURL, "/")
 	}
 
 	prefix := strings.Trim(u.Path, "/")
@@ -363,6 +368,66 @@ func filesToDeploy(dataDir string) ([]deployFile, error) {
 		return nil, fmt.Errorf("read SAL data directory %s: %w", dataDir, err)
 	}
 	return files, nil
+}
+
+// uploadFiles publishes data before Iceberg metadata, with version hints last so readers do not see partial metadata.
+func uploadFiles(ctx context.Context, bucket *blob.Bucket, files []deployFile) (int64, int64, error) {
+	var deployedFiles atomic.Int64
+	var deployedBytes atomic.Int64
+
+	for _, phase := range deployUploadPhases(files) {
+		group, uploadCtx := errgroup.WithContext(ctx)
+		group.SetLimit(maxConcurrentDeployUploads)
+		for _, file := range phase {
+			group.Go(func() error {
+				if err := uploadFile(uploadCtx, bucket, file); err != nil {
+					return err
+				}
+
+				completed := deployedFiles.Add(1)
+				deployedBytes.Add(file.size)
+				if completed%5 == 0 {
+					slog.Info("Deployed files",
+						"completed", completed,
+						"total", len(files),
+						"bytes", deployedBytes.Load(),
+					)
+				}
+				return nil
+			})
+		}
+		if err := group.Wait(); err != nil {
+			return deployedFiles.Load(), deployedBytes.Load(), err
+		}
+	}
+
+	return deployedFiles.Load(), deployedBytes.Load(), nil
+}
+
+func deployUploadPhases(files []deployFile) [][]deployFile {
+	phases := make([][]deployFile, 3)
+	for _, file := range files {
+		phase := deployUploadPhase(file.key)
+		phases[phase] = append(phases[phase], file)
+	}
+
+	var nonEmpty [][]deployFile
+	for _, phase := range phases {
+		if len(phase) > 0 {
+			nonEmpty = append(nonEmpty, phase)
+		}
+	}
+	return nonEmpty
+}
+
+func deployUploadPhase(key string) int {
+	if key == "metadata/version-hint.text" || strings.HasSuffix(key, "/metadata/version-hint.text") {
+		return 2
+	}
+	if strings.HasPrefix(key, "metadata/") || strings.Contains(key, "/metadata/") {
+		return 1
+	}
+	return 0
 }
 
 func uploadFile(ctx context.Context, bucket *blob.Bucket, file deployFile) (err error) {

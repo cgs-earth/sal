@@ -155,7 +155,7 @@ func currentTableRoot(tablePath string) (string, error) {
 		return "", err
 	}
 	var metadata map[string]any
-	if err := json.Unmarshal(b, &metadata); err != nil {
+	if err := decodeJSON(b, &metadata); err != nil {
 		return "", fmt.Errorf("parse %s: %w", latest, err)
 	}
 	if location, ok := metadata["location"].(string); ok && location != "" {
@@ -211,7 +211,7 @@ func rewriteJSONFile(path string, rewrite rootRewriter) (bool, error) {
 	}
 
 	var value any
-	if err := json.Unmarshal(b, &value); err != nil {
+	if err := decodeJSON(b, &value); err != nil {
 		return false, fmt.Errorf("parse %s: %w", path, err)
 	}
 
@@ -226,6 +226,12 @@ func rewriteJSONFile(path string, rewrite rootRewriter) (bool, error) {
 	}
 	out = append(out, '\n')
 	return true, writeFileAtomically(path, out)
+}
+
+func decodeJSON(b []byte, value any) error {
+	decoder := json.NewDecoder(bytes.NewReader(b))
+	decoder.UseNumber()
+	return decoder.Decode(value)
 }
 
 func rewriteAny(value any, rewrite rootRewriter) (any, bool) {

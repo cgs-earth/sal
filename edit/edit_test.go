@@ -42,9 +42,13 @@ func TestRewriteStringDoesNotRewritePartialPrefix(t *testing.T) {
 func TestRewriteJSONFileUpdatesNestedPaths(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v1.metadata.json")
 	original := map[string]any{
-		"location": "/tmp/warehouse/project/triples",
+		"location":            "/tmp/warehouse/project/triples",
+		"current-snapshot-id": json.Number("5012377253338815300"),
 		"snapshots": []any{
-			map[string]any{"manifest-list": "/tmp/warehouse/project/triples/metadata/snap.avro"},
+			map[string]any{
+				"snapshot-id":   json.Number("5012377253338815300"),
+				"manifest-list": "/tmp/warehouse/project/triples/metadata/snap.avro",
+			},
 		},
 	}
 	b, err := json.Marshal(original)
@@ -61,11 +65,13 @@ func TestRewriteJSONFileUpdatesNestedPaths(t *testing.T) {
 	var rewritten map[string]any
 	b, err = os.ReadFile(path)
 	require.NoError(t, err)
-	require.NoError(t, json.Unmarshal(b, &rewritten))
+	require.NoError(t, decodeJSON(b, &rewritten))
 	require.Equal(t, "s3://my_test_bucket", rewritten["location"])
+	require.Equal(t, json.Number("5012377253338815300"), rewritten["current-snapshot-id"])
 
 	snapshots := rewritten["snapshots"].([]any)
 	require.Equal(t, "s3://my_test_bucket/metadata/snap.avro", snapshots[0].(map[string]any)["manifest-list"])
+	require.Equal(t, json.Number("5012377253338815300"), snapshots[0].(map[string]any)["snapshot-id"])
 }
 
 func TestRewriteAvroFileUpdatesNestedPaths(t *testing.T) {
