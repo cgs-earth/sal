@@ -1,0 +1,27 @@
+@prefix schema: <https://schema.org/> .
+@prefix dcat:   <http://www.w3.org/ns/dcat#> .
+@prefix dct:    <http://purl.org/dc/terms/> .
+
+<WWF_PMTiles>
+    a dcat:Dataset ;
+    schema:name "HydroBASINS Level 5 Context PMTiles" ;
+    schema:description "Global HydroBASINS level 5 watershed boundaries packaged as a PMTiles archive for efficient cloud-native visualization." ;
+    schema:keywords
+        "hydrology",
+        "watersheds",
+        "HydroBASINS",
+        "PMTiles",
+        "vector tiles",
+        "WWF" ;
+    dct:format "application/vnd.pmtiles" ;
+    dcat:distribution <#pmtiles> .
+
+<#pmtiles>
+    a dcat:Distribution ;
+    schema:name "Remote PMTiles Archive" ;
+    dct:format "application/vnd.pmtiles" ;
+    dcat:downloadURL <https://storage.googleapis.com/wwf-global-public-data/hydrobasins_lvl5_context.pmtiles> ;
+    dcat:accessURL <https://storage.googleapis.com/wwf-global-public-data/hydrobasins_lvl5_context.pmtiles> ;
+    schema:contentUrl <https://storage.googleapis.com/wwf-global-public-data/hydrobasins_lvl5_context.pmtiles> ;
+    schema:encodingFormat "application/vnd.pmtiles" ;
+    schema:isAccessibleForFree true .
