@@ -56,6 +56,7 @@ func TestDeployUploadsAllFilesToBucket(t *testing.T) {
 	destination := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "project", "triples", "metadata"), 0755))
 	require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "project", "triples", "data"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "catalog.json"), []byte(`{"name":"catalog"}`), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "project", "triples", "metadata", "v1.metadata.json"), []byte(`{"location":"`+filepath.ToSlash(filepath.Join(dataDir, "project", "triples"))+`"}`), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "project", "triples", "data", "file.parquet"), []byte("parquet bytes"), 0644))
 
@@ -69,6 +70,10 @@ func TestDeployUploadsAllFilesToBucket(t *testing.T) {
 	parquet, err := os.ReadFile(filepath.Join(destination, "data", "file.parquet"))
 	require.NoError(t, err)
 	require.Equal(t, []byte("parquet bytes"), parquet)
+
+	catalog, err := os.ReadFile(filepath.Join(destination, "catalog.json"))
+	require.NoError(t, err)
+	require.Equal(t, []byte(`{"name":"catalog"}`), catalog)
 }
 
 func TestDeployReturnsErrorWhenDataDirIsEmpty(t *testing.T) {

@@ -86,6 +86,13 @@ func deploy(ctx context.Context, dataDir string, bucketURL string, openBucket bu
 	if err != nil {
 		return err
 	}
+	if uploadRoot != stagedDataDir {
+		topLevelFiles, err := topLevelFilesToDeploy(stagedDataDir)
+		if err != nil {
+			return err
+		}
+		files = append(files, topLevelFiles...)
+	}
 	if len(files) == 0 {
 		return fmt.Errorf("no files found in SAL data directory: %s", dataDir)
 	}
@@ -555,6 +562,36 @@ func filesToDeploy(dataDir string) ([]deployFile, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("read SAL data directory %s: %w", dataDir, err)
+	}
+	return files, nil
+}
+
+// topLevelFilesToDeploy returns regular files directly under dataDir for explicit table-root uploads.
+func topLevelFilesToDeploy(dataDir string) ([]deployFile, error) {
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("read SAL data directory %s: %w", dataDir, err)
+	}
+
+	var files []deployFile
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		path := filepath.Join(dataDir, entry.Name())
+		info, err := entry.Info()
+		if err != nil {
+			return nil, fmt.Errorf("stat %s: %w", path, err)
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		files = append(files, deployFile{
+			path: path,
+			key:  filepath.ToSlash(entry.Name()),
+			size: info.Size(),
+		})
 	}
 	return files, nil
 }
