@@ -17,6 +17,7 @@ import (
 	"github.com/cgs-earth/sal/push"
 	"github.com/cgs-earth/sal/query"
 	"github.com/cgs-earth/sal/salmodule"
+	"github.com/cgs-earth/sal/test"
 
 	"github.com/alexflint/go-arg"
 	"github.com/lmittmann/tint"
@@ -36,6 +37,7 @@ type args struct {
 	Clone     *clone.CloneCmd         `arg:"subcommand:pull" help:"Clone an OCI artifact and the associated git repository for a built SAL data product."`
 	Edit      *edit.EditCmd           `arg:"subcommand:edit" help:"Edit a built SAL data product."`
 	Deploy    *deploy.DeployCmd       `arg:"subcommand:deploy" help:"Deploy a built SAL data product."`
+	Test      *test.TestCmd           `arg:"subcommand:test" help:"Run tests."`
 }
 
 func (args) Description() string {
@@ -88,6 +90,8 @@ func main() {
 		err = cli.Edit.Run()
 	case cli.Deploy != nil:
 		err = cli.Deploy.Run()
+	case cli.Test != nil:
+		err = cli.Test.Run()
 	case cli.Validate != nil:
 		_, err = cli.Validate.Run()
 		if err != nil {
