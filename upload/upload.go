@@ -1,4 +1,4 @@
-package deploy
+package upload
 
 import (
 	"context"
@@ -25,7 +25,7 @@ import (
 
 const maxConcurrentDeployUploads = 4
 
-// Deploy deploys a built SAL data product to a bucket.
+// UploadCmd uploads a built SAL data product to a bucket.
 // Authentication is handled by tools like gsutil or aws s3
 // which manage credentials.
 // After upload, files then can be queried via a service like duckdb
@@ -36,11 +36,11 @@ const maxConcurrentDeployUploads = 4
 //	'gs://bucket/git-project/iceberg-table'
 //
 // )LIMIT 5;
-type DeployCmd struct {
-	Bucket string `arg:"--bucket" help:"The scheme and name of the bucket to deploy a built SAL data product to. Example: s3://my-bucket/sal/triples or gs://my-bucket/sal/triples"`
+type UploadCmd struct {
+	Bucket string `arg:"--bucket" help:"The scheme and name of the bucket to upload a built SAL data product to. Example: s3://my-bucket/sal/triples or gs://my-bucket/sal/triples"`
 }
 
-func (c *DeployCmd) Run() error {
+func (c *UploadCmd) Run() error {
 	if strings.TrimSpace(c.Bucket) == "" {
 		return fmt.Errorf("--bucket is required")
 	}
@@ -576,7 +576,7 @@ func uploadFiles(ctx context.Context, bucket *blob.Bucket, files []deployFile) (
 				completed := deployedFiles.Add(1)
 				deployedBytes.Add(file.size)
 				if completed%5 == 0 {
-					slog.Info("Deployed files",
+					slog.Info("Uploaded files",
 						"completed", completed,
 						"total", len(files),
 						"bytes", deployedBytes.Load(),
