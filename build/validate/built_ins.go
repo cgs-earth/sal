@@ -1,7 +1,6 @@
-package build
+package validate
 
-const rdfLangStringIRI = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString"
-const rdfNamespaceIRI = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+// const rdfLangStringIRI = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString"
 const xsdNamespaceIRI = "http://www.w3.org/2001/XMLSchema#"
 
 var xsdBuiltinDatatypeLocalNames = []string{

@@ -1,11 +1,13 @@
-# sal-cli
+# SAL
 
-The sal-cli is a CLI tool for creating and validating RDF data products.
+The Semantic Accessibility Layer cli, abbreviated SAL, provides a build tool for creating, validating, and deploying RDF data products.
 
 This repository is currently a work in progress.
 
 ## Installation
 
+To install the latest version of SAL, run the following command:
+
 ```
-go install github.com/cgs-earth/sal-cli@latest
+go install -a github.com/cgs-earth/sal@latest
 ```

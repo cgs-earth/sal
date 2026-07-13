@@ -1,0 +1,602 @@
+@prefix schema: <https://schema.org/> .
+
+<Organization001> a schema:Organization ;
+    schema:name "Example Organization 001" ;
+    schema:url <https://example.org/organizations/001> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person001A> ;
+    schema:employee <Person001B> .
+
+<Organization002> a schema:Organization ;
+    schema:name "Example Organization 002" ;
+    schema:url <https://example.org/organizations/002> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person002A> ;
+    schema:employee <Person002B> .
+
+<Organization003> a schema:Organization ;
+    schema:name "Example Organization 003" ;
+    schema:url <https://example.org/organizations/003> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person003A> ;
+    schema:employee <Person003B> .
+
+<Organization004> a schema:Organization ;
+    schema:name "Example Organization 004" ;
+    schema:url <https://example.org/organizations/004> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person004A> ;
+    schema:employee <Person004B> .
+
+<Organization005> a schema:Organization ;
+    schema:name "Example Organization 005" ;
+    schema:url <https://example.org/organizations/005> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person005A> ;
+    schema:employee <Person005B> .
+
+<Organization006> a schema:Organization ;
+    schema:name "Example Organization 006" ;
+    schema:url <https://example.org/organizations/006> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person006A> ;
+    schema:employee <Person006B> .
+
+<Organization007> a schema:Organization ;
+    schema:name "Example Organization 007" ;
+    schema:url <https://example.org/organizations/007> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person007A> ;
+    schema:employee <Person007B> .
+
+<Organization008> a schema:Organization ;
+    schema:name "Example Organization 008" ;
+    schema:url <https://example.org/organizations/008> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person008A> ;
+    schema:employee <Person008B> .
+
+<Organization009> a schema:Organization ;
+    schema:name "Example Organization 009" ;
+    schema:url <https://example.org/organizations/009> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person009A> ;
+    schema:employee <Person009B> .
+
+<Organization010> a schema:Organization ;
+    schema:name "Example Organization 010" ;
+    schema:url <https://example.org/organizations/010> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person010A> ;
+    schema:employee <Person010B> .
+
+<Organization011> a schema:Organization ;
+    schema:name "Example Organization 011" ;
+    schema:url <https://example.org/organizations/011> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person011A> ;
+    schema:employee <Person011B> .
+
+<Organization012> a schema:Organization ;
+    schema:name "Example Organization 012" ;
+    schema:url <https://example.org/organizations/012> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person012A> ;
+    schema:employee <Person012B> .
+
+<Organization013> a schema:Organization ;
+    schema:name "Example Organization 013" ;
+    schema:url <https://example.org/organizations/013> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person013A> ;
+    schema:employee <Person013B> .
+
+<Organization014> a schema:Organization ;
+    schema:name "Example Organization 014" ;
+    schema:url <https://example.org/organizations/014> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person014A> ;
+    schema:employee <Person014B> .
+
+<Organization015> a schema:Organization ;
+    schema:name "Example Organization 015" ;
+    schema:url <https://example.org/organizations/015> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person015A> ;
+    schema:employee <Person015B> .
+
+<Organization016> a schema:Organization ;
+    schema:name "Example Organization 016" ;
+    schema:url <https://example.org/organizations/016> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person016A> ;
+    schema:employee <Person016B> .
+
+<Organization017> a schema:Organization ;
+    schema:name "Example Organization 017" ;
+    schema:url <https://example.org/organizations/017> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person017A> ;
+    schema:employee <Person017B> .
+
+<Organization018> a schema:Organization ;
+    schema:name "Example Organization 018" ;
+    schema:url <https://example.org/organizations/018> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person018A> ;
+    schema:employee <Person018B> .
+
+<Organization019> a schema:Organization ;
+    schema:name "Example Organization 019" ;
+    schema:url <https://example.org/organizations/019> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person019A> ;
+    schema:employee <Person019B> .
+
+<Organization020> a schema:Organization ;
+    schema:name "Example Organization 020" ;
+    schema:url <https://example.org/organizations/020> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person020A> ;
+    schema:employee <Person020B> .
+
+<Organization021> a schema:Organization ;
+    schema:name "Example Organization 021" ;
+    schema:url <https://example.org/organizations/021> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person021A> ;
+    schema:employee <Person021B> .
+
+<Organization022> a schema:Organization ;
+    schema:name "Example Organization 022" ;
+    schema:url <https://example.org/organizations/022> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person022A> ;
+    schema:employee <Person022B> .
+
+<Organization023> a schema:Organization ;
+    schema:name "Example Organization 023" ;
+    schema:url <https://example.org/organizations/023> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person023A> ;
+    schema:employee <Person023B> .
+
+<Organization024> a schema:Organization ;
+    schema:name "Example Organization 024" ;
+    schema:url <https://example.org/organizations/024> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person024A> ;
+    schema:employee <Person024B> .
+
+<Organization025> a schema:Organization ;
+    schema:name "Example Organization 025" ;
+    schema:url <https://example.org/organizations/025> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person025A> ;
+    schema:employee <Person025B> .
+
+<Organization026> a schema:Organization ;
+    schema:name "Example Organization 026" ;
+    schema:url <https://example.org/organizations/026> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person026A> ;
+    schema:employee <Person026B> .
+
+<Organization027> a schema:Organization ;
+    schema:name "Example Organization 027" ;
+    schema:url <https://example.org/organizations/027> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person027A> ;
+    schema:employee <Person027B> .
+
+<Organization028> a schema:Organization ;
+    schema:name "Example Organization 028" ;
+    schema:url <https://example.org/organizations/028> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person028A> ;
+    schema:employee <Person028B> .
+
+<Organization029> a schema:Organization ;
+    schema:name "Example Organization 029" ;
+    schema:url <https://example.org/organizations/029> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person029A> ;
+    schema:employee <Person029B> .
+
+<Organization030> a schema:Organization ;
+    schema:name "Example Organization 030" ;
+    schema:url <https://example.org/organizations/030> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person030A> ;
+    schema:employee <Person030B> .
+
+<Organization031> a schema:Organization ;
+    schema:name "Example Organization 031" ;
+    schema:url <https://example.org/organizations/031> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person031A> ;
+    schema:employee <Person031B> .
+
+<Organization032> a schema:Organization ;
+    schema:name "Example Organization 032" ;
+    schema:url <https://example.org/organizations/032> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person032A> ;
+    schema:employee <Person032B> .
+
+<Organization033> a schema:Organization ;
+    schema:name "Example Organization 033" ;
+    schema:url <https://example.org/organizations/033> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person033A> ;
+    schema:employee <Person033B> .
+
+<Organization034> a schema:Organization ;
+    schema:name "Example Organization 034" ;
+    schema:url <https://example.org/organizations/034> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person034A> ;
+    schema:employee <Person034B> .
+
+<Organization035> a schema:Organization ;
+    schema:name "Example Organization 035" ;
+    schema:url <https://example.org/organizations/035> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person035A> ;
+    schema:employee <Person035B> .
+
+<Organization036> a schema:Organization ;
+    schema:name "Example Organization 036" ;
+    schema:url <https://example.org/organizations/036> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person036A> ;
+    schema:employee <Person036B> .
+
+<Organization037> a schema:Organization ;
+    schema:name "Example Organization 037" ;
+    schema:url <https://example.org/organizations/037> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person037A> ;
+    schema:employee <Person037B> .
+
+<Organization038> a schema:Organization ;
+    schema:name "Example Organization 038" ;
+    schema:url <https://example.org/organizations/038> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person038A> ;
+    schema:employee <Person038B> .
+
+<Organization039> a schema:Organization ;
+    schema:name "Example Organization 039" ;
+    schema:url <https://example.org/organizations/039> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person039A> ;
+    schema:employee <Person039B> .
+
+<Organization040> a schema:Organization ;
+    schema:name "Example Organization 040" ;
+    schema:url <https://example.org/organizations/040> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person040A> ;
+    schema:employee <Person040B> .
+
+<Organization041> a schema:Organization ;
+    schema:name "Example Organization 041" ;
+    schema:url <https://example.org/organizations/041> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person041A> ;
+    schema:employee <Person041B> .
+
+<Organization042> a schema:Organization ;
+    schema:name "Example Organization 042" ;
+    schema:url <https://example.org/organizations/042> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person042A> ;
+    schema:employee <Person042B> .
+
+<Organization043> a schema:Organization ;
+    schema:name "Example Organization 043" ;
+    schema:url <https://example.org/organizations/043> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person043A> ;
+    schema:employee <Person043B> .
+
+<Organization044> a schema:Organization ;
+    schema:name "Example Organization 044" ;
+    schema:url <https://example.org/organizations/044> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person044A> ;
+    schema:employee <Person044B> .
+
+<Organization045> a schema:Organization ;
+    schema:name "Example Organization 045" ;
+    schema:url <https://example.org/organizations/045> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person045A> ;
+    schema:employee <Person045B> .
+
+<Organization046> a schema:Organization ;
+    schema:name "Example Organization 046" ;
+    schema:url <https://example.org/organizations/046> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person046A> ;
+    schema:employee <Person046B> .
+
+<Organization047> a schema:Organization ;
+    schema:name "Example Organization 047" ;
+    schema:url <https://example.org/organizations/047> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person047A> ;
+    schema:employee <Person047B> .
+
+<Organization048> a schema:Organization ;
+    schema:name "Example Organization 048" ;
+    schema:url <https://example.org/organizations/048> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person048A> ;
+    schema:employee <Person048B> .
+
+<Organization049> a schema:Organization ;
+    schema:name "Example Organization 049" ;
+    schema:url <https://example.org/organizations/049> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person049A> ;
+    schema:employee <Person049B> .
+
+<Organization050> a schema:Organization ;
+    schema:name "Example Organization 050" ;
+    schema:url <https://example.org/organizations/050> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person050A> ;
+    schema:employee <Person050B> .
+
+<Organization051> a schema:Organization ;
+    schema:name "Example Organization 051" ;
+    schema:url <https://example.org/organizations/051> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person051A> ;
+    schema:employee <Person051B> .
+
+<Organization052> a schema:Organization ;
+    schema:name "Example Organization 052" ;
+    schema:url <https://example.org/organizations/052> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person052A> ;
+    schema:employee <Person052B> .
+
+<Organization053> a schema:Organization ;
+    schema:name "Example Organization 053" ;
+    schema:url <https://example.org/organizations/053> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person053A> ;
+    schema:employee <Person053B> .
+
+<Organization054> a schema:Organization ;
+    schema:name "Example Organization 054" ;
+    schema:url <https://example.org/organizations/054> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person054A> ;
+    schema:employee <Person054B> .
+
+<Organization055> a schema:Organization ;
+    schema:name "Example Organization 055" ;
+    schema:url <https://example.org/organizations/055> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person055A> ;
+    schema:employee <Person055B> .
+
+<Organization056> a schema:Organization ;
+    schema:name "Example Organization 056" ;
+    schema:url <https://example.org/organizations/056> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person056A> ;
+    schema:employee <Person056B> .
+
+<Organization057> a schema:Organization ;
+    schema:name "Example Organization 057" ;
+    schema:url <https://example.org/organizations/057> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person057A> ;
+    schema:employee <Person057B> .
+
+<Organization058> a schema:Organization ;
+    schema:name "Example Organization 058" ;
+    schema:url <https://example.org/organizations/058> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person058A> ;
+    schema:employee <Person058B> .
+
+<Organization059> a schema:Organization ;
+    schema:name "Example Organization 059" ;
+    schema:url <https://example.org/organizations/059> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person059A> ;
+    schema:employee <Person059B> .
+
+<Organization060> a schema:Organization ;
+    schema:name "Example Organization 060" ;
+    schema:url <https://example.org/organizations/060> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person060A> ;
+    schema:employee <Person060B> .
+
+<Organization061> a schema:Organization ;
+    schema:name "Example Organization 061" ;
+    schema:url <https://example.org/organizations/061> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person061A> ;
+    schema:employee <Person061B> .
+
+<Organization062> a schema:Organization ;
+    schema:name "Example Organization 062" ;
+    schema:url <https://example.org/organizations/062> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person062A> ;
+    schema:employee <Person062B> .
+
+<Organization063> a schema:Organization ;
+    schema:name "Example Organization 063" ;
+    schema:url <https://example.org/organizations/063> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person063A> ;
+    schema:employee <Person063B> .
+
+<Organization064> a schema:Organization ;
+    schema:name "Example Organization 064" ;
+    schema:url <https://example.org/organizations/064> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person064A> ;
+    schema:employee <Person064B> .
+
+<Organization065> a schema:Organization ;
+    schema:name "Example Organization 065" ;
+    schema:url <https://example.org/organizations/065> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person065A> ;
+    schema:employee <Person065B> .
+
+<Organization066> a schema:Organization ;
+    schema:name "Example Organization 066" ;
+    schema:url <https://example.org/organizations/066> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person066A> ;
+    schema:employee <Person066B> .
+
+<Organization067> a schema:Organization ;
+    schema:name "Example Organization 067" ;
+    schema:url <https://example.org/organizations/067> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person067A> ;
+    schema:employee <Person067B> .
+
+<Organization068> a schema:Organization ;
+    schema:name "Example Organization 068" ;
+    schema:url <https://example.org/organizations/068> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person068A> ;
+    schema:employee <Person068B> .
+
+<Organization069> a schema:Organization ;
+    schema:name "Example Organization 069" ;
+    schema:url <https://example.org/organizations/069> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person069A> ;
+    schema:employee <Person069B> .
+
+<Organization070> a schema:Organization ;
+    schema:name "Example Organization 070" ;
+    schema:url <https://example.org/organizations/070> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person070A> ;
+    schema:employee <Person070B> .
+
+<Organization071> a schema:Organization ;
+    schema:name "Example Organization 071" ;
+    schema:url <https://example.org/organizations/071> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person071A> ;
+    schema:employee <Person071B> .
+
+<Organization072> a schema:Organization ;
+    schema:name "Example Organization 072" ;
+    schema:url <https://example.org/organizations/072> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person072A> ;
+    schema:employee <Person072B> .
+
+<Organization073> a schema:Organization ;
+    schema:name "Example Organization 073" ;
+    schema:url <https://example.org/organizations/073> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person073A> ;
+    schema:employee <Person073B> .
+
+<Organization074> a schema:Organization ;
+    schema:name "Example Organization 074" ;
+    schema:url <https://example.org/organizations/074> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person074A> ;
+    schema:employee <Person074B> .
+
+<Organization075> a schema:Organization ;
+    schema:name "Example Organization 075" ;
+    schema:url <https://example.org/organizations/075> ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "100 Example Street, Example City" ;
+    schema:founder <Person075A> ;
+    schema:employee <Person075B> .
+

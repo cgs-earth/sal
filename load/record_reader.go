@@ -238,7 +238,7 @@ func (r *nquadRecordReader) openNextFile() error {
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return fmt.Errorf("gzip %s: %w", path, err)
 	}
 
@@ -250,11 +250,11 @@ func (r *nquadRecordReader) openNextFile() error {
 
 func (r *nquadRecordReader) closeCurrentFile() {
 	if r.gz != nil {
-		r.gz.Close()
+		_ = r.gz.Close()
 		r.gz = nil
 	}
 	if r.file != nil {
-		r.file.Close()
+		_ = r.file.Close()
 		r.file = nil
 	}
 	r.br = nil
