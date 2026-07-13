@@ -28,15 +28,6 @@ type PushCmd struct {
 	Password   string `arg:"--password,env:OCI_PASSWORD" help:"Password or access token for the OCI registry."`
 }
 
-// formatUploadedSize returns a human-readable transfer size using MB for
-// larger uploads and KB for smaller uploads.
-func formatUploadedSize(bytes int64) string {
-	if bytes >= 1024*1024 {
-		return fmt.Sprintf("%.2f MB", float64(bytes)/(1024*1024))
-	}
-	return fmt.Sprintf("%.2f KB", float64(bytes)/1024)
-}
-
 // push uploads all files in dataDir as OCI layers, then packs and tags a
 // manifest that references those uploaded layers.
 func push(ctx context.Context, dataDir string, repo *remote.Repository, destination string) error {
@@ -97,7 +88,7 @@ func push(ctx context.Context, dataDir string, repo *remote.Repository, destinat
 			completed := uploadedFiles.Add(1)
 			uploadedBytes.Add(int64(len(b)))
 			if completed%5 == 0 {
-				msg := fmt.Sprintf("Uploaded %d/%d files (%s)", completed, len(files), formatUploadedSize(uploadedBytes.Load()))
+				msg := fmt.Sprintf("Uploaded %d/%d files (%s)", completed, len(files), pkg.BytesToHumanReadable(uploadedBytes.Load()))
 				slog.Info(msg)
 			}
 			return nil
@@ -139,7 +130,7 @@ func push(ctx context.Context, dataDir string, repo *remote.Repository, destinat
 		return fmt.Errorf("push artifact: %w", err)
 	}
 
-	slog.Info("Pushed data product to " + destination + ":latest totaling " + formatUploadedSize(uploadedBytes.Load()))
+	slog.Info("Pushed data product to " + destination + ":latest totaling " + pkg.BytesToHumanReadable(uploadedBytes.Load()))
 	return nil
 }
 

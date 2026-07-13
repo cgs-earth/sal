@@ -74,3 +74,15 @@ func chdir(t *testing.T, dir string) {
 		require.NoError(t, os.Chdir(previous))
 	})
 }
+
+func TestFormatUploadedSizeUsesKBForSmallUploads(t *testing.T) {
+	got := BytesToHumanReadable(512 * 1024)
+
+	require.Equal(t, "512.00 KB", got)
+}
+
+func TestFormatUploadedSizeUsesMBForLargeUploads(t *testing.T) {
+	got := BytesToHumanReadable(2 * 1024 * 1024)
+
+	require.Equal(t, "2.00 MB", got)
+}

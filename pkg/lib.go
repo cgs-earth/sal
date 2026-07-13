@@ -184,3 +184,12 @@ func UncommittedChangesInGit() (bool, error) {
 
 	return false, nil
 }
+
+// BytesToHumanReadable returns a human-readable size using MB for
+// larger uploads and KB for smaller sizes
+func BytesToHumanReadable(bytes int64) string {
+	if bytes >= 1024*1024 {
+		return fmt.Sprintf("%.2f MB", float64(bytes)/(1024*1024))
+	}
+	return fmt.Sprintf("%.2f KB", float64(bytes)/1024)
+}
