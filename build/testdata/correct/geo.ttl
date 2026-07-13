@@ -1,0 +1,13 @@
+@prefix schema: <https://schema.org/> .
+@prefix gsp: <http://www.opengis.net/ont/geosparql#> .
+@prefix sf: <http://www.opengis.net/ont/sf#> .
+
+<MyState>
+    a schema:Place,
+      schema:AdministrativeArea,
+      schema:State ;
+    schema:name "Demo State" ;
+    gsp:hasGeometry [
+        a sf:MultiPolygon ;
+        gsp:asWKT "MULTIPOLYGON(((-90 40, -89 40, -89 41, -90 41, -90 40)))"^^gsp:wktLiteral
+    ] .

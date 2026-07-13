@@ -28,10 +28,11 @@ func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
 }
 
 type BuildCmd struct {
-	Paths      []string          `arg:"positional" help:"RDF files to validate"`
-	PrefixMaps []string          `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
-	Format     GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
-	Force      bool              `arg:"--force" help:"force build even if there are uncommitted changes in the git repository"`
+	Paths        []string          `arg:"positional" help:"RDF files to validate"`
+	PrefixMaps   []string          `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
+	Format       GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
+	Force        bool              `arg:"--force" help:"force build even if there are uncommitted changes in the git repository"`
+	DataTypeCols bool              `arg:"--typed" help:"Split distinct data types into separate columns" default:"false"`
 
 	skipCommit bool
 }
@@ -128,7 +129,7 @@ func Run(cfg *BuildCmd) (*rdflibgo.Graph, error) {
 		return nil, err
 	}
 
-	if err := ExportGraph(finalGraph, cfg.Format, hash); err != nil {
+	if err := ExportGraph(finalGraph, cfg.Format, hash, cfg.DataTypeCols); err != nil {
 		return nil, err
 	}
 
