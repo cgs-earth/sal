@@ -10,17 +10,19 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/iceberg-go/catalog/hadoop"
 	"github.com/apache/iceberg-go/table"
+	geoarrow "github.com/geoarrow/geoarrow-go"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
-func TestGetSchemasUseDuckDBCompatibleGeometryBytes(t *testing.T) {
+func TestGetSchemasUseNativeIcebergGeometry(t *testing.T) {
 	arrowSchema, icebergSchema, err := GetSchemas(true)
 	require.NoError(t, err)
 
 	convertedType, err := table.ArrowTypeToIceberg(arrowSchema.Field(5).Type, false)
 	require.NoError(t, err)
 	require.Equal(t, icebergSchema.Field(5).Type.String(), convertedType.String())
+	require.Equal(t, "geometry", icebergSchema.Field(5).Type.String())
 }
 
 func TestGetSchemasUsesLegacyObjectColumnByDefault(t *testing.T) {
@@ -117,7 +119,7 @@ func TestNQuadRecordReaderSerializesObjectColumns(t *testing.T) {
 	objectIRI := rec.Column(2).(*array.String)
 	objectFloat := rec.Column(3).(*array.Float64)
 	objectString := rec.Column(4).(*array.String)
-	objectGeometry := rec.Column(5).(*array.Binary)
+	objectGeometry := rec.Column(5).(*geoarrow.WKBArray)
 
 	require.Equal(t, "http://example.com/o", objectIRI.Value(0))
 	require.True(t, objectFloat.IsNull(0))
@@ -139,7 +141,7 @@ func TestNQuadRecordReaderSerializesObjectColumns(t *testing.T) {
 	require.True(t, objectIRI.IsNull(3))
 	require.True(t, objectFloat.IsNull(3))
 	require.True(t, objectString.IsNull(3))
-	require.Equal(t, expectedWKB, objectGeometry.Value(3))
+	require.Equal(t, geoarrow.WKBBytes(expectedWKB), objectGeometry.Value(3))
 
 	require.False(t, rdr.Next())
 	require.NoError(t, rdr.Err())
@@ -176,6 +178,8 @@ func TestAppendGraphIngestsSimpleWKTGeometry(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, loaded.CurrentSnapshot())
 	require.NotNil(t, loaded.CurrentSnapshot().Summary)
+	require.Equal(t, 3, loaded.Metadata().Version())
+	require.Equal(t, "geometry", loaded.Schema().Field(5).Type.String())
 	require.Equal(t, "1", loaded.CurrentSnapshot().Summary.Properties["added-records"])
 }
 

@@ -118,7 +118,7 @@ func NewIcebergTableFromCfg(ctx context.Context, tableSchema *iceberg.Schema, ca
 		"write.metadata.metrics.default":          cfg.MetricsMode,
 		table.WriteTargetFileSizeBytesKey:         strconv.FormatInt(cfg.TargetFileSizeBytes, 10),
 		table.WriteDeleteModeKey:                  table.WriteModeMergeOnRead,
-		table.PropertyFormatVersion:               "3",
+		table.PropertyFormatVersion:               formatVersion(cfg.DataTypeCols),
 	}
 	for k, v := range geometryMetricsProperty(cfg.DataTypeCols) {
 		properties[k] = v
@@ -155,7 +155,13 @@ func geometryMetricsProperty(dataTypeCols bool) iceberg.Properties {
 	if !dataTypeCols {
 		return nil
 	}
-	// add no metrics for geometry for the time being since this feature is still in dev
-	//  in upstream
+	// Geometry metrics are disabled while upstream Iceberg geometry support is still experimental.
 	return iceberg.Properties{table.MetricsModeColumnConfPrefix + ".object_geometry": "none"}
+}
+
+func formatVersion(dataTypeCols bool) string {
+	if dataTypeCols {
+		return "3"
+	}
+	return "2"
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/array"
+	geoarrow "github.com/geoarrow/geoarrow-go"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
@@ -91,7 +92,7 @@ func TestGraphRecordReaderSerializesObjectColumns(t *testing.T) {
 	objectIRI := rec.Column(2).(*array.String)
 	objectFloat := rec.Column(3).(*array.Float64)
 	objectString := rec.Column(4).(*array.String)
-	objectGeometry := rec.Column(5).(*array.Binary)
+	objectGeometry := rec.Column(5).(*geoarrow.WKBArray)
 	subjects := rec.Column(0).(*array.String)
 
 	expectedWKB, err := wktObjectToWKB("POINT (1 2)")
@@ -128,7 +129,7 @@ func TestGraphRecordReaderSerializesObjectColumns(t *testing.T) {
 	require.True(t, objectIRI.IsNull(geometryRow))
 	require.True(t, objectFloat.IsNull(geometryRow))
 	require.True(t, objectString.IsNull(geometryRow))
-	require.Equal(t, expectedWKB, objectGeometry.Value(geometryRow))
+	require.Equal(t, geoarrow.WKBBytes(expectedWKB), objectGeometry.Value(geometryRow))
 
 	require.False(t, rdr.Next())
 	require.NoError(t, rdr.Err())

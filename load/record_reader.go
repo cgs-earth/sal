@@ -15,6 +15,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	geoarrow "github.com/geoarrow/geoarrow-go"
 	"github.com/twpayne/go-geom/encoding/wkb"
 	"github.com/twpayne/go-geom/encoding/wkt"
 )
@@ -139,7 +140,7 @@ func appendObjectFields(builder *array.RecordBuilder, t triple) error {
 	objectIRI := builder.Field(2).(*array.StringBuilder)
 	objectFloat := builder.Field(3).(*array.Float64Builder)
 	objectString := builder.Field(4).(*array.StringBuilder)
-	objectGeometry := builder.Field(5).(*array.BinaryBuilder)
+	objectGeometry := builder.Field(5).(*geoarrow.WKBBuilder)
 
 	if t.oKind == objectKindIRI {
 		objectIRI.Append(t.o)
@@ -157,7 +158,7 @@ func appendObjectFields(builder *array.RecordBuilder, t triple) error {
 		objectIRI.AppendNull()
 		objectFloat.AppendNull()
 		objectString.AppendNull()
-		objectGeometry.Append(wkbBytes)
+		objectGeometry.Append(geoarrow.WKBBytes(wkbBytes))
 		return nil
 	}
 
