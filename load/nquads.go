@@ -14,20 +14,7 @@ var (
 	langTagRE        = regexp.MustCompile(`^[A-Za-z]{1,8}(-[A-Za-z0-9]{1,8})*(--(ltr|rtl))?$`)
 )
 
-type objectKind int
-
-const (
-	objectKindIRI objectKind = iota
-	objectKindBNode
-	objectKindLiteral
-)
-
-type triple struct {
-	s, p      string
-	o         string
-	oKind     objectKind
-	oDatatype string
-}
+type triple struct{ s, p, o string }
 
 func cleanNQuadLine(raw string) string {
 	line := strings.TrimSpace(raw)
@@ -67,7 +54,7 @@ func parseNQuadLine(line string) (triple, error) {
 		return triple{}, err
 	}
 
-	return triple{s: subj, p: pred, o: obj.value, oKind: obj.kind, oDatatype: obj.datatype}, nil
+	return triple{s: subj, p: pred, o: obj}, nil
 }
 
 func (p *nquadLineParser) readSubject() (string, error) {
@@ -93,39 +80,21 @@ func (p *nquadLineParser) readPredicate() (string, error) {
 	return predicate, nil
 }
 
-type nquadObject struct {
-	value    string
-	kind     objectKind
-	datatype string
-}
-
-func (p *nquadLineParser) readObject() (nquadObject, error) {
+func (p *nquadLineParser) readObject() (string, error) {
 	p.skipSpaces()
 	if p.done() {
-		return nquadObject{}, fmt.Errorf("unexpected end")
+		return "", fmt.Errorf("unexpected end")
 	}
 	if p.peek("<") {
-		iri, err := p.readIRI()
-		if err != nil {
-			return nquadObject{}, err
-		}
-		return nquadObject{value: iri, kind: objectKindIRI}, nil
+		return p.readIRI()
 	}
 	if p.peek("_:") {
-		bnode, err := p.readBNode()
-		if err != nil {
-			return nquadObject{}, err
-		}
-		return nquadObject{value: bnode, kind: objectKindBNode}, nil
+		return p.readBNode()
 	}
 	if p.peek(`"`) {
-		value, datatype, err := p.readLiteral()
-		if err != nil {
-			return nquadObject{}, err
-		}
-		return nquadObject{value: value, kind: objectKindLiteral, datatype: datatype}, nil
+		return p.readLiteral()
 	}
-	return nquadObject{}, fmt.Errorf("expected IRI, blank node, or literal for object")
+	return "", fmt.Errorf("expected IRI, blank node, or literal for object")
 }
 
 func (p *nquadLineParser) skipGraphLabel() error {
@@ -214,17 +183,16 @@ func (p *nquadLineParser) readBNode() (string, error) {
 	return label, nil
 }
 
-func (p *nquadLineParser) readLiteral() (string, string, error) {
+func (p *nquadLineParser) readLiteral() (string, error) {
 	p.pos++
 	lexical, err := p.readLiteralLexical()
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
-	datatype, err := p.skipLiteralSuffix()
-	if err != nil {
-		return "", "", err
+	if err := p.skipLiteralSuffix(); err != nil {
+		return "", err
 	}
-	return lexical, datatype, nil
+	return lexical, nil
 }
 
 func (p *nquadLineParser) readLiteralLexical() (string, error) {
@@ -251,18 +219,16 @@ func (p *nquadLineParser) readLiteralLexical() (string, error) {
 	return "", fmt.Errorf("unterminated string literal")
 }
 
-func (p *nquadLineParser) skipLiteralSuffix() (string, error) {
+func (p *nquadLineParser) skipLiteralSuffix() error {
 	if p.consume("@") {
-		return "", p.skipLangTag()
+		return p.skipLangTag()
 	}
 	if p.consume("^^") {
-		datatype, err := p.readIRI()
-		if err != nil {
-			return "", fmt.Errorf("datatype: %w", err)
+		if _, err := p.readIRI(); err != nil {
+			return fmt.Errorf("datatype: %w", err)
 		}
-		return datatype, nil
 	}
-	return "", nil
+	return nil
 }
 
 func (p *nquadLineParser) writeEscapedLiteralChar(sb *strings.Builder) error {

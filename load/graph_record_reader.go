@@ -101,9 +101,7 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 
 		builder.Field(0).(*array.StringBuilder).Append(triple.Subject.String())
 		builder.Field(1).(*array.StringBuilder).Append(triple.Predicate.String())
-		if err := appendObjectColumns(builder, graphTripleObject(triple.Object)); err != nil {
-			return nil, fmt.Errorf("serialize object for %s %s: %w", triple.Subject.String(), triple.Predicate.String(), err)
-		}
+		builder.Field(2).(*array.StringBuilder).Append(triple.Object.String())
 		count++
 		r.rows++
 	}
@@ -112,19 +110,6 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 	}
 
 	return builder.NewRecordBatch(), nil
-}
-
-func graphTripleObject(object rdflibgo.Term) triple {
-	switch o := object.(type) {
-	case rdflibgo.URIRef:
-		return triple{o: o.Value(), oKind: objectKindIRI}
-	case rdflibgo.BNode:
-		return triple{o: o.Value(), oKind: objectKindBNode}
-	case rdflibgo.Literal:
-		return triple{o: o.String(), oKind: objectKindLiteral, oDatatype: o.Datatype().Value()}
-	default:
-		return triple{o: object.String(), oKind: objectKindLiteral}
-	}
 }
 
 func (r *graphRecordReader) releaseCurrent() {
