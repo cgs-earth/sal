@@ -22,7 +22,7 @@ const (
 
 // Export graph takes in a rdflib format graph struct and
 // serializes it to disk in the specified format
-func ExportGraph(graph *rdflibgo.Graph, format GraphExportFormat, hash string) error {
+func ExportGraph(graph *rdflibgo.Graph, format GraphExportFormat, hash string, dataTypeCols bool) error {
 
 	switch format {
 	case "nq":
@@ -60,6 +60,7 @@ func ExportGraph(graph *rdflibgo.Graph, format GraphExportFormat, hash string) e
 			MetricsMode:        "none",
 			Warehouse:          dataDir,
 			Namespace:          gitProject,
+			DataTypeCols:       dataTypeCols,
 		}, map[string]string{"sal.hash": hash})
 		if err != nil {
 			return err

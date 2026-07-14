@@ -56,6 +56,9 @@ func Run(cmd *QueryCmd) error {
 INSTALL iceberg;
 LOAD iceberg;
 
+INSTALL spatial;
+LOAD spatial;
+
 CREATE OR REPLACE VIEW triples AS
 SELECT *
 FROM iceberg_scan('%s', allow_moved_paths = true);

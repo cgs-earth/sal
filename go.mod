@@ -7,12 +7,14 @@ require (
 	github.com/apache/arrow-go/v18 v18.6.1-0.20260608200437-88561cf0d192
 	github.com/apache/iceberg-go v0.6.1-0.20260623164312-30cc631eb24a
 	github.com/cgs-earth/json-gold v0.0.0-20260623123334-63cdb5b88cb8
+	github.com/geoarrow/geoarrow-go v0.0.0-20260525170239-1af41a063b49
 	github.com/lmittmann/tint v1.1.3
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/piprate/json-gold v0.8.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tggo/goRDFlib v0.1.12
 	github.com/twmb/avro v1.7.2
+	github.com/twpayne/go-geom v1.6.1
 	gocloud.dev v0.46.0
 	golang.org/x/sync v0.21.0
 	oras.land/oras-go/v2 v2.6.1
@@ -78,7 +80,6 @@ require (
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/geoarrow/geoarrow-go v0.0.0-20260525170239-1af41a063b49 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

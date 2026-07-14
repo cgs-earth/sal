@@ -26,18 +26,24 @@ type LoadCmd struct {
 	MaxFiles            int    `arg:"--max-files" help:"maximum number of input files to process" default:"0"`
 	Warehouse           string `arg:"--warehouse" help:"Iceberg warehouse directory" default:"/tmp/iceberg-warehouse"`
 	Namespace           string `arg:"--namespace" help:"Iceberg namespace" default:"default"`
+	DataTypeCols        bool   `arg:"--data-type-cols" help:"Split distinct data types into separate columns" default:"false"`
 }
 
 func Run(cfg *LoadCmd) error {
 
 	ctx := context.Background()
 
+	arrowSchema, icebergSchema, err := GetSchemas(cfg.DataTypeCols)
+	if err != nil {
+		return err
+	}
+
 	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create catalog: %w", err)
 	}
 
-	tbl, err := NewIcebergTableFromCfg(ctx, cat, cfg)
+	tbl, err := NewIcebergTableFromCfg(ctx, icebergSchema, cat, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create Iceberg table: %w", err)
 	}
@@ -66,7 +72,7 @@ func Run(cfg *LoadCmd) error {
 		"target_file_size", cfg.TargetFileSizeBytes,
 	)
 
-	if err := processFiles(ctx, files, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, cfg.Workers); err != nil {
+	if err := processFiles(ctx, files, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, cfg.Workers, cfg.DataTypeCols); err != nil {
 		return err
 	}
 
@@ -83,12 +89,17 @@ func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCm
 		return fmt.Errorf("load graph: missing arguments")
 	}
 
+	arrowSchema, tableSchema, err := GetSchemas(cfg.DataTypeCols)
+	if err != nil {
+		return err
+	}
+
 	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create catalog: %w", err)
 	}
 
-	tbl, err := NewIcebergTableFromCfg(ctx, cat, cfg)
+	tbl, err := NewIcebergTableFromCfg(ctx, tableSchema, cat, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create Iceberg table: %w", err)
 	}
@@ -97,7 +108,7 @@ func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCm
 		return err
 	}
 
-	err = processGraph(ctx, graph, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize)
+	err = processGraph(ctx, graph, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, cfg.DataTypeCols)
 	if err != nil {
 		return err
 	}
@@ -121,10 +132,15 @@ func processFiles(
 	arrowSchema *arrow.Schema,
 	batchSize int,
 	workers int,
+	dataTypeCols bool,
 ) error {
 	tbl, err := cat.LoadTable(ctx, tableIdent)
 	if err != nil {
 		return fmt.Errorf("load table: %w", err)
+	}
+
+	if dataTypeCols {
+		return appendFiles(ctx, tbl, files, arrowSchema, batchSize)
 	}
 
 	dataFiles, rows, err := writeFilesInParallel(ctx, tbl, files, arrowSchema, batchSize, workers)
@@ -142,10 +158,15 @@ func processGraph(
 	tableIdent table.Identifier,
 	arrowSchema *arrow.Schema,
 	batchSize int,
+	dataTypeCols bool,
 ) error {
 	tbl, err := cat.LoadTable(ctx, tableIdent)
 	if err != nil {
 		return fmt.Errorf("load table: %w", err)
+	}
+
+	if dataTypeCols {
+		return appendGraph(ctx, tbl, graph, arrowSchema, batchSize)
 	}
 
 	dataFiles, rows, err := writeGraph(ctx, tbl, graph, arrowSchema, batchSize)
@@ -221,6 +242,36 @@ func writeFilesInParallel(
 	return allDataFiles, totalRows, nil
 }
 
+func appendFiles(
+	ctx context.Context,
+	tbl *table.Table,
+	files []string,
+	arrowSchema *arrow.Schema,
+	batchSize int,
+) error {
+	txn := tbl.NewTransaction()
+	var totalRows int64
+	for _, path := range files {
+		rdr := newNQuadRecordReader([]string{path}, arrowSchema, batchSize)
+		if err := txn.Append(ctx, rdr, nil); err != nil {
+			rdr.Release()
+			return fmt.Errorf("append %s: %w", path, err)
+		}
+		if err := rdr.Err(); err != nil {
+			rdr.Release()
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+		totalRows += rdr.RowsRead()
+		log.Printf("  appended %s with %d triples", path, rdr.RowsRead())
+		rdr.Release()
+	}
+	if totalRows == 0 {
+		return fmt.Errorf("no triples found")
+	}
+	_, err := txn.Commit(ctx)
+	return err
+}
+
 func writeOneInputFile(
 	ctx context.Context,
 	tbl *table.Table,
@@ -272,6 +323,34 @@ func writeGraph(
 
 	slog.Info("Successfully wrote to iceberg table with " + fmt.Sprint(len(dataFiles)) + " data files and " + fmt.Sprint(rdr.RowsRead()) + " triples")
 	return dataFiles, rdr.RowsRead(), nil
+}
+
+func appendGraph(
+	ctx context.Context,
+	tbl *table.Table,
+	graph *rdflibgo.Graph,
+	arrowSchema *arrow.Schema,
+	batchSize int,
+) error {
+	rdr := newGraphRecordReader(graph, arrowSchema, batchSize)
+	defer rdr.Release()
+
+	txn := tbl.NewTransaction()
+	if err := txn.Append(ctx, rdr, nil); err != nil {
+		return fmt.Errorf("append graph: %w", err)
+	}
+	if err := rdr.Err(); err != nil {
+		return fmt.Errorf("read graph: %w", err)
+	}
+	if rdr.RowsRead() == 0 {
+		return fmt.Errorf("no triples found")
+	}
+	if _, err := txn.Commit(ctx); err != nil {
+		return fmt.Errorf("commit data files: %w", err)
+	}
+
+	slog.Info("Successfully appended to iceberg table with " + fmt.Sprint(rdr.RowsRead()) + " triples")
+	return nil
 }
 
 // commitDataFiles commits produced Iceberg data files in one table snapshot.
