@@ -3,3 +3,7 @@ __pycache__
 .tmp/
 sal_cli
 *.nq.gz
+.sal
+sal-cli
+sal
+.sal/data

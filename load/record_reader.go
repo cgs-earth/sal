@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -113,7 +114,7 @@ func (r *nquadRecordReader) nextBatch() (arrow.RecordBatch, error) {
 		}
 		builder.Field(0).(*array.StringBuilder).Append(t.s)
 		builder.Field(1).(*array.StringBuilder).Append(t.p)
-		if err := appendObjectFields(builder, t); err != nil {
+		if err := appendObjectColumns(builder, t); err != nil {
 			return nil, fmt.Errorf("serialize object for %s %s: %w", t.s, t.p, err)
 		}
 		count++
@@ -126,14 +127,24 @@ func (r *nquadRecordReader) nextBatch() (arrow.RecordBatch, error) {
 	return builder.NewRecordBatch(), nil
 }
 
+func appendObjectColumns(builder *array.RecordBuilder, t triple) error {
+	if builder.Schema().NumFields() == 3 {
+		builder.Field(2).(*array.StringBuilder).Append(t.o)
+		return nil
+	}
+	return appendObjectFields(builder, t)
+}
+
 // appendObjectFields serializes an RDF object into the Iceberg object union columns.
 func appendObjectFields(builder *array.RecordBuilder, t triple) error {
 	objectIRI := builder.Field(2).(*array.StringBuilder)
-	objectString := builder.Field(3).(*array.StringBuilder)
-	objectGeometry := builder.Field(4).(*geoarrow.WKBBuilder)
+	objectFloat := builder.Field(3).(*array.Float64Builder)
+	objectString := builder.Field(4).(*array.StringBuilder)
+	objectGeometry := builder.Field(5).(*geoarrow.WKBBuilder)
 
 	if t.oKind == objectKindIRI {
 		objectIRI.Append(t.o)
+		objectFloat.AppendNull()
 		objectString.AppendNull()
 		objectGeometry.AppendNull()
 		return nil
@@ -145,12 +156,25 @@ func appendObjectFields(builder *array.RecordBuilder, t triple) error {
 			return err
 		}
 		objectIRI.AppendNull()
+		objectFloat.AppendNull()
 		objectString.AppendNull()
 		objectGeometry.Append(geoarrow.WKBBytes(wkbBytes))
 		return nil
 	}
 
+	if t.oKind == objectKindLiteral {
+		objectValue, err := strconv.ParseFloat(t.o, 64)
+		if err == nil {
+			objectIRI.AppendNull()
+			objectFloat.Append(objectValue)
+			objectString.AppendNull()
+			objectGeometry.AppendNull()
+			return nil
+		}
+	}
+
 	objectIRI.AppendNull()
+	objectFloat.AppendNull()
 	objectString.Append(t.o)
 	objectGeometry.AppendNull()
 	return nil
@@ -238,7 +262,7 @@ func (r *nquadRecordReader) openNextFile() error {
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return fmt.Errorf("gzip %s: %w", path, err)
 	}
 
@@ -250,11 +274,11 @@ func (r *nquadRecordReader) openNextFile() error {
 
 func (r *nquadRecordReader) closeCurrentFile() {
 	if r.gz != nil {
-		r.gz.Close()
+		_ = r.gz.Close()
 		r.gz = nil
 	}
 	if r.file != nil {
-		r.file.Close()
+		_ = r.file.Close()
 		r.file = nil
 	}
 	r.br = nil

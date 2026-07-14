@@ -1,0 +1,30 @@
+# Copyright 2025 Lincoln Institute of Land Policy
+# SPDX-License-Identifier: Apache-2.0
+
+name: SAL Go Tests
+
+on:
+  workflow_dispatch: # Allows manual triggering of the workflow
+  push:
+
+concurrency:
+  group:
+    ${{ github.workflow }}-${{ github.ref_name }}-${{github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: "Checkout GitHub Action"
+        uses: actions/checkout@v4
+        id: checkout
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.25
+      - name: Go tests
+        shell: bash 
+        run: |
+          go test -v ./...
