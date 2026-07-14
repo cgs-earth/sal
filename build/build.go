@@ -19,10 +19,11 @@ type ValidateCmd struct {
 
 func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
 	buildCfg := &BuildCmd{
-		Paths:      cfg.Paths,
-		PrefixMaps: cfg.PrefixMaps,
-		Format:     cfg.Format,
-		skipCommit: true,
+		Paths:             cfg.Paths,
+		PrefixMaps:        cfg.PrefixMaps,
+		Format:            cfg.Format,
+		skipCommit:        true,
+		skipProjectChecks: true,
 	}
 	return Run(buildCfg)
 }
@@ -34,7 +35,11 @@ type BuildCmd struct {
 	Force        bool              `arg:"--force" help:"force build even if there are uncommitted changes in the git repository"`
 	DataTypeCols bool              `arg:"--typed" help:"Split distinct data types into separate columns" default:"false"`
 
+	// skip committing the built data to iceberg
 	skipCommit bool
+
+	// skip validating that the command is called from within a valid sal project / git repo
+	skipProjectChecks bool
 }
 
 var findSALProjectDir = pkg.SALProjectDir
@@ -50,18 +55,18 @@ func Run(cfg *BuildCmd) (*rdflibgo.Graph, error) {
 	var paths []string
 	if len(cfg.Paths) > 0 {
 		paths = cfg.Paths
-	} else {
+	} else if !cfg.skipProjectChecks {
 		projectDir, err := findSALProjectDir(os.UserHomeDir)
 		if err != nil {
 			return nil, fmt.Errorf("build: find SAL project directory: %w", err)
 		}
 		paths = []string{projectDir}
+	} else {
+		// if we are validating rdf data not in a valid sal project, use the current directory
+		// as the default
+		paths = []string{"."}
 	}
 
-	base, err := pkg.DefaultSalBase()
-	if err != nil {
-		return nil, err
-	}
 	files, err := pkg.FindRdfDataInPaths(paths)
 	if err != nil {
 		return nil, err
@@ -78,6 +83,18 @@ func Run(cfg *BuildCmd) (*rdflibgo.Graph, error) {
 	vocabsToReplace, err := parsePrefixMaps(cfg.PrefixMaps)
 	if err != nil {
 		return nil, err
+	}
+
+	var base string
+	if !cfg.skipProjectChecks {
+		base, err = pkg.DefaultSalBase()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// if we are validating rdf data not in a valid sal project, use an empty base
+		// since there is no git repo to check against
+		base = ""
 	}
 
 	finalGraph := rdflibgo.NewGraph(rdflibgo.WithBase(base))
@@ -104,8 +121,10 @@ func Run(cfg *BuildCmd) (*rdflibgo.Graph, error) {
 		slog.Info("Validated " + fmt.Sprint(len(files)) + " files")
 	}
 
-	if err := NewTermsHaveClassDefinitions(finalGraph); err != nil {
-		return nil, err
+	if !cfg.skipProjectChecks {
+		if err := NewTermsHaveClassDefinitions(finalGraph, base); err != nil {
+			return nil, err
+		}
 	}
 	if cfg.Format == GraphExportFormatNQuads {
 		slog.Warn("Exporting as NQuads. Note this will create a larger and less efficient file than iceberg")

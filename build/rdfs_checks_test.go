@@ -20,7 +20,7 @@ func TestAllNewTypesHaveRdfClassTypes(t *testing.T) {
 	g.Add(thingType, rdflibgo.RDF.Type, rdflibgo.RDFS.Class)
 	g.Add(thingType, rdflibgo.RDFS.SubClassOf, rdflibgo.RDFS.Class)
 
-	require.NoError(t, NewTermsHaveClassDefinitions(g))
+	require.NoError(t, NewTermsHaveClassDefinitions(g, base))
 }
 
 func TestAllNewTypesHaveRdfClassTypesRequiresTypeForLocalSubjects(t *testing.T) {
@@ -32,7 +32,7 @@ func TestAllNewTypesHaveRdfClassTypesRequiresTypeForLocalSubjects(t *testing.T) 
 
 	g.Add(thing, rdflibgo.RDFS.Label, rdflibgo.NewLiteral("Thing"))
 
-	err = NewTermsHaveClassDefinitions(g)
+	err = NewTermsHaveClassDefinitions(g, base)
 	require.Error(t, err)
 	var typeDefinitionErr TermLacksTypeDefinitionErr
 	require.ErrorAs(t, err, &typeDefinitionErr)
@@ -50,7 +50,7 @@ func TestAllNewTypesHaveRdfClassTypesRequiresLocalTypesToSubclassRDFSClass(t *te
 	g.Add(thing, rdflibgo.RDF.Type, thingType)
 	g.Add(thingType, rdflibgo.RDF.Type, rdflibgo.RDFS.Class)
 
-	err = NewTermsHaveClassDefinitions(g)
+	err = NewTermsHaveClassDefinitions(g, base)
 	require.Error(t, err)
 	var subclassErr TermIsNotASubClassOfRDFSClassErr
 	require.ErrorAs(t, err, &subclassErr)
@@ -72,5 +72,5 @@ func TestAllNewTypesHaveRdfClassTypesAllowsTransitiveSubclass(t *testing.T) {
 	g.Add(parentType, rdflibgo.RDF.Type, rdflibgo.RDFS.Class)
 	g.Add(parentType, rdflibgo.RDFS.SubClassOf, rdflibgo.RDFS.Class)
 
-	require.NoError(t, NewTermsHaveClassDefinitions(g))
+	require.NoError(t, NewTermsHaveClassDefinitions(g, base))
 }

@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/cgs-earth/sal/build/validate"
-	"github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
@@ -27,11 +26,7 @@ func (t TermIsNotASubClassOfRDFSClassErr) Error() string {
 
 // NewTermsHaveClassDefinitions verifies local resources have rdf:type definition triples and
 // local rdf:type values are declared as subclasses of rdfs:Class.
-func NewTermsHaveClassDefinitions(g *rdflibgo.Graph) error {
-	baseForRelativePaths, err := pkg.DefaultSalBase()
-	if err != nil {
-		return err
-	}
+func NewTermsHaveClassDefinitions(g *rdflibgo.Graph, baseForRelativePaths string) error {
 
 	localSubjects := map[string]bool{}
 	typedSubjects := map[string]bool{}
