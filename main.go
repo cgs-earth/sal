@@ -12,7 +12,6 @@ import (
 	"github.com/cgs-earth/sal/clone"
 	"github.com/cgs-earth/sal/edit"
 	"github.com/cgs-earth/sal/initialization"
-	"github.com/cgs-earth/sal/load"
 	"github.com/cgs-earth/sal/push"
 	"github.com/cgs-earth/sal/query"
 	"github.com/cgs-earth/sal/salmodule"
@@ -27,7 +26,6 @@ import (
 // the order changes how the CLI presents them in the help message.
 type args struct {
 	Init      *initialization.InitCmd `arg:"subcommand:init" help:"Initialize a SAL project in the current directory"`
-	Load      *load.LoadCmd           `arg:"subcommand:load" help:"Load N-Quads gzip files into a local Iceberg triples table"`
 	Build     *build.BuildCmd         `arg:"subcommand:build" help:"Build RDF data into a SAL data product in the iceberg table format"`
 	Validate  *build.ValidateCmd      `arg:"subcommand:validate" help:"Validate all RDF data is properly defined and structured"`
 	Query     *query.QueryCmd         `arg:"subcommand:query" help:"Use duckdb to query a built SAL data product"`
@@ -72,8 +70,6 @@ func main() {
 			fmt.Println(err.Error())
 			os.Exit(1)
 		}
-	case cli.Load != nil:
-		err = load.Run(cli.Load)
 	case cli.Init != nil:
 		err = initialization.Run(cli.Init)
 	case cli.Query != nil:
