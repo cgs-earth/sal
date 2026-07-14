@@ -1,6 +1,8 @@
 package load
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sync/atomic"
 
@@ -99,11 +101,21 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 		triple := r.triples[r.index]
 		r.index++
 
-		builder.Field(0).(*array.StringBuilder).Append(triple.Subject.String())
-		builder.Field(1).(*array.StringBuilder).Append(triple.Predicate.String())
-		if err := appendObjectColumns(builder, graphTripleObject(triple.Object)); err != nil {
+		subject := triple.Subject.String()
+		predicate := triple.Predicate.String()
+
+		builder.Field(0).(*array.StringBuilder).Append(subject)
+		builder.Field(1).(*array.StringBuilder).Append(predicate)
+		objectFields, err := appendObjectColumns(builder, graphTripleObject(triple.Object))
+		if err != nil {
 			return nil, fmt.Errorf("serialize object for %s %s: %w", triple.Subject.String(), triple.Predicate.String(), err)
 		}
+		// triple_hash is the final schema field. It is generated from subject, predicate,
+		// and whichever object column was populated for this triple, leaving null object
+		// columns out of the hash input.
+		lastIndex := r.schema.NumFields() - 1
+		hashValue := tripleHash(subject, predicate, objectFields)
+		builder.Field(lastIndex).(*array.StringBuilder).Append(hashValue)
 		count++
 		r.rows++
 	}
@@ -112,6 +124,20 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 	}
 
 	return builder.NewRecordBatch(), nil
+}
+
+// tripleHash returns a stable SHA-256 row identifier from the populated triple fields.
+func tripleHash(subject string, predicate string, objectFields []hashField) string {
+	hash := sha256.New()
+	_, _ = hash.Write([]byte(subject))
+	_, _ = hash.Write([]byte(predicate))
+	for _, field := range objectFields {
+		if field.value == nil {
+			continue
+		}
+		_, _ = hash.Write(field.value)
+	}
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func graphTripleObject(object rdflibgo.Term) rdfObject {

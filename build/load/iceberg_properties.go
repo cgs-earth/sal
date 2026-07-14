@@ -24,13 +24,15 @@ func GetSchemas(dataTypeCols bool) (*arrow.Schema, *iceberg.Schema, error) {
 				{Name: "subject", Type: arrow.BinaryTypes.String},
 				{Name: "predicate", Type: arrow.BinaryTypes.String},
 				{Name: "object", Type: arrow.BinaryTypes.String},
+				{Name: "triple_hash", Type: arrow.BinaryTypes.String},
 			},
 			nil,
 		)
-		icebergSchema := iceberg.NewSchemaWithIdentifiers(1, []int{3},
+		icebergSchema := iceberg.NewSchemaWithIdentifiers(1, []int{4},
 			iceberg.NestedField{ID: 1, Name: "subject", Type: iceberg.PrimitiveTypes.String, Required: true},
 			iceberg.NestedField{ID: 2, Name: "predicate", Type: iceberg.PrimitiveTypes.String, Required: true},
 			iceberg.NestedField{ID: 3, Name: "object", Type: iceberg.PrimitiveTypes.String, Required: true},
+			iceberg.NestedField{ID: 4, Name: "triple_hash", Type: iceberg.PrimitiveTypes.String, Required: true},
 		)
 		return arrowSchema, icebergSchema, nil
 	}
@@ -50,6 +52,7 @@ func GetSchemas(dataTypeCols bool) (*arrow.Schema, *iceberg.Schema, error) {
 			{Name: "object_float", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
 			{Name: "object_string", Type: arrow.BinaryTypes.String, Nullable: true},
 			{Name: "object_geometry", Type: geoarrow.NewWKBType(geoarrow.WKBWithBinaryStorage(), geoarrow.WKBWithMetadata(geoMetadata)), Nullable: true},
+			{Name: "triple_hash", Type: arrow.BinaryTypes.String, Nullable: false},
 		},
 		nil,
 	)
@@ -57,13 +60,14 @@ func GetSchemas(dataTypeCols bool) (*arrow.Schema, *iceberg.Schema, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	var icebergSchema = iceberg.NewSchemaWithIdentifiers(1, []int{3},
+	var icebergSchema = iceberg.NewSchemaWithIdentifiers(1, []int{7},
 		iceberg.NestedField{ID: 1, Name: "subject", Type: iceberg.PrimitiveTypes.String, Required: true},
 		iceberg.NestedField{ID: 2, Name: "predicate", Type: iceberg.PrimitiveTypes.String, Required: true},
 		iceberg.NestedField{ID: 3, Name: "object_iri", Type: iceberg.PrimitiveTypes.String, Required: false},
 		iceberg.NestedField{ID: 4, Name: "object_float", Type: iceberg.PrimitiveTypes.Float64, Required: false},
 		iceberg.NestedField{ID: 5, Name: "object_string", Type: iceberg.PrimitiveTypes.String, Required: false},
 		iceberg.NestedField{ID: 6, Name: "object_geometry", Type: geometry_type, Required: false},
+		iceberg.NestedField{ID: 7, Name: "triple_hash", Type: iceberg.PrimitiveTypes.String, Required: true},
 	)
 
 	return arrowSchema, icebergSchema, nil

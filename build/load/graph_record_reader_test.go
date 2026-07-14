@@ -34,25 +34,26 @@ func TestGraphRecordReaderStreamsGraphTriples(t *testing.T) {
 	defer rdr.Release()
 
 	var batches int
-	var rows [][3]string
+	var rows [][4]string
 	for rdr.Next() {
 		batches++
 		rec := rdr.RecordBatch()
 		subjects := rec.Column(0).(*array.String)
 		predicates := rec.Column(1).(*array.String)
 		objects := rec.Column(2).(*array.String)
+		hashes := rec.Column(3).(*array.String)
 		for i := 0; i < int(rec.NumRows()); i++ {
-			rows = append(rows, [3]string{subjects.Value(i), predicates.Value(i), objects.Value(i)})
+			rows = append(rows, [4]string{subjects.Value(i), predicates.Value(i), objects.Value(i), hashes.Value(i)})
 		}
 	}
 
 	require.NoError(t, rdr.Err())
 	require.Equal(t, 2, batches)
 	require.Equal(t, int64(3), rdr.RowsRead())
-	require.ElementsMatch(t, [][3]string{
-		{"http://example.com/s1", "http://example.com/p", "one"},
-		{"subject", "http://example.com/p", "http://example.com/o2"},
-		{"http://example.com/s3", "http://example.com/p", "three"},
+	require.ElementsMatch(t, [][4]string{
+		{"http://example.com/s1", "http://example.com/p", "one", tripleHash("http://example.com/s1", "http://example.com/p", []hashField{{name: "object", value: []byte("one")}})},
+		{"subject", "http://example.com/p", "http://example.com/o2", tripleHash("subject", "http://example.com/p", []hashField{{name: "object", value: []byte("http://example.com/o2")}})},
+		{"http://example.com/s3", "http://example.com/p", "three", tripleHash("http://example.com/s3", "http://example.com/p", []hashField{{name: "object", value: []byte("three")}})},
 	}, rows)
 }
 
@@ -93,6 +94,7 @@ func TestGraphRecordReaderSerializesObjectColumns(t *testing.T) {
 	objectFloat := rec.Column(3).(*array.Float64)
 	objectString := rec.Column(4).(*array.String)
 	objectGeometry := rec.Column(5).(*geoarrow.WKBArray)
+	hashes := rec.Column(6).(*array.String)
 	subjects := rec.Column(0).(*array.String)
 
 	expectedWKB, err := wktObjectToWKB("POINT (1 2)")
@@ -112,25 +114,42 @@ func TestGraphRecordReaderSerializesObjectColumns(t *testing.T) {
 	require.True(t, objectFloat.IsNull(iriRow))
 	require.True(t, objectString.IsNull(iriRow))
 	require.True(t, objectGeometry.IsNull(iriRow))
+	require.Equal(t, tripleHash("http://example.com/s1", "http://example.com/p", []hashField{{name: "object_iri", value: []byte("http://example.com/o")}}), hashes.Value(iriRow))
 
 	floatRow := rowsBySubject["http://example.com/s2"]
 	require.True(t, objectIRI.IsNull(floatRow))
 	require.Equal(t, 42.5, objectFloat.Value(floatRow))
 	require.True(t, objectString.IsNull(floatRow))
 	require.True(t, objectGeometry.IsNull(floatRow))
+	require.Equal(t, tripleHash("http://example.com/s2", "http://example.com/p", []hashField{{name: "object_float", value: []byte("42.5")}}), hashes.Value(floatRow))
 
 	stringRow := rowsBySubject["http://example.com/s3"]
 	require.True(t, objectIRI.IsNull(stringRow))
 	require.True(t, objectFloat.IsNull(stringRow))
 	require.Equal(t, "label", objectString.Value(stringRow))
 	require.True(t, objectGeometry.IsNull(stringRow))
+	require.Equal(t, tripleHash("http://example.com/s3", "http://example.com/p", []hashField{{name: "object_string", value: []byte("label")}}), hashes.Value(stringRow))
 
 	geometryRow := rowsBySubject["http://example.com/s4"]
 	require.True(t, objectIRI.IsNull(geometryRow))
 	require.True(t, objectFloat.IsNull(geometryRow))
 	require.True(t, objectString.IsNull(geometryRow))
 	require.Equal(t, geoarrow.WKBBytes(expectedWKB), objectGeometry.Value(geometryRow))
+	require.Equal(t, tripleHash("http://example.com/s4", "http://example.com/p", []hashField{{name: "object_geometry", value: expectedWKB}}), hashes.Value(geometryRow))
 
 	require.False(t, rdr.Next())
 	require.NoError(t, rdr.Err())
+}
+
+func TestTripleHashIgnoresNilFields(t *testing.T) {
+	hashWithOnlyObject := tripleHash("s", "p", []hashField{{name: "object_string", value: []byte("o")}})
+	hashWithNullFields := tripleHash("s", "p", []hashField{
+		{name: "object_iri"},
+		{name: "object_float"},
+		{name: "object_string", value: []byte("o")},
+		{name: "object_geometry"},
+	})
+
+	require.Equal(t, hashWithOnlyObject, hashWithNullFields)
+	require.Len(t, hashWithOnlyObject, 64)
 }

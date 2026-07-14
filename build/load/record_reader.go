@@ -14,19 +14,24 @@ import (
 
 const geoSPARQLWKTLiteral = "http://www.opengis.net/ont/geosparql#wktLiteral"
 
-func appendObjectColumns(builder *array.RecordBuilder, t rdfObject) error {
-	// if we are using the simple s,p,o schema and have 3 columns
+type hashField struct {
+	name  string
+	value []byte
+}
+
+func appendObjectColumns(builder *array.RecordBuilder, t rdfObject) ([]hashField, error) {
+	// if we are using the simple s,p,o,hash schema and have 4 columns
 	// we can just append the object column directly
-	if builder.Schema().NumFields() == 3 {
+	if builder.Schema().NumFields() == 4 {
 		builder.Field(2).(*array.StringBuilder).Append(t.o)
-		return nil
+		return []hashField{{name: "object", value: []byte(t.o)}}, nil
 	}
-	// otherwie we map the object to the proper iceberg type and
+	// otherwise we map the object to the proper iceberg type and
 	return appendObjectFields(builder, t)
 }
 
 // appendObjectFields serializes an RDF object into the Iceberg object union columns.
-func appendObjectFields(builder *array.RecordBuilder, t rdfObject) error {
+func appendObjectFields(builder *array.RecordBuilder, t rdfObject) ([]hashField, error) {
 	objectIRI := builder.Field(2).(*array.StringBuilder)
 	objectFloat := builder.Field(3).(*array.Float64Builder)
 	objectString := builder.Field(4).(*array.StringBuilder)
@@ -37,19 +42,19 @@ func appendObjectFields(builder *array.RecordBuilder, t rdfObject) error {
 		objectFloat.AppendNull()
 		objectString.AppendNull()
 		objectGeometry.AppendNull()
-		return nil
+		return []hashField{{name: "object_iri", value: []byte(t.o)}}, nil
 	}
 
 	if isWKTObject(t) {
 		wkbBytes, err := wktObjectToWKB(t.o)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		objectIRI.AppendNull()
 		objectFloat.AppendNull()
 		objectString.AppendNull()
 		objectGeometry.Append(geoarrow.WKBBytes(wkbBytes))
-		return nil
+		return []hashField{{name: "object_geometry", value: wkbBytes}}, nil
 	}
 
 	if t.oKind == objectKindLiteral {
@@ -59,7 +64,7 @@ func appendObjectFields(builder *array.RecordBuilder, t rdfObject) error {
 			objectFloat.Append(objectValue)
 			objectString.AppendNull()
 			objectGeometry.AppendNull()
-			return nil
+			return []hashField{{name: "object_float", value: []byte(strconv.FormatFloat(objectValue, 'g', -1, 64))}}, nil
 		}
 	}
 
@@ -67,7 +72,7 @@ func appendObjectFields(builder *array.RecordBuilder, t rdfObject) error {
 	objectFloat.AppendNull()
 	objectString.Append(t.o)
 	objectGeometry.AppendNull()
-	return nil
+	return []hashField{{name: "object_string", value: []byte(t.o)}}, nil
 }
 
 func isWKTObject(t rdfObject) bool {

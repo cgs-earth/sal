@@ -24,21 +24,27 @@ func TestGetSchemasUsesLegacyObjectColumnByDefault(t *testing.T) {
 	arrowSchema, icebergSchema, err := GetSchemas(false)
 	require.NoError(t, err)
 
-	require.Equal(t, 3, arrowSchema.NumFields())
+	require.Equal(t, 4, arrowSchema.NumFields())
 	require.Equal(t, "object", arrowSchema.Field(2).Name)
+	require.Equal(t, "triple_hash", arrowSchema.Field(3).Name)
 	require.Equal(t, "object", icebergSchema.Field(2).Name)
+	require.Equal(t, "triple_hash", icebergSchema.Field(3).Name)
+	require.Equal(t, []int{4}, icebergSchema.IdentifierFieldIDs)
 }
 
 func TestGetSchemasUsesDataTypeColumnsWhenEnabled(t *testing.T) {
 	arrowSchema, icebergSchema, err := GetSchemas(true)
 	require.NoError(t, err)
 
-	require.Equal(t, 6, arrowSchema.NumFields())
+	require.Equal(t, 7, arrowSchema.NumFields())
 	require.Equal(t, "object_iri", arrowSchema.Field(2).Name)
 	require.Equal(t, "object_float", arrowSchema.Field(3).Name)
 	require.Equal(t, "object_string", arrowSchema.Field(4).Name)
 	require.Equal(t, "object_geometry", arrowSchema.Field(5).Name)
+	require.Equal(t, "triple_hash", arrowSchema.Field(6).Name)
 	require.Equal(t, "object_geometry", icebergSchema.Field(5).Name)
+	require.Equal(t, "triple_hash", icebergSchema.Field(6).Name)
+	require.Equal(t, []int{7}, icebergSchema.IdentifierFieldIDs)
 }
 
 func TestAppendGraphIngestsSimpleWKTGeometry(t *testing.T) {
