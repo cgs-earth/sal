@@ -8,7 +8,7 @@ const (
 	objectKindLiteral
 )
 
-type triple struct {
+type rdfObject struct {
 	o         string
 	oKind     objectKind
 	oDatatype string

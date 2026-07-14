@@ -14,7 +14,7 @@ import (
 
 const geoSPARQLWKTLiteral = "http://www.opengis.net/ont/geosparql#wktLiteral"
 
-func appendObjectColumns(builder *array.RecordBuilder, t triple) error {
+func appendObjectColumns(builder *array.RecordBuilder, t rdfObject) error {
 	if builder.Schema().NumFields() == 3 {
 		builder.Field(2).(*array.StringBuilder).Append(t.o)
 		return nil
@@ -23,7 +23,7 @@ func appendObjectColumns(builder *array.RecordBuilder, t triple) error {
 }
 
 // appendObjectFields serializes an RDF object into the Iceberg object union columns.
-func appendObjectFields(builder *array.RecordBuilder, t triple) error {
+func appendObjectFields(builder *array.RecordBuilder, t rdfObject) error {
 	objectIRI := builder.Field(2).(*array.StringBuilder)
 	objectFloat := builder.Field(3).(*array.Float64Builder)
 	objectString := builder.Field(4).(*array.StringBuilder)
@@ -67,7 +67,7 @@ func appendObjectFields(builder *array.RecordBuilder, t triple) error {
 	return nil
 }
 
-func isWKTObject(t triple) bool {
+func isWKTObject(t rdfObject) bool {
 	return t.oKind == objectKindLiteral && t.oDatatype == geoSPARQLWKTLiteral
 }
 

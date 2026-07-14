@@ -114,16 +114,16 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 	return builder.NewRecordBatch(), nil
 }
 
-func graphTripleObject(object rdflibgo.Term) triple {
+func graphTripleObject(object rdflibgo.Term) rdfObject {
 	switch o := object.(type) {
 	case rdflibgo.URIRef:
-		return triple{o: o.Value(), oKind: objectKindIRI}
+		return rdfObject{o: o.Value(), oKind: objectKindIRI}
 	case rdflibgo.BNode:
-		return triple{o: o.Value(), oKind: objectKindBNode}
+		return rdfObject{o: o.Value(), oKind: objectKindBNode}
 	case rdflibgo.Literal:
-		return triple{o: o.String(), oKind: objectKindLiteral, oDatatype: o.Datatype().Value()}
+		return rdfObject{o: o.String(), oKind: objectKindLiteral, oDatatype: o.Datatype().Value()}
 	default:
-		return triple{o: object.String(), oKind: objectKindLiteral}
+		return rdfObject{o: object.String(), oKind: objectKindLiteral}
 	}
 }
 
