@@ -18,6 +18,7 @@ type graphRecordReader struct {
 	schema    *arrow.Schema
 	pool      memory.Allocator
 	triples   []rdflibgo.Triple
+	hashes    map[string]struct{}
 	batchSize int
 
 	index   int
@@ -28,9 +29,15 @@ type graphRecordReader struct {
 
 // newGraphRecordReader snapshots graph triples and exposes them as Arrow record batches.
 func newGraphRecordReader(graph *rdflibgo.Graph, schema *arrow.Schema, batchSize int) *graphRecordReader {
+	return newFilteredGraphRecordReader(graph, schema, batchSize, nil)
+}
+
+// newFilteredGraphRecordReader writes only triples whose hash is present in hashes.
+func newFilteredGraphRecordReader(graph *rdflibgo.Graph, schema *arrow.Schema, batchSize int, hashes map[string]struct{}) *graphRecordReader {
 	r := &graphRecordReader{
 		schema:    schema,
 		pool:      memory.NewGoAllocator(),
+		hashes:    hashes,
 		batchSize: batchSize,
 	}
 	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
@@ -103,18 +110,23 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 
 		subject := triple.Subject.String()
 		predicate := triple.Predicate.String()
+		object := graphTripleObject(triple.Object)
+		hashValue := tripleHash(subject, predicate, object.o)
+		if r.hashes != nil {
+			if _, ok := r.hashes[hashValue]; !ok {
+				continue
+			}
+		}
 
 		builder.Field(0).(*array.StringBuilder).Append(subject)
 		builder.Field(1).(*array.StringBuilder).Append(predicate)
-		objectFields, err := appendObjectColumns(builder, graphTripleObject(triple.Object))
-		if err != nil {
+		if err := appendObjectColumns(builder, object); err != nil {
 			return nil, fmt.Errorf("serialize object for %s %s: %w", triple.Subject.String(), triple.Predicate.String(), err)
 		}
 		// triple_hash is the final schema field. It is generated from subject, predicate,
-		// and whichever object column was populated for this triple, leaving null object
-		// columns out of the hash input.
+		// and the object term before typed object columns are derived, so storage type
+		// markers like xsd:date or geometry WKB do not affect the row identity.
 		lastIndex := r.schema.NumFields() - 1
-		hashValue := tripleHash(subject, predicate, objectFields)
 		builder.Field(lastIndex).(*array.StringBuilder).Append(hashValue)
 		count++
 		r.rows++
@@ -126,18 +138,20 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 	return builder.NewRecordBatch(), nil
 }
 
-// tripleHash returns a stable SHA-256 row identifier from the populated triple fields.
-func tripleHash(subject string, predicate string, objectFields []hashField) string {
+// tripleHash returns a stable SHA-256 row identifier from the RDF triple terms.
+func tripleHash(subject string, predicate string, object string) string {
 	hash := sha256.New()
+	_, _ = hash.Write([]byte("subject="))
 	_, _ = hash.Write([]byte(subject))
+	_, _ = hash.Write([]byte("\npredicate="))
 	_, _ = hash.Write([]byte(predicate))
-	for _, field := range objectFields {
-		if field.value == nil {
-			continue
-		}
-		_, _ = hash.Write(field.value)
-	}
+	_, _ = hash.Write([]byte("\nobject="))
+	_, _ = hash.Write([]byte(object))
 	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func tripleHashForTriple(triple rdflibgo.Triple) string {
+	return tripleHash(triple.Subject.String(), triple.Predicate.String(), graphTripleObject(triple.Object).o)
 }
 
 func graphTripleObject(object rdflibgo.Term) rdfObject {

@@ -6,12 +6,15 @@ import (
 	"log/slog"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/iceberg-go"
 	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/catalog/hadoop"
 	"github.com/apache/iceberg-go/table"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
+
+const deleteHashChunkSize = 100
 
 type LoadConfig struct {
 	// BatchSize is the number of Arrow records to write per batch.
@@ -57,6 +60,8 @@ func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCo
 		return fmt.Errorf("load graph: missing arguments")
 	}
 
+	graph = stabilizeBlankNodes(graph)
+
 	arrowSchema, tableSchema, err := GetSchemas(cfg.DataTypeCols)
 	if err != nil {
 		return err
@@ -79,6 +84,11 @@ func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCo
 	err = processGraph(ctx, graph, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, cfg.DataTypeCols)
 	if err != nil {
 		return err
+	}
+
+	tbl, err = cat.LoadTable(ctx, tbl.Identifier())
+	if err != nil {
+		return fmt.Errorf("reload table before setting metadata: %w", err)
 	}
 
 	tx := tbl.NewTransaction()
@@ -105,11 +115,29 @@ func processGraph(
 		return fmt.Errorf("load table: %w", err)
 	}
 
-	if dataTypeCols {
-		return appendGraph(ctx, tbl, graph, arrowSchema, batchSize)
+	diff, err := diffGraphAgainstTable(ctx, tbl, graph)
+	if err != nil {
+		return err
+	}
+	if len(diff.toAdd) == 0 && len(diff.toDrop) == 0 {
+		slog.Warn("No changes from last Iceberg snapshot", "added", 0, "removed", 0, "unchanged", diff.unchanged)
+		return nil
+	}
+	slog.Info("Applying Iceberg triple diff", "added", len(diff.toAdd), "removed", len(diff.toDrop), "unchanged", diff.unchanged)
+
+	tbl, err = deleteRemovedTriples(ctx, tbl, diff.toDrop)
+	if err != nil {
+		return err
+	}
+	if len(diff.toAdd) == 0 {
+		return nil
 	}
 
-	dataFiles, rows, err := writeGraph(ctx, tbl, graph, arrowSchema, batchSize)
+	if dataTypeCols {
+		return appendGraph(ctx, tbl, graph, arrowSchema, batchSize, diff.toAdd)
+	}
+
+	dataFiles, rows, err := writeGraph(ctx, tbl, graph, arrowSchema, batchSize, diff.toAdd)
 	if err != nil {
 		return err
 	}
@@ -123,8 +151,9 @@ func writeGraph(
 	graph *rdflibgo.Graph,
 	arrowSchema *arrow.Schema,
 	batchSize int,
+	hashes map[string]struct{},
 ) ([]iceberg.DataFile, int64, error) {
-	rdr := newGraphRecordReader(graph, arrowSchema, batchSize)
+	rdr := newFilteredGraphRecordReader(graph, arrowSchema, batchSize, hashes)
 	defer rdr.Release()
 
 	records := retainedRecordIterator(rdr)
@@ -149,8 +178,9 @@ func appendGraph(
 	graph *rdflibgo.Graph,
 	arrowSchema *arrow.Schema,
 	batchSize int,
+	hashes map[string]struct{},
 ) error {
-	rdr := newGraphRecordReader(graph, arrowSchema, batchSize)
+	rdr := newFilteredGraphRecordReader(graph, arrowSchema, batchSize, hashes)
 	defer rdr.Release()
 
 	txn := tbl.NewTransaction()
@@ -169,6 +199,99 @@ func appendGraph(
 
 	slog.Info("Successfully appended to iceberg table with " + fmt.Sprint(rdr.RowsRead()) + " triples")
 	return nil
+}
+
+type graphTableDiff struct {
+	toAdd     map[string]struct{}
+	toDrop    []string
+	unchanged int
+}
+
+// diffGraphAgainstTable compares new graph triple hashes against hashes already in Iceberg.
+func diffGraphAgainstTable(ctx context.Context, tbl *table.Table, graph *rdflibgo.Graph) (*graphTableDiff, error) {
+	existing, err := readExistingTripleHashes(ctx, tbl)
+	if err != nil {
+		return nil, err
+	}
+
+	diff := &graphTableDiff{toAdd: map[string]struct{}{}}
+	newHashes := map[string]struct{}{}
+	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+		hash := tripleHashForTriple(triple)
+		newHashes[hash] = struct{}{}
+		if _, ok := existing[hash]; ok {
+			diff.unchanged++
+			return true
+		}
+		diff.toAdd[hash] = struct{}{}
+		return true
+	})
+
+	for hash := range existing {
+		if _, ok := newHashes[hash]; !ok {
+			diff.toDrop = append(diff.toDrop, hash)
+		}
+	}
+
+	return diff, nil
+}
+
+// readExistingTripleHashes scans only the triple_hash column from the current Iceberg table.
+func readExistingTripleHashes(ctx context.Context, tbl *table.Table) (map[string]struct{}, error) {
+	hashes := map[string]struct{}{}
+	if tbl.CurrentSnapshot() == nil {
+		return hashes, nil
+	}
+
+	_, records, err := tbl.Scan(
+		table.WithSelectedFields("triple_hash"),
+		table.WithCaseSensitive(true),
+	).ToArrowRecords(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("scan existing triple hashes: %w", err)
+	}
+	for rec, err := range records {
+		if err != nil {
+			return nil, fmt.Errorf("read existing triple hashes: %w", err)
+		}
+		if rec == nil {
+			continue
+		}
+		hashColumn := rec.Column(0).(*array.String)
+		for i := 0; i < int(rec.NumRows()); i++ {
+			if hashColumn.IsNull(i) {
+				continue
+			}
+			hashes[hashColumn.Value(i)] = struct{}{}
+		}
+		rec.Release()
+	}
+	return hashes, nil
+}
+
+// deleteRemovedTriples removes table rows whose triple_hash is absent from the new graph.
+func deleteRemovedTriples(ctx context.Context, tbl *table.Table, hashes []string) (*table.Table, error) {
+	for start := 0; start < len(hashes); start += deleteHashChunkSize {
+		end := min(start+deleteHashChunkSize, len(hashes))
+		predicate := tripleHashDeletePredicate(hashes[start:end])
+		next, err := tbl.Delete(ctx, predicate, nil)
+		if err != nil {
+			return nil, fmt.Errorf("delete removed triples: %w", err)
+		}
+		tbl = next
+	}
+	return tbl, nil
+}
+
+func tripleHashDeletePredicate(hashes []string) iceberg.BooleanExpression {
+	if len(hashes) == 0 {
+		return iceberg.AlwaysFalse{}
+	}
+	var expr iceberg.BooleanExpression = iceberg.EqualTo(iceberg.Reference("triple_hash"), hashes[0])
+	for _, hash := range hashes[1:] {
+		expr = iceberg.NewOr(expr, iceberg.EqualTo(iceberg.Reference("triple_hash"), hash))
+	}
+	return expr
 }
 
 // commitDataFiles commits produced Iceberg data files in one table snapshot.

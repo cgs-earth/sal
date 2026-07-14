@@ -51,9 +51,9 @@ func TestGraphRecordReaderStreamsGraphTriples(t *testing.T) {
 	require.Equal(t, 2, batches)
 	require.Equal(t, int64(3), rdr.RowsRead())
 	require.ElementsMatch(t, [][4]string{
-		{"http://example.com/s1", "http://example.com/p", "one", tripleHash("http://example.com/s1", "http://example.com/p", []hashField{{name: "object", value: []byte("one")}})},
-		{"subject", "http://example.com/p", "http://example.com/o2", tripleHash("subject", "http://example.com/p", []hashField{{name: "object", value: []byte("http://example.com/o2")}})},
-		{"http://example.com/s3", "http://example.com/p", "three", tripleHash("http://example.com/s3", "http://example.com/p", []hashField{{name: "object", value: []byte("three")}})},
+		{"http://example.com/s1", "http://example.com/p", "one", tripleHash("http://example.com/s1", "http://example.com/p", "one")},
+		{"subject", "http://example.com/p", "http://example.com/o2", tripleHash("subject", "http://example.com/p", "http://example.com/o2")},
+		{"http://example.com/s3", "http://example.com/p", "three", tripleHash("http://example.com/s3", "http://example.com/p", "three")},
 	}, rows)
 }
 
@@ -114,42 +114,108 @@ func TestGraphRecordReaderSerializesObjectColumns(t *testing.T) {
 	require.True(t, objectFloat.IsNull(iriRow))
 	require.True(t, objectString.IsNull(iriRow))
 	require.True(t, objectGeometry.IsNull(iriRow))
-	require.Equal(t, tripleHash("http://example.com/s1", "http://example.com/p", []hashField{{name: "object_iri", value: []byte("http://example.com/o")}}), hashes.Value(iriRow))
+	require.Equal(t, tripleHash("http://example.com/s1", "http://example.com/p", "http://example.com/o"), hashes.Value(iriRow))
 
 	floatRow := rowsBySubject["http://example.com/s2"]
 	require.True(t, objectIRI.IsNull(floatRow))
 	require.Equal(t, 42.5, objectFloat.Value(floatRow))
 	require.True(t, objectString.IsNull(floatRow))
 	require.True(t, objectGeometry.IsNull(floatRow))
-	require.Equal(t, tripleHash("http://example.com/s2", "http://example.com/p", []hashField{{name: "object_float", value: []byte("42.5")}}), hashes.Value(floatRow))
+	require.Equal(t, tripleHash("http://example.com/s2", "http://example.com/p", "42.5"), hashes.Value(floatRow))
 
 	stringRow := rowsBySubject["http://example.com/s3"]
 	require.True(t, objectIRI.IsNull(stringRow))
 	require.True(t, objectFloat.IsNull(stringRow))
 	require.Equal(t, "label", objectString.Value(stringRow))
 	require.True(t, objectGeometry.IsNull(stringRow))
-	require.Equal(t, tripleHash("http://example.com/s3", "http://example.com/p", []hashField{{name: "object_string", value: []byte("label")}}), hashes.Value(stringRow))
+	require.Equal(t, tripleHash("http://example.com/s3", "http://example.com/p", "label"), hashes.Value(stringRow))
 
 	geometryRow := rowsBySubject["http://example.com/s4"]
 	require.True(t, objectIRI.IsNull(geometryRow))
 	require.True(t, objectFloat.IsNull(geometryRow))
 	require.True(t, objectString.IsNull(geometryRow))
 	require.Equal(t, geoarrow.WKBBytes(expectedWKB), objectGeometry.Value(geometryRow))
-	require.Equal(t, tripleHash("http://example.com/s4", "http://example.com/p", []hashField{{name: "object_geometry", value: expectedWKB}}), hashes.Value(geometryRow))
+	require.Equal(t, tripleHash("http://example.com/s4", "http://example.com/p", "POINT (1 2)"), hashes.Value(geometryRow))
 
 	require.False(t, rdr.Next())
 	require.NoError(t, rdr.Err())
 }
 
-func TestTripleHashIgnoresNilFields(t *testing.T) {
-	hashWithOnlyObject := tripleHash("s", "p", []hashField{{name: "object_string", value: []byte("o")}})
-	hashWithNullFields := tripleHash("s", "p", []hashField{
-		{name: "object_iri"},
-		{name: "object_float"},
-		{name: "object_string", value: []byte("o")},
-		{name: "object_geometry"},
-	})
+func TestTripleHashUsesTermsWithoutTypeMarkers(t *testing.T) {
+	typedLiteral := rdflibgo.NewLiteral("2026-06-02", rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe("http://www.w3.org/2001/XMLSchema#date")))
+	triple := rdflibgo.Triple{
+		Subject:   rdflibgo.NewURIRefUnsafe("http://example.com/s"),
+		Predicate: rdflibgo.NewURIRefUnsafe("http://purl.org/dc/terms/created"),
+		Object:    typedLiteral,
+	}
 
-	require.Equal(t, hashWithOnlyObject, hashWithNullFields)
-	require.Len(t, hashWithOnlyObject, 64)
+	hashFromTriple := tripleHashForTriple(triple)
+	hashFromTerms := tripleHash("http://example.com/s", "http://purl.org/dc/terms/created", "2026-06-02")
+
+	require.Equal(t, hashFromTerms, hashFromTriple)
+	require.Len(t, hashFromTriple, 64)
+}
+
+func TestStabilizeBlankNodesStabilizesBlankNodeHashes(t *testing.T) {
+	first := graphWithGeometryBlankNode("first")
+	second := graphWithGeometryBlankNode("second")
+
+	canonicalFirst := stabilizeBlankNodes(first)
+	canonicalSecond := stabilizeBlankNodes(second)
+
+	require.Equal(t, tripleHashes(canonicalFirst), tripleHashes(canonicalSecond))
+}
+
+func TestStabilizeBlankNodesPreservesRelativeIRIs(t *testing.T) {
+	graph := rdflibgo.NewGraph(rdflibgo.WithBase("https://example.test/base/"))
+	graph.Add(
+		rdflibgo.NewURIRefUnsafe("Organization001"),
+		rdflibgo.NewURIRefUnsafe("https://schema.org/worksFor"),
+		rdflibgo.NewURIRefUnsafe("org/acme"),
+	)
+
+	stable := stabilizeBlankNodes(graph)
+
+	require.Same(t, graph, stable)
+	require.Equal(t, tripleHashes(graph), tripleHashes(stable))
+}
+
+func TestStabilizeBlankNodesStabilizesNestedBlankNodeHashes(t *testing.T) {
+	first := graphWithNestedBlankNodes("location1", "address1")
+	second := graphWithNestedBlankNodes("location2", "address2")
+
+	stableFirst := stabilizeBlankNodes(first)
+	stableSecond := stabilizeBlankNodes(second)
+
+	require.Equal(t, tripleHashes(stableFirst), tripleHashes(stableSecond))
+}
+
+func graphWithGeometryBlankNode(id string) *rdflibgo.Graph {
+	graph := rdflibgo.NewGraph()
+	subject := rdflibgo.NewURIRefUnsafe("http://example.com/place")
+	blank := rdflibgo.NewBNode(id)
+	graph.Add(subject, rdflibgo.NewURIRefUnsafe("http://www.opengis.net/ont/geosparql#hasGeometry"), blank)
+	graph.Add(blank, rdflibgo.RDF.Type, rdflibgo.NewURIRefUnsafe("http://www.opengis.net/ont/sf#MultiPolygon"))
+	graph.Add(blank, rdflibgo.NewURIRefUnsafe("http://www.opengis.net/ont/geosparql#asWKT"), rdflibgo.NewLiteral("POINT (1 2)", rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(geoSPARQLWKTLiteral))))
+	return graph
+}
+
+func graphWithNestedBlankNodes(locationID string, addressID string) *rdflibgo.Graph {
+	graph := rdflibgo.NewGraph()
+	subject := rdflibgo.NewURIRefUnsafe("http://example.com/place")
+	location := rdflibgo.NewBNode(locationID)
+	address := rdflibgo.NewBNode(addressID)
+	graph.Add(subject, rdflibgo.NewURIRefUnsafe("https://schema.org/location"), location)
+	graph.Add(location, rdflibgo.NewURIRefUnsafe("https://schema.org/address"), address)
+	graph.Add(address, rdflibgo.NewURIRefUnsafe("https://schema.org/streetAddress"), rdflibgo.NewLiteral("100 Example Street"))
+	return graph
+}
+
+func tripleHashes(graph *rdflibgo.Graph) map[string]struct{} {
+	hashes := map[string]struct{}{}
+	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+		hashes[tripleHashForTriple(triple)] = struct{}{}
+		return true
+	})
+	return hashes
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"os"
 	"strconv"
@@ -89,10 +88,12 @@ func NewIcebergTableFromCfg(ctx context.Context, tableSchema *iceberg.Schema, ca
 	}
 
 	tableIdent := catalog.ToIdentifier(cfg.Namespace, "triples")
-	if err := cat.DropTable(ctx, tableIdent); err != nil && !errors.Is(err, catalog.ErrNoSuchTable) {
-		log.Fatal("Failed to reset table:", err)
+	if tbl, err := cat.LoadTable(ctx, tableIdent); err == nil {
+		slog.Info("Loaded existing Iceberg table")
+		return tbl, nil
+	} else if !errors.Is(err, catalog.ErrNoSuchTable) {
+		return nil, fmt.Errorf("load existing Iceberg table: %w", err)
 	}
-	slog.Info("Table reset successfully")
 
 	partitionSpec := iceberg.NewPartitionSpec(
 		iceberg.PartitionField{
