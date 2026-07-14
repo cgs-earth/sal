@@ -13,21 +13,43 @@ import (
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
-type LoadCmd struct {
-	BatchSize           int    `arg:"--batch-size" help:"Arrow records per batch" default:"131072"`
-	Workers             int    `arg:"--workers" help:"number of input files to convert to Parquet in parallel" default:"8"`
-	ParquetCompression  string `arg:"--compression" help:"Parquet compression codec: snappy, zstd, gzip, brotli, lz4, uncompressed" default:"snappy"`
-	MetricsMode         string `arg:"--metrics-mode" help:"Iceberg metrics mode: none, counts, truncate(N), full" default:"truncate(16)"`
-	TargetFileSizeBytes int64  `arg:"--target-file-size-bytes" help:"target Iceberg data file size" default:"0"`
-	InputDir            string `arg:"positional,required" placeholder:"PATH" help:"path to a directory containing .nq.gz files"`
-	MaxFiles            int    `arg:"--max-files" help:"maximum number of input files to process" default:"0"`
-	Warehouse           string `arg:"--warehouse" help:"Iceberg warehouse directory" default:"/tmp/iceberg-warehouse"`
-	Namespace           string `arg:"--namespace" help:"Iceberg namespace" default:"default"`
-	DataTypeCols        bool   `arg:"--data-type-cols" help:"Split distinct data types into separate columns" default:"false"`
+type LoadConfig struct {
+	// BatchSize is the number of Arrow records to write per batch.
+	BatchSize int
+
+	// Workers is the number of input files to convert to Parquet in parallel.
+	Workers int
+
+	// ParquetCompression is the Parquet compression codec
+	// (snappy, zstd, gzip, brotli, lz4, or uncompressed).
+	ParquetCompression string
+
+	// MetricsMode is the Iceberg metrics mode
+	// (none, counts, truncate(N), or full).
+	MetricsMode string
+
+	// TargetFileSizeBytes is the target Iceberg data file size in bytes.
+	TargetFileSizeBytes int64
+
+	// InputDir is the path to a directory containing .nq.gz files.
+	InputDir string
+
+	// MaxFiles is the maximum number of input files to process.
+	// A value of 0 processes all files.
+	MaxFiles int
+
+	// Warehouse is the Iceberg warehouse directory.
+	Warehouse string
+
+	// Namespace is the Iceberg namespace.
+	Namespace string
+
+	// DataTypeCols splits distinct RDF object data types into separate columns.
+	DataTypeCols bool
 }
 
 // WriteGraphToIceberg writes an RDF graph into the configured Iceberg triples table.
-func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCmd, customMetadata map[string]string) error {
+func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig, customMetadata map[string]string) error {
 	if graph == nil {
 		return fmt.Errorf("load graph: missing graph")
 	}

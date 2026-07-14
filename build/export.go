@@ -54,7 +54,7 @@ func ExportGraph(graph *rdflibgo.Graph, format GraphExportFormat, hash string, d
 		if err != nil {
 			return err
 		}
-		err = load.WriteGraphToIceberg(context.Background(), graph, &load.LoadCmd{
+		err = load.WriteGraphToIceberg(context.Background(), graph, &load.LoadConfig{
 			BatchSize:          131072,
 			ParquetCompression: "snappy",
 			MetricsMode:        "none",

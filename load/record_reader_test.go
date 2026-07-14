@@ -43,7 +43,7 @@ func TestGetSchemasUsesDataTypeColumnsWhenEnabled(t *testing.T) {
 
 func TestAppendGraphIngestsSimpleWKTGeometry(t *testing.T) {
 	ctx := context.Background()
-	cfg := &LoadCmd{
+	cfg := &LoadConfig{
 		BatchSize:           10,
 		ParquetCompression:  "snappy",
 		MetricsMode:         "truncate(16)",

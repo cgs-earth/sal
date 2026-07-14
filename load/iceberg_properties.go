@@ -70,7 +70,7 @@ func GetSchemas(dataTypeCols bool) (*arrow.Schema, *iceberg.Schema, error) {
 
 }
 
-func NewIcebergTableFromCfg(ctx context.Context, tableSchema *iceberg.Schema, cat catalog.Catalog, cfg *LoadCmd) (*table.Table, error) {
+func NewIcebergTableFromCfg(ctx context.Context, tableSchema *iceberg.Schema, cat catalog.Catalog, cfg *LoadConfig) (*table.Table, error) {
 
 	if err := os.MkdirAll(cfg.Warehouse+"/"+cfg.Namespace, 0755); err != nil {
 		slog.Error("Failed to create warehouse directory:", "error", err)
@@ -131,7 +131,7 @@ func NewIcebergTableFromCfg(ctx context.Context, tableSchema *iceberg.Schema, ca
 	)
 }
 
-func applyWriteProperties(ctx context.Context, tbl *table.Table, cfg *LoadCmd) error {
+func applyWriteProperties(ctx context.Context, tbl *table.Table, cfg *LoadConfig) error {
 	writeProps := iceberg.Properties{
 		"write.parquet.compression-codec": cfg.ParquetCompression,
 		"write.metadata.metrics.default":  cfg.MetricsMode,
