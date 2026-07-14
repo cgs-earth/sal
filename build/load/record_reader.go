@@ -15,10 +15,13 @@ import (
 const geoSPARQLWKTLiteral = "http://www.opengis.net/ont/geosparql#wktLiteral"
 
 func appendObjectColumns(builder *array.RecordBuilder, t rdfObject) error {
+	// if we are using the simple s,p,o schema and have 3 columns
+	// we can just append the object column directly
 	if builder.Schema().NumFields() == 3 {
 		builder.Field(2).(*array.StringBuilder).Append(t.o)
 		return nil
 	}
+	// otherwie we map the object to the proper iceberg type and
 	return appendObjectFields(builder, t)
 }
 
