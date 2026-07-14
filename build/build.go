@@ -122,7 +122,7 @@ func Run(cfg *BuildCmd) (*rdflibgo.Graph, error) {
 		return finalGraph, ErrUncommittedChanges
 	}
 	if cfg.Force {
-		slog.Warn("creating build with modified source tree. This should only be done for testing purposes.")
+		slog.Warn("Creating build with modified source tree. This should only be done for testing purposes.")
 	}
 
 	if err := AddAdditionalDataFileMetadata(finalGraph); err != nil {
