@@ -120,7 +120,7 @@ func processGraph(
 		return err
 	}
 	if len(diff.toAdd) == 0 && len(diff.toDrop) == 0 {
-		slog.Warn("No changes from last Iceberg snapshot", "added", 0, "removed", 0, "unchanged", diff.unchanged)
+		slog.Warn("No changes from last Iceberg snapshot. No new snapshot will be created")
 		return nil
 	}
 	slog.Info("Applying Iceberg triple diff", "added", len(diff.toAdd), "removed", len(diff.toDrop), "unchanged", diff.unchanged)
