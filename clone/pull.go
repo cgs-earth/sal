@@ -2,25 +2,16 @@ package clone
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
+	"log/slog"
 
+	"github.com/apache/iceberg-go/catalog"
 	"github.com/cgs-earth/sal/pkg"
-	"github.com/cgs-earth/sal/push"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/retry"
 )
-
-func getSnapshots(manifest ocispec.Manifest) ([]string, error) {
-	for key, value := range manifest.Annotations {
-		if key == push.SalIcebergSnapshotsAnnotation {
-			return strings.Split(value, ","), nil
-		}
-	}
-	return nil, fmt.Errorf("no snapshot metadata found in data product")
-}
 
 func (cfg *OciArtifactRetrievalCmd) RunPull() error {
 	ctx := context.Background()
@@ -48,12 +39,25 @@ func (cfg *OciArtifactRetrievalCmd) RunPull() error {
 		return err
 	}
 
-	snapshots, err := getSnapshots(manifest)
+	remoteSnapshots, err := getSnapshots(manifest)
 	if err != nil {
+		return fmt.Errorf("error getting snapshot data from %s %w", cfg.Artifact, err)
+	}
+
+	localSnapshots, err := pkg.GetSalSnapshots()
+	// if the error is that the table just doesn't exist yet, that is
+	// ok since it will be created upon pull
+	if !errors.Is(err, catalog.ErrNoSuchTable) {
 		return err
 	}
 
-	fmt.Printf("%v", snapshots)
+	err = canPull(localSnapshots, remoteSnapshots)
+	if errors.Is(err, ErrNothingToPull) {
+		slog.Info(err.Error())
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("skipping pull: %w", err)
+	}
 
 	dataDir, err := pkg.SalDataDir()
 	if err != nil {

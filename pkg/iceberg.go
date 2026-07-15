@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/catalog/hadoop"
 	"github.com/apache/iceberg-go/table"
 )
+
+const DefaultSalIcebergTable = "triples"
 
 func SalIcebergCatalog() (catalog.Catalog, error) {
 	dataDir, err := SalDataDir()
@@ -21,37 +24,44 @@ func SalIcebergCatalog() (catalog.Catalog, error) {
 }
 
 func GetSalIcebergTable() (*table.Table, error) {
-	dataDir, err := SalDataDir()
-	if err != nil {
-		return nil, err
-	}
 	cat, err := SalIcebergCatalog()
 	if err != nil {
 		return nil, err
 	}
+	gitProjectName, err := GitProjectName()
+	if err != nil {
+		return nil, err
+	}
+	dataDir, err := SalDataDir()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dataDir+"/"+gitProjectName, 0755); err != nil {
+		slog.Error("Failed to create warehouse directory:", "error", err)
+		return nil, err
+	}
+
 	ctx := context.Background()
-	defaultNS := catalog.ToIdentifier(dataDir)
+	defaultNS := catalog.ToIdentifier(gitProjectName)
 	if err := cat.CreateNamespace(ctx, defaultNS, nil); err != nil &&
 		!errors.Is(err, catalog.ErrNamespaceAlreadyExists) {
 		slog.Error("Failed to create default namespace:", "error", err)
 		return nil, err
 	}
 
-	tableIdent := catalog.ToIdentifier(cfg.Namespace, "triples")
-	if tbl, err := cat.LoadTable(ctx, tableIdent); err == nil {
-		slog.Info("Loaded existing Iceberg table")
-		return tbl, nil
-	} else if !errors.Is(err, catalog.ErrNoSuchTable) {
-		return nil, fmt.Errorf("load existing Iceberg table: %w", err)
-	}
-	tbl, err := cat.LoadTable(nil, table.Identifier{"default", "triples"})
-	return tbl, err
+	tableIdent := catalog.ToIdentifier(gitProjectName, DefaultSalIcebergTable)
+	return cat.LoadTable(ctx, tableIdent)
 }
 
-func SalSnapshots() ([]string, error) {
+func GetSalSnapshots() ([]string, error) {
 
-	// tbl :=
-	// for _, snap := range tbl.Metadata().Snapshots() {
-	// 	fmt.Println(snap.SnapshotID)
-	// }
+	tbl, err := GetSalIcebergTable()
+	if err != nil {
+		return nil, err
+	}
+	var snapshots []string
+	for _, s := range tbl.Metadata().Snapshots() {
+		snapshots = append(snapshots, fmt.Sprintf("%d", s.SnapshotID))
+	}
+	return snapshots, nil
 }

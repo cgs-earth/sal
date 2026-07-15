@@ -36,13 +36,18 @@ type PushCmd struct {
 func push(ctx context.Context, dataDir string, repo *remote.Repository, destination string) error {
 	slog.Info("Pushing SAL data product in " + dataDir + " to " + destination)
 
+	SnapShots, err := pkg.GetSalSnapshots()
+	if err != nil {
+		return fmt.Errorf("error getting snapshot data %w", err)
+	}
+
 	type uploadFile struct {
 		path  string
 		title string
 	}
 
 	var files []uploadFile
-	err := filepath.WalkDir(dataDir, func(path string, d os.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(dataDir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -119,6 +124,7 @@ func push(ctx context.Context, dataDir string, repo *remote.Repository, destinat
 			"org.opencontainers.image.source":      gitRemote,
 			SalGitHashAnnotation:                   gitHash,
 			"org.opencontainers.image.description": description,
+			SalIcebergSnapshotsAnnotation:          strings.Join(SnapShots, ","),
 		},
 	})
 	if err != nil {
