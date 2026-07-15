@@ -22,6 +22,9 @@ import (
 const defaultRegistry = "ghcr.io"
 const maxConcurrentUploads = 4
 
+const SalIcebergSnapshotsAnnotation = "sal.iceberg-snapshots"
+const SalGitHashAnnotation = "sal.git-commit-hash"
+
 type PushCmd struct {
 	Repository string `arg:"positional" help:"Full URL of the OCI registry and repository to push the built SAL data product to. Example: ghcr.io/my-username/my-repository"`
 	Username   string `arg:"--username,env:OCI_USERNAME" help:"Username for the OCI registry. This should match the username used to create the password token"`
@@ -37,7 +40,6 @@ func push(ctx context.Context, dataDir string, repo *remote.Repository, destinat
 		path  string
 		title string
 	}
-
 	var files []uploadFile
 	err := filepath.WalkDir(dataDir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -61,6 +63,11 @@ func push(ctx context.Context, dataDir string, repo *remote.Repository, destinat
 
 	if len(files) == 0 {
 		return fmt.Errorf("no files found in SAL data directory: %s", dataDir)
+	}
+
+	SnapShots, err := pkg.GetSalSnapshots()
+	if err != nil {
+		return fmt.Errorf("error getting snapshot data %w", err)
 	}
 
 	layers := make([]ocispec.Descriptor, len(files))
@@ -114,8 +121,9 @@ func push(ctx context.Context, dataDir string, repo *remote.Repository, destinat
 		Layers: layers,
 		ManifestAnnotations: map[string]string{
 			"org.opencontainers.image.source":      gitRemote,
-			"sal.git-commit-hash":                  gitHash,
+			SalGitHashAnnotation:                   gitHash,
 			"org.opencontainers.image.description": description,
+			SalIcebergSnapshotsAnnotation:          strings.Join(SnapShots, ","),
 		},
 	})
 	if err != nil {

@@ -25,17 +25,18 @@ import (
 // All subcommands that sal supports. These should be in a useful order as
 // the order changes how the CLI presents them in the help message.
 type args struct {
-	Init      *initialization.InitCmd `arg:"subcommand:init" help:"Initialize a SAL project in the current directory"`
-	Build     *build.BuildCmd         `arg:"subcommand:build" help:"Build RDF data into a SAL data product in the iceberg table format"`
-	Validate  *build.ValidateCmd      `arg:"subcommand:validate" help:"Validate all RDF data is properly defined and structured"`
-	Query     *query.QueryCmd         `arg:"subcommand:query" help:"Use duckdb to query a built SAL data product"`
-	Clean     *clean.CleanCmd         `arg:"subcommand:clean" help:"Remove build artifacts produced by a SAL project"`
-	Push      *push.PushCmd           `arg:"subcommand:push" help:"Push a built SAL data product to a remote OCI registry"`
-	SalModule *salmodule.SalModuleCmd `arg:"subcommand:salmodule" help:"Output salmodule information about this project"`
-	Clone     *clone.CloneCmd         `arg:"subcommand:clone" help:"Clone an OCI artifact and the associated git repository for a built SAL data product"`
-	Edit      *edit.EditCmd           `arg:"subcommand:edit" help:"Edit the metadata of a built SAL data product"`
-	Upload    *upload.UploadCmd       `arg:"subcommand:upload" help:"Upload a built SAL data product to an object store"`
-	Test      *test.TestCmd           `arg:"subcommand:test" help:"Run tests on a built SAL data product"`
+	Init      *initialization.InitCmd        `arg:"subcommand:init" help:"Initialize a SAL project in the current directory"`
+	Build     *build.BuildCmd                `arg:"subcommand:build" help:"Build RDF data into a SAL data product in the iceberg table format"`
+	Validate  *build.ValidateCmd             `arg:"subcommand:validate" help:"Validate all RDF data is properly defined and structured"`
+	Query     *query.QueryCmd                `arg:"subcommand:query" help:"Use duckdb to query a built SAL data product"`
+	Clean     *clean.CleanCmd                `arg:"subcommand:clean" help:"Remove build artifacts produced by a SAL project"`
+	Push      *push.PushCmd                  `arg:"subcommand:push" help:"Push a built SAL data product to a remote OCI registry"`
+	SalModule *salmodule.SalModuleCmd        `arg:"subcommand:salmodule" help:"Output salmodule information about this project"`
+	Clone     *clone.OciArtifactRetrievalCmd `arg:"subcommand:clone" help:"Clone an OCI artifact and the associated git repository for a built SAL data product"`
+	Edit      *edit.EditCmd                  `arg:"subcommand:edit" help:"Edit the metadata of a built SAL data product"`
+	Upload    *upload.UploadCmd              `arg:"subcommand:upload" help:"Upload a built SAL data product to an object store"`
+	Test      *test.TestCmd                  `arg:"subcommand:test" help:"Run tests on a built SAL data product"`
+	Pull      *clone.OciArtifactRetrievalCmd `arg:"subcommand:pull" help:"Pull a built SAL data product from a remote OCI registry"`
 }
 
 func (args) Description() string {
@@ -81,13 +82,15 @@ func main() {
 	case cli.Push != nil:
 		err = push.Run(cli.Push)
 	case cli.Clone != nil:
-		err = clone.Run(cli.Clone)
+		err = cli.Clone.RunClone()
 	case cli.Edit != nil:
 		err = cli.Edit.Run()
 	case cli.Upload != nil:
 		err = cli.Upload.Run()
 	case cli.Test != nil:
 		err = cli.Test.Run()
+	case cli.Pull != nil:
+		err = cli.Pull.RunPull()
 	case cli.Validate != nil:
 		_, err = cli.Validate.Run()
 		if err != nil {
