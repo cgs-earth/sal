@@ -32,7 +32,7 @@ type args struct {
 	Clean     *clean.CleanCmd         `arg:"subcommand:clean" help:"Remove build artifacts produced by a SAL project"`
 	Push      *push.PushCmd           `arg:"subcommand:push" help:"Push a built SAL data product to a remote OCI registry"`
 	SalModule *salmodule.SalModuleCmd `arg:"subcommand:salmodule" help:"Output salmodule information about this project"`
-	Clone     *clone.CloneCmd         `arg:"subcommand:pull" help:"Clone an OCI artifact and the associated git repository for a built SAL data product"`
+	Clone     *clone.CloneCmd         `arg:"subcommand:clone" help:"Clone an OCI artifact and the associated git repository for a built SAL data product"`
 	Edit      *edit.EditCmd           `arg:"subcommand:edit" help:"Edit the metadata of a built SAL data product"`
 	Upload    *upload.UploadCmd       `arg:"subcommand:upload" help:"Upload a built SAL data product to an object store"`
 	Test      *test.TestCmd           `arg:"subcommand:test" help:"Run tests on a built SAL data product"`
