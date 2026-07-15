@@ -25,7 +25,7 @@ func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
 		skipCommit:        true,
 		skipProjectChecks: true,
 	}
-	return Run(buildCfg)
+	return buildCfg.Run()
 }
 
 type BuildCmd struct {
@@ -47,7 +47,7 @@ var findSALProjectDir = pkg.SALProjectDir
 var ErrUncommittedChanges = fmt.Errorf("git repository has uncommitted changes; please commit and finalize changes before creating a new build snapshot")
 
 // Run validates RDF files for terms that are not defined by their vocabularies and returns their merged RDF graph.
-func Run(cfg *BuildCmd) (*rdflibgo.Graph, error) {
+func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("build: missing arguments")
 	}

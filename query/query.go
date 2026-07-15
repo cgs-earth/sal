@@ -20,7 +20,7 @@ type QueryCmd struct {
 	SnapshotDiff string `arg:"--snapshot-diff" help:"Show rows added and removed by the specified Iceberg snapshot ID. Specify 'latest' for the latest snapshot."`
 }
 
-func Run(cmd *QueryCmd) error {
+func (cmd *QueryCmd) Run() error {
 	if cmd == nil {
 		return fmt.Errorf("query: missing arguments")
 	}

@@ -20,7 +20,7 @@ var salConfigTemplate string
 type InitCmd struct {
 }
 
-func Run(cmd *InitCmd) error {
+func (cmd *InitCmd) Run() error {
 
 	// if cwd is home return an error
 	cwd, err := os.Getwd()

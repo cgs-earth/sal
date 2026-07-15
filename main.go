@@ -62,7 +62,7 @@ func main() {
 	var err error
 	switch {
 	case cli.Build != nil:
-		_, err = build.Run(cli.Build)
+		_, err = cli.Build.Run()
 		// Errors from build should be directly written to stdout
 		// not written as a log which adds extra noise
 		// Special errors like UncommittedChangesErr should be handled normally
@@ -72,15 +72,15 @@ func main() {
 			os.Exit(1)
 		}
 	case cli.Init != nil:
-		err = initialization.Run(cli.Init)
+		err = cli.Init.Run()
 	case cli.Query != nil:
-		err = query.Run(cli.Query)
+		err = cli.Query.Run()
 	case cli.Clean != nil:
-		err = clean.Run(cli.Clean)
+		err = cli.Clean.Run()
 	case cli.SalModule != nil:
-		err = salmodule.Run(cli.SalModule)
+		err = cli.SalModule.Run()
 	case cli.Push != nil:
-		err = push.Run(cli.Push)
+		err = cli.Push.Run()
 	case cli.Clone != nil:
 		err = cli.Clone.RunClone()
 	case cli.Edit != nil:

@@ -144,7 +144,7 @@ func push(ctx context.Context, dataDir string, repo *remote.Repository, destinat
 
 // Run executes the push command, which pushes all files in the SAL data directory
 // to the specified OCI registry.
-func Run(p *PushCmd) error {
+func (p *PushCmd) Run() error {
 	if p.Password == "" {
 		return fmt.Errorf("password is required for pushing to an OCI registry. See https://oras.land/docs/how_to_guides/remote_registries/#authentication for more information")
 	}

@@ -14,7 +14,7 @@ import (
 type CleanCmd struct {
 }
 
-func Run(cmd *CleanCmd) error {
+func (cmd *CleanCmd) Run() error {
 	dataProductPath, err := pkg.SalBuiltDataProductPath()
 	if err != nil {
 		return err
