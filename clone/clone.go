@@ -8,11 +8,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	_ "crypto/sha256"
 
 	"github.com/cgs-earth/sal/pkg"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"golang.org/x/sync/errgroup"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content/file"
 	"oras.land/oras-go/v2/registry/remote"
@@ -21,6 +23,7 @@ import (
 const (
 	sourceAnnotation    = "org.opencontainers.image.source"
 	gitCommitAnnotation = "sal.git-commit-hash"
+	maxConcurrentPulls  = 8
 )
 
 type OciArtifactRetrievalCmd struct {
@@ -123,34 +126,42 @@ func pullManifestLayers(ctx context.Context, src oras.ReadOnlyTarget, manifest o
 		}
 	}()
 
-	var pulledFiles int
+	var pulledFiles atomic.Int64
+	group, pullCtx := errgroup.WithContext(ctx)
+	group.SetLimit(maxConcurrentPulls)
 	for _, layer := range manifest.Layers {
 		title := layer.Annotations[ocispec.AnnotationTitle]
 		if title == "" {
 			continue
 		}
 
-		rc, err := src.Fetch(ctx, layer)
-		if err != nil {
-			return fmt.Errorf("fetch layer %s: %w", title, err)
-		}
-		layer.Annotations[ocispec.AnnotationTitle] = title
-		err = fs.Push(ctx, layer, rc)
-		closeErr := rc.Close()
-		if err != nil {
-			return fmt.Errorf("write layer %s: %w", title, err)
-		}
-		if closeErr != nil {
-			return fmt.Errorf("close layer %s: %w", title, closeErr)
-		}
-		pulledFiles++
+		group.Go(func() error {
+			rc, err := src.Fetch(pullCtx, layer)
+			if err != nil {
+				return fmt.Errorf("fetch layer %s: %w", title, err)
+			}
+			layer.Annotations[ocispec.AnnotationTitle] = title
+			err = fs.Push(pullCtx, layer, rc)
+			closeErr := rc.Close()
+			if err != nil {
+				return fmt.Errorf("write layer %s: %w", title, err)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("close layer %s: %w", title, closeErr)
+			}
+			pulledFiles.Add(1)
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return err
 	}
 
-	if pulledFiles == 0 {
+	if pulledFiles.Load() == 0 {
 		return fmt.Errorf("artifact %s has no SAL data layers with %s annotations", reference, ocispec.AnnotationTitle)
 	}
 
-	slog.Info("Pulled data product to "+destination, "digest", desc.Digest.String(), "files", pulledFiles)
+	slog.Info("Pulled data product to "+destination, "digest", desc.Digest.String(), "files", pulledFiles.Load())
 	return nil
 }
 
