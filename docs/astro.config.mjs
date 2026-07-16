@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 // https://astro.build/config
 export default defineConfig({
+	site: 'https://cgs-earth.github.io',
+	base: '/sal',
 	vite: {
 		resolve: {
 			alias: {
