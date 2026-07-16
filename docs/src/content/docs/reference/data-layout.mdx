@@ -1,0 +1,63 @@
+---
+title: Data Layout
+description: How SAL stores generated RDF data products on disk and in published locations.
+---
+
+SAL separates source files from generated data.
+Your Git repository contains RDF source files and project code; `.sal/data` contains generated output.
+
+## Local layout
+
+After [`sal init`](/reference/commands/#sal-init), a project has:
+
+```text
+.sal/
+  data/
+```
+
+After [`sal build`](/reference/commands/#sal-build), `.sal/data` contains the built data product.
+For the main triples table, SAL writes an Apache Iceberg table under the project namespace:
+
+```text
+.sal/data/
+  <git-project-name>/
+    triples/
+      data/
+      metadata/
+```
+
+The `metadata` directory contains Iceberg table metadata, manifest lists, manifests, and `version-hint.text`.
+The `data` directory contains the table's data files.
+
+## RDF triples
+
+SAL builds RDF into rows representing triples:
+
+- `subject`
+- `predicate`
+- `object`
+- `triple_hash`
+
+The hash identifies a triple from its subject, predicate, and object.
+SAL uses this identity to avoid writing duplicate triples when the table already contains the same data.
+
+## Validation and vocabularies
+
+Before writing output, SAL validates RDF source files.
+Source data can be Turtle or JSON-LD.
+
+Validation checks that terms used through prefixes are defined by the provided vocabularies.
+For example, a misspelled term such as `schema:nameee` should fail validation rather than becoming a built triple.
+
+Use [`sal validate`](/reference/commands/#sal-validate) to run these checks without writing a new build.
+
+## Published layout
+
+[`sal push`](/reference/commands/#sal-push) preserves `.sal/data` as an OCI artifact.
+The artifact metadata records the source repository and commit, which lets [`sal clone`](/reference/commands/#sal-clone) recreate the matching source tree and data directory.
+
+[`sal upload`](/reference/commands/#sal-upload) deploys the same data to an object store.
+For object stores, SAL rewrites a staged copy of the Iceberg metadata so table paths point to the remote table root.
+The local `.sal/data` directory is not changed by upload.
+
+For examples, see [Publishing Data](/guides/publishing-data/).

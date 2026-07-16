@@ -1,0 +1,139 @@
+---
+title: Commands
+description: High-level reference for SAL CLI subcommands.
+---
+
+SAL commands operate on a Git-backed project and the generated data under `.sal/data`.
+For a step-by-step flow, start with [Getting Started](/guides/getting-started/).
+
+## `sal init`
+
+Initializes a SAL project in the current Git repository.
+The repository must not be your home directory and must already have a Git remote.
+
+`sal init` creates:
+
+- `.sal/data` in the project for generated data.
+- `~/.sal/cache` for user-level cache data.
+- `~/.sal/config.jsonld` for user-level SAL configuration.
+- A `.gitignore` entry for `.sal/data`.
+
+## `sal validate`
+
+Validates RDF source files without committing a new data product.
+Use it while editing Turtle or JSON-LD files:
+
+```sh
+sal validate data/
+```
+
+Important flags:
+
+- `--prefix-maps`: apply prefix mappings as `source=target` entries or source/target pairs.
+- `--format`: choose `iceberg` or `nq`; defaults to `iceberg`.
+
+## `sal build`
+
+Validates RDF source files and writes the merged graph into the local data product.
+
+```sh
+sal build data/
+```
+
+By default, `sal build` requires a clean Git working tree.
+Use `--force` only for test or debugging builds.
+
+Important flags:
+
+- `--prefix-maps`: apply prefix mappings before validation.
+- `--format`: choose `iceberg` or `nq`; defaults to `iceberg`.
+- `--typed`: split distinct RDF data types into separate output columns.
+- `--force`: build even when the Git working tree has uncommitted changes.
+
+See [Data Layout](/reference/data-layout/) for the generated table structure.
+
+## `sal query`
+
+Opens DuckDB with a `triples` view over the built Iceberg table.
+
+```sh
+sal query
+```
+
+Info modes:
+
+- `head`: show the first rows from `triples`.
+- `properties`: show Iceberg table properties.
+- `snapshots`: show Iceberg snapshots and SAL Git tags.
+- `column-stats`: show Iceberg column statistics.
+
+To compare snapshots:
+
+```sh
+sal query --snapshot-diff latest
+```
+
+## `sal push`
+
+Publishes `.sal/data` as an OCI artifact:
+
+```sh
+sal push ghcr.io/my-org/my-data-product --username "$OCI_USERNAME" --password "$OCI_PASSWORD"
+```
+
+SAL uploads generated data files as OCI layers and annotates the artifact with the source Git remote and current commit hash.
+See [Publishing Data](/guides/publishing-data/#push-to-an-oci-registry).
+
+## `sal clone`
+
+Restores a published OCI artifact and its source repository:
+
+```sh
+sal clone ghcr.io/my-org/my-data-product:latest
+```
+
+SAL reads the artifact metadata, clones the recorded source repository, checks out the recorded commit, runs `sal init`, and restores the artifact layers into `.sal/data`.
+
+Use `--destination` to choose the local clone path.
+
+## `sal pull`
+
+Pulls data from an OCI artifact.
+It uses the same artifact retrieval command shape as `sal clone`.
+
+## `sal upload`
+
+Uploads the built data product to an object store:
+
+```sh
+sal upload --bucket gs://my-bucket/sal/triples
+```
+
+SAL stages a temporary copy, rewrites staged Iceberg metadata to point at the target location, then uploads data and metadata in reader-friendly order.
+See [Publishing Data](/guides/publishing-data/#upload-to-object-storage).
+
+## `sal edit`
+
+Rewrites local Iceberg metadata so a copied table can be read from a new table root:
+
+```sh
+sal edit --new-table-root gs://my-bucket/sal/triples
+```
+
+This command changes metadata references only.
+It does not rewrite Parquet data files.
+
+## `sal clean`
+
+Removes or reshapes local build artifacts.
+Use `--wipe` to delete the local data product, or `--squash` to condense local snapshots ahead of a remote artifact.
+
+## `sal salmodule`
+
+Outputs SAL module information.
+The `ontology` subcommand prints SAL's ontology information, and `run` runs a SAL project.
+
+## `sal test`
+
+Reserved for tests on built SAL data products.
+This command is not yet implemented.

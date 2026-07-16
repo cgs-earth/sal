@@ -1,0 +1,51 @@
+---
+title: SAL
+description: High-level documentation for the Semantic Accessibility Layer CLI.
+template: splash
+hero:
+  tagline: Build, validate, query, and publish RDF data products from source-controlled datasets.
+  actions:
+    - text: Get Started
+      link: /guides/getting-started/
+      icon: right-arrow
+    - text: Command Reference
+      link: /reference/commands/
+      icon: document
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+SAL, the Semantic Accessibility Layer CLI, turns RDF source files into versioned data products.
+It is designed for projects where the source data lives in Git, the built output is an Apache Iceberg table, and published artifacts need to preserve the link back to the exact source commit.
+
+## How SAL fits together
+
+<CardGrid stagger>
+	<Card title="Initialize a project" icon="setting">
+		Start with [Getting Started](/guides/getting-started/) to create the `.sal` workspace inside a Git repository.
+	</Card>
+	<Card title="Build RDF" icon="add-document">
+		Use [`sal build`](/reference/commands/#sal-build) to validate Turtle or JSON-LD and write triples into Iceberg.
+	</Card>
+	<Card title="Inspect data" icon="magnifier">
+		Query the local Iceberg table with DuckDB using [`sal query`](/reference/commands/#sal-query).
+	</Card>
+	<Card title="Publish output" icon="upload">
+		Publish to OCI registries or object stores with the workflows in [Publishing Data](/guides/publishing-data/).
+	</Card>
+	<Card title="Understand the layout" icon="folder">
+		Read [Data Layout](/reference/data-layout/) for how `.sal/data` stores generated Iceberg files.
+	</Card>
+</CardGrid>
+
+## Core workflow
+
+1. Run [`sal init`](/reference/commands/#sal-init) in a Git repository with a configured remote.
+2. Add RDF source files to the project.
+3. Run [`sal validate`](/reference/commands/#sal-validate) while editing to catch invalid or undefined terms.
+4. Commit source changes, then run [`sal build`](/reference/commands/#sal-build) to create or update the local data product.
+5. Use [`sal query`](/reference/commands/#sal-query) to inspect the built table.
+6. Publish the result with [`sal push`](/reference/commands/#sal-push) or [`sal upload`](/reference/commands/#sal-upload).
+
+For command flags and examples, see the [command reference](/reference/commands/).

@@ -1,0 +1,55 @@
+---
+title: Publishing Data
+description: Publish a built SAL data product to registries or object stores.
+---
+
+SAL can publish the same built data product in two ways:
+
+- [`sal push`](/reference/commands/#sal-push) packages `.sal/data` as an OCI artifact.
+- [`sal upload`](/reference/commands/#sal-upload) deploys `.sal/data` to an object store bucket.
+
+Build locally first with [`sal build`](/reference/commands/#sal-build).
+
+## Push to an OCI registry
+
+Use `sal push` when you want a portable artifact that records the source Git repository and commit hash:
+
+```sh
+sal push ghcr.io/my-org/my-data-product --username "$OCI_USERNAME" --password "$OCI_PASSWORD"
+```
+
+The pushed artifact is tagged as `latest` and with the current Git commit hash.
+SAL adds OCI annotations that connect the artifact back to the source repository and commit.
+
+Consumers can use [`sal clone`](/reference/commands/#sal-clone) to clone the source repository, check out the pinned commit, initialize SAL, and restore the data product into `.sal/data`.
+
+## Upload to object storage
+
+Use `sal upload` when readers should query the Iceberg table directly from an object store:
+
+```sh
+sal upload --bucket gs://my-bucket/sal/triples
+```
+
+Supported object-store URL forms include `gs://`, `s3://`, `azblob://`, and Google Cloud Storage HTTPS URLs such as:
+
+```sh
+sal upload --bucket https://storage.googleapis.com/my-bucket/sal/triples
+```
+
+During upload, SAL stages a temporary copy of `.sal/data`, rewrites Iceberg metadata paths to the destination, and uploads the staged files.
+The local `.sal/data` directory is left unchanged.
+
+## Query a deployed table
+
+After uploading to object storage, query the table with DuckDB's Iceberg extension:
+
+```sql
+SET enable_object_cache = false;
+
+SELECT subject, predicate, object
+FROM iceberg_scan('gs://my-bucket/sal/triples')
+LIMIT 5;
+```
+
+For more detail about where SAL writes generated files, see [Data Layout](/reference/data-layout/).
