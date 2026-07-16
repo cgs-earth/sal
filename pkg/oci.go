@@ -3,12 +3,15 @@ package pkg
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/apache/iceberg-go/catalog"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/registry"
+	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/retry"
 )
@@ -52,10 +55,15 @@ func RepoDirFromSource(source string) string {
 }
 
 type ArtifactReference struct {
-	Repository   string
-	Reference    string
+	// ghcr.io/cgs-earth/sal
+	Repository string
+	// example latest
+	Reference string
+	// example ghcr.io
 	RegistryName string
-	Owner        string
+	// example cgs-earth
+	Owner string
+	// example sal
 	ArtifactName string
 }
 
@@ -120,4 +128,30 @@ func NewOciClientWithOptionalAuth(cmd CmdWithAuth, ref ArtifactReference) *auth.
 		}
 	}
 	return auth.DefaultClient
+}
+
+func FetchAndDiffSnapshots(repo *remote.Repository, reference string) (SnapshotDiffReport, error) {
+	return fetchAndDiffSnapshots(repo, reference, GetLocalSalSnapshots)
+}
+
+func fetchAndDiffSnapshots(src oras.ReadOnlyTarget, reference string, getLocalSnapshots func() ([]string, error)) (SnapshotDiffReport, error) {
+	ctx := context.Background()
+	_, manifest, err := FetchManifest(ctx, src, reference)
+	if err != nil {
+		return SnapshotDiffReport{}, err
+	}
+
+	remoteSnapshots, err := GetSnapshotsFromManifest(manifest)
+	if err != nil {
+		return SnapshotDiffReport{}, err
+	}
+
+	localSnapshots, err := getLocalSnapshots()
+	// if the error is that the table just doesn't exist yet, that is
+	// ok since it will be created upon pull
+	if err != nil && !errors.Is(err, catalog.ErrNoSuchTable) {
+		return SnapshotDiffReport{}, err
+	}
+
+	return SnapshotDiff(localSnapshots, remoteSnapshots)
 }

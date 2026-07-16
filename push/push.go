@@ -39,7 +39,8 @@ var _ pkg.CmdWithAuth = (*PushCmd)(nil)
 
 // push uploads all files in dataDir as OCI layers, then packs and tags a
 // manifest that references those uploaded layers.
-func push(ctx context.Context, dataDir string, repo *remote.Repository, destination string) error {
+func push(dataDir string, repo *remote.Repository, destination string) error {
+	ctx := context.Background()
 	slog.Info("Pushing SAL data product in " + dataDir + " to " + destination)
 
 	type uploadFile struct {
@@ -171,6 +172,14 @@ func (p *PushCmd) Run() error {
 	}
 
 	repo.Client = pkg.NewOciClientWithOptionalAuth(p, artifactRef)
-	ctx := context.Background()
-	return push(ctx, dataDir, repo, artifactRef.Repository)
+
+	diff, _ := pkg.FetchAndDiffSnapshots(repo, artifactRef.Reference)
+	if len(diff.SnapshotsInRemoteNotLocal) > 0 {
+		proceed := pkg.Confirm(fmt.Sprintf("Remote %s contains %d snapshots not present locally. Continue pushing anyways?", p.Repository, len(diff.SnapshotsInRemoteNotLocal)))
+		if !proceed {
+			return fmt.Errorf("cancelled pushing to %s", p.Repository)
+		}
+	}
+
+	return push(dataDir, repo, artifactRef.Repository)
 }

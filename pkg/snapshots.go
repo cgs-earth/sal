@@ -47,7 +47,7 @@ func SnapshotDiff(localSnapshots []string, remoteSnapshots []string) (SnapshotDi
 		return SnapshotDiffReport{}, fmt.Errorf("%w: found the same %d snapshots both locally and remote", ErrNothingToPull, len(remoteSnapshots))
 	}
 
-	return SnapshotDiffReport{}, nil
+	return SnapshotDiffReport{SnapshotsInRemoteNotLocal: remoteSnapshots[len(localSnapshots):]}, nil
 }
 
 func GetLocalSalSnapshots() ([]string, error) {
