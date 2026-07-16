@@ -12,8 +12,6 @@
     schema:name "Example Organization 002" ;
     schema:url <https://example.org/organizations/002> ;
     schema:description "A simple example organization used in a larger Turtle test file." ;
-    schema:address "100 Example Street, Example City" ;
-    schema:founder <Person002A> ;
     schema:employee <Person002B> .
 
 <Organization003> a schema:Organization ;
