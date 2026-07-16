@@ -50,6 +50,31 @@ func TestDeleteSnapshotsRejectsDeletingEverySnapshot(t *testing.T) {
 	require.ErrorContains(t, err, "cannot delete every snapshot")
 }
 
+func TestSquashSnapshotsCondensesLocalSnapshotsIntoNewSnapshot(t *testing.T) {
+	ctx := context.Background()
+	cat, tbl, snapshots := createTableWithSnapshots(t, 4)
+	latestManifest := tbl.SnapshotByID(snapshots[3]).ManifestList
+
+	require.NoError(t, SquashSnapshots(
+		tbl,
+		cat,
+		[]string{fmt.Sprintf("%d", snapshots[1]), fmt.Sprintf("%d", snapshots[2]), fmt.Sprintf("%d", snapshots[3])},
+		[]string{fmt.Sprintf("%d", snapshots[0])},
+	))
+
+	loaded, err := cat.LoadTable(ctx, tbl.Identifier())
+	require.NoError(t, err)
+	require.Len(t, loaded.Metadata().Snapshots(), 2)
+	require.NotNil(t, loaded.SnapshotByID(snapshots[0]))
+	require.Nil(t, loaded.SnapshotByID(snapshots[1]))
+	require.Nil(t, loaded.SnapshotByID(snapshots[2]))
+	require.Nil(t, loaded.SnapshotByID(snapshots[3]))
+	require.NotEqual(t, snapshots[3], loaded.CurrentSnapshot().SnapshotID)
+	require.Equal(t, latestManifest, loaded.CurrentSnapshot().ManifestList)
+	require.NotNil(t, loaded.CurrentSnapshot().ParentSnapshotID)
+	require.Equal(t, snapshots[0], *loaded.CurrentSnapshot().ParentSnapshotID)
+}
+
 func createTableWithSnapshots(t *testing.T, count int) (*hadoop.Catalog, *table.Table, []int64) {
 	t.Helper()
 
