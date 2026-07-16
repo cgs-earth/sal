@@ -1,0 +1,50 @@
+name: PySpark Integration Tests
+
+"on":
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group:
+    ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  pyspark-integration:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: pyspark_integration/.python-version
+
+      - name: Initialize SAL data directory
+        run: mkdir -p .sal/data
+
+      - name: Install PySpark integration dependencies
+        working-directory: pyspark_integration
+        run: uv sync --locked
+
+      - name: Run PySpark integration tests
+        working-directory: pyspark_integration
+        run: uv run pytest -s

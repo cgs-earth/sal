@@ -8,3 +8,4 @@ sal-cli
 sal
 .sal/data
 .env
+.venv/
