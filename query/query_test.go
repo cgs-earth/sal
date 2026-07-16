@@ -33,18 +33,25 @@ func TestQueryForInfoRejectsUnknownInfo(t *testing.T) {
 	_, err := queryForInfo("bogus", "/tmp/table")
 
 	require.ErrorContains(t, err, "unknown info option")
-	require.ErrorContains(t, err, "tags")
+	require.NotContains(t, err.Error(), "tags")
 }
 
-func TestQueryForInfoBuildsTagsQuery(t *testing.T) {
-	query, err := queryForInfo("tags", "/tmp/table")
+func TestQueryForInfoBuildsSnapshotsQueryWithTags(t *testing.T) {
+	query, err := queryForInfo("snapshots", "/tmp/table")
 
 	require.NoError(t, err)
+	require.Contains(t, query, "FROM iceberg_snapshots('/tmp/table')")
 	require.Contains(t, query, "read_text('/tmp/table/metadata/*.metadata.json')")
 	require.Contains(t, query, "json_each(json_extract(metadata_json, '$.refs'))")
-	require.Contains(t, query, "WHERE json_extract_string(ref_json, '$.type') = 'tag'")
-	require.Contains(t, query, "snapshot_id")
-	require.Contains(t, query, "ORDER BY tag")
+	require.Contains(t, query, "WHERE json_extract_string(ref.value, '$.type') = 'tag'")
+	require.Contains(t, query, "string_agg(ref.key, ', ' ORDER BY ref.key) AS tags")
+	require.Contains(t, query, "LEFT JOIN tags ON tags.snapshot_id = snapshots.snapshot_id")
+}
+
+func TestQueryForInfoRejectsTagsInfo(t *testing.T) {
+	_, err := queryForInfo("tags", "/tmp/table")
+
+	require.ErrorContains(t, err, "unknown info option")
 }
 
 func TestSnapshotForDiffUsesCurrentSnapshotForLatest(t *testing.T) {
