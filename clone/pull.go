@@ -18,6 +18,7 @@ func (cmd *OciArtifactRetrievalCmd) RunPull() error {
 	if err != nil {
 		return err
 	}
+	pkg.Infof("Starting pull of %s", ref.Repository)
 
 	repo, err := remote.NewRepository(ref.Repository)
 	if err != nil {
@@ -39,13 +40,16 @@ func (cmd *OciArtifactRetrievalCmd) RunPull() error {
 	localSnapshots, err := pkg.GetLocalSalSnapshots()
 	// if the error is that the table just doesn't exist yet, that is
 	// ok since it will be created upon pull
-	if !errors.Is(err, catalog.ErrNoSuchTable) {
+	if errors.Is(err, catalog.ErrNoSuchTable) {
+		slog.Info("No local SAL data product found; pulling remote data product")
+		localSnapshots = nil
+	} else if err != nil {
 		return err
 	}
 
 	_, err = pkg.SnapshotDiff(localSnapshots, remoteSnapshots)
 	if errors.Is(err, pkg.ErrNothingToPull) {
-		slog.Info(err.Error())
+		pkg.Infof("Skipping pull: %s", err.Error())
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("skipping pull: %w", err)
@@ -56,5 +60,6 @@ func (cmd *OciArtifactRetrievalCmd) RunPull() error {
 		return err
 	}
 
+	slog.Info("Pulling data product", "destination", dataDir)
 	return pullManifestLayers(ctx, repo, manifest, desc, ref.Reference, dataDir)
 }

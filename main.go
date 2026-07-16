@@ -3,8 +3,10 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/cgs-earth/sal/build"
@@ -45,8 +47,11 @@ func (args) Description() string {
 
 func main() {
 
+	logWriter, closeLog := newLogWriter(os.Stderr, "/tmp")
+	defer closeLog()
+
 	slog.SetDefault(slog.New(
-		tint.NewHandler(os.Stderr, &tint.Options{
+		tint.NewHandler(logWriter, &tint.Options{
 			Level:      slog.LevelDebug,
 			TimeFormat: time.Kitchen,
 			AddSource:  true,
@@ -101,5 +106,26 @@ func main() {
 	if err != nil {
 		slog.Error(err.Error())
 		os.Exit(1)
+	}
+}
+
+// newLogWriter writes logs to stderr and appends the same output to a temp log file.
+func newLogWriter(stderr io.Writer, tmpDir string) (io.Writer, func()) {
+	logDir := filepath.Join(tmpDir, "sal", "logs")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		_, _ = fmt.Fprintf(stderr, "failed to create SAL log directory: %v\n", err)
+		return stderr, func() {}
+	}
+	current_time := time.Now().Format(time.DateTime)
+	logFile, err := os.OpenFile(filepath.Join(logDir, fmt.Sprintf("%s_sal.log", current_time)), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "failed to open SAL log file: %v\n", err)
+		return stderr, func() {}
+	}
+
+	return io.MultiWriter(stderr, logFile), func() {
+		if err := logFile.Close(); err != nil {
+			_, _ = fmt.Fprintf(stderr, "failed to close SAL log file: %v\n", err)
+		}
 	}
 }
