@@ -4,7 +4,6 @@
     schema:name "Example Organization 001" ;
     schema:description "A simple example organization used in a larger Turtle test file." ;
     schema:address "100 Example Street, Example City" ;
-    schema:founder <Person001A> ;
     schema:employee <Person001B> .
 
 <Organization002> a schema:Organization ;
