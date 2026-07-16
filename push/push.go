@@ -15,8 +15,6 @@ import (
 
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/registry/remote"
-	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/retry"
 )
 
 const maxConcurrentUploads = 4
@@ -28,6 +26,16 @@ type PushCmd struct {
 	Username   string `arg:"--username,env:OCI_USERNAME" help:"Username for the OCI registry. This should match the username used to create the password token"`
 	Password   string `arg:"--password,env:OCI_PASSWORD" help:"Password or access token for the OCI registry."`
 }
+
+func (p *PushCmd) GetUsername() string {
+	return p.Username
+}
+
+func (p *PushCmd) GetPassword() string {
+	return p.Password
+}
+
+var _ pkg.CmdWithAuth = (*PushCmd)(nil)
 
 // push uploads all files in dataDir as OCI layers, then packs and tags a
 // manifest that references those uploaded layers.
@@ -147,28 +155,9 @@ func (p *PushCmd) Run() error {
 		return fmt.Errorf("password is required for pushing to an OCI registry. See https://oras.land/docs/how_to_guides/remote_registries/#authentication for more information")
 	}
 
-	username := p.Username
-	if username == "" {
-		owner, err := pkg.GitProjectOwner()
-		if err != nil {
-			return fmt.Errorf("failed to get Git project owner: %w", err)
-		}
-		if owner == "" {
-			return fmt.Errorf("username is required for deploying to an OCI registry and could not be inferred from the git project URL. Please provide a username using the --username flag")
-		}
-		username = owner
-	}
-	destination := p.Repository
-	if destination == "" {
-		projectName, err := pkg.GitProjectName()
-		if err != nil {
-			return fmt.Errorf("failed to get Git project name: %w", err)
-		}
-		destination = pkg.DefaultAssumedRegistry + "/" + username + "/" + projectName
-		slog.Info("No registry/repository specified, using " + destination + " as the default registry.")
-	} else {
-		destination = strings.TrimPrefix(destination, "https://")
-		destination = strings.TrimPrefix(destination, "http://")
+	artifactRef, err := pkg.ParseArtifact(p.Repository)
+	if err != nil {
+		return err
 	}
 
 	dataDir, err := pkg.SalDataDir()
@@ -176,21 +165,12 @@ func (p *PushCmd) Run() error {
 		return err
 	}
 
-	repo, err := remote.NewRepository(destination)
+	repo, err := remote.NewRepository(artifactRef.Repository)
 	if err != nil {
 		return fmt.Errorf("failed creating OCI registry client: %w", err)
 	}
 
-	credential := auth.Credential{
-		Username: username,
-		Password: p.Password,
-	}
-
-	repo.Client = &auth.Client{
-		Client:     retry.DefaultClient,
-		Cache:      auth.NewCache(),
-		Credential: auth.StaticCredential(repo.Reference.Registry, credential),
-	}
+	repo.Client = pkg.NewOciClientWithOptionalAuth(p, artifactRef)
 	ctx := context.Background()
-	return push(ctx, dataDir, repo, destination)
+	return push(ctx, dataDir, repo, artifactRef.Repository)
 }

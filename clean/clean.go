@@ -167,20 +167,6 @@ func parseSnapshotIDs(snapshotIDs []string) ([]int64, error) {
 	return ids, nil
 }
 
-func confirm(prompt string) (bool, error) {
-
-	pkg.Warnf("%s [y/N]", prompt)
-
-	var input string
-	if _, err := fmt.Scanln(&input); err != nil {
-		// If user just presses enter, Scanln errors → treat as "no"
-		return false, nil
-	}
-
-	input = strings.ToLower(strings.TrimSpace(input))
-	return input == "y" || input == "yes", nil
-}
-
 type CleanCmd struct {
 	Wipe     bool   `arg:"--wipe,-w" help:"Wipe the entire data product. Useful for debugging and testing purposes"`
 	Squash   bool   `arg:"--squash" help:"Condense local snapshots ahead of the remote artifact into one new snapshot"`
@@ -202,12 +188,9 @@ func (cmd *CleanCmd) GetArtifactReference() (pkg.ArtifactReference, error) {
 }
 
 func wipe() error {
-	ok, err := confirm("This will permanently delete the entire data product. Continue?")
-	if err != nil {
-		return err
-	}
+	proceed := pkg.Confirm("This will permanently delete the entire data product. Continue?")
 
-	if !ok {
+	if !proceed {
 		slog.Info("Wipe cancelled")
 		return nil
 	}
@@ -318,12 +301,8 @@ func cleanDiff(cmd *CleanCmd) error {
 
 		latestLocalSnapshot := diff.SnapshotsInLocalNotRemote[len(diff.SnapshotsInLocalNotRemote)-1]
 		msg := fmt.Sprintf("Found %d snapshot(s) in local but not remote: %s. Squash them into one new snapshot based on %s?", len(diff.SnapshotsInLocalNotRemote), strings.Join(diff.SnapshotsInLocalNotRemote, ", "), latestLocalSnapshot)
-		ok, err := confirm(msg)
-		if err != nil {
-			return err
-		}
-
-		if !ok {
+		proceed := pkg.Confirm(msg)
+		if !proceed {
 			slog.Info("Squash cancelled")
 			return nil
 		}
@@ -333,12 +312,9 @@ func cleanDiff(cmd *CleanCmd) error {
 
 	if len(diff.SnapshotsInLocalNotRemote) > 0 {
 		msg := fmt.Sprintf("Found %d snapshot(s) in local but not remote: %s. Delete them permanently?", len(diff.SnapshotsInLocalNotRemote), strings.Join(diff.SnapshotsInLocalNotRemote, ", "))
-		ok, err := confirm(msg)
-		if err != nil {
-			return err
-		}
+		proceed := pkg.Confirm(msg)
 
-		if !ok {
+		if !proceed {
 			slog.Info("Wipe cancelled")
 			return nil
 		}
