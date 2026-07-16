@@ -15,7 +15,7 @@ go install -a github.com/cgs-earth/sal@latest
 ```
 
 SAL also expects Git for project metadata.
-[`sal query`](/reference/commands/#sal-query) opens DuckDB, so install DuckDB if you want to inspect built tables interactively.
+[`sal query`](/sal/reference/commands/#sal-query) opens DuckDB, so install DuckDB if you want to inspect built tables interactively.
 
 ## Initialize a repository
 
@@ -28,7 +28,7 @@ sal init
 This creates the local SAL data directory and adds `.sal/data` to `.gitignore`.
 Generated data is not meant to be committed to source control.
 
-Read more about the generated files in [Data Layout](/reference/data-layout/).
+Read more about the generated files in [Data Layout](/sal/reference/data-layout/).
 
 ## Add RDF files
 
@@ -51,7 +51,7 @@ sal build data/
 ```
 
 By default, SAL writes an Iceberg table.
-For validation-only workflows or debugging, see [`sal validate`](/reference/commands/#sal-validate) and the `--format` option in [`sal build`](/reference/commands/#sal-build).
+For validation-only workflows or debugging, see [`sal validate`](/sal/reference/commands/#sal-validate) and the `--format` option in [`sal build`](/sal/reference/commands/#sal-build).
 
 ## Query the result
 
@@ -70,4 +70,4 @@ FROM triples
 LIMIT 10;
 ```
 
-Next, publish the generated table using [Publishing Data](/guides/publishing-data/).
+Next, publish the generated table using [Publishing Data](/sal/guides/publishing-data/).

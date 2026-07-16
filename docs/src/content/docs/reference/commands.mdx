@@ -4,7 +4,7 @@ description: High-level reference for SAL CLI subcommands.
 ---
 
 SAL commands operate on a Git-backed project and the generated data under `.sal/data`.
-For a step-by-step flow, start with [Getting Started](/guides/getting-started/).
+For a step-by-step flow, start with [Getting Started](/sal/guides/getting-started/).
 
 ## `sal init`
 
@@ -50,7 +50,7 @@ Important flags:
 - `--typed`: split distinct RDF data types into separate output columns.
 - `--force`: build even when the Git working tree has uncommitted changes.
 
-See [Data Layout](/reference/data-layout/) for the generated table structure.
+See [Data Layout](/sal/reference/data-layout/) for the generated table structure.
 
 ## `sal query`
 
@@ -82,7 +82,7 @@ sal push ghcr.io/my-org/my-data-product --username "$OCI_USERNAME" --password "$
 ```
 
 SAL uploads generated data files as OCI layers and annotates the artifact with the source Git remote and current commit hash.
-See [Publishing Data](/guides/publishing-data/#push-to-an-oci-registry).
+See [Publishing Data](/sal/guides/publishing-data/#push-to-an-oci-registry).
 
 ## `sal clone`
 
@@ -110,7 +110,7 @@ sal upload --bucket gs://my-bucket/sal/triples
 ```
 
 SAL stages a temporary copy, rewrites staged Iceberg metadata to point at the target location, then uploads data and metadata in reader-friendly order.
-See [Publishing Data](/guides/publishing-data/#upload-to-object-storage).
+See [Publishing Data](/sal/guides/publishing-data/#upload-to-object-storage).
 
 ## `sal edit`
 

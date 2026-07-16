@@ -8,14 +8,14 @@ Your Git repository contains RDF source files and project code; `.sal/data` cont
 
 ## Local layout
 
-After [`sal init`](/reference/commands/#sal-init), a project has:
+After [`sal init`](/sal/reference/commands/#sal-init), a project has:
 
 ```text
 .sal/
   data/
 ```
 
-After [`sal build`](/reference/commands/#sal-build), `.sal/data` contains the built data product.
+After [`sal build`](/sal/reference/commands/#sal-build), `.sal/data` contains the built data product.
 For the main triples table, SAL writes an Apache Iceberg table under the project namespace:
 
 ```text
@@ -49,15 +49,15 @@ Source data can be Turtle or JSON-LD.
 Validation checks that terms used through prefixes are defined by the provided vocabularies.
 For example, a misspelled term such as `schema:nameee` should fail validation rather than becoming a built triple.
 
-Use [`sal validate`](/reference/commands/#sal-validate) to run these checks without writing a new build.
+Use [`sal validate`](/sal/reference/commands/#sal-validate) to run these checks without writing a new build.
 
 ## Published layout
 
-[`sal push`](/reference/commands/#sal-push) preserves `.sal/data` as an OCI artifact.
-The artifact metadata records the source repository and commit, which lets [`sal clone`](/reference/commands/#sal-clone) recreate the matching source tree and data directory.
+[`sal push`](/sal/reference/commands/#sal-push) preserves `.sal/data` as an OCI artifact.
+The artifact metadata records the source repository and commit, which lets [`sal clone`](/sal/reference/commands/#sal-clone) recreate the matching source tree and data directory.
 
-[`sal upload`](/reference/commands/#sal-upload) deploys the same data to an object store.
+[`sal upload`](/sal/reference/commands/#sal-upload) deploys the same data to an object store.
 For object stores, SAL rewrites a staged copy of the Iceberg metadata so table paths point to the remote table root.
 The local `.sal/data` directory is not changed by upload.
 
-For examples, see [Publishing Data](/guides/publishing-data/).
+For examples, see [Publishing Data](/sal/guides/publishing-data/).

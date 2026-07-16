@@ -5,10 +5,10 @@ description: Publish a built SAL data product to registries or object stores.
 
 SAL can publish the same built data product in two ways:
 
-- [`sal push`](/reference/commands/#sal-push) packages `.sal/data` as an OCI artifact.
-- [`sal upload`](/reference/commands/#sal-upload) deploys `.sal/data` to an object store bucket.
+- [`sal push`](/sal/reference/commands/#sal-push) packages `.sal/data` as an OCI artifact.
+- [`sal upload`](/sal/reference/commands/#sal-upload) deploys `.sal/data` to an object store bucket.
 
-Build locally first with [`sal build`](/reference/commands/#sal-build).
+Build locally first with [`sal build`](/sal/reference/commands/#sal-build).
 
 ## Push to an OCI registry
 
@@ -21,7 +21,7 @@ sal push ghcr.io/my-org/my-data-product --username "$OCI_USERNAME" --password "$
 The pushed artifact is tagged as `latest` and with the current Git commit hash.
 SAL adds OCI annotations that connect the artifact back to the source repository and commit.
 
-Consumers can use [`sal clone`](/reference/commands/#sal-clone) to clone the source repository, check out the pinned commit, initialize SAL, and restore the data product into `.sal/data`.
+Consumers can use [`sal clone`](/sal/reference/commands/#sal-clone) to clone the source repository, check out the pinned commit, initialize SAL, and restore the data product into `.sal/data`.
 
 ## Upload to object storage
 
@@ -52,4 +52,4 @@ FROM iceberg_scan('gs://my-bucket/sal/triples')
 LIMIT 5;
 ```
 
-For more detail about where SAL writes generated files, see [Data Layout](/reference/data-layout/).
+For more detail about where SAL writes generated files, see [Data Layout](/sal/reference/data-layout/).
