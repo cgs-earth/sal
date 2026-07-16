@@ -17,7 +17,7 @@ import (
 	"oras.land/oras-go/v2/registry/remote"
 )
 
-const maxConcurrentUploads = 4
+const maxConcurrentUploads = 8
 
 const SalGitHashAnnotation = "sal.git-commit-hash"
 
