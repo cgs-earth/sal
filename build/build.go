@@ -15,6 +15,7 @@ type ValidateCmd struct {
 	Paths      []string          `arg:"positional" help:"RDF files to validate"`
 	PrefixMaps []string          `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
 	Format     GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
+	NoCache    bool              `arg:"--no-cache" help:"fetch vocab prefixes directly from remote sources and skip using locally cached definitions"`
 }
 
 func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
@@ -22,6 +23,7 @@ func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
 		Paths:             cfg.Paths,
 		PrefixMaps:        cfg.PrefixMaps,
 		Format:            cfg.Format,
+		NoCache:           cfg.NoCache,
 		skipCommit:        true,
 		skipProjectChecks: true,
 	}
@@ -34,6 +36,7 @@ type BuildCmd struct {
 	Format       GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
 	Force        bool              `arg:"--force" help:"force build even if there are uncommitted changes in the git repository"`
 	DataTypeCols bool              `arg:"--typed" help:"Split distinct data types into separate columns" default:"false"`
+	NoCache      bool              `arg:"--no-cache" help:"fetch vocab prefixes directly from remote sources and skip using locally cached definitions"`
 
 	// skip committing the built data to iceberg
 	skipCommit bool
@@ -50,6 +53,12 @@ var ErrUncommittedChanges = fmt.Errorf("git repository has uncommitted changes; 
 func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("build: missing arguments")
+	}
+
+	if cfg.NoCache {
+		if err := validate.ClearCache(); err != nil {
+			return nil, fmt.Errorf("build: clear cache: %w", err)
+		}
 	}
 
 	var paths []string

@@ -31,6 +31,7 @@ Important flags:
 
 - `--prefix-maps`: apply prefix mappings as `source=target` entries or source/target pairs.
 - `--format`: choose `iceberg` or `nq`; defaults to `iceberg`.
+- `--no-cache`: clear SAL's temp cache before validating, while still caching new fetches during the run.
 
 ## `sal build`
 
@@ -49,6 +50,7 @@ Important flags:
 - `--format`: choose `iceberg` or `nq`; defaults to `iceberg`.
 - `--typed`: split distinct RDF data types into separate output columns.
 - `--force`: build even when the Git working tree has uncommitted changes.
+- `--no-cache`: clear SAL's temp cache before building, while still caching new fetches during the run.
 
 See [Data Layout](/sal/reference/data-layout/) for the generated table structure.
 

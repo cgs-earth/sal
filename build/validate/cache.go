@@ -32,8 +32,21 @@ type vocabularyCache struct {
 
 const vocabularyCacheVersion = 11
 
+var cacheRootDir = func() string {
+	return filepath.Join(os.TempDir(), "sal", "cache")
+}
+
+func defaultCacheDir() string {
+	return cacheRootDir()
+}
+
 func defaultVocabularyCacheDir() string {
-	return filepath.Join("/tmp", "sal", "cache", "vocab")
+	return filepath.Join(defaultCacheDir(), "vocab")
+}
+
+// ClearCache removes cached validation data from the platform temp directory.
+func ClearCache() error {
+	return os.RemoveAll(defaultCacheDir())
 }
 
 type cachedVocabulary struct {
