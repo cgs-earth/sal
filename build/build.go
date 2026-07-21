@@ -12,17 +12,15 @@ import (
 )
 
 type ValidateCmd struct {
-	Paths      []string          `arg:"positional" help:"RDF files to validate"`
-	PrefixMaps []string          `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
-	Format     GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
-	NoCache    bool              `arg:"--no-cache" help:"fetch vocab prefixes directly from remote sources and skip using locally cached definitions"`
+	Paths      []string `arg:"positional" help:"RDF files to validate"`
+	PrefixMaps []string `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
+	NoCache    bool     `arg:"--no-cache" help:"fetch vocab prefixes directly from remote sources and skip using locally cached definitions"`
 }
 
 func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
 	buildCfg := &BuildCmd{
 		Paths:             cfg.Paths,
 		PrefixMaps:        cfg.PrefixMaps,
-		Format:            cfg.Format,
 		NoCache:           cfg.NoCache,
 		skipCommit:        true,
 		skipProjectChecks: true,
@@ -135,13 +133,14 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 			return nil, err
 		}
 	}
-	if cfg.Format == GraphExportFormatNQuads {
-		slog.Warn("Exporting as NQuads. Note this will create a larger and less efficient file than iceberg")
-	}
 
 	if cfg.skipCommit {
 		return finalGraph, nil
 	}
+	if cfg.Format == GraphExportFormatNQuads {
+		slog.Warn("Exporting as NQuads. Note this will create a larger and less efficient file than iceberg")
+	}
+
 	hasChanges, err := pkg.UncommittedChangesInGit()
 	if err != nil {
 		return nil, err
