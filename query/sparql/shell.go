@@ -1137,7 +1137,6 @@ func renderHelp() string {
 	items := []string{
 		helpItem("Ctrl+R", "run"),
 		helpItem("Tab", "change focus"),
-		helpItem("Home/End", "row bounds"),
 		helpItem("Ctrl+U", "clear row"),
 		helpItem("Ctrl+A", "select all"),
 		helpItem("Ctrl+C", "copy"),

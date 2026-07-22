@@ -111,8 +111,6 @@ func TestShellHelpStylesKeyboardDescriptions(t *testing.T) {
 
 	require.Contains(t, help, shellHelpKeyStyle.Render("Tab"))
 	require.Contains(t, help, shellHelpDescriptionStyle.Render("change focus"))
-	require.Contains(t, help, shellHelpKeyStyle.Render("Home/End"))
-	require.Contains(t, help, shellHelpDescriptionStyle.Render("row bounds"))
 	require.Contains(t, help, shellHelpKeyStyle.Render("Ctrl+U"))
 	require.Contains(t, help, shellHelpDescriptionStyle.Render("clear row"))
 	require.NotContains(t, help, "row/table csv")
