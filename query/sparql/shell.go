@@ -18,6 +18,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
 )
 
 type Result struct {
@@ -166,6 +167,7 @@ type shellModel struct {
 	resultsAllSelected bool
 	mouseSelecting     bool
 	mouseSelectAnchor  int
+	showHelp           bool
 }
 
 func newShellModel(ctx context.Context, runner Runner) shellModel {
@@ -244,6 +246,10 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyPressMsg:
+		if msg.Keystroke() == "ctrl+h" {
+			m.showHelp = !m.showHelp
+			return m, nil
+		}
 		if isFocusPreviousKey(msg) {
 			m.shiftFocus(-1)
 			return m, nil
@@ -447,25 +453,27 @@ func (m shellModel) View() tea.View {
 	width := max(60, m.width)
 	contentWidth := max(40, width-4)
 
-	header := shellTitleStyle.Width(contentWidth).Render("SAL SPARQL")
-	help := renderHelp()
+	header := shellTitleStyle.Width(contentWidth).Render("SAL SPARQL  Ctrl+H help")
 	editorWidth, sqlWidth := splitTopPanelWidths(contentWidth)
 	editorColumn := m.renderEditorColumn(editorWidth)
 	top := editorColumn
 	if sqlWidth > 0 {
 		top = lipgloss.JoinHorizontal(lipgloss.Top, editorColumn, " ", m.renderSQL(sqlWidth))
 	}
-	resultsHeight := m.resultsHeight(header, help, top)
+	resultsHeight := m.resultsHeight(header, top)
 	results := m.renderResults(contentWidth, resultsHeight)
 
 	body := lipgloss.JoinVertical(
 		lipgloss.Left,
 		header,
-		help,
 		top,
 		results,
 	)
-	view := tea.NewView(shellAppStyle.Width(width).Render(body))
+	rendered := shellAppStyle.Width(width).Render(body)
+	if m.showHelp {
+		rendered = renderHelpLayer(rendered, width)
+	}
+	view := tea.NewView(rendered)
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeCellMotion
 	return view
@@ -475,9 +483,9 @@ func (m shellModel) renderEditorColumn(width int) string {
 	return lipgloss.JoinVertical(lipgloss.Left, m.renderHistory(width), m.renderEditor(width))
 }
 
-func (m shellModel) resultsHeight(header string, help string, top string) int {
+func (m shellModel) resultsHeight(header string, top string) int {
 	bodyHeight := max(1, m.height-2)
-	used := lipgloss.Height(header) + lipgloss.Height(help) + lipgloss.Height(top)
+	used := lipgloss.Height(header) + lipgloss.Height(top)
 	return max(6, bodyHeight-used)
 }
 
@@ -551,10 +559,10 @@ func (m shellModel) renderResults(width int, availableHeight int) string {
 		if m.focus == focusResults {
 			body.WriteString(shellMutedStyle.Render(fmt.Sprintf("  row %d/%d", m.selectedRow+1, len(m.result.Rows))))
 		}
-		body.WriteString("\n\n")
-		visibleRows := maxVisibleResultRows(availableHeight)
+		body.WriteString("\n")
+		visibleRows := maxVisibleRenderedResultRows(availableHeight)
 		offset, rows := resultWindow(m.result.Rows, m.selectedRow, m.resultOffset, visibleRows)
-		body.WriteString(renderTable(m.result.Header, rows, width-4, m.focus == focusResults, m.selectedRow-offset, m.resultsAllSelected))
+		body.WriteString(renderTable(m.result.Header, rows, width-6, m.focus == focusResults, m.selectedRow-offset, m.resultsAllSelected))
 	} else {
 		body.WriteString(shellMutedStyle.Render("Run a query to show results here."))
 	}
@@ -647,7 +655,7 @@ func (m shellModel) editorBodyBounds() (int, int, int, int) {
 	editorWidth, _ := splitTopPanelWidths(contentWidth)
 
 	x := 2 + 1 + 2
-	y := 1 + 1 + lipgloss.Height(renderHelp()) + 1 + 1
+	y := 1 + 1 + 1 + 1
 	y += lipgloss.Height(m.renderHistory(editorWidth))
 	bodyWidth := max(1, editorWidth-2-4)
 	bodyHeight := max(1, lipgloss.Height(renderEditorBody(m.query, m.cursor, m.selectionStart, m.selectionEnd)))
@@ -754,6 +762,10 @@ func (m shellModel) visibleResultRows() [][]string {
 
 func maxVisibleResultRows(availableHeight int) int {
 	return max(1, availableHeight-9)
+}
+
+func maxVisibleRenderedResultRows(availableHeight int) int {
+	return max(1, availableHeight-10)
 }
 
 func resultWindow(rows [][]string, selectedRow int, offset int, visibleRows int) (int, [][]string) {
@@ -935,67 +947,90 @@ func renderTable(header []string, rows [][]string, width int, focused bool, focu
 	if width <= 0 {
 		width = 100
 	}
-	cols := len(header)
-	widths := make([]int, cols)
-	for i, cell := range header {
-		widths[i] = len(cell)
-	}
-	for _, row := range rows {
-		for i := 0; i < cols && i < len(row); i++ {
-			if len(row[i]) > widths[i] {
-				widths[i] = len(row[i])
-			}
-		}
-	}
-	maxCol := max(8, (width-(3*(cols-1)))/cols)
-	for i := range widths {
-		widths[i] = min(widths[i], maxCol)
-	}
-
-	var b strings.Builder
-	writeStyledTableRow(&b, header, widths, tableHeaderStyle)
-	for i, w := range widths {
-		if i > 0 {
-			b.WriteString(tableDividerStyle.Render("-+-"))
-		} else {
-			b.WriteString(tableDividerStyle.Render(""))
-		}
-		b.WriteString(tableDividerStyle.Render(strings.Repeat("-", w)))
-	}
-	b.WriteByte('\n')
+	trimmedHeader := trimTableRow(header, width)
+	trimmedRows := make([][]string, len(rows))
 	for i, row := range rows {
-		style := tableCellStyle
-		if focused && (allRowsSelected || i == focusedRow) {
-			style = tableFocusedRowStyle
-		}
-		writeStyledTableRow(&b, row, widths, style)
+		trimmedRows[i] = trimTableRow(row, width)
 	}
-	return strings.TrimRight(b.String(), "\n")
+	return table.New().
+		Border(lipgloss.NormalBorder()).
+		BorderStyle(tableBorderStyle).
+		Width(width).
+		Height(len(trimmedRows) + 4).
+		Wrap(false).
+		StyleFunc(func(row, _ int) lipgloss.Style {
+			switch {
+			case row == table.HeaderRow:
+				return tableHeaderStyle
+			case focused && (allRowsSelected || row == focusedRow):
+				return tableFocusedRowStyle
+			case row%2 == 0:
+				return tableEvenRowStyle
+			default:
+				return tableOddRowStyle
+			}
+		}).
+		Headers(trimmedHeader...).
+		Rows(trimmedRows...).
+		String()
 }
 
-func writeStyledTableRow(b *strings.Builder, row []string, widths []int, style lipgloss.Style) {
-	for i, width := range widths {
-		if i > 0 {
-			b.WriteString(tableDividerStyle.Render(" | "))
-		}
-		cell := ""
-		if i < len(row) {
-			cell = row[i]
-		}
-		b.WriteString(style.Render(padCell(cell, width)))
+func trimTableRow(row []string, width int) []string {
+	trimmed := make([]string, len(row))
+	maxCellWidth := max(8, width/max(1, len(row))-4)
+	for i, cell := range row {
+		trimmed[i] = truncateTableCell(cell, maxCellWidth)
 	}
-	b.WriteByte('\n')
+	return trimmed
 }
 
-func padCell(value string, width int) string {
+func truncateTableCell(value string, width int) string {
 	value = strings.ReplaceAll(value, "\n", " ")
-	if len(value) > width {
-		if width <= 3 {
-			return value[:width]
-		}
-		value = value[:width-3] + "..."
+	if len(value) <= width {
+		return value
 	}
-	return value + strings.Repeat(" ", width-len(value))
+	if width <= 3 {
+		return value[:width]
+	}
+	return value[:width-3] + "..."
+}
+
+func renderHelpLayer(base string, width int) string {
+	help := renderHelp(width)
+	x := max(0, (lipgloss.Width(base)-lipgloss.Width(help))/2)
+	y := max(1, min(5, lipgloss.Height(base)/3))
+	return lipgloss.NewCompositor(
+		lipgloss.NewLayer(base),
+		lipgloss.NewLayer(help).X(x).Y(y).Z(1),
+	).Render()
+}
+
+func renderHelp(width int) string {
+	helpWidth := min(max(36, width-12), 72)
+	items := []string{
+		helpItem("Ctrl+H", "toggle help"),
+		helpItem("Ctrl+R", "run query"),
+		helpItem("Shift+←/→", "change focus"),
+		helpItem("Left/Right", "browse history when history is focused"),
+		helpItem("Up/Down", "move cursor or selected result row"),
+		helpItem("PgUp/PgDown", "page through results"),
+		helpItem("Ctrl+U", "clear current editor line"),
+		helpItem("Ctrl+A", "select editor text or result rows"),
+		helpItem("Ctrl+C", "copy selection"),
+		helpItem("Ctrl+V", "paste into editor"),
+		helpItem("Ctrl+L", "clear screen"),
+		helpItem("Ctrl+D", "quit"),
+	}
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		shellHelpTitleStyle.Render("Help"),
+		strings.Join(items, "\n"),
+	)
+	return shellHelpStyle.Width(helpWidth).Render(content)
+}
+
+func helpItem(key string, description string) string {
+	return shellHelpRowStyle.Render(shellHelpKeyStyle.Render(key) + "  " + shellHelpDescriptionStyle.Render(description))
 }
 
 func renderEditorBody(query string, cursor int, selection ...int) string {
@@ -1232,23 +1267,6 @@ func isFocusNextKey(msg tea.KeyPressMsg) bool {
 	return key.Code == tea.KeyRightShift || (key.Code == tea.KeyRight && key.Mod&tea.ModShift != 0)
 }
 
-func renderHelp() string {
-	items := []string{
-		helpItem("Ctrl+R", "run"),
-		helpItem("Shift+←/→", "change focus"),
-		helpItem("Ctrl+U", "clear row"),
-		helpItem("Ctrl+A", "select all"),
-		helpItem("Ctrl+C", "copy"),
-		helpItem("Ctrl+V", "paste"),
-		helpItem("Ctrl+D", "quit"),
-	}
-	return shellHelpStyle.Render(strings.Join(items, "  "))
-}
-
-func helpItem(key string, description string) string {
-	return shellHelpKeyStyle.Render(key) + " " + shellHelpDescriptionStyle.Render(description)
-}
-
 func splitAtCursor(value string, cursor int) (string, string, string) {
 	runes := []rune(value)
 	cursor = clampCursor(cursor, len(runes))
@@ -1395,109 +1413,152 @@ func isSPARQLKeyword(token string) bool {
 	}
 }
 
+const (
+	catRosewater = "#F5E0DC"
+	catPink      = "#F5C2E7"
+	catMauve     = "#CBA6F7"
+	catRed       = "#F38BA8"
+	catPeach     = "#FAB387"
+	catYellow    = "#F9E2AF"
+	catGreen     = "#A6E3A1"
+	catTeal      = "#94E2D5"
+	catSky       = "#89DCEB"
+	catBlue      = "#89B4FA"
+	catLavender  = "#B4BEFE"
+	catText      = "#CDD6F4"
+	catSubtext1  = "#BAC2DE"
+	catSubtext0  = "#A6ADC8"
+	catOverlay2  = "#9399B2"
+	catOverlay1  = "#7F849C"
+	catSurface2  = "#585B70"
+	catSurface1  = "#45475A"
+	catSurface0  = "#313244"
+	catBase      = "#1E1E2E"
+	catMantle    = "#181825"
+	catCrust     = "#11111B"
+)
+
 var (
 	shellAppStyle = lipgloss.NewStyle().
 			Padding(1, 2)
 	shellTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#E8EEF2")).
-			Background(lipgloss.Color("#2D5A4E")).
+			Foreground(lipgloss.Color(catCrust)).
+			Background(lipgloss.Color(catLavender)).
 			Padding(0, 1)
 	shellHelpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6E7C7C")).
-			MarginTop(1).
-			MarginBottom(1)
+			Foreground(lipgloss.Color(catText)).
+			Border(lipgloss.ThickBorder()).
+			BorderForeground(lipgloss.Color(catBlue)).
+			Padding(1, 2)
+	shellHelpTitleStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color(catBlue)).
+				Background(lipgloss.Color(catBase)).
+				Bold(true)
+	shellHelpRowStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color(catText)).
+				Background(lipgloss.Color(catBase))
 	shellHelpKeyStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#20302C")).
+				Foreground(lipgloss.Color(catRosewater)).
+				Background(lipgloss.Color(catBase)).
 				Bold(true)
 	shellHelpDescriptionStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#6E7C7C")).
+					Foreground(lipgloss.Color(catText)).
+					Background(lipgloss.Color(catBase)).
 					Italic(true)
 	historyTitleStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#8C9696"))
+				Foreground(lipgloss.Color(catSubtext0))
 	sectionTitleStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#20302C"))
+				Foreground(lipgloss.Color(catText))
 	focusedSectionTitleStyle = lipgloss.NewStyle().
 					Bold(true).
-					Foreground(lipgloss.Color("#1F6F52"))
+					Foreground(lipgloss.Color(catLavender))
 	focusedHistoryTitleStyle = lipgloss.NewStyle().
 					Bold(true).
-					Foreground(lipgloss.Color("#E8EEF2")).
-					Background(lipgloss.Color("#0B5F46")).
+					Foreground(lipgloss.Color(catCrust)).
+					Background(lipgloss.Color(catLavender)).
 					Padding(0, 1)
 	editorPanelStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#6C7A99")).
+				BorderForeground(lipgloss.Color(catSurface2)).
 				Padding(1, 2).
 				MarginBottom(1)
 	focusedEditorPanelStyle = lipgloss.NewStyle().
 				Border(lipgloss.ThickBorder()).
-				BorderForeground(lipgloss.Color("#0B5F46")).
+				BorderForeground(lipgloss.Color(catLavender)).
 				Padding(1, 2).
 				MarginBottom(1)
 	resultPanelStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#6C7A99")).
+				BorderForeground(lipgloss.Color(catSurface2)).
 				Padding(1, 2)
 	focusedResultPanelStyle = lipgloss.NewStyle().
 				Border(lipgloss.ThickBorder()).
-				BorderForeground(lipgloss.Color("#0B5F46")).
+				BorderForeground(lipgloss.Color(catLavender)).
 				Padding(1, 2)
 	sqlPanelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#6C7A99")).
+			BorderForeground(lipgloss.Color(catSurface2)).
 			Padding(1, 2).
 			MarginBottom(1)
 	shellMutedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#7A8282"))
+			Foreground(lipgloss.Color(catOverlay2))
 	editorFlashStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#1F6F52")).
+				Foreground(lipgloss.Color(catGreen)).
 				Italic(true)
 	shellErrorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#B42318")).
+			Foreground(lipgloss.Color(catRed)).
 			Bold(true)
 	shellSuccessStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#1F7A4D")).
+				Foreground(lipgloss.Color(catGreen)).
 				Bold(true)
 	shellRunningStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#6B5A00")).
+				Foreground(lipgloss.Color(catYellow)).
 				Bold(true)
 	sqlPreviewStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#48545C")).
+			Foreground(lipgloss.Color(catSubtext1)).
 			Padding(0, 1)
 	editorCursorStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#5A8F7B")).
-				Foreground(lipgloss.Color("#E8EEF2"))
+				Background(lipgloss.Color(catLavender)).
+				Foreground(lipgloss.Color(catCrust))
 	editorSelectionStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#D7E8E2")).
-				Foreground(lipgloss.Color("#10231D"))
+				Background(lipgloss.Color(catSurface2)).
+				Foreground(lipgloss.Color(catText))
 
 	sparqlKeywordStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#005F87")).
+				Foreground(lipgloss.Color(catBlue)).
 				Bold(true)
 	sparqlVariableStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#8A4A00"))
+				Foreground(lipgloss.Color(catPeach))
 	sparqlIRIStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#1F6F52"))
+			Foreground(lipgloss.Color(catTeal))
 	sparqlStringStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#8F2F4A"))
+				Foreground(lipgloss.Color(catGreen))
 	sparqlCommentStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#7A8282")).
+				Foreground(lipgloss.Color(catOverlay1)).
 				Italic(true)
 	sparqlPrefixedNameStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#5D4B8C"))
+				Foreground(lipgloss.Color(catMauve))
 
 	tableHeaderStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#20302C"))
+				Foreground(lipgloss.Color(catText)).
+				Align(lipgloss.Center).
+				Padding(0, 1)
 	tableCellStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#263238"))
+			Foreground(lipgloss.Color(catSubtext1)).
+			Padding(0, 1)
+	tableOddRowStyle = tableCellStyle.
+				Foreground(lipgloss.Color(catSubtext1))
+	tableEvenRowStyle = tableCellStyle.
+				Foreground(lipgloss.Color(catOverlay2))
 	tableFocusedRowStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#10231D")).
-				Background(lipgloss.Color("#CDE8DD")).
-				Bold(true)
-	tableDividerStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#9BA7A7"))
+				Foreground(lipgloss.Color(catCrust)).
+				Background(lipgloss.Color(catLavender)).
+				Bold(true).
+				Padding(0, 1)
+	tableBorderStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color(catSurface2))
 )

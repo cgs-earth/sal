@@ -114,14 +114,28 @@ func TestShellViewEnablesMouseSelection(t *testing.T) {
 }
 
 func TestShellHelpStylesKeyboardDescriptions(t *testing.T) {
-	help := renderHelp()
+	help := renderHelp(80)
 
+	require.Contains(t, help, shellHelpKeyStyle.Render("Ctrl+H"))
+	require.Contains(t, help, shellHelpDescriptionStyle.Render("toggle help"))
 	require.Contains(t, help, shellHelpKeyStyle.Render("Shift+←/→"))
 	require.Contains(t, help, shellHelpDescriptionStyle.Render("change focus"))
 	require.Contains(t, help, shellHelpKeyStyle.Render("Ctrl+U"))
-	require.Contains(t, help, shellHelpDescriptionStyle.Render("clear row"))
+	require.Contains(t, help, shellHelpDescriptionStyle.Render("clear current editor line"))
 	require.NotContains(t, help, "row/table csv")
 	require.Contains(t, help, shellHelpDescriptionStyle.Render("quit"))
+}
+
+func TestShellHelpLayerIsToggledWithCtrlH(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+
+	require.NotContains(t, model.View().Content, "toggle help")
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	model = updated.(shellModel)
+
+	require.Contains(t, model.View().Content, "Help")
+	require.Contains(t, model.View().Content, "run query")
 }
 
 func TestRenderHistoryShowsCompactCountByDefault(t *testing.T) {
@@ -188,7 +202,7 @@ func TestRenderEditorUsesNeutralBorderWhenEditorIsBlurred(t *testing.T) {
 
 	require.Contains(t, editor, sectionTitleStyle.Render("Editor"))
 	require.NotContains(t, editor, focusedSectionTitleStyle.Render("Editor"))
-	require.Contains(t, editor, "\x1b[38;2;108;122;153m")
+	require.Contains(t, editor, "\x1b[38;2;88;91;112m")
 }
 
 func TestRenderEditorUsesThickBorderWhenFocused(t *testing.T) {
