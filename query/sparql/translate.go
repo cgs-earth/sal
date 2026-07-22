@@ -28,19 +28,24 @@ func ToSQL(input string, layout ObjectLayout) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parse SPARQL query: %w", err)
 	}
+	sql, _, err := toSQL(parsed, layout, nil, true, true)
+	return sql, err
+}
+
+func toSQL(parsed *rdflibsparql.ParsedQuery, layout ObjectLayout, projected []string, requireProjectedBound bool, includeLimit bool) (string, []string, error) {
 	if parsed.Type != "SELECT" {
-		return "", fmt.Errorf("only read-only SPARQL SELECT queries are supported")
+		return "", nil, fmt.Errorf("only read-only SPARQL SELECT queries are supported")
 	}
 	if len(parsed.ProjectExprs) > 0 || len(parsed.GroupBy) > 0 || parsed.Having != nil || len(parsed.OrderBy) > 0 || parsed.Offset > 0 {
-		return "", fmt.Errorf("SPARQL projection expressions and solution modifiers are not supported yet")
+		return "", nil, fmt.Errorf("SPARQL projection expressions and solution modifiers are not supported yet")
 	}
 
 	triples, filters, err := basicGraphPatternParts(parsed.Where)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if len(triples) == 0 {
-		return "", fmt.Errorf("SPARQL query must include at least one triple pattern")
+		return "", nil, fmt.Errorf("SPARQL query must include at least one triple pattern")
 	}
 
 	var from []string
@@ -71,7 +76,7 @@ func ToSQL(input string, layout ObjectLayout) (string, error) {
 			}
 			clauses, err := constantClauses(alias, part.column, part.term, parsed.Prefixes, layout)
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			where = append(where, clauses...)
 		}
@@ -79,25 +84,33 @@ func ToSQL(input string, layout ObjectLayout) (string, error) {
 	for _, filter := range filters {
 		clause, err := filterSQL(filter, bindings, layout)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		where = append(where, clause)
 	}
 
-	projected := parsed.Variables
 	if len(projected) == 0 {
-		projected = discovered
+		projected = parsed.Variables
+		if len(projected) == 0 {
+			projected = discovered
+		}
 	}
 	if len(projected) == 0 {
-		return "", fmt.Errorf("SPARQL SELECT must project at least one variable")
+		return "", nil, fmt.Errorf("SPARQL SELECT must project at least one variable")
 	}
 	selects := make([]string, 0, len(projected))
 	for _, name := range projected {
 		binding, ok := bindings[name]
 		if !ok {
-			return "", fmt.Errorf("projected variable ?%s is not bound by a supported triple pattern", name)
+			if !requireProjectedBound {
+				continue
+			}
+			return "", nil, fmt.Errorf("projected variable ?%s is not bound by a supported triple pattern", name)
 		}
 		selects = append(selects, binding.expr(layout)+" AS "+quoteIdent(name))
+	}
+	if len(selects) == 0 {
+		return "", nil, fmt.Errorf("SPARQL SELECT must project at least one locally bound variable")
 	}
 
 	sql := "SELECT " + strings.Join(selects, ", ") + "\nFROM " + strings.Join(from, "\nCROSS JOIN ")
@@ -107,10 +120,10 @@ func ToSQL(input string, layout ObjectLayout) (string, error) {
 	if parsed.Distinct {
 		sql = strings.Replace(sql, "SELECT ", "SELECT DISTINCT ", 1)
 	}
-	if parsed.Limit >= 0 {
+	if includeLimit && parsed.Limit >= 0 {
 		sql += "\nLIMIT " + strconv.Itoa(parsed.Limit)
 	}
-	return sql, nil
+	return sql, projected, nil
 }
 
 func (b sqlBinding) expr(layout ObjectLayout) string {

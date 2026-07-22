@@ -1,12 +1,12 @@
 package sparql
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/csv"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,9 +33,10 @@ type Runner interface {
 }
 
 type DuckDBRunner struct {
-	TablePath string
-	Layout    ObjectLayout
-	Limit     int
+	TablePath  string
+	Layout     ObjectLayout
+	Limit      int
+	HTTPClient *http.Client
 }
 
 // RunShell opens an interactive SPARQL prompt against the Iceberg triples table.
@@ -51,40 +52,37 @@ func RunShell(ctx context.Context, tablePath string, layout ObjectLayout) error 
 
 // Run translates SPARQL to SQL and executes it through DuckDB.
 func (r DuckDBRunner) Run(ctx context.Context, query string) (Result, error) {
-	sql, err := ToSQL(query, r.Layout)
+	plan, err := federatedPlanFor(query, r.Layout)
 	if err != nil {
 		return Result{}, err
 	}
-	sql = strings.TrimRight(strings.TrimSpace(sql), ";")
-	if r.Limit > 0 && !hasLimit(sql) {
-		sql += fmt.Sprintf("\nLIMIT %d", r.Limit)
-	}
-
-	tablePath := strings.ReplaceAll(r.TablePath, "'", "''")
-	statement := fmt.Sprintf(`
-INSTALL iceberg;
-LOAD iceberg;
-INSTALL spatial;
-LOAD spatial;
-CREATE OR REPLACE VIEW triples AS
-SELECT *
-FROM iceberg_scan('%s', allow_moved_paths = true);
-COPY (%s) TO STDOUT (HEADER, DELIMITER ',');
-`, tablePath, sql)
-
-	cmd := exec.CommandContext(ctx, "duckdb", "-csv", "-c", statement)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if stderr.Len() > 0 {
-			return Result{}, fmt.Errorf("duckdb query failed: %s", strings.TrimSpace(stderr.String()))
+	var sql string
+	if plan == nil {
+		sql, err = ToSQL(query, r.Layout)
+		if err != nil {
+			return Result{}, err
 		}
-		return Result{}, fmt.Errorf("duckdb query failed: %w", err)
+		sql = strings.TrimRight(strings.TrimSpace(sql), ";")
+		if r.Limit > 0 && !hasLimit(sql) {
+			sql += fmt.Sprintf("\nLIMIT %d", r.Limit)
+		}
+	} else {
+		serviceRows := make([][][]string, 0, len(plan.Services))
+		for _, service := range plan.Services {
+			rows, err := fetchServiceRows(ctx, r.HTTPClient, service)
+			if err != nil {
+				return Result{}, err
+			}
+			serviceRows = append(serviceRows, rows)
+		}
+		sql = federatedSQL(plan, serviceRows, r.Limit)
 	}
 
-	header, rows, err := parseCSVResult(stdout.String())
+	output, err := csvFromFederatedSQL(ctx, r.TablePath, sql)
+	if err != nil {
+		return Result{}, err
+	}
+	header, rows, err := parseCSVResult(string(output))
 	if err != nil {
 		return Result{}, err
 	}
@@ -94,6 +92,10 @@ COPY (%s) TO STDOUT (HEADER, DELIMITER ',');
 		Rows:    rows,
 		Message: fmt.Sprintf("%d rows", len(rows)),
 	}, nil
+}
+
+func duckDBCommand(ctx context.Context) *exec.Cmd {
+	return exec.CommandContext(ctx, "duckdb", "-csv")
 }
 
 func parseCSVResult(output string) ([]string, [][]string, error) {
