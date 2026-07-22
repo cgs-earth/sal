@@ -94,15 +94,26 @@ SELECT ?s WHERE { ?s schema:name "bob" . }`)
 	require.Contains(t, highlighted, `"bob"`)
 }
 
+func TestHighlightSQLStylesKeywordsAndStrings(t *testing.T) {
+	highlighted := highlightSQL(`SELECT t0.subject AS s FROM triples AS t0 JOIN other AS o ON o.s = 'bob'`)
+
+	require.Contains(t, highlighted, "\x1b[")
+	require.Contains(t, highlighted, sqlKeywordStyle.Render("SELECT"))
+	require.Contains(t, highlighted, sqlKeywordStyle.Render("JOIN"))
+	require.Contains(t, highlighted, sqlStringStyle.Render("'bob'"))
+	require.Contains(t, highlighted, "t0.subject")
+}
+
 func TestShellViewDelineatesEditorAndResults(t *testing.T) {
 	model := newShellModel(context.Background(), &fakeRunner{})
 	view := model.View().Content
 
 	require.Contains(t, view, "Editor")
 	require.Contains(t, view, "History")
-	require.Contains(t, view, "SQL")
 	require.Contains(t, view, "Results")
+	require.Contains(t, view, "F2: SQL View")
 	require.Contains(t, view, "Run a query to show results here.")
+	require.NotContains(t, view, "Run a query to show generated SQL.")
 	require.Contains(t, view, "\x1b[")
 }
 
@@ -118,11 +129,14 @@ func TestShellHelpStylesKeyboardDescriptions(t *testing.T) {
 
 	require.Contains(t, help, shellHelpKeyStyle.Render("Ctrl+H"))
 	require.Contains(t, help, shellHelpDescriptionStyle.Render("toggle help"))
+	require.Contains(t, help, shellHelpKeyStyle.Render("F2"))
+	require.Contains(t, help, shellHelpDescriptionStyle.Render("switch main and SQL pages"))
 	require.Contains(t, help, shellHelpKeyStyle.Render("Shift+←/→"))
 	require.Contains(t, help, shellHelpDescriptionStyle.Render("change focus"))
 	require.Contains(t, help, shellHelpKeyStyle.Render("Ctrl+U"))
 	require.Contains(t, help, shellHelpDescriptionStyle.Render("clear current editor line"))
 	require.NotContains(t, help, "row/table csv")
+	require.Contains(t, help, shellHelpDescriptionStyle.Render("copy selection or SQL page"))
 	require.Contains(t, help, shellHelpDescriptionStyle.Render("quit"))
 }
 
@@ -165,7 +179,7 @@ func TestRenderHistoryUsesFocusedStyle(t *testing.T) {
 	require.NotContains(t, history, "SELECT ?s WHERE {}")
 }
 
-func TestSQLRendersInSidePanelNotResults(t *testing.T) {
+func TestSQLRendersOnSeparatePageNotMainViewOrResults(t *testing.T) {
 	model := newShellModel(context.Background(), &fakeRunner{})
 	model.result = Result{
 		SQL:     "SELECT t0.subject AS s FROM triples AS t0",
@@ -174,11 +188,33 @@ func TestSQLRendersInSidePanelNotResults(t *testing.T) {
 		Message: "1 rows",
 	}
 
-	sqlPanel := model.renderSQL(40)
+	mainView := model.View().Content
 	resultsPanel := model.renderResults(80, 20)
+	model.page = pageSQL
+	sqlPage := model.View().Content
 
-	require.Contains(t, sqlPanel, "SELECT t0.subject")
+	require.NotContains(t, mainView, "SELECT t0.subject")
 	require.NotContains(t, resultsPanel, "SELECT t0.subject")
+	require.Contains(t, sqlPage, "SELECT")
+	require.Contains(t, sqlPage, "F2 main")
+	require.NotContains(t, sqlPage, "Ctrl+C copy")
+	require.Contains(t, sqlPage, sqlKeywordStyle.Render("SELECT"))
+}
+
+func TestRenderSQLKeepsTitleAbovePanel(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.page = pageSQL
+	model.result = Result{SQL: "SELECT t0.subject AS s FROM triples AS t0"}
+
+	sqlView := model.View().Content
+
+	titleIndex := strings.Index(sqlView, "Generated SQL")
+	borderIndex := strings.Index(sqlView, "┏")
+	require.NotEqual(t, -1, titleIndex)
+	require.NotEqual(t, -1, borderIndex)
+	require.Less(t, titleIndex, borderIndex)
+	require.Contains(t, sqlView[:titleIndex], "\n")
+	require.NotContains(t, sqlView[strings.Index(sqlView, "┏"):], "Generated SQL")
 }
 
 func TestRenderEditorKeepsStatusOutsideEditorBox(t *testing.T) {
@@ -332,6 +368,41 @@ func TestShellModelShiftLeftBackToEditorReactivatesEditing(t *testing.T) {
 	updated, _ = model.Update(tea.KeyPressMsg{Text: "?s", Code: 's'})
 	model = updated.(shellModel)
 	require.Equal(t, "SELECT ?s", model.query)
+}
+
+func TestShellModelF2NavigatesToSQLPage(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.result = Result{SQL: "SELECT t0.subject AS s FROM triples AS t0"}
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyF2})
+	model = updated.(shellModel)
+
+	require.Equal(t, pageSQL, model.page)
+	require.Contains(t, model.View().Content, sqlKeywordStyle.Render("SELECT"))
+	require.Contains(t, model.View().Content, "t0.subject")
+}
+
+func TestShellModelF2ReturnsToMainPage(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.page = pageSQL
+	model.result = Result{SQL: "SELECT t0.subject AS s FROM triples AS t0"}
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyF2})
+	model = updated.(shellModel)
+
+	require.Equal(t, pageMain, model.page)
+	require.NotContains(t, model.View().Content, "SELECT t0.subject")
+	require.Contains(t, model.View().Content, "Results")
+}
+
+func TestShellModelEscapeReturnsFromSQLPage(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.page = pageSQL
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	model = updated.(shellModel)
+
+	require.Equal(t, pageMain, model.page)
 }
 
 func TestShellModelHistoryIgnoresTextInput(t *testing.T) {
@@ -557,6 +628,31 @@ func TestShellModelCopiesAllSelectedResultsAsCSVWithCtrlC(t *testing.T) {
 	require.NotNil(t, cmd)
 	batch := cmd().(tea.BatchMsg)
 	require.Equal(t, "s,name\nhttps://example.org/alice,alice\nhttps://example.org/bob,bob\n", fmt.Sprint(batch[0]()))
+}
+
+func TestShellModelCopiesSQLPageWithCtrlC(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.page = pageSQL
+	model.result = Result{SQL: "SELECT t0.subject AS s FROM triples AS t0"}
+
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	model = updated.(shellModel)
+
+	require.Equal(t, "Copied to clipboard", model.copyFlash)
+	require.Equal(t, focusSQL, model.copyFlashFocus)
+	require.Contains(t, model.renderSQL(80), editorFlashStyle.Render("Copied to clipboard"))
+	require.NotNil(t, cmd)
+	batch := cmd().(tea.BatchMsg)
+	require.Equal(t, "SELECT t0.subject AS s FROM triples AS t0", fmt.Sprint(batch[0]()))
+}
+
+func TestShellModelSQLPageCtrlCIgnoresEmptySQL(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.page = pageSQL
+
+	_, cmd := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+
+	require.Nil(t, cmd)
 }
 
 func TestShellModelMovingResultsClearsAllResultsSelection(t *testing.T) {

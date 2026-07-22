@@ -135,12 +135,20 @@ const (
 	focusHistory shellFocus = iota
 	focusEditor
 	focusResults
+	focusSQL
 )
 
 type historyEntry struct {
 	Query string
 	Path  string
 }
+
+type shellPage int
+
+const (
+	pageMain shellPage = iota
+	pageSQL
+)
 
 type shellModel struct {
 	ctx                context.Context
@@ -168,6 +176,7 @@ type shellModel struct {
 	mouseSelecting     bool
 	mouseSelectAnchor  int
 	showHelp           bool
+	page               shellPage
 }
 
 func newShellModel(ctx context.Context, runner Runner) shellModel {
@@ -206,7 +215,7 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case tea.MouseClickMsg:
-		if msg.Button == tea.MouseLeft {
+		if m.page == pageMain && msg.Button == tea.MouseLeft {
 			if offset, ok := m.editorOffsetAtMouse(msg.X, msg.Y); ok {
 				m.focus = focusEditor
 				m.cursor = offset
@@ -236,18 +245,48 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.PasteMsg:
-		if m.focus == focusEditor {
+		if m.page == pageMain && m.focus == focusEditor {
 			m.insertEditorText(msg.Content)
 		}
 		return m, nil
 	case tea.ClipboardMsg:
-		if m.focus == focusEditor {
+		if m.page == pageMain && m.focus == focusEditor {
 			m.insertEditorText(msg.Content)
 		}
 		return m, nil
 	case tea.KeyPressMsg:
 		if msg.Keystroke() == "ctrl+h" {
 			m.showHelp = !m.showHelp
+			return m, nil
+		}
+		if isSQLPageToggleKey(msg) {
+			if m.page == pageSQL {
+				m.page = pageMain
+			} else {
+				m.page = pageSQL
+			}
+			m.mouseSelecting = false
+			return m, nil
+		}
+		if m.page == pageSQL {
+			if msg.Keystroke() == "ctrl+l" {
+				return m, func() tea.Msg {
+					return tea.ClearScreen()
+				}
+			}
+			switch msg.Keystroke() {
+			case "ctrl+d":
+				return m, tea.Quit
+			case "esc":
+				m.page = pageMain
+				return m, nil
+			}
+			if isCopyKey(msg) {
+				if sql := strings.TrimSpace(m.result.SQL); sql != "" {
+					return m, m.copyToClipboard(sql, focusSQL)
+				}
+				return m, nil
+			}
 			return m, nil
 		}
 		if isFocusPreviousKey(msg) {
@@ -453,22 +492,28 @@ func (m shellModel) View() tea.View {
 	width := max(60, m.width)
 	contentWidth := max(40, width-4)
 
-	header := shellTitleStyle.Width(contentWidth).Render("SAL SPARQL  Ctrl+H help")
-	editorWidth, sqlWidth := splitTopPanelWidths(contentWidth)
-	editorColumn := m.renderEditorColumn(editorWidth)
-	top := editorColumn
-	if sqlWidth > 0 {
-		top = lipgloss.JoinHorizontal(lipgloss.Top, editorColumn, " ", m.renderSQL(sqlWidth))
-	}
-	resultsHeight := m.resultsHeight(header, top)
-	results := m.renderResults(contentWidth, resultsHeight)
+	var body string
+	if m.page == pageSQL {
+		header := shellTitleStyle.Width(contentWidth).Render("SAL SPARQL SQL  F2 main  Esc main")
+		body = lipgloss.JoinVertical(
+			lipgloss.Left,
+			header,
+			"",
+			m.renderSQL(contentWidth),
+		)
+	} else {
+		header := shellTitleStyle.Width(contentWidth).Render("SAL SPARQL  Ctrl+H: help  F2: SQL View")
+		editorColumn := m.renderEditorColumn(contentWidth)
+		resultsHeight := m.resultsHeight(header, editorColumn)
+		results := m.renderResults(contentWidth, resultsHeight)
 
-	body := lipgloss.JoinVertical(
-		lipgloss.Left,
-		header,
-		top,
-		results,
-	)
+		body = lipgloss.JoinVertical(
+			lipgloss.Left,
+			header,
+			editorColumn,
+			results,
+		)
+	}
 	rendered := shellAppStyle.Width(width).Render(body)
 	if m.showHelp {
 		rendered = renderHelpLayer(rendered, width)
@@ -538,14 +583,25 @@ func (m shellModel) renderHistory(width int) string {
 func (m shellModel) renderSQL(width int) string {
 	body := shellMutedStyle.Render("Run a query to show generated SQL.")
 	if strings.TrimSpace(m.result.SQL) != "" {
-		body = sqlPreviewStyle.Render(m.result.SQL)
+		body = sqlPreviewStyle.Render(highlightSQL(m.result.SQL))
 	}
-	content := lipgloss.JoinVertical(
+	titleStyle := sectionTitleStyle
+	panelStyle := sqlPanelStyle
+	if m.page == pageSQL {
+		titleStyle = focusedSectionTitleStyle
+		panelStyle = focusedSQLPanelStyle
+	}
+	labelParts := []string{titleStyle.Render("Generated SQL")}
+	if m.copyFlash != "" && m.copyFlashFocus == focusSQL {
+		labelParts = append(labelParts, " ", editorFlashStyle.Render(m.copyFlash))
+	}
+	label := lipgloss.JoinHorizontal(lipgloss.Top, labelParts...)
+	panel := panelStyle.Width(width).Render(body)
+	return "\n" + lipgloss.JoinVertical(
 		lipgloss.Left,
-		sectionTitleStyle.Render("SQL"),
-		body,
+		label,
+		panel,
 	)
-	return sqlPanelStyle.Width(width).Render(content)
 }
 
 func (m shellModel) renderResults(width int, availableHeight int) string {
@@ -652,7 +708,7 @@ func (m shellModel) editorOffsetAtMouse(x int, y int) (int, bool) {
 func (m shellModel) editorBodyBounds() (int, int, int, int) {
 	width := max(60, m.width)
 	contentWidth := max(40, width-4)
-	editorWidth, _ := splitTopPanelWidths(contentWidth)
+	editorWidth := contentWidth
 
 	x := 2 + 1 + 2
 	y := 1 + 1 + 1 + 1
@@ -924,13 +980,13 @@ func pruneQueryHistory(dir string, limit int) error {
 	return nil
 }
 
-func splitTopPanelWidths(width int) (int, int) {
-	if width < 80 {
-		return width, 0
+func isSQLPageToggleKey(msg tea.KeyPressMsg) bool {
+	stroke := strings.ToLower(msg.Keystroke())
+	if stroke == "f2" {
+		return true
 	}
-	sqlWidth := max(28, width/3)
-	editorWidth := max(40, width-sqlWidth-1)
-	return editorWidth, sqlWidth
+	key := msg.Key()
+	return key.Code == tea.KeyF2
 }
 
 func recordsToCSV(records [][]string) string {
@@ -1010,13 +1066,14 @@ func renderHelp(width int) string {
 	items := []string{
 		helpItem("Ctrl+H", "toggle help"),
 		helpItem("Ctrl+R", "run query"),
+		helpItem("F2", "switch main and SQL pages"),
 		helpItem("Shift+←/→", "change focus"),
 		helpItem("Left/Right", "browse history when history is focused"),
 		helpItem("Up/Down", "move cursor or selected result row"),
 		helpItem("PgUp/PgDown", "page through results"),
 		helpItem("Ctrl+U", "clear current editor line"),
 		helpItem("Ctrl+A", "select editor text or result rows"),
-		helpItem("Ctrl+C", "copy selection"),
+		helpItem("Ctrl+C", "copy selection or SQL page"),
 		helpItem("Ctrl+V", "paste into editor"),
 		helpItem("Ctrl+L", "clear screen"),
 		helpItem("Ctrl+D", "quit"),
@@ -1413,6 +1470,72 @@ func isSPARQLKeyword(token string) bool {
 	}
 }
 
+// highlightSQL applies minimal highlighting for generated SQL preview text.
+func highlightSQL(sql string) string {
+	var b strings.Builder
+	for i := 0; i < len(sql); {
+		ch := rune(sql[i])
+		if ch == '"' || ch == '\'' {
+			end := scanSQLQuoted(sql, i)
+			b.WriteString(sqlStringStyle.Render(sql[i:end]))
+			i = end
+			continue
+		}
+		if isSQLIdentifierStart(ch) {
+			end := i + 1
+			for end < len(sql) && isSQLIdentifierRune(rune(sql[end])) {
+				end++
+			}
+			token := sql[i:end]
+			if isSQLKeyword(token) {
+				b.WriteString(sqlKeywordStyle.Render(token))
+			} else {
+				b.WriteString(token)
+			}
+			i = end
+			continue
+		}
+		b.WriteByte(sql[i])
+		i++
+	}
+	return b.String()
+}
+
+func scanSQLQuoted(value string, start int) int {
+	quote := value[start]
+	for i := start + 1; i < len(value); i++ {
+		if value[i] == '\\' {
+			i++
+			continue
+		}
+		if value[i] == quote {
+			if quote == '\'' && i+1 < len(value) && value[i+1] == '\'' {
+				i++
+				continue
+			}
+			return i + 1
+		}
+	}
+	return len(value)
+}
+
+func isSQLIdentifierStart(ch rune) bool {
+	return unicode.IsLetter(ch) || ch == '_'
+}
+
+func isSQLIdentifierRune(ch rune) bool {
+	return unicode.IsLetter(ch) || unicode.IsDigit(ch) || ch == '_'
+}
+
+func isSQLKeyword(token string) bool {
+	switch strings.ToUpper(token) {
+	case "SELECT", "FROM", "WHERE", "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS", "ON", "AS", "AND", "OR", "NOT", "NULL", "IS", "IN", "LIKE", "BETWEEN", "CASE", "WHEN", "THEN", "ELSE", "END", "GROUP", "BY", "ORDER", "HAVING", "LIMIT", "OFFSET", "UNION", "ALL", "DISTINCT", "CREATE", "REPLACE", "VIEW", "CAST", "COPY", "TO", "TRUE", "FALSE":
+		return true
+	default:
+		return false
+	}
+}
+
 const (
 	catRosewater = "#F5E0DC"
 	catPink      = "#F5C2E7"
@@ -1503,6 +1626,11 @@ var (
 			BorderForeground(lipgloss.Color(catSurface2)).
 			Padding(1, 2).
 			MarginBottom(1)
+	focusedSQLPanelStyle = lipgloss.NewStyle().
+				Border(lipgloss.ThickBorder()).
+				BorderForeground(lipgloss.Color(catLavender)).
+				Padding(1, 2).
+				MarginBottom(1)
 	shellMutedStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color(catOverlay2))
 	editorFlashStyle = lipgloss.NewStyle().
@@ -1520,6 +1648,11 @@ var (
 	sqlPreviewStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color(catSubtext1)).
 			Padding(0, 1)
+	sqlKeywordStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color(catBlue)).
+			Bold(true)
+	sqlStringStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color(catGreen))
 	editorCursorStyle = lipgloss.NewStyle().
 				Background(lipgloss.Color(catLavender)).
 				Foreground(lipgloss.Color(catCrust))
