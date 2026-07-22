@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +46,7 @@ func TestRenderTableShowsHeadersAndRows(t *testing.T) {
 		80,
 		false,
 		0,
+		false,
 	)
 
 	require.Contains(t, table, "subject")
@@ -60,10 +62,25 @@ func TestRenderTableHighlightsFocusedRowOnly(t *testing.T) {
 		80,
 		true,
 		1,
+		false,
 	)
 
 	require.Contains(t, table, tableFocusedRowStyle.Render("row two"))
 	require.NotContains(t, table, tableFocusedRowStyle.Render("row one"))
+}
+
+func TestRenderTableHighlightsAllSelectedRows(t *testing.T) {
+	table := renderTable(
+		[]string{"subject"},
+		[][]string{{"row one"}, {"row two"}},
+		80,
+		true,
+		0,
+		true,
+	)
+
+	require.Contains(t, table, tableFocusedRowStyle.Render("row one"))
+	require.Contains(t, table, tableFocusedRowStyle.Render("row two"))
 }
 
 func TestSyntaxHighlightStylesSPARQLParts(t *testing.T) {
@@ -94,6 +111,11 @@ func TestShellHelpStylesKeyboardDescriptions(t *testing.T) {
 
 	require.Contains(t, help, shellHelpKeyStyle.Render("Tab"))
 	require.Contains(t, help, shellHelpDescriptionStyle.Render("change focus"))
+	require.Contains(t, help, shellHelpKeyStyle.Render("Home/End"))
+	require.Contains(t, help, shellHelpDescriptionStyle.Render("row bounds"))
+	require.Contains(t, help, shellHelpKeyStyle.Render("Ctrl+U"))
+	require.Contains(t, help, shellHelpDescriptionStyle.Render("clear row"))
+	require.NotContains(t, help, "row/table csv")
 	require.Contains(t, help, shellHelpDescriptionStyle.Render("quit"))
 }
 
@@ -227,8 +249,35 @@ func TestShellModelCopiesSelectedTextWithCtrlC(t *testing.T) {
 	model = updated.(shellModel)
 
 	require.Equal(t, len("SELECT ?s"), model.cursor)
+	require.Equal(t, "Copied to clipboard", model.copyFlash)
+	require.Equal(t, focusEditor, model.copyFlashFocus)
+	require.Contains(t, model.renderEditor(80), editorFlashStyle.Render("Copied to clipboard"))
 	require.NotNil(t, cmd)
-	require.Equal(t, "?s", fmt.Sprint(cmd()))
+	batch := cmd().(tea.BatchMsg)
+	require.Len(t, batch, 2)
+	require.Equal(t, "?s", fmt.Sprint(batch[0]()))
+}
+
+func TestShellModelClearsCopyFlash(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.copyFlash = "Copied to clipboard"
+	model.copyFlashID = 3
+
+	updated, _ := model.Update(clearCopyFlashMsg{id: 3})
+	model = updated.(shellModel)
+
+	require.Empty(t, model.copyFlash)
+}
+
+func TestShellModelIgnoresStaleCopyFlashClear(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.copyFlash = "Copied to clipboard"
+	model.copyFlashID = 3
+
+	updated, _ := model.Update(clearCopyFlashMsg{id: 2})
+	model = updated.(shellModel)
+
+	require.Equal(t, "Copied to clipboard", model.copyFlash)
 }
 
 func TestShellModelIgnoresMetaC(t *testing.T) {
@@ -255,6 +304,120 @@ func TestShellModelRequestsClipboardWithCtrlV(t *testing.T) {
 	model := newShellModel(context.Background(), &fakeRunner{})
 
 	_, cmd := model.Update(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
+
+	require.NotNil(t, cmd)
+	require.NotNil(t, cmd())
+}
+
+func TestShellModelSelectsAllResultsWithCtrlA(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.focus = focusResults
+	model.result = Result{
+		Header: []string{"s"},
+		Rows:   [][]string{{"row one"}, {"row two"}},
+	}
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+	model = updated.(shellModel)
+
+	require.True(t, model.resultsAllSelected)
+	require.Equal(t, 0, model.selectionStart)
+	require.Equal(t, 0, model.selectionEnd)
+}
+
+func TestShellModelCopiesSelectedResultRowWithCtrlC(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.focus = focusResults
+	model.selectedRow = 1
+	model.result = Result{
+		Header: []string{"s", "name"},
+		Rows:   [][]string{{"https://example.org/alice", "alice"}, {"https://example.org/bob", "bob"}},
+	}
+
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	model = updated.(shellModel)
+
+	require.Equal(t, "Copied to clipboard", model.copyFlash)
+	require.Equal(t, focusResults, model.copyFlashFocus)
+	require.Contains(t, model.renderResults(80, 20), editorFlashStyle.Render("Copied to clipboard"))
+	require.NotContains(t, model.renderEditor(80), editorFlashStyle.Render("Copied to clipboard"))
+	require.NotNil(t, cmd)
+	batch := cmd().(tea.BatchMsg)
+	require.Equal(t, "https://example.org/bob,bob\n", fmt.Sprint(batch[0]()))
+}
+
+func TestShellModelCopiesAllSelectedResultsAsCSVWithCtrlC(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.focus = focusResults
+	model.resultsAllSelected = true
+	model.result = Result{
+		Header: []string{"s", "name"},
+		Rows:   [][]string{{"https://example.org/alice", "alice"}, {"https://example.org/bob", "bob"}},
+	}
+
+	_, cmd := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+
+	require.NotNil(t, cmd)
+	batch := cmd().(tea.BatchMsg)
+	require.Equal(t, "s,name\nhttps://example.org/alice,alice\nhttps://example.org/bob,bob\n", fmt.Sprint(batch[0]()))
+}
+
+func TestShellModelMovingResultsClearsAllResultsSelection(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.focus = focusResults
+	model.resultsAllSelected = true
+	model.result = Result{
+		Header: []string{"s"},
+		Rows:   [][]string{{"row one"}, {"row two"}},
+	}
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	model = updated.(shellModel)
+
+	require.False(t, model.resultsAllSelected)
+	require.Equal(t, 1, model.selectedRow)
+}
+
+func TestShellModelPagesThroughResults(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.focus = focusResults
+	model.height = 12
+	model.result = Result{
+		Header: []string{"s"},
+		Rows: [][]string{
+			{"row 0"}, {"row 1"}, {"row 2"}, {"row 3"}, {"row 4"},
+		},
+	}
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	model = updated.(shellModel)
+	require.Equal(t, 2, model.selectedRow)
+
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
+	model = updated.(shellModel)
+	require.Equal(t, 0, model.selectedRow)
+}
+
+func TestShellModelPageResultsClearsAllResultsSelection(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.focus = focusResults
+	model.height = 12
+	model.resultsAllSelected = true
+	model.result = Result{
+		Header: []string{"s"},
+		Rows:   [][]string{{"row 0"}, {"row 1"}, {"row 2"}},
+	}
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	model = updated.(shellModel)
+
+	require.False(t, model.resultsAllSelected)
+}
+
+func TestShellModelCtrlLClearsScreen(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+
+	_, cmd := model.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 
 	require.NotNil(t, cmd)
 	require.NotNil(t, cmd())
@@ -521,6 +684,53 @@ func TestShellModelMovesCursorWithArrows(t *testing.T) {
 	require.Equal(t, 5, model.cursor)
 }
 
+func TestMoveCursorLineStartAndEnd(t *testing.T) {
+	query := "abc\ndefgh\nij"
+
+	require.Equal(t, 4, moveCursorLineStart(query, 6))
+	require.Equal(t, 9, moveCursorLineEnd(query, 6))
+}
+
+func TestDeleteCurrentLineDeletesFocusedLine(t *testing.T) {
+	query, cursor := deleteCurrentLine("abc\ndefgh\nij", 6)
+
+	require.Equal(t, "abc\nij", query)
+	require.Equal(t, 4, cursor)
+}
+
+func TestDeleteCurrentLineDeletesLastLineAndPrecedingNewline(t *testing.T) {
+	query, cursor := deleteCurrentLine("abc\ndef", len("abc\ndef"))
+
+	require.Equal(t, "abc", query)
+	require.Equal(t, 3, cursor)
+}
+
+func TestShellModelMovesCursorToLineBoundsWithHomeAndEnd(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.query = "abc\ndefgh\nij"
+	model.cursor = 6
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyHome})
+	model = updated.(shellModel)
+	require.Equal(t, 4, model.cursor)
+
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
+	model = updated.(shellModel)
+	require.Equal(t, 9, model.cursor)
+}
+
+func TestShellModelDeletesCurrentLineWithCtrlU(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.query = "abc\ndefgh\nij"
+	model.cursor = 6
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	model = updated.(shellModel)
+
+	require.Equal(t, "abc\nij", model.query)
+	require.Equal(t, 4, model.cursor)
+}
+
 func TestMoveCursorWordLeftAndRight(t *testing.T) {
 	query := "SELECT ?subject WHERE"
 
@@ -543,6 +753,38 @@ func TestShellModelMovesCursorByWordWithPlatformModifier(t *testing.T) {
 	require.Equal(t, len("SELECT ?subject"), model.cursor)
 }
 
+func TestShellModelMovesCursorByWordWithDedicatedModifiedArrowCodes(t *testing.T) {
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.query = "SELECT ?subject WHERE"
+	model.cursor = len("SELECT ?subject")
+
+	leftCode, rightCode := wordJumpArrowCodes()
+	updated, _ := model.Update(tea.KeyPressMsg{Code: leftCode})
+	model = updated.(shellModel)
+	require.Equal(t, len("SELECT "), model.cursor)
+
+	updated, _ = model.Update(tea.KeyPressMsg{Code: rightCode})
+	model = updated.(shellModel)
+	require.Equal(t, len("SELECT ?subject"), model.cursor)
+}
+
+func TestShellModelMovesCursorByWordWithMacOptionBFEncoding(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Option+B/F word navigation is macOS-specific")
+	}
+	model := newShellModel(context.Background(), &fakeRunner{})
+	model.query = "SELECT ?subject WHERE"
+	model.cursor = len("SELECT ?subject")
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModAlt})
+	model = updated.(shellModel)
+	require.Equal(t, len("SELECT "), model.cursor)
+
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModAlt})
+	model = updated.(shellModel)
+	require.Equal(t, len("SELECT ?subject"), model.cursor)
+}
+
 func TestShellModelIgnoresInactiveWordJumpModifier(t *testing.T) {
 	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?subject WHERE"
@@ -560,6 +802,13 @@ func inactiveWordJumpModifier() tea.KeyMod {
 		return tea.ModCtrl
 	}
 	return tea.ModAlt
+}
+
+func wordJumpArrowCodes() (rune, rune) {
+	if runtime.GOOS == "darwin" {
+		return tea.KeyLeftAlt, tea.KeyRightAlt
+	}
+	return tea.KeyLeftCtrl, tea.KeyRightCtrl
 }
 
 func TestShellModelTabsIntoResultsAndMovesFocusedRow(t *testing.T) {

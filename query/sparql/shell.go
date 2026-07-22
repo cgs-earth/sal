@@ -13,11 +13,11 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	rdflibsparql "github.com/tggo/goRDFlib/sparql"
 )
 
 type Result struct {
@@ -124,6 +124,10 @@ type historySavedMsg struct {
 	err     error
 }
 
+type clearCopyFlashMsg struct {
+	id int
+}
+
 type shellFocus int
 
 const (
@@ -138,25 +142,29 @@ type historyEntry struct {
 }
 
 type shellModel struct {
-	ctx            context.Context
-	runner         Runner
-	query          string
-	cursor         int
-	selectionStart int
-	selectionEnd   int
-	result         Result
-	err            string
-	running        bool
-	width          int
-	height         int
-	submitted      string
-	focus          shellFocus
-	historyDir     string
-	history        []historyEntry
-	historyIndex   int
-	historyVisible bool
-	selectedRow    int
-	resultOffset   int
+	ctx                context.Context
+	runner             Runner
+	query              string
+	cursor             int
+	selectionStart     int
+	selectionEnd       int
+	result             Result
+	err                string
+	copyFlash          string
+	copyFlashID        int
+	copyFlashFocus     shellFocus
+	running            bool
+	width              int
+	height             int
+	submitted          string
+	focus              shellFocus
+	historyDir         string
+	history            []historyEntry
+	historyIndex       int
+	historyVisible     bool
+	selectedRow        int
+	resultOffset       int
+	resultsAllSelected bool
 }
 
 func newShellModel(ctx context.Context, runner Runner) shellModel {
@@ -205,6 +213,11 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleFocus()
 			return m, nil
 		}
+		if msg.Keystroke() == "ctrl+l" {
+			return m, func() tea.Msg {
+				return tea.ClearScreen()
+			}
+		}
 		if m.focus == focusHistory {
 			switch msg.Keystroke() {
 			case "left":
@@ -219,21 +232,47 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.Keystroke() {
 			case "up":
 				m.selectedRow = max(0, m.selectedRow-1)
+				m.resultsAllSelected = false
 				m.ensureSelectedRowVisible()
 				return m, nil
 			case "down":
 				m.selectedRow = min(max(0, len(m.result.Rows)-1), m.selectedRow+1)
+				m.resultsAllSelected = false
 				m.ensureSelectedRowVisible()
+				return m, nil
+			case "pgup":
+				m.pageResults(-1)
+				return m, nil
+			case "pgdown":
+				m.pageResults(1)
+				return m, nil
+			}
+			switch msg.Key().Code {
+			case tea.KeyPgUp:
+				m.pageResults(-1)
+				return m, nil
+			case tea.KeyPgDown:
+				m.pageResults(1)
 				return m, nil
 			}
 		}
 		if isSelectAllKey(msg) {
+			if m.focus == focusResults && len(m.result.Rows) > 0 {
+				m.resultsAllSelected = true
+				return m, nil
+			}
 			m.selectAll()
 			return m, nil
 		}
 		if isCopyKey(msg) {
+			if m.focus == focusResults {
+				if text, ok := m.selectedResultsCSV(); ok {
+					return m, m.copyToClipboard(text, focusResults)
+				}
+				return m, nil
+			}
 			if text, ok := m.selectedEditorText(); ok {
-				return m, tea.SetClipboard(text)
+				return m, m.copyToClipboard(text, focusEditor)
 			}
 			return m, nil
 		}
@@ -241,6 +280,21 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg {
 				return tea.ReadClipboard()
 			}
+		}
+		if isLineStartKey(msg) {
+			m.cursor = moveCursorLineStart(m.query, m.cursor)
+			m.clearSelection()
+			return m, nil
+		}
+		if isLineEndKey(msg) {
+			m.cursor = moveCursorLineEnd(m.query, m.cursor)
+			m.clearSelection()
+			return m, nil
+		}
+		if isLineDeleteKey(msg) {
+			m.query, m.cursor = deleteCurrentLine(m.query, m.cursor)
+			m.clearSelection()
+			return m, nil
 		}
 		if isWordLeftKey(msg) {
 			m.cursor = moveCursorWordLeft(m.query, m.cursor)
@@ -329,11 +383,17 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.result = msg.result
 		m.selectedRow = 0
 		m.resultOffset = 0
+		m.resultsAllSelected = false
 		return m, nil
 	case historySavedMsg:
 		if msg.err == nil {
 			m.history = msg.entries
 			m.historyIndex = -1
+		}
+		return m, nil
+	case clearCopyFlashMsg:
+		if msg.id == m.copyFlashID {
+			m.copyFlash = ""
 		}
 		return m, nil
 	default:
@@ -382,7 +442,7 @@ func (m shellModel) resultsHeight(header string, help string, top string) int {
 }
 
 func (m shellModel) renderEditor(width int) string {
-	status := parseStatus(m.query)
+	status := ""
 	if m.running {
 		status = shellRunningStyle.Render("running")
 	}
@@ -393,7 +453,14 @@ func (m shellModel) renderEditor(width int) string {
 		titleStyle = focusedSectionTitleStyle
 		panelStyle = focusedEditorPanelStyle
 	}
-	label := lipgloss.JoinHorizontal(lipgloss.Top, titleStyle.Render("Editor"), " ", status)
+	labelParts := []string{titleStyle.Render("Editor")}
+	if status != "" {
+		labelParts = append(labelParts, " ", status)
+	}
+	if m.copyFlash != "" && m.copyFlashFocus == focusEditor {
+		labelParts = append(labelParts, " ", editorFlashStyle.Render(m.copyFlash))
+	}
+	label := lipgloss.JoinHorizontal(lipgloss.Top, labelParts...)
 	panel := panelStyle.Width(width).Render(body)
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -447,13 +514,13 @@ func (m shellModel) renderResults(width int, availableHeight int) string {
 		body.WriteString("\n\n")
 		visibleRows := maxVisibleResultRows(availableHeight)
 		offset, rows := resultWindow(m.result.Rows, m.selectedRow, m.resultOffset, visibleRows)
-		body.WriteString(renderTable(m.result.Header, rows, width-4, m.focus == focusResults, m.selectedRow-offset))
+		body.WriteString(renderTable(m.result.Header, rows, width-4, m.focus == focusResults, m.selectedRow-offset, m.resultsAllSelected))
 	} else {
 		body.WriteString(shellMutedStyle.Render("Run a query to show results here."))
 	}
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
-		m.resultsTitle().Render("Results"),
+		m.renderResultsTitle(),
 		body.String(),
 	)
 	return m.resultsPanel().Width(width).Render(content)
@@ -506,6 +573,13 @@ func (m *shellModel) loadHistoryOffset(delta int) {
 	m.err = ""
 }
 
+func (m *shellModel) copyToClipboard(text string, focus shellFocus) tea.Cmd {
+	m.copyFlashID++
+	m.copyFlash = "Copied to clipboard"
+	m.copyFlashFocus = focus
+	return tea.Batch(tea.SetClipboard(text), clearCopyFlashCmd(m.copyFlashID))
+}
+
 func (m *shellModel) insertEditorText(text string) {
 	if !m.replaceSelection(text) {
 		m.query, m.cursor = insertAtCursor(m.query, m.cursor, text)
@@ -530,6 +604,24 @@ func (m shellModel) selectedEditorText() (string, bool) {
 		return "", false
 	}
 	return string([]rune(m.query)[start:end]), true
+}
+
+func (m shellModel) selectedResultsCSV() (string, bool) {
+	if len(m.result.Rows) == 0 {
+		return "", false
+	}
+	records := m.result.Rows
+	if !m.resultsAllSelected {
+		row := min(max(0, m.selectedRow), len(m.result.Rows)-1)
+		records = [][]string{m.result.Rows[row]}
+		return recordsToCSV(records), true
+	}
+	allRecords := make([][]string, 0, len(m.result.Rows)+1)
+	if len(m.result.Header) > 0 {
+		allRecords = append(allRecords, m.result.Header)
+	}
+	allRecords = append(allRecords, records...)
+	return recordsToCSV(allRecords), true
 }
 
 func (m *shellModel) deleteSelection() bool {
@@ -562,6 +654,16 @@ func (m *shellModel) ensureSelectedRowVisible() {
 		m.resultOffset = m.selectedRow - visibleRows + 1
 	}
 	m.resultOffset = min(max(0, m.resultOffset), max(0, len(m.result.Rows)-visibleRows))
+}
+
+func (m *shellModel) pageResults(direction int) {
+	if len(m.result.Rows) == 0 {
+		return
+	}
+	step := max(1, maxVisibleResultRows(m.height)-1)
+	m.selectedRow = min(max(0, m.selectedRow+(direction*step)), len(m.result.Rows)-1)
+	m.resultsAllSelected = false
+	m.ensureSelectedRowVisible()
 }
 
 func (m shellModel) visibleResultRows() [][]string {
@@ -598,6 +700,14 @@ func (m shellModel) resultsTitle() lipgloss.Style {
 	return sectionTitleStyle
 }
 
+func (m shellModel) renderResultsTitle() string {
+	parts := []string{m.resultsTitle().Render("Results")}
+	if m.copyFlash != "" && m.copyFlashFocus == focusResults {
+		parts = append(parts, " ", editorFlashStyle.Render(m.copyFlash))
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+}
+
 func (m shellModel) resultsPanel() lipgloss.Style {
 	if m.focus == focusResults {
 		return focusedResultPanelStyle
@@ -617,6 +727,12 @@ func saveHistoryCmd(dir string, query string) tea.Cmd {
 		entries, err := saveQueryHistory(dir, query)
 		return historySavedMsg{entries: entries, err: err}
 	}
+}
+
+func clearCopyFlashCmd(id int) tea.Cmd {
+	return tea.Tick(900*time.Millisecond, func(time.Time) tea.Msg {
+		return clearCopyFlashMsg{id: id}
+	})
 }
 
 func defaultHistoryDir() string {
@@ -724,7 +840,14 @@ func splitTopPanelWidths(width int) (int, int) {
 	return editorWidth, sqlWidth
 }
 
-func renderTable(header []string, rows [][]string, width int, focused bool, focusedRow int) string {
+func recordsToCSV(records [][]string) string {
+	var b strings.Builder
+	writer := csv.NewWriter(&b)
+	_ = writer.WriteAll(records)
+	return b.String()
+}
+
+func renderTable(header []string, rows [][]string, width int, focused bool, focusedRow int, allRowsSelected bool) string {
 	if len(header) == 0 {
 		return ""
 	}
@@ -761,7 +884,7 @@ func renderTable(header []string, rows [][]string, width int, focused bool, focu
 	b.WriteByte('\n')
 	for i, row := range rows {
 		style := tableCellStyle
-		if focused && i == focusedRow {
+		if focused && (allRowsSelected || i == focusedRow) {
 			style = tableFocusedRowStyle
 		}
 		writeStyledTableRow(&b, row, widths, style)
@@ -872,6 +995,35 @@ func deleteWordBeforeCursor(value string, cursor int) (string, int) {
 	return string(next), start
 }
 
+func moveCursorLineStart(value string, cursor int) int {
+	runes := []rune(value)
+	cursor = clampCursor(cursor, len(runes))
+	start, _ := currentLineBounds(runes, cursor)
+	return start
+}
+
+func moveCursorLineEnd(value string, cursor int) int {
+	runes := []rune(value)
+	cursor = clampCursor(cursor, len(runes))
+	_, end := currentLineBounds(runes, cursor)
+	return end
+}
+
+func deleteCurrentLine(value string, cursor int) (string, int) {
+	runes := []rune(value)
+	cursor = clampCursor(cursor, len(runes))
+	start, end := currentLineBounds(runes, cursor)
+	if end < len(runes) {
+		end++
+	} else if start > 0 {
+		start--
+	}
+	next := make([]rune, 0, len(runes)-(end-start))
+	next = append(next, runes[:start]...)
+	next = append(next, runes[end:]...)
+	return string(next), start
+}
+
 func moveCursorWordLeft(value string, cursor int) int {
 	runes := []rune(value)
 	cursor = clampCursor(cursor, len(runes))
@@ -908,21 +1060,48 @@ func isWordDeleteKey(msg tea.KeyPressMsg) bool {
 	return key.Mod&tea.ModCtrl != 0 || key.Mod&tea.ModAlt != 0
 }
 
+func isLineStartKey(msg tea.KeyPressMsg) bool {
+	key := msg.Key()
+	return msg.Keystroke() == "home" || key.Code == tea.KeyHome
+}
+
+func isLineEndKey(msg tea.KeyPressMsg) bool {
+	key := msg.Key()
+	return msg.Keystroke() == "end" || key.Code == tea.KeyEnd
+}
+
+func isLineDeleteKey(msg tea.KeyPressMsg) bool {
+	key := msg.Key()
+	return msg.Keystroke() == "ctrl+u" || (unicode.ToLower(key.Code) == 'u' && key.Mod&tea.ModCtrl != 0)
+}
+
 func isWordLeftKey(msg tea.KeyPressMsg) bool {
 	mod, name := wordJumpModifier()
-	if msg.Keystroke() == name+"+left" {
+	if msg.Keystroke() == name+"+left" || (runtime.GOOS == "darwin" && msg.Keystroke() == "alt+b") {
 		return true
 	}
 	key := msg.Key()
+	if runtime.GOOS == "darwin" && (key.Code == tea.KeyLeftAlt || key.Code == tea.KeyLeftMeta || (unicode.ToLower(key.Code) == 'b' && key.Mod&tea.ModAlt != 0)) {
+		return true
+	}
+	if runtime.GOOS != "darwin" && key.Code == tea.KeyLeftCtrl {
+		return true
+	}
 	return key.Code == tea.KeyLeft && key.Mod&mod != 0
 }
 
 func isWordRightKey(msg tea.KeyPressMsg) bool {
 	mod, name := wordJumpModifier()
-	if msg.Keystroke() == name+"+right" {
+	if msg.Keystroke() == name+"+right" || (runtime.GOOS == "darwin" && msg.Keystroke() == "alt+f") {
 		return true
 	}
 	key := msg.Key()
+	if runtime.GOOS == "darwin" && (key.Code == tea.KeyRightAlt || key.Code == tea.KeyRightMeta || (unicode.ToLower(key.Code) == 'f' && key.Mod&tea.ModAlt != 0)) {
+		return true
+	}
+	if runtime.GOOS != "darwin" && key.Code == tea.KeyRightCtrl {
+		return true
+	}
 	return key.Code == tea.KeyRight && key.Mod&mod != 0
 }
 
@@ -958,6 +1137,8 @@ func renderHelp() string {
 	items := []string{
 		helpItem("Ctrl+R", "run"),
 		helpItem("Tab", "change focus"),
+		helpItem("Home/End", "row bounds"),
+		helpItem("Ctrl+U", "clear row"),
 		helpItem("Ctrl+A", "select all"),
 		helpItem("Ctrl+C", "copy"),
 		helpItem("Ctrl+V", "paste"),
@@ -1021,17 +1202,6 @@ func currentLineBounds(runes []rune, cursor int) (int, int) {
 
 func clampCursor(cursor int, length int) int {
 	return min(max(0, cursor), length)
-}
-
-func parseStatus(query string) string {
-	if strings.TrimSpace(query) == "" {
-		return shellMutedStyle.Render("empty")
-	}
-	parsed, err := rdflibsparql.Parse(query)
-	if err != nil {
-		return shellErrorStyle.Render("parse error")
-	}
-	return shellSuccessStyle.Render(strings.ToLower(parsed.Type))
 }
 
 func syntaxHighlight(query string) string {
@@ -1179,6 +1349,9 @@ var (
 			MarginBottom(1)
 	shellMutedStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#7A8282"))
+	editorFlashStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1F6F52")).
+				Italic(true)
 	shellErrorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#B42318")).
 			Bold(true)
