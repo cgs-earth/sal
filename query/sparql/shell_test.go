@@ -116,7 +116,6 @@ func TestShellViewEnablesMouseSelection(t *testing.T) {
 func TestShellHelpStylesKeyboardDescriptions(t *testing.T) {
 	help := renderHelp()
 
-	require.Contains(t, help, shellHelpKeyStyle.Render("Tab"))
 	require.Contains(t, help, shellHelpKeyStyle.Render("Shift+←/→"))
 	require.Contains(t, help, shellHelpDescriptionStyle.Render("change focus"))
 	require.Contains(t, help, shellHelpKeyStyle.Render("Ctrl+U"))

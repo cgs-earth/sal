@@ -1235,7 +1235,6 @@ func isFocusNextKey(msg tea.KeyPressMsg) bool {
 func renderHelp() string {
 	items := []string{
 		helpItem("Ctrl+R", "run"),
-		helpItem("Tab", "indent"),
 		helpItem("Shift+←/→", "change focus"),
 		helpItem("Ctrl+U", "clear row"),
 		helpItem("Ctrl+A", "select all"),
