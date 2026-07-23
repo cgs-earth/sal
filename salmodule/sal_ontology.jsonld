@@ -1,0 +1,43 @@
+{
+    "@context": {
+        "salmodule": "https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#",
+        "owl": "http://www.w3.org/2002/07/owl#",
+        "dc": "http://purl.org/dc/elements/1.1/",
+        "schema": "https://schema.org/"
+    },
+    "@graph": [
+        {
+            "@id": ".",
+            "@type": "owl:Ontology",
+            "dc:title": "SAL Builtin Ontology",
+            "dc:description": "An ontology describing the SAL built-in salmodule Tasks and other vocabulary.",
+            "owl:versionInfo": "0.0.1"
+        },
+        {
+            "@id": "SALRunEntryPoint",
+            "@type": "owl:Class",
+            "rdfs:label": "SAL Run Entry Point",
+            "rdfs:comment": "Represents the the SAL 'run' subcommand as a salmodule:Task.",
+            "rdfs:subClassOf": "salmodule:Task",
+            "salmodule:self": {
+                "@type": "sh:NodeShape",
+                "rdfs:comment": "a dummy property for example purposes. TBD what properties we want here",
+                "sh:property": [
+                        {
+                     
+                            "sh:targetClass": {"@id": "SALRunEntryPoint"},
+                            "sh:path": {"@id": "schema:name"},
+                            "sh:datatype": {"@id": "xsd:string"},
+                            "sh:minInclusive": 0,
+                            "sh:minCount": 0,
+                    
+                            "sh:message": "The SALRunEntryPoint instance 'name' property may have  up to one value."
+                        }
+                    ]
+                }
+  
+        }
+    ]
+
+
+}
