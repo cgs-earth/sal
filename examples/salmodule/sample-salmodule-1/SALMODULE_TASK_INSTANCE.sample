@@ -1,0 +1,1 @@
+{ "@id":"https://github.com/owner/myrepo/myinst","@type":"GeoconnexReferenceFeatureStates","maxRetries": {"@value":"5","@type":"xsd:integer"} }
