@@ -3,6 +3,9 @@
         "salmodule": "https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#",
         "owl": "http://www.w3.org/2002/07/owl#",
         "dc": "http://purl.org/dc/elements/1.1/",
+        "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+        "sh": "http://www.w3.org/ns/shacl#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
         "schema": "https://schema.org/"
     },
     "@graph": [

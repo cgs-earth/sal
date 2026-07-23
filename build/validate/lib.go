@@ -15,6 +15,17 @@ func (e validationError) Error() string {
 	return fmt.Sprintf("%s:%d: undefined term %s", e.Path, e.Line, e.Term)
 }
 
+type undefinedPrefixError struct {
+	Path   string
+	Line   int
+	Term   string
+	Prefix string
+}
+
+func (e undefinedPrefixError) Error() string {
+	return fmt.Sprintf("%s:%d: undefined term %s: prefix %s is not defined", e.Path, e.Line, e.Term, e.Prefix)
+}
+
 type vocabularyLookupError struct {
 	Path string
 	Line int

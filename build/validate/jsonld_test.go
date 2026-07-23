@@ -88,6 +88,65 @@ func TestValidateJSONLDFileRejectsUndefinedCompactProperty(t *testing.T) {
 	require.Contains(t, err.Error(), path+":7:")
 }
 
+func TestValidateJSONLDFileRejectsUndeclaredCompactPropertyPrefix(t *testing.T) {
+	path := writeJSONLDTestFile(t, `{
+		"@context": {
+			"schema": "https://schema.org/"
+		},
+		"@id": "Bob",
+		"@type": "schema:Person",
+		"sh:property": "name"
+	}`)
+
+	_, err := ValidateRDFFile(path, nil, testBase)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "undefined term")
+	require.Contains(t, err.Error(), "sh:property")
+	require.Contains(t, err.Error(), "prefix sh is not defined")
+	require.Contains(t, err.Error(), path+":7:")
+}
+
+func TestValidateJSONLDFileRejectsUndeclaredCompactTypePrefix(t *testing.T) {
+	path := writeJSONLDTestFile(t, `{
+		"@context": {
+			"schema": "https://schema.org/"
+		},
+		"@id": "Bob",
+		"@type": "sh:NodeShape"
+	}`)
+
+	_, err := ValidateRDFFile(path, nil, testBase)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "undefined term")
+	require.Contains(t, err.Error(), "sh:NodeShape")
+	require.Contains(t, err.Error(), "prefix sh is not defined")
+	require.Contains(t, err.Error(), path+":6:")
+}
+
+func TestValidateJSONLDFileRejectsUndeclaredCompactIDPrefix(t *testing.T) {
+	path := writeJSONLDTestFile(t, `{
+		"@context": {
+			"schema": "https://schema.org/",
+			"sh": "http://www.w3.org/ns/shacl#"
+		},
+		"@id": "Bob",
+		"@type": "sh:NodeShape",
+		"sh:datatype": {
+			"@id": "xsd:string"
+		}
+	}`)
+
+	_, err := ValidateRDFFile(path, nil, testBase)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "undefined term")
+	require.Contains(t, err.Error(), "xsd:string")
+	require.Contains(t, err.Error(), "prefix xsd is not defined")
+	require.Contains(t, err.Error(), path+":9:")
+}
+
 func TestValidateJSONLDFileReportsUndefinedTypeLine(t *testing.T) {
 	path := writeJSONLDTestFile(t, `{
 		"@context": {
@@ -161,4 +220,10 @@ func TestValidateJSONLDFileRejectsLocalIDWithoutType(t *testing.T) {
 	var missingTypeErr missingTypeError
 	require.ErrorAs(t, err, &missingTypeErr)
 	require.Equal(t, testBase+"Jane", missingTypeErr.IRI)
+}
+
+func TestValidateSALModuleOntology(t *testing.T) {
+	_, err := ValidateRDFFile("../../salmodule/sal_ontology.jsonld", nil, testBase)
+
+	require.NoError(t, err)
 }
