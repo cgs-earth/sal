@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-//go:embed sal_ontology.ttl
+//go:embed sal_ontology.jsonld
 var salOntology string
 
 type ontologyCmd struct {

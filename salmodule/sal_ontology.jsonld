@@ -23,21 +23,22 @@
                 "@type": "sh:NodeShape",
                 "rdfs:comment": "a dummy property for example purposes. TBD what properties we want here",
                 "sh:property": [
-                        {
-                     
-                            "sh:targetClass": {"@id": "SALRunEntryPoint"},
-                            "sh:path": {"@id": "schema:name"},
-                            "sh:datatype": {"@id": "xsd:string"},
-                            "sh:minInclusive": 0,
-                            "sh:minCount": 0,
-                    
-                            "sh:message": "The SALRunEntryPoint instance 'name' property may have  up to one value."
-                        }
-                    ]
-                }
-  
+                    {
+                        "sh:targetClass": {
+                            "@id": "SALRunEntryPoint"
+                        },
+                        "sh:path": {
+                            "@id": "schema:name"
+                        },
+                        "sh:datatype": {
+                            "@id": "xsd:string"
+                        },
+                        "sh:minInclusive": 0,
+                        "sh:minCount": 0,
+                        "sh:message": "The SALRunEntryPoint instance 'name' property may have  up to one value."
+                    }
+                ]
+            }
         }
     ]
-
-
 }
