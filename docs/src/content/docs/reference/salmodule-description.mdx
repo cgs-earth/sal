@@ -172,20 +172,20 @@ $
 ##### Run sal:NodeProcessor
 
 
-A SAL Module compliant container allows a user to run a defined instance of a `sal:NodeProcessor` subclass (node-processing instance) declared in it's ontology. These instances are passed to the container's `run` command using the `SAL_NP_INSTANCE` environment variable. The `sal:NodeProcessor` subclass instance serves to provide context to the sal:NodeProcessor runtime logic. 
+A SAL Module compliant container allows a user to run a defined instance of a `sal:NodeProcessor` subclass (node-processing instance) declared in it's ontology. These instances are passed to the container's `run` command using the `SALMODULE_TASK_INSTANCE` environment variable. The `sal:NodeProcessor` subclass instance serves to provide context to the sal:NodeProcessor runtime logic. 
 
 > Note: one simple example for adding `sal:NodeProcessor` properties may be to describe an external host's connection properties that are needed by the sal:NodeProcessor run(time) logic to connect to a data source.
 
 
-`docker run -e SAL_NP_INSTANCE="<sal:NodeProcessor node object instance>" MYIMAGE sal run`
+`docker run -e SALMODULE_TASK_INSTANCE="<sal:NodeProcessor node object instance>" MYIMAGE sal run`
 
 Building on Example 1, The following example shows how an instance of `sal:NodeProcessor` subclass `EducationalHistoryFinder` is invoked from the command line. 
 
 Note: The response printed to 
 
 ```
-$ SAL_NP_INSTANCE='{"@id":"http://example.org/#pistolpete","@type":"EducationalHistoryFinder"}' 
-$ docker run MYIMAGE sal run -e SAL_NP_INSTANCE="${SAL_NP_INSTANCE}" 
+$ SALMODULE_TASK_INSTANCE='{"@id":"http://example.org/#pistolpete","@type":"EducationalHistoryFinder"}' 
+$ docker run MYIMAGE sal run -e SALMODULE_TASK_INSTANCE="${SALMODULE_TASK_INSTANCE}" 
 {"@id":"http://example.org/#pistolpete","@type":"schema:Person","schema:givenName":"Frank","schema:familyName":"Eaton","schema:birthDate":{"@id":"xsd:date", "@value":"1888-09-17"},"schema:alumniOf":{"@id":"http://nmsu.edu/","@type":"schema:EducationalOrganization","schema:name": "New Mexico State University"}}
 $ 
 ```
