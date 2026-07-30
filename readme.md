@@ -4,6 +4,8 @@ The Semantic Accessibility Layer cli, abbreviated SAL, provides a build tool for
 
 This repository is currently a work in progress.
 
+Documentation can be found at: https://cgs-earth.github.io/sal/
+
 ## Installation
 
 To install the latest version of SAL, run the following command:
