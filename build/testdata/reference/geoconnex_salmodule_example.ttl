@@ -1,0 +1,16 @@
+# A SAL project that materializes RDF from the sample SAL module published at
+# https://github.com/adplincinst/sample-salmodule-1
+#
+# Building this file clones that repository, builds the Dockerfile in its root,
+# runs the module with the task instance declared below, and merges the U.S.
+# state reference features the module emits into the built triples.
+
+@prefix salmodule: <https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#> .
+@prefix states: <salmodule://github.com/adplincinst/sample-salmodule-1/> .
+
+# The module's own ontology declares GeoconnexReferenceFeatureStates as a
+# subclass of salmodule:Task, which is how SAL knows this instance is runnable.
+# maxRetries is likewise defined by the module, so the module decides what a
+# valid task instance looks like.
+<GeoconnexStates> a states:GeoconnexReferenceFeatureStates ;
+    salmodule:taskInstanceEnvVar '{"@id":"https://github.com/adplincinst/sample-salmodule-1/GeoconnexStates","@type":"GeoconnexReferenceFeatureStates","maxRetries":{"@value":"5","@type":"xsd:integer"}}' .
