@@ -11,7 +11,8 @@ SAL, (semantic accessibility layer), is a CLI tool for creating RDF data and met
     - Each sal subcommand is present in a folder of the same name. For instance -> `sal build` is present in the `build/` folder.
     - Any broadly reusable code is present in the `pkg` folder
     - `integration_tests/` contains integration tests which require spinning up additional services. They don't request real data from remote servers though.
-    - `salmodule/` is the exception to the folder-per-subcommand rule. It holds the entire SAL Module specification implementation, in both directions:
+    - `initialization` is an exception to the folder-per-subcommand pattern. This is since `init` is a keyword that can cause issues in golang.
+    - `salmodule/` is an exception to the folder-per-subcommand pattern. It holds the entire SAL Module specification implementation, in both directions:
         - the `sal salmodule` subcommand, which makes the sal CLI itself a sal module
         - dereferencing, building, and running the sal modules that a project references. `salmodule.Resolver` clones the module repository, builds its Dockerfile, and invokes the SAL Module CLI inside the resulting image.
         - This lives in `salmodule/` rather than `build/` because both `build` and `build/validate` need it. Do not duplicate docker or module resolution logic into either of those packages.

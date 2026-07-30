@@ -9,8 +9,10 @@ from pyspark.sql import SparkSession
 
 @pytest.fixture(scope="module")
 def repo_root():
-    """Locate the SAL checkout by walking up to the directory holding go.mod."""
-    return Path(__file__).parent.parent
+    """The root of the SAL git repository."""
+    root = Path(__file__).parent.parent.parent
+    assert (root / ".git").exists(), f"{root} appears to be the wrong directory and not the root"
+    return root
 
 
 @pytest.fixture(scope="module")
