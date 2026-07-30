@@ -1,17 +1,30 @@
 # SAL
 
-SAL, (semantic accessibility layer), is a CLI tool for creating RDF data and metadata from a dataset. It contains a series of subcommands. Each subcommand is present in a subdirectory of the same name. 
+SAL, (semantic accessibility layer), is a CLI tool for creating RDF data and metadata from a dataset. It contains a series of subcommands.
+
+## Repository Structure
+
+- sal is setup as a monorepo
+    - `docs/` contains a documentation site written with Astro and Starlight on the overall project, any specifications, and sal commands at a high level
+    - `examples/` contains examples of how to use sal or example sal module implementations
+    - `.github/workflows` contains github workflows for CI/CD
+    - Each sal subcommand is present in a folder of the same name. For instance -> `sal build` is present in the `build/` folder.
+    - Any broadly reusable code is present in the `pkg` folder
 
 ## Subcommands
 
 ### `build`
 
-- `build` is a subcommand which takes in RDF data, validates it, and writes it to a local iceberg table.
+- Takes in RDF data, validates it, and writes it to a local iceberg table in the sal data directory.
     - All input RDF data should be validated. This RDF data can be defined in either Turtle or JSON-LD. 
     - For all input RDF data, if there is a term that is not defined in the provided prefixes, SAL will throw an error which calls out the specific line number with the offending term.
         - For instance, if the user makes a typo and specifies `schema:nameee` in their JSON-LD, SAL build will throw an error saying that `nameee` is not a defined term in the RDF vocab. This should be supported for any generalized RDF vocabulary.
     - Only new data should be written to the iceberg table. For instance, if the table already has a particular triple, it should be ommitted from the new commit. 
         - An identifier for each triple can be calculated by hashing the subject, predicate, and object. This hash identifier can then be looked up in the iceberg table to check if it exists.
+    - Build can also materialize triples from a sal module and add it to the iceberg table.
+        - A sal module is another github repository with a Dockerfile in the root. More info on the sal module spec can be found here: @./docs/src/content/docs/reference/salmodule-description.mdx
+        - A sal module is referred to in an rdf file by using the sal module ontology here: `https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#`
+        - If a new term is defined in the sal module that is a subclass of `salmodule:NodeProcessor` the sal module should be built by fetching the remote git repository, building the docker container, passing the `salmodule:taskInstanceEnvVar` to the container
 
 ### `clone`
 
@@ -62,16 +75,29 @@ FROM iceberg_scan(
 LIMIT 5;
 ```
 
+
+### `serve` 
+
+- Starts a local HTTP server on port 8080.
+- The server can resolve SPARQL queries against the iceberg triples table
+
 ## Code Style
 
 - Use testify for writing succinct tests; avoid just the standard library and if statements with `t.Error()`.
 - If a function would only be called from one other function and it is short, try to just condense it into the function that calls it.
-- If some functionality would be very complex, duplicative, and better handled by an underlying library like json-gold or goRDFlib, say so and mark it as TODO in the code.
 - Any function with functionality that is non trivial should be documented with a succinct comment of what it does.
 - Don't create functions that are very small and only used in a single place.
-- Do not use table oriented tests; make each test case a separate test function so it is easier to debug
+- Prefer to not use table oriented tests unless there is significant test duplication; make each test case a separate test function so it is easier to debug and isolate failures.
+- All tests should be unit tests without external fetches to remote servers. All local filesystem operations should be mocked or written to tmp files. 
+
+## Boundaries
+
+* Ask First:
+    - Large cross-package refactors.
+    - If some functionality would be very complex, duplicative, and better handled by an underlying library like json-gold or goRDFlib, explicitly call it out; don't try to create a custom fix here with lots of specialized code
+    - If the AGENTS.md file should be updated to reflect new changes, explicitly call it out
 
 ## Development 
 
 - `go test ./...` should pass after every new feature
-- For any major new user facing features, add associated documentation in the /docs folder
+- For any major new user facing features, add associated documentation in the `/docs` folder
