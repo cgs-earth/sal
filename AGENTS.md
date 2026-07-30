@@ -74,3 +74,4 @@ LIMIT 5;
 ## Development 
 
 - `go test ./...` should pass after every new feature
+- For any major new user facing features, add associated documentation in the /docs folder
