@@ -1,6 +1,15 @@
 install:
 	go build -o ~/.local/bin
 
+# Rebuilds the React UI that `sal serve --with-ui` serves. serve/ui.go embeds
+# serve/sal-ui/dist, so the output is committed; rerun this after editing the UI.
+ui:
+	cd serve/sal-ui && npm ci && npm run build
+
+# Runs the UI against a `sal serve --with-ui` on port 8080 with hot reloading
+ui_dev:
+	cd serve/sal-ui && npm run dev
+
 deadcode:
 	deadcode ./...
 

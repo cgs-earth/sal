@@ -83,6 +83,41 @@ To compare snapshots:
 sal query --snapshot-diff latest
 ```
 
+## `sal serve`
+
+Serves the built triples table as a read-only SPARQL endpoint on port 8080:
+
+```sh
+sal serve
+```
+
+The endpoint implements the SPARQL Protocol query operation at `/sparql`.
+It accepts `GET` requests with a `query` parameter and `POST` requests using either `application/sparql-query` or `application/x-www-form-urlencoded`, and it answers with `application/sparql-results+json`.
+
+### `--with-ui`
+
+Adds a web UI at `/` alongside the SPARQL endpoint:
+
+```sh
+sal serve --with-ui
+```
+
+The UI is a React app compiled into the `sal` binary, so it works offline and needs no extra install.
+It has four tabs:
+
+- **Stats**: triple, subject, predicate, and object counts, plus the Iceberg snapshots, table properties, and column statistics that `sal query --info` prints.
+- **SQL**: a DuckDB editor over the same `triples` view `sal query` opens, with sample queries and `Ctrl`/`Cmd` + `Enter` to run.
+- **SPARQL**: a [YASGUI](https://github.com/zazuko/Yasgui) editor pointed at the local `/sparql` endpoint.
+- **Map**: reserved for rendering the `object_geometry` column. Not implemented yet.
+
+Enabling the UI also exposes two JSON endpoints it reads:
+
+- `POST /api/sql` with a `{"sql": "..."}` body runs a DuckDB statement and returns its header and rows. Results are capped at 1000 rows, and the response message reports the full count when it truncates.
+- `GET /api/stats` returns the counts and Iceberg metadata shown on the Stats tab.
+- `GET /geometries?limit=&offset=` returns up to 100 `object_geometry` values at a time as GeoJSON.
+
+`/api/sql` runs arbitrary DuckDB statements against your machine, so only enable `--with-ui` on a network you trust.
+
 ## `sal push`
 
 Publishes `.sal/data` as an OCI artifact:

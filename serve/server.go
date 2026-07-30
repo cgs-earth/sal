@@ -2,7 +2,6 @@ package serve
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,18 +16,30 @@ import (
 
 const sparqlResultsJSON = "application/sparql-results+json"
 
-//go:embed map.html
-var mapHTML string
+// maxUIRows bounds how many rows of a SQL result are sent to the browser.
+const maxUIRows = 1000
+
+// UIRunner is the query surface the bundled web UI needs from the DuckDB backend.
+type UIRunner interface {
+	salsparql.Runner
+	salsparql.GeometryRunner
+	salsparql.SQLRunner
+	salsparql.StatsRunner
+}
 
 // Serve starts a read-only SPARQL Protocol HTTP endpoint backed by DuckDB.
-func Serve(ctx context.Context, addr string, tablePath string, layout salsparql.ObjectLayout, withMap bool) error {
+func Serve(ctx context.Context, addr string, tablePath string, layout salsparql.ObjectLayout, withUI bool) error {
 	runner := salsparql.DuckDBRunner{
 		TablePath: tablePath,
 		Layout:    layout,
 	}
 	handler := NewEndpoint(runner)
-	if withMap {
-		handler = NewEndpointWithMap(runner, runner)
+	if withUI {
+		ui, err := NewEndpointWithUI(runner)
+		if err != nil {
+			return err
+		}
+		handler = ui
 	}
 	server := &http.Server{
 		Addr:    addr,
@@ -40,8 +51,8 @@ func Serve(ctx context.Context, addr string, tablePath string, layout salsparql.
 			slog.Error("failed to stop SPARQL endpoint", "error", err)
 		}
 	}()
-	if withMap {
-		fmt.Printf("Serving map at http://localhost%s/ and SPARQL endpoint at http://localhost%s/sparql\n", addr, addr)
+	if withUI {
+		fmt.Printf("Serving the SAL UI at http://localhost%s/ and SPARQL endpoint at http://localhost%s/sparql\n", addr, addr)
 	} else {
 		fmt.Printf("Serving SPARQL endpoint at http://localhost%s/sparql\n", addr)
 	}
@@ -61,14 +72,101 @@ func NewEndpoint(runner salsparql.Runner) http.Handler {
 	return mux
 }
 
-// NewEndpointWithMap returns an HTTP handler with a MapLibre UI at / and SPARQL at /sparql.
-func NewEndpointWithMap(runner salsparql.Runner, geometryRunner salsparql.GeometryRunner) http.Handler {
+// NewEndpointWithUI returns an HTTP handler serving the embedded SAL UI at / along
+// with the SPARQL endpoint and the JSON APIs the UI reads.
+func NewEndpointWithUI(runner UIRunner) (http.Handler, error) {
+	ui, err := uiHandler()
+	if err != nil {
+		return nil, err
+	}
 	mux := http.NewServeMux()
-	sparql := sparqlHandler{runner: runner}
-	mux.Handle("/sparql", sparql)
-	mux.Handle("/geometries", geometryHandler{runner: geometryRunner})
-	mux.HandleFunc("/", mapHandler)
-	return mux
+	mux.Handle("/sparql", sparqlHandler{runner: runner})
+	mux.Handle("/geometries", geometryHandler{runner: runner})
+	mux.Handle("/api/sql", sqlHandler{runner: runner})
+	mux.Handle("/api/stats", statsHandler{runner: runner})
+	mux.Handle("/", ui)
+	return mux, nil
+}
+
+type sqlHandler struct {
+	runner salsparql.SQLRunner
+}
+
+func (h sqlHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "the SQL endpoint only supports POST requests", http.StatusMethodNotAllowed)
+		return
+	}
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			slog.Error("failed to close SQL request body", "error", err)
+		}
+	}()
+	var request struct {
+		SQL string `json:"sql"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("parse SQL request: %v", err))
+		return
+	}
+	statement := strings.TrimRight(strings.TrimSpace(request.SQL), ";")
+	if statement == "" {
+		writeJSONError(w, http.StatusBadRequest, "SQL request is missing a sql field")
+		return
+	}
+
+	result, err := h.runner.RunSQL(r.Context(), statement)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, truncateResult(result))
+}
+
+// truncateResult bounds a result to maxUIRows and says so in the message rather
+// than silently dropping the tail.
+func truncateResult(result salsparql.Result) salsparql.Result {
+	total := len(result.Rows)
+	result.Message = fmt.Sprintf("%d rows", total)
+	if total > maxUIRows {
+		result.Rows = result.Rows[:maxUIRows]
+		result.Message = fmt.Sprintf("%d rows (showing the first %d)", total, maxUIRows)
+	}
+	return result
+}
+
+type statsHandler struct {
+	runner salsparql.StatsRunner
+}
+
+func (h statsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "the stats endpoint only supports GET requests", http.StatusMethodNotAllowed)
+		return
+	}
+	stats, err := h.runner.Stats(r.Context())
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, stats)
+}
+
+func writeJSON(w http.ResponseWriter, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		slog.Error("failed to write JSON response", "error", err)
+	}
+}
+
+func writeJSONError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(map[string]string{"error": message}); err != nil {
+		slog.Error("failed to write JSON error response", "error", err)
+	}
 }
 
 type sparqlHandler struct {
@@ -160,20 +258,6 @@ func intQueryParam(r *http.Request, name string, fallback int) int {
 		return fallback
 	}
 	return parsed
-}
-
-func mapHandler(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "map only supports GET requests", http.StatusMethodNotAllowed)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = io.WriteString(w, mapHTML)
 }
 
 func queryFromRequest(r *http.Request) (string, error) {

@@ -1,0 +1,465 @@
+/*
+ * YASGUI ships a light theme. These overrides repaint it in Catppuccin Mocha so
+ * the SPARQL tab matches the rest of the app. Loaded after yasgui.min.css.
+ */
+
+.yasgui {
+  background: var(--base);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+/* ---------- yasgui's own tab strip ---------- */
+
+.yasgui .tabsList {
+  background: var(--mantle);
+  border-bottom: 1px solid var(--surface1);
+}
+
+.yasgui .tabsList li a,
+.yasgui .tabsList .tab {
+  background: transparent;
+  border: none;
+  color: var(--overlay2);
+  font-size: 13px;
+}
+
+.yasgui .tabsList li.active a,
+.yasgui .tabsList li a.active {
+  background: var(--base);
+  color: var(--lavender);
+  box-shadow: inset 0 -2px 0 var(--lavender);
+}
+
+.yasgui .tabsList li a:hover {
+  background: var(--surface0);
+  color: var(--text);
+}
+
+.yasgui .addTab,
+.yasgui .tabContextButton,
+.yasgui .closeTab {
+  color: var(--overlay1);
+  background: transparent;
+}
+
+.yasgui .addTab:hover,
+.yasgui .tabContextButton:hover,
+.yasgui .closeTab:hover {
+  color: var(--lavender);
+  background: var(--surface0);
+}
+
+.yasgui .tabMenu,
+.yasgui .context-menu-list {
+  background: var(--surface0);
+  border: 1px solid var(--surface2);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+.yasgui .context-menu-item:hover {
+  background: var(--surface1);
+  color: var(--text);
+}
+
+/* ---------- the request settings panel behind the gear icon ---------- */
+
+/* This wrapper carries its own #f5f5f5 at a higher specificity than .tabMenu,
+   so it has to be restated rather than relying on the panel background. */
+.yasgui .tabMenu .requestConfigWrapper {
+  background: var(--surface0);
+  color: var(--text);
+}
+
+.yasgui .tabMenu .requestConfigWrapper .selectorButton {
+  background-color: transparent;
+  border-bottom: 1px solid var(--surface2);
+  color: var(--subtext0);
+}
+
+.yasgui .tabMenu .requestConfigWrapper .selectorButton:hover,
+.yasgui .tabMenu .requestConfigWrapper .selectorButton:focus-visible {
+  border-color: var(--lavender);
+  color: var(--text);
+}
+
+.yasgui .tabMenu .requestConfigWrapper .selectorButton.selected {
+  border-bottom: 2px solid var(--lavender);
+  color: var(--lavender);
+}
+
+.yasgui .tabMenu .acceptLabel,
+.yasgui .tabMenu .acceptWrapper .selector .selectorLabel {
+  color: var(--subtext0);
+}
+
+.yasgui .tabMenu select {
+  background: var(--crust);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 4px 6px;
+}
+
+/* ---------- endpoint bar ---------- */
+
+.yasgui .controlbar,
+.yasgui .endpointText,
+.yasgui .autocompleteWrapper {
+  background: var(--mantle);
+  color: var(--text);
+}
+
+/* YASGUI styles these inputs with near-black text on the assumption of a light
+   panel, which would be invisible here, so both halves are restated. */
+.yasgui .yasgui_textfield > input,
+.yasgui .yasgui_textfield > textarea,
+.yasgui .autocompleteWrapper input,
+.yasgui input[type='text'] {
+  background: var(--crust);
+  border: 1px solid var(--surface1);
+  border-bottom: 1px solid var(--surface1);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.yasgui .yasgui_textfield > label,
+.yasgui .yasgui_textfield > input:focus ~ label,
+.yasgui .yasgui_textfield > textarea:focus ~ label {
+  color: var(--overlay2);
+}
+
+.yasgui .yasgui_textfield > input:focus,
+.yasgui .yasgui_textfield > textarea:focus,
+.yasgui .autocompleteWrapper input:focus {
+  border-color: var(--lavender);
+  border-width: 1px;
+  outline: none;
+}
+
+.yasgui .clearEndpointBtn {
+  background-color: var(--surface0);
+  border: 1px solid var(--surface1);
+  color: var(--subtext0);
+}
+
+.yasgui .clearEndpointBtn:hover {
+  background-color: var(--surface1);
+  color: var(--text);
+  opacity: 1;
+}
+
+/* ---------- endpoint autocomplete dropdown ---------- */
+
+.yasgui .autocomplete {
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-sm);
+}
+
+.yasgui .autocomplete:hover {
+  border-color: var(--surface2);
+}
+
+.yasgui .autocomplete:focus {
+  background: none;
+  border-color: var(--lavender);
+  outline: none;
+}
+
+.yasgui .autocompleteList {
+  background: var(--surface0);
+  border: 1px solid var(--surface2);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+
+.yasgui .autocompleteList .autoComplete_result {
+  color: var(--subtext1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* The matched substring is #1f49a3 by default, which disappears on a dark list. */
+.yasgui .autocompleteList .autoComplete_result b {
+  color: var(--sky);
+}
+
+.yasgui .autocompleteList .autoComplete_result.autoComplete_selected,
+.yasgui .autocompleteList .autoComplete_result:hover {
+  background: var(--surface1);
+  color: var(--text);
+}
+
+.yasgui .autocompleteList .noResults {
+  color: var(--overlay1);
+}
+
+.yasgui .autocompleteList .removeItem {
+  color: var(--overlay2);
+  text-shadow: none;
+}
+
+.yasgui .autocompleteList .removeItem:hover {
+  color: var(--red);
+  opacity: 1;
+}
+
+/* ---------- yasqe (the CodeMirror 5 query editor) ---------- */
+
+.yasgui .yasqe,
+.yasgui .yasqe .CodeMirror {
+  background: var(--mantle);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.yasgui .yasqe .CodeMirror-gutters {
+  background: var(--mantle);
+  border-right: 1px solid var(--surface0);
+}
+
+.yasgui .yasqe .CodeMirror-linenumber {
+  color: var(--overlay0);
+}
+
+/* YASGUI ships CodeMirror 5's light defaults: a black caret and a near-white
+   selection. Both are restated here at a higher specificity than the originals. */
+.yasgui .yasqe .CodeMirror .CodeMirror-cursor,
+.yasgui .yasqe .CodeMirror-cursor {
+  border-left: 2px solid var(--lavender);
+  border-right: none;
+}
+
+.yasgui .yasqe .CodeMirror .CodeMirror-selected,
+.yasgui .yasqe .CodeMirror-focused .CodeMirror-selected,
+.yasgui .yasqe .CodeMirror-selected {
+  background: var(--surface1);
+}
+
+.yasgui .yasqe .CodeMirror-line::selection,
+.yasgui .yasqe .CodeMirror-line > span::selection,
+.yasgui .yasqe .CodeMirror-line > span > span::selection {
+  background: var(--surface1);
+}
+
+.yasgui .yasqe .cm-searching,
+.yasgui .yasqe .cm-matchhighlight,
+.yasgui .yasqe .CodeMirror-selectedtext {
+  background: var(--surface1);
+  color: var(--text);
+}
+
+.yasgui .yasqe .CodeMirror-activeline-background {
+  background: rgb(255 255 255 / 3%);
+}
+
+.yasgui .yasqe .CodeMirror-matchingbracket,
+.yasgui .yasqe .CodeMirror .CodeMirror-matchingbracket {
+  background: var(--surface1);
+  color: var(--lavender);
+  border-bottom: 1px solid var(--lavender);
+}
+
+.yasgui .yasqe .CodeMirror-nonmatchingbracket {
+  color: var(--red);
+}
+
+/* SPARQL token colors, matching the `sal query --sparql` shell. */
+.yasgui .cm-keyword {
+  color: var(--blue);
+  font-weight: 600;
+}
+.yasgui .cm-variable-3,
+.yasgui .cm-atom {
+  color: var(--peach);
+}
+.yasgui .cm-string,
+.yasgui .cm-string-2 {
+  color: var(--green);
+}
+.yasgui .cm-number {
+  color: var(--peach);
+}
+.yasgui .cm-comment {
+  color: var(--overlay1);
+  font-style: italic;
+}
+.yasgui .cm-variable,
+.yasgui .cm-variable-2 {
+  color: var(--mauve);
+}
+.yasgui .cm-meta,
+.yasgui .cm-builtin {
+  color: var(--teal);
+}
+.yasgui .cm-operator,
+.yasgui .cm-punc,
+.yasgui .cm-bracket {
+  color: var(--overlay2);
+}
+.yasgui .cm-error {
+  color: var(--red);
+}
+
+.yasgui .CodeMirror-hints {
+  background: var(--surface0);
+  border: 1px solid var(--surface2);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
+.yasgui .CodeMirror-hint-active {
+  background: var(--lavender);
+  color: var(--crust);
+}
+
+/* ---------- yasqe buttons ---------- */
+
+.yasgui .yasqe_buttons svg,
+.yasgui .yasqe_queryButton svg {
+  fill: var(--lavender);
+}
+
+.yasgui .yasqe_buttons .yasqe_btn,
+.yasgui .yasqe_share {
+  color: var(--subtext0);
+}
+
+.yasgui .yasqe_sharePopup,
+.yasgui .yasqe_tooltip {
+  background: var(--surface0);
+  border: 1px solid var(--surface2);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+/* ---------- yasr (results) ---------- */
+
+.yasgui .yasr {
+  background: var(--base);
+  color: var(--text);
+}
+
+.yasgui .yasr .yasr_header {
+  background: var(--mantle);
+  border-bottom: 1px solid var(--surface0);
+  color: var(--subtext0);
+}
+
+.yasgui .yasr .yasr_response_chip,
+.yasgui .yasr .yasr_btn {
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+
+.yasgui .yasr .yasr_btn:hover {
+  background: var(--surface1);
+}
+
+.yasgui .yasr .yasr_btn.selected,
+.yasgui .yasr .yasr_btnGroup .selected {
+  background: var(--lavender);
+  border-color: var(--lavender);
+  color: var(--crust);
+}
+
+.yasgui .yasr .yasr_btn svg {
+  fill: currentcolor;
+}
+
+.yasgui .yasr table.dataTable {
+  background: var(--base);
+  border-color: var(--surface0);
+  color: var(--subtext1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.yasgui .yasr table.dataTable thead th {
+  background: var(--surface0);
+  border-bottom: 1px solid var(--surface2);
+  color: var(--text);
+}
+
+.yasgui .yasr table.dataTable tbody td {
+  border-top: 1px solid var(--surface0);
+}
+
+.yasgui .yasr table.dataTable tbody tr {
+  background: transparent;
+}
+
+.yasgui .yasr table.dataTable tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--mantle) 55%, transparent);
+}
+
+.yasgui .yasr table.dataTable tbody tr:hover {
+  background: var(--surface0);
+  color: var(--text);
+}
+
+.yasgui .yasr .dataTables_wrapper,
+.yasgui .yasr .dataTables_paginate,
+.yasgui .yasr .dt-input,
+.yasgui .yasr .tableControls,
+.yasgui .yasr .tableFilter {
+  color: var(--subtext0);
+}
+
+.yasgui .yasr .dataTables_paginate .paginate_button {
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-sm);
+  color: var(--text) !important;
+}
+
+.yasgui .yasr .dataTables_paginate .paginate_button.current,
+.yasgui .yasr .dataTables_paginate .paginate_button:hover {
+  background: var(--lavender);
+  border-color: var(--lavender);
+  color: var(--crust) !important;
+}
+
+.yasgui .yasr .dataTables_paginate .paginate_button.disabled {
+  background: transparent;
+  border-color: var(--surface0);
+  color: var(--overlay0) !important;
+}
+
+.yasgui .yasr input,
+.yasgui .yasr select {
+  background: var(--crust);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+
+.yasgui .yasr a {
+  color: var(--sky);
+}
+
+.yasgui .yasr pre {
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-sm);
+  color: var(--subtext1);
+}
+
+.yasgui .yasr .yasr_fallback_info,
+.yasgui .yasr .yasr_tryQuery {
+  color: var(--overlay1);
+}
+
+.yasgui .yasr .yasr_external_ref_btn svg {
+  fill: var(--overlay1);
+}
