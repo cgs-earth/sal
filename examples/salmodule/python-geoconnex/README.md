@@ -7,7 +7,6 @@ This sample SAL Module implements a new `salmodule:Task` subclass named `Geoconn
 
 The following doc assume a unix command line environment.
 
-
 ## Usage
 
 The following sections detail this SALModule's implementation of the SAL Module command line interface specification 
@@ -26,5 +25,5 @@ From this git repository's root directory run:
 
 #### GeoconnexReferenceFeatureStates Task
 
-`docker run -e SALMODULE_TASK_INSTANCE="$(cat SALMODULE_TASK_INSTANCE.sample)" sample-sal-module-1 salmodule run`
+`docker run -e SALMODULE_TASK_INSTANCE="$(cat SALMODULE_TASK_INSTANCE.json)" sample-sal-module-1 salmodule run`
 

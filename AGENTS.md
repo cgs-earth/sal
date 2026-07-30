@@ -22,9 +22,11 @@ SAL, (semantic accessibility layer), is a CLI tool for creating RDF data and met
     - Only new data should be written to the iceberg table. For instance, if the table already has a particular triple, it should be ommitted from the new commit. 
         - An identifier for each triple can be calculated by hashing the subject, predicate, and object. This hash identifier can then be looked up in the iceberg table to check if it exists.
     - Build can also materialize triples from a sal module and add it to the iceberg table.
-        - A sal module is another github repository with a Dockerfile in the root. More info on the sal module spec can be found here: @./docs/src/content/docs/reference/salmodule-description.mdx
+        - A sal module is another github repository with a Dockerfile in the root. 
+            - More info on the sal module spec can be found here: @./docs/src/content/docs/reference/salmodule-description.mdx
+            - An example sal module can be found here: @./examples/salmodule/python-geoconnex
         - A sal module is referred to in an rdf file by using the sal module ontology here: `https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#`
-        - If a new term is defined in the sal module that is a subclass of `salmodule:NodeProcessor` the sal module should be built by fetching the remote git repository, building the docker container, passing the `salmodule:taskInstanceEnvVar` to the container
+        - If a new term is defined in the sal module that is a subclass of `salmodule:NodeProcessor` the sal module should be built by fetching the remote git repository, building the docker container, passing the `salmodule:taskInstanceEnvVar` to the container. The JSON-LD that results from this process should be added to the in memory goRDFlib graph and thus added to the iceberg table upon a successful build. 
 
 ### `clone`
 
