@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cgs-earth/sal/pkg"
 	salsparql "github.com/cgs-earth/sal/query/sparql"
 )
 
@@ -52,9 +53,9 @@ func Serve(ctx context.Context, addr string, tablePath string, layout salsparql.
 		}
 	}()
 	if withUI {
-		fmt.Printf("Serving the SAL UI at http://localhost%s/ and SPARQL endpoint at http://localhost%s/sparql\n", addr, addr)
+		pkg.Infof("Serving the SAL UI at http://localhost%s/ and SPARQL endpoint at http://localhost%s/sparql\n", addr, addr)
 	} else {
-		fmt.Printf("Serving SPARQL endpoint at http://localhost%s/sparql\n", addr)
+		pkg.Infof("Serving SPARQL endpoint at http://localhost%s/sparql\n", addr)
 	}
 	err := server.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
