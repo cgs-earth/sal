@@ -10,6 +10,11 @@ SAL, (semantic accessibility layer), is a CLI tool for creating RDF data and met
     - `.github/workflows` contains github workflows for CI/CD
     - Each sal subcommand is present in a folder of the same name. For instance -> `sal build` is present in the `build/` folder.
     - Any broadly reusable code is present in the `pkg` folder
+    - `salmodule/` is the exception to the folder-per-subcommand rule. It holds the entire SAL Module specification implementation, in both directions:
+        - the `sal salmodule` subcommand, which makes the sal CLI itself a sal module
+        - dereferencing, building, and running the sal modules that a project references. `salmodule.Resolver` clones the module repository, builds its Dockerfile, and invokes the SAL Module CLI inside the resulting image.
+        - This lives in `salmodule/` rather than `build/` because both `build` and `build/validate` need it. Do not duplicate docker or module resolution logic into either of those packages.
+        - `salmodule.Default()` is the process-wide resolver shared by validation and build so that a module referenced from several places is cloned and built only once per invocation. Tests inject fakes through its `Runner` and `Command` fields and call `Reset` afterwards.
 
 ## Subcommands
 
@@ -26,7 +31,22 @@ SAL, (semantic accessibility layer), is a CLI tool for creating RDF data and met
             - More info on the sal module spec can be found here: @./docs/src/content/docs/reference/salmodule-description.mdx
             - An example sal module can be found here: @./examples/salmodule/python-geoconnex
         - A sal module is referred to in an rdf file by using the sal module ontology here: `https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#`
-        - If a new term is defined in the sal module that is a subclass of `salmodule:NodeProcessor` the sal module should be built by fetching the remote git repository, building the docker container, passing the `salmodule:taskInstanceEnvVar` to the container. The JSON-LD that results from this process should be added to the in memory goRDFlib graph and thus added to the iceberg table upon a successful build. 
+        - If a new term is defined in the sal module that is a subclass of `salmodule:NodeProcessor` the sal module should be built by fetching the remote git repository, building the docker container, passing the `salmodule:taskInstanceEnvVar` defined in the rdf defintion as the environment variable for the container. The JSON-LD that results from this process should be added to the in memory goRDFlib graph and thus added to the iceberg table upon a successful build. 
+        - An example project using a salmodule might look like @./build/testdata/reference/ontology_with_sal.ttl 
+        - An instance is only run when it is known to be a task. Either the project's RDF types it as a `salmodule:NodeProcessor`, `salmodule:NodeProducer`, `salmodule:NodeConsumer`, or `salmodule:Task`, or the module's own ontology declares its class as a subclass of one of those. A `salmodule://` typed instance that is neither is left alone.
+        - A task writes newline delimited JSON, not JSON-LD, to stdout. The module ontology's `@context` must be injected into each node before it is converted to RDF, since it is what resolves the task output's keys to the module's vocabulary.
+        - A task that emits `salmodule:Error` nodes instead of data fails the build with the messages the module reported.
+        - Materialization happens in `build` only, after validation and after the uncommitted changes check, so that nothing is run for a build that would be rejected anyway.
+
+### `validate`
+
+- Validates RDF source files without committing anything. It runs the same pipeline as `build` with committing and sal project checks skipped, so any behavior described here applies to `build` as well.
+- Every URI-backed term used in a file is checked against the vocabulary declared for its prefix. An undefined term is reported with the file, the line number, and the offending term.
+- Vocabularies are fetched from their base IRI, and the resulting term sets are cached to the platform temp directory keyed by a hash of the base. `build/vocab` holds bundled copies used when a fetch fails. `--no-cache` clears the cache before the run.
+- A `salmodule://` prefix is a vocabulary like any other, but it is not served over HTTP. It is dereferenced by cloning the module repository, building its Dockerfile, and running the module's ontology command; the JSON-LD the module prints is the vocabulary document.
+    - The module ontology's relative terms resolve against the module's own `salmodule://` namespace, not against the sal project's base. `vocabularyCache.parseBase` is what keeps these apart; passing the project base here would make every module term fail to match.
+    - This means validating a file that references a module clones and builds that module. That is intended, and matches the dereferencing sequence in the SAL Module spec.
+    - Validation never runs module tasks. Only `build` invokes the run command.
 
 ### `clone`
 

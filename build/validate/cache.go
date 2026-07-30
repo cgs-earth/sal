@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/cgs-earth/sal/build/vocab"
+	"github.com/cgs-earth/sal/salmodule"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/jsonld"
 	"github.com/tggo/goRDFlib/rdfxml"
@@ -197,6 +198,16 @@ func (c *vocabularyCache) load(base string) (Vocabulary, error) {
 	return vocab, nil
 }
 
+// parseBase returns the base that a fetched vocabulary's relative terms resolve
+// against. A SAL module ontology declares its terms relative to the module
+// itself rather than to the SAL project being built.
+func (c *vocabularyCache) parseBase(base string) string {
+	if salmodule.IsModuleIRI(base) {
+		return base
+	}
+	return c.base
+}
+
 func (c *vocabularyCache) loadTerms(base string) (map[string]bool, error) {
 	if terms, err := c.loadTermsFromDisk(base); err == nil {
 		return terms, nil
@@ -207,7 +218,7 @@ func (c *vocabularyCache) loadTerms(base string) (map[string]bool, error) {
 	if err != nil {
 		fetchErr = err
 	} else {
-		terms, _, err := serializeRdfDataAndGetVocab(contentType, body, c.base)
+		terms, _, err := serializeRdfDataAndGetVocab(contentType, body, c.parseBase(base))
 		if err == nil {
 			if err := c.storeTermsToDisk(base, terms); err != nil {
 				return nil, err
@@ -328,6 +339,12 @@ func extractVocabularyTermsFromGraph(g *rdflibgo.Graph) map[string]bool {
 }
 
 func fetchVocabularyDocument(u string) ([]byte, string, error) {
+	// a salmodule:// vocabulary is not served over HTTP; it is obtained by
+	// building the module's container and asking it for its ontology
+	if salmodule.IsModuleIRI(u) {
+		return salmodule.FetchOntologyDocument(u)
+	}
+
 	req, err := http.NewRequest(http.MethodGet, u, http.NoBody)
 	if err != nil {
 		return nil, "", err

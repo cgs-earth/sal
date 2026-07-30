@@ -33,6 +33,9 @@ Important flags:
 - `--format`: choose `iceberg` or `nq`; defaults to `iceberg`.
 - `--no-cache`: clear SAL's temp cache before validating, while still caching new fetches during the run.
 
+Validating a file that references a SAL module clones and builds that module so its vocabulary can be checked.
+`sal validate` does not run module tasks; only `sal build` does.
+
 ## `sal build`
 
 Validates RDF source files and writes the merged graph into the local data product.
@@ -51,6 +54,11 @@ Important flags:
 - `--typed`: split distinct RDF data types into separate output columns.
 - `--force`: build even when the Git working tree has uncommitted changes.
 - `--no-cache`: clear SAL's temp cache before building, while still caching new fetches during the run.
+
+`sal build` also materializes any SAL module the source files reference.
+It clones each referenced module, builds the `Dockerfile` in its repository root, runs the task instance
+declared in the RDF, and merges the triples the module produced into the data product.
+See [Using SAL Modules](/sal/guides/using-sal-modules/).
 
 See [Data Layout](/sal/reference/data-layout/) for the generated table structure.
 
