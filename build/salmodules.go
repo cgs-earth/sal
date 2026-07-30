@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -112,12 +113,17 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 		}
 
 		slog.Info("Running SAL module task " + task.classIRI)
-		output, err := resolver.RunTask(ctx, task.ref, ontology.TaskInstanceEnvVar, taskInstance)
-		if err != nil {
-			return fmt.Errorf("build: %w", err)
-		}
+		output, runErr := resolver.RunTask(ctx, task.ref, ontology.TaskInstanceEnvVar, taskInstance)
 		moduleGraph, err := ontology.GraphFromTaskOutput(output)
-		if err != nil {
+		// a failing task reports why it failed as salmodule:Error nodes before it
+		// exits, so those messages are preferred over the container's exit status
+		var taskErr salmodule.TaskError
+		switch {
+		case errors.As(err, &taskErr):
+			return fmt.Errorf("build: %w", taskErr)
+		case runErr != nil:
+			return fmt.Errorf("build: %w", runErr)
+		case err != nil:
 			return fmt.Errorf("build: %w", err)
 		}
 

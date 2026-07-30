@@ -86,6 +86,11 @@ func (r *Resolver) Ontology(ctx context.Context, ref ModuleRef) (*ModuleOntology
 // RunTask invokes the module's run command with taskInstance supplied through
 // the environment variable the module's ontology declares, and returns the
 // newline delimited JSON the task wrote to stdout.
+//
+// Whatever the task wrote is returned even when the container fails, because a
+// task reports its own failures as salmodule:Error nodes on stdout before
+// exiting non-zero; those messages describe the failure far better than the
+// container's exit status does.
 func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, envVar string, taskInstance string) ([]byte, error) {
 	return r.runModuleCommand(ctx, ref, []string{envVar + "=" + taskInstance}, RunCommand)
 }
@@ -101,11 +106,11 @@ func (r *Resolver) runModuleCommand(ctx context.Context, ref ModuleRef, env []st
 		return nil, err
 	}
 	stdout, stderr, err := runner.RunContainer(ctx, image, env, []string{BaseCommand, subcommand})
-	if err != nil {
-		return nil, fmt.Errorf("run %s %s for %s: %w", BaseCommand, subcommand, ref.Namespace, err)
-	}
 	if len(stderr) > 0 {
 		slog.Warn(ref.Namespace + " wrote to stderr: " + strings.TrimSpace(string(stderr)))
+	}
+	if err != nil {
+		return stdout, fmt.Errorf("run %s %s for %s: %w", BaseCommand, subcommand, ref.Namespace, err)
 	}
 	return stdout, nil
 }

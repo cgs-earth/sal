@@ -143,6 +143,34 @@ func TestMaterializeSalModulesFailsWhenTheModuleReportsAnError(t *testing.T) {
 	require.Contains(t, err.Error(), "reference feature server is unreachable")
 }
 
+func TestMaterializeSalModulesPrefersTheModuleErrorOverTheContainerExitStatus(t *testing.T) {
+	graph := parseTestProject(t, testProject)
+	// a task reports why it failed on stdout and then exits non-zero
+	runner := &testContainerRunner{
+		ontology:  testModuleOntology,
+		runOutput: `{"@type":"salmodule:Error","rdfs:comment":"reference feature server is unreachable"}`,
+		runErr:    fmt.Errorf("container exited with status 1"),
+	}
+
+	err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "reference feature server is unreachable")
+}
+
+func TestMaterializeSalModulesReportsContainerFailuresWithoutModuleErrors(t *testing.T) {
+	graph := parseTestProject(t, testProject)
+	runner := &testContainerRunner{
+		ontology: testModuleOntology,
+		runErr:   fmt.Errorf("container exited with status 137"),
+	}
+
+	err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "container exited with status 137")
+}
+
 func graphHasTriple(graph *rdflibgo.Graph, subject, predicate, object string) bool {
 	found := false
 	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
