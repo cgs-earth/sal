@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/cgs-earth/sal/salmodule"
@@ -20,25 +21,33 @@ const testModuleOntology = `{
 	"@context": {
 		"schema": "https://schema.org/",
 		"owl": "http://www.w3.org/2002/07/owl#",
+		"xsd": "http://www.w3.org/2001/XMLSchema#",
 		"salmodule": "https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#"
 	},
 	"@graph": [
 		{"@id": ".", "@type": "owl:Ontology"},
 		{"@id": "EducationalHistoryFinder", "@type": "owl:Class", "rdfs:subClassOf": {"@id": "salmodule:Task"}},
+		{"@id": "maxRetries", "@type": "owl:DatatypeProperty"},
+		{"@id": "school", "@type": "owl:ObjectProperty"},
 		{"@id": "NotATask", "@type": "owl:Class"}
 	]
 }`
 
 // testProject is the shape of a SAL project that references a SAL module, as
-// described in build/testdata/reference/ontology_with_sal.ttl.
+// described in build/testdata/reference/ontology_with_sal.ttl. The instance is
+// configured with the module's own properties rather than an embedded JSON-LD
+// literal.
 const testProject = `
 	@base <https://example.test/project/> .
 	@prefix history: <salmodule://www.github.com/test/history-getter/> .
 	@prefix salmodule: <https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#> .
+	@prefix schema: <https://schema.org/> .
+	@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
 	<EducationFinder> a history:EducationalHistoryFinder ;
 		a salmodule:NodeProcessor ;
-		salmodule:taskInstanceEnvVar '{"@id":"https://example.test/project/EducationFinder","@type":"EducationalHistoryFinder"}' .
+		schema:name "not a module property" ;
+		history:maxRetries "5"^^xsd:integer .
 `
 
 type testContainerRunner struct {
@@ -46,16 +55,20 @@ type testContainerRunner struct {
 	runOutput string
 	runErr    error
 	runs      int
+	// runEnv is the environment the run command was last invoked with, which is
+	// how the task instance reaches the module.
+	runEnv []string
 }
 
 func (r *testContainerRunner) BuildImage(context.Context, string, string) error { return nil }
 
-func (r *testContainerRunner) RunContainer(_ context.Context, _ string, _ []string, cmd []string) ([]byte, []byte, error) {
+func (r *testContainerRunner) RunContainer(_ context.Context, _ string, env []string, cmd []string) ([]byte, []byte, error) {
 	switch cmd[len(cmd)-1] {
 	case salmodule.OntologyCommand:
 		return []byte(r.ontology), nil, nil
 	case salmodule.RunCommand:
 		r.runs++
+		r.runEnv = env
 		return []byte(r.runOutput), nil, r.runErr
 	}
 	return nil, nil, fmt.Errorf("unexpected command %v", cmd)
@@ -86,7 +99,6 @@ func TestFindSalModuleTasksReadsTaskInstances(t *testing.T) {
 	require.Equal(t, testModuleNamespace+"EducationalHistoryFinder", tasks[0].classIRI)
 	require.Equal(t, "https://www.github.com/test/history-getter.git", tasks[0].ref.CloneURL)
 	require.True(t, tasks[0].declaredTask)
-	require.Contains(t, tasks[0].taskInstance, `"@type":"EducationalHistoryFinder"`)
 }
 
 func TestFindSalModuleTasksIgnoresGraphsWithoutModules(t *testing.T) {
@@ -113,6 +125,26 @@ func TestMaterializeSalModulesMergesTaskOutput(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, runner.runs)
 	require.True(t, graphHasTriple(graph, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
+}
+
+// TestMaterializeSalModulesPassesTheInstanceConfiguredInRDF checks that the task
+// instance the module receives is built from the instance's RDF properties, and
+// that only the properties the module's own vocabulary defines are passed on.
+func TestMaterializeSalModulesPassesTheInstanceConfiguredInRDF(t *testing.T) {
+	runner := &testContainerRunner{ontology: testModuleOntology}
+
+	err := MaterializeSalModules(context.Background(), parseTestProject(t, testProject), testResolver(runner))
+
+	require.NoError(t, err)
+	require.Len(t, runner.runEnv, 1)
+	name, instance, found := strings.Cut(runner.runEnv[0], "=")
+	require.True(t, found)
+	require.Equal(t, salmodule.DefaultTaskInstanceEnvVar, name)
+	require.JSONEq(t, `{
+		"@id": "https://example.test/project/EducationFinder",
+		"@type": "EducationalHistoryFinder",
+		"maxRetries": {"@value": "5", "@type": "xsd:integer"}
+	}`, instance)
 }
 
 func TestMaterializeSalModulesSkipsClassesThatAreNotTasks(t *testing.T) {

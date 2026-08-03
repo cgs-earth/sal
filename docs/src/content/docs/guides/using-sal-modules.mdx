@@ -15,10 +15,11 @@ Declare it as a prefix and type an instance with one of the classes the module's
 ```turtle
 @prefix salmodule: <https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#> .
 @prefix states: <salmodule://github.com/cgs-earth/python-geoconnex/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
 <GeoconnexStates> a states:GeoconnexReferenceFeatureStates ;
     a salmodule:NodeProcessor ;
-    salmodule:taskInstanceEnvVar '{"@id":"https://example.org/GeoconnexStates","@type":"GeoconnexReferenceFeatureStates","maxRetries":{"@value":"5","@type":"xsd:integer"}}' .
+    states:maxRetries "5"^^xsd:integer .
 ```
 
 The prefix takes the form `salmodule://[HOST/]OWNER/REPO/`.
@@ -46,9 +47,48 @@ the module:
 A prefix that does not end in a slash reports every module term as undefined even though the module and its
 ontology are fine, so reach for the slash-terminated form whenever a module's terms unexpectedly fail to validate.
 
-`salmodule:taskInstanceEnvVar` carries the JSON-LD node object describing the task instance.
-SAL passes it to the container through the environment variable the module's ontology declares,
-which defaults to `SALMODULE_TASK_INSTANCE`.
+## Configure the task
+
+A task is configured in RDF, with the properties the module's own vocabulary defines.
+`states:maxRetries` above is one of them, so the module decides what a valid task instance looks like
+and `sal validate` reports a typo in a configuration property the same way it reports a typo in a class.
+
+SAL serializes those properties into the JSON-LD node object that `salmodule:runCommand` is invoked with.
+The instance above is passed as:
+
+```json
+{"@id":"https://example.org/GeoconnexStates","@type":"GeoconnexReferenceFeatureStates","maxRetries":{"@value":"5","@type":"xsd:integer"}}
+```
+
+The rules SAL follows when writing it:
+
+- Only properties in the module's own namespace become keys. Everything else the project says about the
+  instance, such as an `rdfs:label` or a `schema:name`, is left out, since only the module knows what
+  configures it.
+- Keys and IRIs are written the way the module's ontology writes them: a term of the module's vocabulary
+  becomes its relative name, and any other IRI is shortened with whichever prefix the ontology's
+  `@context` binds it to.
+- A typed literal becomes a `{"@value": ..., "@type": ...}` object and a language-tagged literal becomes a
+  `{"@value": ..., "@language": ...}` object. A plain string is written as a string.
+- A property used more than once becomes an array.
+- A blank node is inlined as a nested object, so structured configuration can be expressed with the usual
+  turtle `[ ... ]` syntax. A named node stays a `{"@id": ...}` reference.
+
+### Which ontology property describes what
+
+Two properties of the SAL Module ontology are involved, and it is worth keeping them apart:
+
+- `salmodule:runCommand` describes the invocation the task instance is an input to, and so is the property
+  that documents the JSON-LD node object above. Its `skos:note` is what says the value must be a JSON-LD
+  representation of the `salmodule:Task` subclass instance being invoked.
+- `salmodule:taskInstanceEnvVar` only defines a constant: the *name* of the environment variable that value
+  is carried in. A module declares it on its own ontology, and it defaults to `SALMODULE_TASK_INSTANCE`.
+
+:::caution
+Neither property is written in a project's RDF. Earlier versions of SAL took the task instance from a
+JSON-LD literal attached to the instance with `salmodule:taskInstanceEnvVar`; SAL now warns that such a
+value is ignored and builds the task instance from the instance's own properties instead.
+:::
 
 ## What SAL does with it
 

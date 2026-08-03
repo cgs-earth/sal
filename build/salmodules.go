@@ -2,12 +2,10 @@ package build
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
-	"strings"
 
 	"github.com/cgs-earth/sal/salmodule"
 	rdflibgo "github.com/tggo/goRDFlib"
@@ -19,9 +17,6 @@ type salModuleTask struct {
 	// classIRI is the salmodule:// term the instance is typed with.
 	classIRI string
 	ref      salmodule.ModuleRef
-	// taskInstance is the JSON passed to the module through its task instance
-	// environment variable.
-	taskInstance string
 	// declaredTask records that the project's RDF types the instance as a SAL
 	// Module task class itself, so the module ontology does not have to be
 	// consulted to know that it is runnable.
@@ -29,12 +24,12 @@ type salModuleTask struct {
 }
 
 // findSalModuleTasks collects every instance in the graph typed by a term from a
-// salmodule:// vocabulary, along with the task instance it should be run with.
+// salmodule:// vocabulary. What each instance is configured with is read from its
+// own properties later, once the module's vocabulary is known.
 func findSalModuleTasks(graph *rdflibgo.Graph) ([]salModuleTask, error) {
 	subjects := map[string]rdflibgo.Subject{}
 	moduleTypes := map[string][]string{}
 	declaredTasks := map[string]bool{}
-	taskInstances := map[string]string{}
 
 	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		key := triple.Subject.String()
@@ -50,10 +45,11 @@ func findSalModuleTasks(graph *rdflibgo.Graph) ([]salModuleTask, error) {
 				}
 			}
 		}
+		// taskInstanceEnvVar names the environment variable a module reads its
+		// task instance from; it is declared by a module's ontology, not by a
+		// project, whose instances are configured with the module's own properties
 		if triple.Predicate.Value() == salmodule.Namespace+"taskInstanceEnvVar" {
-			if literal, ok := triple.Object.(rdflibgo.Literal); ok {
-				taskInstances[key] = literal.Lexical()
-			}
+			slog.Warn(triple.Subject.String() + " sets " + salmodule.Namespace + "taskInstanceEnvVar, which is ignored; configure the task with the properties the module's vocabulary defines")
 		}
 		return true
 	})
@@ -77,7 +73,6 @@ func findSalModuleTasks(graph *rdflibgo.Graph) ([]salModuleTask, error) {
 				subject:      subjects[key],
 				classIRI:     classIRI,
 				ref:          ref,
-				taskInstance: taskInstances[key],
 				declaredTask: declaredTasks[key],
 			})
 		}
@@ -103,13 +98,9 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 			continue
 		}
 
-		taskInstance := task.taskInstance
-		if taskInstance == "" {
-			taskInstance, err = defaultTaskInstance(task)
-			if err != nil {
-				return err
-			}
-			slog.Warn(task.subject.String() + " has no " + salmodule.Namespace + "taskInstanceEnvVar value; running the module with only its identifier and type")
+		taskInstance, err := ontology.TaskInstance(graph, task.subject, task.classIRI)
+		if err != nil {
+			return fmt.Errorf("build: %w", err)
 		}
 
 		slog.Info("Running SAL module task " + task.classIRI)
@@ -136,17 +127,4 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 		slog.Info(fmt.Sprintf("Materialized %d triples from %s", materialized, task.classIRI))
 	}
 	return nil
-}
-
-// defaultTaskInstance builds the minimal task instance node object for an
-// instance that does not carry an explicit one in the project's RDF.
-func defaultTaskInstance(task salModuleTask) (string, error) {
-	instance, err := json.Marshal(map[string]string{
-		"@id":   task.subject.String(),
-		"@type": strings.TrimPrefix(task.classIRI, task.ref.Namespace),
-	})
-	if err != nil {
-		return "", fmt.Errorf("build: encode task instance for %s: %w", task.classIRI, err)
-	}
-	return string(instance), nil
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/iceberg-go/table"
 	"github.com/cgs-earth/sal/build"
+	"github.com/cgs-earth/sal/build/validate"
 	"github.com/cgs-earth/sal/initialization"
 	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/salmodule"
@@ -53,6 +54,10 @@ func (s *SalModuleSuite) SetupSuite() {
 	s.originalWorkingDir = workingDir
 
 	s.moduleRepo = s.commitFixtureModuleToGitRepository()
+
+	// the fixture module's ontology changes with the fixture, so a vocabulary
+	// cached by an earlier run would validate this run against the wrong terms
+	s.Require().NoError(validate.ClearCache())
 
 	resolver := salmodule.Default()
 	resolver.Reset()
@@ -127,19 +132,22 @@ func (s *SalModuleSuite) newSalProject(source string) string {
 }
 
 // projectReferencing is the RDF of a SAL project that declares one task
-// instance of the fixture module's StaticPlaceProducer class.
-func projectReferencing(taskInstance string) string {
-	encoded, err := json.Marshal(taskInstance)
-	if err != nil {
-		panic(err)
+// instance of the fixture module's StaticPlaceProducer class. Each entry of
+// configuration is a property of the instance, which is the only way a project
+// tells a module how to run: SAL serializes the properties the module's own
+// vocabulary defines into the task instance the container is invoked with.
+func projectReferencing(configuration ...string) string {
+	instance := "<Places> a fixture:StaticPlaceProducer"
+	for _, property := range configuration {
+		instance += " ;\n    " + property
 	}
-	return fmt.Sprintf(`
-@prefix salmodule: <https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#> .
-@prefix fixture: <%s> .
 
-<Places> a fixture:StaticPlaceProducer ;
-    salmodule:taskInstanceEnvVar %s .
-`, moduleNamespace, encoded)
+	return fmt.Sprintf(`
+@prefix fixture: <%s> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+%s .
+`, moduleNamespace, instance)
 }
 
 // TestModuleImplementsSalModuleCli runs the fixture module in an ephemeral
@@ -178,7 +186,7 @@ func (s *SalModuleSuite) TestModuleImplementsSalModuleCli() {
 // the module is built, and the triples the module produced are read back out of
 // the Iceberg table SAL wrote.
 func (s *SalModuleSuite) TestBuildMaterializesModuleTriples() {
-	s.newSalProject(projectReferencing(`{"@id":"https://example.test/Places","@type":"StaticPlaceProducer"}`))
+	s.newSalProject(projectReferencing())
 
 	graph, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, Force: true}).Run()
 
@@ -190,11 +198,55 @@ func (s *SalModuleSuite) TestBuildMaterializesModuleTriples() {
 	s.Contains(objects, "Lake Erie")
 }
 
+// TestBuildConfiguresTheTaskWithItsRDFProperties is what makes the module's
+// configuration RDF rather than an embedded JSON-LD literal: fixture:region is a
+// property of the instance, and the places the build ends up with are only the
+// ones the module emits for the region it was given.
+func (s *SalModuleSuite) TestBuildConfiguresTheTaskWithItsRDFProperties() {
+	s.newSalProject(projectReferencing(`fixture:region "west"`))
+
+	graph, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, Force: true}).Run()
+
+	s.Require().NoError(err)
+	s.Require().NotNil(graph)
+
+	objects := s.builtObjectsForPredicate("https://schema.org/name")
+	s.Contains(objects, "Lake Tahoe")
+	s.NotContains(objects, "Lake Erie")
+}
+
+// TestBuildConfiguresTheTaskWithTypedLiterals checks the same path for a
+// property whose literal carries a datatype, which reaches the module as a
+// JSON-LD value object rather than as a bare JSON value.
+func (s *SalModuleSuite) TestBuildConfiguresTheTaskWithTypedLiterals() {
+	s.newSalProject(projectReferencing(`fixture:region "east"`, `fixture:labelled "true"^^xsd:boolean`))
+
+	graph, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, Force: true}).Run()
+
+	s.Require().NoError(err)
+	s.Require().NotNil(graph)
+
+	s.Equal([]string{"Lake Erie"}, s.builtObjectsForPredicate("https://schema.org/name"))
+	s.Equal([]string{"Lake Erie"}, s.builtObjectsForPredicate("http://www.w3.org/2000/01/rdf-schema#label"))
+}
+
+// TestBuildRejectsConfigurationTheModuleDoesNotDefine checks that a typo in a
+// configuration property is caught by validation, since the module's vocabulary
+// is what declares which properties configure its tasks.
+func (s *SalModuleSuite) TestBuildRejectsConfigurationTheModuleDoesNotDefine() {
+	s.newSalProject(projectReferencing(`fixture:regionn "west"`))
+
+	_, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, Force: true}).Run()
+
+	s.Require().Error(err)
+	s.Contains(err.Error(), "regionn")
+}
+
 // TestBuildReportsModuleErrors checks that a task which reports a
 // salmodule:Error and exits non-zero fails the build with its own message
 // rather than with the container's exit status.
 func (s *SalModuleSuite) TestBuildReportsModuleErrors() {
-	s.newSalProject(projectReferencing(`{"@id":"https://example.test/Places","@type":"StaticPlaceProducer","fail":true}`))
+	s.newSalProject(projectReferencing(`fixture:fail "true"^^xsd:boolean`))
 
 	_, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, Force: true}).Run()
 
