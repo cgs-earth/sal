@@ -62,7 +62,7 @@ func (cmd *QueryCmd) Run() error {
 			return err
 		}
 	} else {
-		infoQuery, err = queryForInfo(cmd.Info, escapedTablePath)
+		infoQuery, err = salsparql.InfoSQL(cmd.Info, tablePath)
 		if err != nil {
 			return err
 		}
@@ -118,62 +118,6 @@ FROM iceberg_scan('%s', allow_moved_paths = true);
 	}
 
 	return nil
-}
-
-func queryForInfo(info string, escapedTablePath string) (string, error) {
-	switch info {
-	case "", "head":
-		return "SELECT * FROM triples LIMIT 20", nil
-	case "properties":
-		return fmt.Sprintf(`
-WITH latest_metadata AS (
-	SELECT
-		filename,
-		content::JSON AS metadata_json
-	FROM read_text('%s/metadata/*.metadata.json')
-	ORDER BY regexp_extract(filename, 'v([0-9]+)\.metadata\.json', 1)::BIGINT DESC
-	LIMIT 1
-)
-SELECT
-	prop.key,
-	json_extract_string(prop.value, '$') AS value
-FROM latest_metadata,
-json_each(json_extract(metadata_json, '$.properties')) AS prop
-ORDER BY prop.key`, escapedTablePath), nil
-	case "snapshots":
-		return fmt.Sprintf(`
-WITH snapshots AS (
-	SELECT *
-	FROM iceberg_snapshots('%s')
-),
-latest_metadata AS (
-	SELECT
-		filename,
-		content::JSON AS metadata_json
-	FROM read_text('%s/metadata/*.metadata.json')
-	ORDER BY regexp_extract(filename, 'v([0-9]+)\.metadata\.json', 1)::BIGINT DESC
-	LIMIT 1
-),
-tags AS (
-	SELECT
-		json_extract(ref.value, '$."snapshot-id"')::BIGINT AS snapshot_id,
-		string_agg(ref.key, ', ' ORDER BY ref.key) AS tags
-	FROM latest_metadata,
-	json_each(json_extract(metadata_json, '$.refs')) AS ref
-	WHERE json_extract_string(ref.value, '$.type') = 'tag'
-	GROUP BY snapshot_id
-)
-SELECT
-	snapshots.*,
-	tags.tags
-FROM snapshots
-LEFT JOIN tags ON tags.snapshot_id = snapshots.snapshot_id
-ORDER BY snapshots.sequence_number DESC`, escapedTablePath, escapedTablePath), nil
-	case "column-stats":
-		return fmt.Sprintf("SELECT * FROM iceberg_column_stats('%s')", escapedTablePath), nil
-	default:
-		return "", fmt.Errorf("unknown info option %q; expected one of: head, properties, snapshots, column-stats", info)
-	}
 }
 
 func queryForSnapshotDiff(ctx context.Context, warehouse string, namespace string, escapedTablePath string, snapshotDiff string) (string, error) {

@@ -104,6 +104,12 @@ LIMIT 5;
 
 - Starts a local HTTP server on port 8080.
 - The server can resolve SPARQL queries against the iceberg triples table
+- `--with-ui` additionally serves a React web UI at `/` plus the JSON endpoints it reads: `POST /api/sql`, `GET /api/stats`, and `GET /geometries`.
+    - The UI source lives in `serve/sal-ui/`. It is a Vite + React + TypeScript app using a high contrast Catppuccin Mocha palette, `@zazuko/yasgui` for the SPARQL editor, and CodeMirror 6 for the SQL editor.
+    - `serve/ui.go` embeds `serve/sal-ui/dist` with `//go:embed`, so that build output is committed to git rather than gitignored. `go install` must be able to produce a working UI without a Node toolchain.
+    - Rebuild it with `make ui` after changing anything under `serve/sal-ui/src`. `.github/workflows/ui_build.yml` fails if the committed `dist` does not match the sources.
+    - The Map tab is a placeholder. `/geometries` already serves GeoJSON, but no MapLibre client is wired to it.
+- DuckDB execution and the SQL behind each `sal query --info` option live in `query/sparql`, not in `serve` or `query`. `salsparql.InfoSQL` and `DuckDBRunner.RunSQL`/`Stats`/`Geometries` are shared by the `query` subcommand, the SPARQL shell, and the serve endpoints. Do not duplicate those queries.
 
 ## Code Style
 

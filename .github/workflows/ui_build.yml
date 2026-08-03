@@ -1,0 +1,43 @@
+# Copyright 2025 Lincoln Institute of Land Policy
+# SPDX-License-Identifier: Apache-2.0
+
+name: SAL UI Build
+
+on:
+  workflow_dispatch: # Allows manual triggering of the workflow
+  push:
+
+concurrency:
+  group:
+    ${{ github.workflow }}-${{ github.ref_name }}-${{github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: serve/sal-ui
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: serve/sal-ui/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
+      # serve/ui.go embeds serve/sal-ui/dist, so the committed build output has to
+      # match the sources. Otherwise `go install` ships a stale UI.
+      - name: Check that the committed dist matches the sources
+        run: |
+          if ! git diff --quiet -- dist; then
+            echo "serve/sal-ui/dist is out of date; run 'make ui' and commit the result." >&2
+            git diff --stat -- dist >&2
+            exit 1
+          fi

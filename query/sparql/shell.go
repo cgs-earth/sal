@@ -23,10 +23,10 @@ import (
 )
 
 type Result struct {
-	SQL     string
-	Header  []string
-	Rows    [][]string
-	Message string
+	SQL     string     `json:"sql"`
+	Header  []string   `json:"header"`
+	Rows    [][]string `json:"rows"`
+	Message string     `json:"message"`
 }
 
 type Runner interface {
@@ -35,6 +35,14 @@ type Runner interface {
 
 type GeometryRunner interface {
 	Geometries(ctx context.Context, limit int, offset int) (FeatureCollection, error)
+}
+
+type SQLRunner interface {
+	RunSQL(ctx context.Context, sql string) (Result, error)
+}
+
+type StatsRunner interface {
+	Stats(ctx context.Context) (TableStats, error)
 }
 
 type DuckDBRunner struct {
@@ -65,7 +73,7 @@ func (r DuckDBRunner) Run(ctx context.Context, query string) (Result, error) {
 		sql += fmt.Sprintf("\nLIMIT %d", r.Limit)
 	}
 
-	return r.runSQL(ctx, sql)
+	return r.RunSQL(ctx, sql)
 }
 
 // Geometries reads a bounded page of WKB object geometries and converts them to GeoJSON features.
@@ -77,7 +85,7 @@ func (r DuckDBRunner) Geometries(ctx context.Context, limit int, offset int) (Fe
 		offset = 0
 	}
 	sql := geometrySQL(r.Layout, limit, offset)
-	result, err := r.runSQL(ctx, sql)
+	result, err := r.RunSQL(ctx, sql)
 	if err != nil {
 		return FeatureCollection{}, err
 	}
@@ -104,23 +112,20 @@ func (r DuckDBRunner) Geometries(ctx context.Context, limit int, offset int) (Fe
 
 // geometrySQL builds the map data query for both legacy and typed object column layouts.
 func geometrySQL(layout ObjectLayout, limit int, offset int) string {
-	objectExpr := "object"
-	if layout == TypedObjects {
-		objectExpr = "COALESCE(object_iri, CAST(object_float AS VARCHAR), object_string)"
-	}
 	return fmt.Sprintf(`
 SELECT
-	subject,
-	predicate,
+	triples.subject,
+	triples.predicate,
 	%s AS object,
-	ST_AsGeoJSON(ST_GeomFromWKB(object_geometry)) AS geometry
+	ST_AsGeoJSON(ST_GeomFromWKB(triples.object_geometry)) AS geometry
 FROM triples
-WHERE object_geometry IS NOT NULL
+WHERE triples.object_geometry IS NOT NULL
 LIMIT %d
-OFFSET %d`, objectExpr, limit, offset)
+OFFSET %d`, bindingExpr("triples", "object", layout), limit, offset)
 }
 
-func (r DuckDBRunner) runSQL(ctx context.Context, sql string) (Result, error) {
+// RunSQL executes a DuckDB statement with the Iceberg triples table registered as the `triples` view.
+func (r DuckDBRunner) RunSQL(ctx context.Context, sql string) (Result, error) {
 	tablePath := strings.ReplaceAll(r.TablePath, "'", "''")
 	statement := fmt.Sprintf(`
 INSTALL iceberg;

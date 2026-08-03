@@ -12,7 +12,7 @@ import (
 )
 
 type ServeCmd struct {
-	WithMap bool `arg:"--with-map" help:"Serve a MapLibre map at / that renders up to 100 object_geometry values at a time"`
+	WithUI bool `arg:"--with-ui" help:"Serve the SAL web UI at / with stats, SQL, SPARQL, and map tabs"`
 }
 
 func (cmd *ServeCmd) Run() error {
@@ -42,7 +42,7 @@ func (cmd *ServeCmd) Run() error {
 		return err
 	}
 	tablePath := joinRemote(warehouse, namespace, "triples")
-	return Serve(context.Background(), ":8080", tablePath, layout, cmd.WithMap)
+	return Serve(context.Background(), ":8080", tablePath, layout, cmd.WithUI)
 }
 
 func joinRemote(base string, parts ...string) string {

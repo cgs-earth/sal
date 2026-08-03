@@ -25,17 +25,38 @@ func (r *endpointRunner) Run(_ context.Context, query string) (salsparql.Result,
 	return r.result, r.err
 }
 
-type endpointGeometryRunner struct {
+// endpointUIRunner is a UIRunner whose four query surfaces are all canned responses.
+type endpointUIRunner struct {
+	endpointRunner
 	collection salsparql.FeatureCollection
-	err        error
+	stats      salsparql.TableStats
+	sqlResult  salsparql.Result
+	sqlErr     error
+	sql        string
 	limit      int
 	offset     int
 }
 
-func (r *endpointGeometryRunner) Geometries(_ context.Context, limit int, offset int) (salsparql.FeatureCollection, error) {
+func (r *endpointUIRunner) Geometries(_ context.Context, limit int, offset int) (salsparql.FeatureCollection, error) {
 	r.limit = limit
 	r.offset = offset
 	return r.collection, r.err
+}
+
+func (r *endpointUIRunner) RunSQL(_ context.Context, sql string) (salsparql.Result, error) {
+	r.sql = sql
+	return r.sqlResult, r.sqlErr
+}
+
+func (r *endpointUIRunner) Stats(_ context.Context) (salsparql.TableStats, error) {
+	return r.stats, r.err
+}
+
+func newUIServer(t *testing.T, runner *endpointUIRunner) *httptest.Server {
+	t.Helper()
+	handler, err := NewEndpointWithUI(runner)
+	require.NoError(t, err)
+	return httptest.NewServer(handler)
 }
 
 func TestEndpointAcceptsGETQueryAndReturnsSPARQLJSON(t *testing.T) {
@@ -70,8 +91,8 @@ func TestEndpointAcceptsGETQueryAndReturnsSPARQLJSON(t *testing.T) {
 	require.Equal(t, "Alice", body.Results.Bindings[0]["name"].Value)
 }
 
-func TestEndpointWithMapServesMapAtRoot(t *testing.T) {
-	server := httptest.NewServer(NewEndpointWithMap(&endpointRunner{}, &endpointGeometryRunner{}))
+func TestEndpointWithUIServesTheAppAtRoot(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/")
@@ -84,13 +105,121 @@ func TestEndpointWithMapServesMapAtRoot(t *testing.T) {
 	require.Contains(t, resp.Header.Get("Content-Type"), "text/html")
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
-	require.Contains(t, string(body), "maplibre-gl")
-	require.Contains(t, string(body), "tiles.openfreemap.org")
-	require.Contains(t, string(body), "/geometries?limit=")
+	require.Contains(t, string(body), `<div id="root">`)
+	require.Contains(t, string(body), "/assets/")
 }
 
-func TestEndpointWithMapReturnsGeometryFeatureCollection(t *testing.T) {
-	geometryRunner := &endpointGeometryRunner{collection: salsparql.FeatureCollection{
+func TestEndpointWithUIFallsBackToIndexForUnknownPaths(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/does-not-exist")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Contains(t, resp.Header.Get("Content-Type"), "text/html")
+}
+
+func TestEndpointWithUIRunsSQL(t *testing.T) {
+	runner := &endpointUIRunner{sqlResult: salsparql.Result{
+		Header: []string{"count"},
+		Rows:   [][]string{{"42"}},
+	}}
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/sql", "application/json", strings.NewReader(`{"sql":"SELECT COUNT(*) FROM triples;  "}`))
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "SELECT COUNT(*) FROM triples", runner.sql)
+
+	var body salsparql.Result
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, []string{"count"}, body.Header)
+	require.Equal(t, [][]string{{"42"}}, body.Rows)
+	require.Equal(t, "1 rows", body.Message)
+}
+
+func TestEndpointWithUIReportsSQLErrorsAsJSON(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{sqlErr: fmt.Errorf("Catalog Error: Table with name nope does not exist")})
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/sql", "application/json", strings.NewReader(`{"sql":"SELECT * FROM nope"}`))
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Contains(t, body["error"], "Table with name nope does not exist")
+}
+
+func TestEndpointWithUIRejectsEmptySQL(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/sql", "application/json", strings.NewReader(`{"sql":"   "}`))
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestTruncateResultReportsTheFullRowCount(t *testing.T) {
+	rows := make([][]string, maxUIRows+5)
+	for i := range rows {
+		rows[i] = []string{"row"}
+	}
+
+	truncated := truncateResult(salsparql.Result{Header: []string{"value"}, Rows: rows})
+
+	require.Len(t, truncated.Rows, maxUIRows)
+	require.Equal(t, fmt.Sprintf("%d rows (showing the first %d)", maxUIRows+5, maxUIRows), truncated.Message)
+}
+
+func TestEndpointWithUIReturnsTableStats(t *testing.T) {
+	runner := &endpointUIRunner{stats: salsparql.TableStats{
+		TablePath:  "/tmp/warehouse/sal/triples",
+		Triples:    12,
+		Subjects:   3,
+		Predicates: 4,
+		Objects:    9,
+		Snapshots: salsparql.Result{
+			Header: []string{"snapshot_id"},
+			Rows:   [][]string{{"123"}},
+		},
+	}}
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/stats")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var body salsparql.TableStats
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, int64(12), body.Triples)
+	require.Equal(t, int64(9), body.Objects)
+	require.Equal(t, "/tmp/warehouse/sal/triples", body.TablePath)
+	require.Equal(t, [][]string{{"123"}}, body.Snapshots.Rows)
+}
+
+func TestEndpointWithUIReturnsGeometryFeatureCollection(t *testing.T) {
+	runner := &endpointUIRunner{collection: salsparql.FeatureCollection{
 		Type: "FeatureCollection",
 		Features: []salsparql.Feature{
 			{
@@ -102,7 +231,7 @@ func TestEndpointWithMapReturnsGeometryFeatureCollection(t *testing.T) {
 			},
 		},
 	}}
-	server := httptest.NewServer(NewEndpointWithMap(&endpointRunner{}, geometryRunner))
+	server := newUIServer(t, runner)
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/geometries?limit=500&offset=12")
@@ -113,8 +242,8 @@ func TestEndpointWithMapReturnsGeometryFeatureCollection(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, "application/geo+json", resp.Header.Get("Content-Type"))
-	require.Equal(t, 100, geometryRunner.limit)
-	require.Equal(t, 12, geometryRunner.offset)
+	require.Equal(t, 100, runner.limit)
+	require.Equal(t, 12, runner.offset)
 
 	var body salsparql.FeatureCollection
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
