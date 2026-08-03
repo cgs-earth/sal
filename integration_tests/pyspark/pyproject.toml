@@ -1,7 +1,7 @@
 [project]
 name = "pyspark-integration"
 version = "0.1.0"
-description = "Add your description here"
+description = "An integration test for querying sal-built iceberg tables with PySpark"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

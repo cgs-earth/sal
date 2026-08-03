@@ -1,0 +1,82 @@
+---
+title: Using SAL Modules
+description: Reference a SAL Module from your project's RDF so that sal build materializes the triples it produces.
+---
+
+A [SAL Module](/sal/reference/salmodule-description/) is a git repository with a `Dockerfile` in its root whose
+container implements the SAL Module command line interface.
+Referencing one from your project's RDF lets `sal build` run it and fold the RDF it produces into your data product.
+
+## Reference a module
+
+A module is referenced through the `salmodule://` protocol scheme.
+Declare it as a prefix and type an instance with one of the classes the module's ontology defines:
+
+```turtle
+@prefix salmodule: <https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#> .
+@prefix states: <salmodule://github.com/cgs-earth/python-geoconnex/> .
+
+<GeoconnexStates> a states:GeoconnexReferenceFeatureStates ;
+    a salmodule:NodeProcessor ;
+    salmodule:taskInstanceEnvVar '{"@id":"https://example.org/GeoconnexStates","@type":"GeoconnexReferenceFeatureStates","maxRetries":{"@value":"5","@type":"xsd:integer"}}' .
+```
+
+The prefix takes the form `salmodule://[HOST/]OWNER/REPO/`.
+`HOST` is optional and defaults to `github.com`.
+
+### The prefix must end in a slash
+
+A module's ontology declares its classes as relative IRIs, such as `"@id": "GeoconnexReferenceFeatureStates"`.
+SAL resolves them against the prefix you declared, and only a slash-terminated prefix places them underneath
+the module:
+
+```turtle
+# correct
+@prefix states: <salmodule://github.com/cgs-earth/python-geoconnex/> .
+# states:GeoconnexReferenceFeatureStates and the ontology's own term both become
+#   salmodule://github.com/cgs-earth/python-geoconnex/GeoconnexReferenceFeatureStates
+
+# wrong
+@prefix states: <salmodule://github.com/cgs-earth/python-geoconnex#> .
+# relative IRI resolution drops the last path segment, so the ontology's term becomes
+#   salmodule://github.com/cgs-earth/GeoconnexReferenceFeatureStates
+# which no longer matches the term the prefix expands to
+```
+
+A prefix that does not end in a slash reports every module term as undefined even though the module and its
+ontology are fine, so reach for the slash-terminated form whenever a module's terms unexpectedly fail to validate.
+
+`salmodule:taskInstanceEnvVar` carries the JSON-LD node object describing the task instance.
+SAL passes it to the container through the environment variable the module's ontology declares,
+which defaults to `SALMODULE_TASK_INSTANCE`.
+
+## What SAL does with it
+
+Validation dereferences the `salmodule://` prefix so that the module's terms are checked like any other vocabulary.
+SAL clones the repository, builds the `Dockerfile` in its root, and runs
+`docker run IMAGE salmodule ontology` to read the module's vocabulary.
+A typo in a module term is reported the same way a typo in a `schema:` term is:
+
+```
+data/module.ttl:5: undefined term states:GeoconnexReferenceFeatureStatess
+```
+
+`sal build` then runs each task instance with `docker run -e SALMODULE_TASK_INSTANCE=... IMAGE salmodule run`.
+An instance is only run when it is typed as a SAL Module task, either because the project's RDF types it as a
+`salmodule:NodeProcessor`, `salmodule:NodeProducer`, `salmodule:NodeConsumer`, or `salmodule:Task`, or because
+the module's own ontology declares its class as a subclass of one of those.
+
+A task writes newline delimited JSON to stdout.
+SAL injects the module ontology's `@context` into each node so that its keys resolve to the module's vocabulary,
+converts the result to RDF, and merges it into the graph being built.
+Those triples land in the Iceberg table alongside the triples from your source files.
+
+If a task emits `salmodule:Error` nodes instead of data, the build fails with the messages the module reported.
+
+## Requirements
+
+- A reachable docker daemon. SAL talks to whatever `DOCKER_HOST` points at, defaulting to the local socket.
+- `git` on `PATH`, used to clone the module repository.
+
+Each module is cloned and built once per `sal build` invocation.
+Dereferenced module ontologies are cached alongside SAL's other vocabularies; `--no-cache` clears that cache.

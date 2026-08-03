@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/cgs-earth/sal/build/validate"
 	"github.com/cgs-earth/sal/pkg"
+	"github.com/cgs-earth/sal/salmodule"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
@@ -150,6 +152,10 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 	}
 	if cfg.Force {
 		slog.Warn("Creating build with modified source tree. This should only be done for testing purposes.")
+	}
+
+	if err := MaterializeSalModules(context.Background(), finalGraph, salmodule.Default()); err != nil {
+		return nil, err
 	}
 
 	if err := AddAdditionalDataFileMetadata(finalGraph); err != nil {

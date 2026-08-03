@@ -36,15 +36,15 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version-file: pyspark_integration/.python-version
+          python-version-file: integration_tests/pyspark/.python-version
 
       - name: Initialize SAL data directory
         run: mkdir -p .sal/data
 
       - name: Install PySpark integration dependencies
-        working-directory: pyspark_integration
+        working-directory: integration_tests/pyspark
         run: uv sync --locked
 
       - name: Run PySpark integration tests
-        working-directory: pyspark_integration
+        working-directory: integration_tests/pyspark
         run: uv run pytest -s
