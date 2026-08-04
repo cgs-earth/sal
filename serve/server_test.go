@@ -7,10 +7,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
 	salsparql "github.com/cgs-earth/sal/query/sparql"
+	"github.com/cgs-earth/sal/salmodule"
 	"github.com/stretchr/testify/require"
 )
 
@@ -168,6 +170,78 @@ func TestEndpointWithUIRejectsEmptySQL(t *testing.T) {
 	defer server.Close()
 
 	resp, err := http.Post(server.URL+"/api/sql", "application/json", strings.NewReader(`{"sql":"   "}`))
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+// newModuleServer serves the SAL module endpoint against a canned inspector so
+// that the handler can be tested without cloning or building a real module.
+func newModuleServer(t *testing.T, inspect ModuleInspector) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.Handle("/api/salmodule", salmoduleHandler{inspect: inspect})
+	return httptest.NewServer(mux)
+}
+
+func TestSalModuleEndpointReturnsTheOntologyDocument(t *testing.T) {
+	var inspected string
+	server := newModuleServer(t, func(_ context.Context, reference string) (*salmodule.ModuleOntology, error) {
+		inspected = reference
+		return &salmodule.ModuleOntology{
+			Namespace: "salmodule://github.com/owner/repo/",
+			Document:  []byte(`{"@context":{"@vocab":"salmodule://github.com/owner/repo/"}}`),
+		}, nil
+	})
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/salmodule?module=" + url.QueryEscape("salmodule://github.com/owner/repo/"))
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "salmodule://github.com/owner/repo/", inspected)
+
+	var body struct {
+		Module   string         `json:"module"`
+		Ontology map[string]any `json:"ontology"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, "salmodule://github.com/owner/repo/", body.Module)
+	require.Contains(t, body.Ontology, "@context")
+}
+
+func TestSalModuleEndpointReportsInspectionFailuresAsJSON(t *testing.T) {
+	server := newModuleServer(t, func(_ context.Context, _ string) (*salmodule.ModuleOntology, error) {
+		return nil, fmt.Errorf("SAL module salmodule://github.com/owner/repo/ has no Dockerfile in its repository root")
+	})
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/salmodule?module=owner/repo")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Contains(t, body["error"], "has no Dockerfile")
+}
+
+func TestSalModuleEndpointRejectsAMissingModuleParameter(t *testing.T) {
+	server := newModuleServer(t, func(_ context.Context, _ string) (*salmodule.ModuleOntology, error) {
+		t.Fatal("a module should not be inspected without a reference")
+		return nil, nil
+	})
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/salmodule?module=%20")
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, resp.Body.Close())

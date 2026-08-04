@@ -12,7 +12,7 @@ import (
 )
 
 type ServeCmd struct {
-	WithUI bool `arg:"--with-ui" help:"Serve the SAL web UI at / with stats, SQL, SPARQL, and map tabs"`
+	WithUI bool `arg:"--with-ui" help:"Serve the SAL web UI at / with stats, SQL, SPARQL, module, and map tabs"`
 }
 
 func (cmd *ServeCmd) Run() error {

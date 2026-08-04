@@ -16,6 +16,13 @@ export type TableStats = {
   columnStats: QueryResult
 }
 
+export type ModuleOntology = {
+  /** The salmodule:// namespace the module's own terms resolve against. */
+  module: string
+  /** The JSON-LD document the module printed in response to its ontology command. */
+  ontology: unknown
+}
+
 export type GeoJSONFeatureCollection = {
   type: 'FeatureCollection'
   features: {
@@ -52,6 +59,16 @@ export async function runSQL(sql: string, signal?: AbortSignal): Promise<QueryRe
   })
   if (!response.ok) throw await failure(response)
   return (await response.json()) as QueryResult
+}
+
+/**
+ * Clones, builds, and runs a SAL module so that it publishes its ontology. The
+ * first inspection of a module can take minutes, since its image has to be built.
+ */
+export async function inspectModule(module: string, signal?: AbortSignal): Promise<ModuleOntology> {
+  const response = await fetch(`/api/salmodule?module=${encodeURIComponent(module)}`, { signal })
+  if (!response.ok) throw await failure(response)
+  return (await response.json()) as ModuleOntology
 }
 
 export async function fetchGeometries(

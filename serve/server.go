@@ -13,6 +13,7 @@ import (
 
 	"github.com/cgs-earth/sal/pkg"
 	salsparql "github.com/cgs-earth/sal/query/sparql"
+	"github.com/cgs-earth/sal/salmodule"
 )
 
 const sparqlResultsJSON = "application/sparql-results+json"
@@ -85,8 +86,43 @@ func NewEndpointWithUI(runner UIRunner) (http.Handler, error) {
 	mux.Handle("/geometries", geometryHandler{runner: runner})
 	mux.Handle("/api/sql", sqlHandler{runner: runner})
 	mux.Handle("/api/stats", statsHandler{runner: runner})
+	mux.Handle("/api/salmodule", salmoduleHandler{inspect: salmodule.Inspect})
 	mux.Handle("/", ui)
 	return mux, nil
+}
+
+// ModuleInspector dereferences a SAL module reference to the ontology the module
+// publishes. It is a field on the handler so that tests do not need docker.
+type ModuleInspector func(ctx context.Context, reference string) (*salmodule.ModuleOntology, error)
+
+type salmoduleHandler struct {
+	inspect ModuleInspector
+}
+
+// ServeHTTP clones, builds, and runs the module named by the module query
+// parameter, answering with the JSON-LD ontology it printed. This can take
+// minutes the first time a module is seen, since the image has to be built.
+func (h salmoduleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "the SAL module endpoint only supports GET requests", http.StatusMethodNotAllowed)
+		return
+	}
+	reference := strings.TrimSpace(r.URL.Query().Get("module"))
+	if reference == "" {
+		writeJSONError(w, http.StatusBadRequest, "the SAL module request is missing a module parameter")
+		return
+	}
+
+	ontology, err := h.inspect(r.Context(), reference)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, struct {
+		Module   string          `json:"module"`
+		Ontology json.RawMessage `json:"ontology"`
+	}{Module: ontology.Namespace, Ontology: ontology.Document})
 }
 
 type sqlHandler struct {
