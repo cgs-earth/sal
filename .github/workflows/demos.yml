@@ -6,15 +6,30 @@
 # drift from the CLI's real output, and publishes them as `demo-gifs-<tape>`
 # artifacts. The Pages deploy merges those into docs/public/demos before building
 # the site.
+#
+# Recording is only worth its cost when something consumes the result, which means a
+# deploy of main. A branch push runs the `check` job alone: it catches a broken tape
+# in seconds without building sal, installing a recording toolchain, rendering five
+# GIFs, or uploading artifacts nothing will read.
 
 name: SAL Demo GIFs
 
 on:
   workflow_dispatch:
+    inputs:
+      record:
+        description: Record and upload the GIFs, rather than only checking the tapes
+        type: boolean
+        default: true
   # Called by push_pages.yml so a deploy of main records the GIFs inside the same
   # run and can hand them to the site build as artifacts. Pushes to main are
-  # therefore excluded here, otherwise every one of them would record twice.
+  # therefore excluded from the push trigger below, otherwise every one of them
+  # would record twice.
   workflow_call:
+    inputs:
+      record:
+        type: boolean
+        default: true
   push:
     branches-ignore: [main]
 
@@ -24,9 +39,55 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The only job a branch push runs. Parsing the tapes needs the vhs binary but not
+  # ttyd, ffmpeg, or sal, so this is a single small download rather than an apt
+  # install. `go build` is already covered on every push by go_tests.yml.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      # Pinned rather than taken from the charm apt repo: this needs one file, and
+      # apt would cost more than the check itself.
+      - name: Install VHS
+        run: |
+          curl -fsSL -o /tmp/vhs.tar.gz \
+            https://github.com/charmbracelet/vhs/releases/download/v0.11.0/vhs_0.11.0_Linux_x86_64.tar.gz
+          sudo tar -xzf /tmp/vhs.tar.gz --strip-components=1 -C /usr/local/bin \
+            vhs_0.11.0_Linux_x86_64/vhs
+          vhs --version
+
+      - name: Check the tapes parse
+        run: vhs validate "docs/demos/*.tape"
+
+      - name: Check the recording scripts parse
+        run: bash -n docs/demos/generate.sh docs/demos/scenario.sh
+
+      # A tape that generate.sh does not know about is never recorded, and a tape
+      # missing from the record matrix below is never uploaded. Both are silent.
+      - name: Check every tape is wired up
+        run: |
+          rc=0
+          for tape in docs/demos/*.tape; do
+            name=$(basename "$tape" .tape)
+            case "$name" in common | prompt) continue ;; esac
+            grep -q "^TAPES=.*\b$name\b" docs/demos/generate.sh || {
+              echo "$tape is not listed in the TAPES line of generate.sh" >&2
+              rc=1
+            }
+            grep -q "tape: \[.*\b$name\b.*\]" .github/workflows/demos.yml || {
+              echo "$tape is not in the record matrix of demos.yml" >&2
+              rc=1
+            }
+          done
+          exit $rc
+
   # Built once and shared with every tape job below, so the five recordings do not
   # each pay for a compile of the same binary.
   build-sal:
+    # Empty for a push event, so branch pushes skip straight past the recording jobs.
+    if: inputs.record
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the repository
@@ -51,6 +112,7 @@ jobs:
 
   record:
     needs: build-sal
+    if: inputs.record
     runs-on: ubuntu-latest
     strategy:
       # One tape per job. A failing tape should not hide the state of the others.

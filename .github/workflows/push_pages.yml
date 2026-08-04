@@ -21,9 +21,12 @@ concurrency:
 jobs:
   # Records the terminal demos embedded in the command reference and publishes them
   # as `demo-gifs-<tape>` artifacts. It runs in this workflow so the GIFs shipped
-  # with the site are always recorded from the commit being deployed.
+  # with the site are always recorded from the commit being deployed. Branch pushes
+  # only check the tapes, so this is the one place a full recording happens.
   demos:
     uses: ./.github/workflows/demos.yml
+    with:
+      record: true
 
   build:
     needs: demos

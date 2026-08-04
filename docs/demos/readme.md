@@ -4,14 +4,20 @@ The terminal GIFs embedded in [the command reference](../src/content/docs/refere
 recorded with [VHS](https://github.com/charmbracelet/vhs).
 
 The GIFs are **not committed**. `.github/workflows/demos.yml` records them from the
-working tree on every push and uploads them as `demo-gifs-<tape>` artifacts;
-`push_pages.yml` merges those into `docs/public/demos` before building the site, so
-what the docs show is always what the current CLI prints. Recording locally writes to
-the same gitignored `docs/public/demos`.
+working tree and uploads them as `demo-gifs-<tape>` artifacts; `push_pages.yml` merges
+those into `docs/public/demos` before building the site, so what the docs show is
+always what the current CLI prints. Recording locally writes to the same gitignored
+`docs/public/demos`.
 
-That workflow builds `sal` once in a `build-sal` job and then records the tapes as a
-matrix, one job per tape. The tape jobs set `SAL_DEMO_SKIP_BUILD=1` so they use the
-binary they downloaded instead of compiling it five times.
+A full recording only happens where something reads the result, which is a deploy of
+main. `push_pages.yml` calls this workflow with `record: true`; it builds `sal` once in
+a `build-sal` job and then records the tapes as a matrix, one job per tape, with
+`SAL_DEMO_SKIP_BUILD=1` so the binary is compiled once rather than five times.
+
+A **branch push** runs the `check` job alone: it downloads the `vhs` binary and parses
+the tapes, the recording scripts, and the wiring between them. No `sal` build, no
+recording toolchain, no GIFs, no artifacts — nothing would read them before the branch
+merges. Use `workflow_dispatch` on the branch to force a full recording.
 
 ## Layout
 
@@ -63,7 +69,9 @@ invisible until the GIF is published. It under-captures DuckDB's redraws, though
 2. Add `<name>` to `TAPES` and `state_for` in `generate.sh`, choosing the starting
    state the command needs. Add a new state to `scenario.sh` if none of the existing
    ones fit.
-3. Embed the GIF in `commands.mdx` at `/sal/demos/sal-<name>.gif`.
+3. Add `<name>` to the `record` matrix in `.github/workflows/demos.yml`, or CI will
+   never record it. The `check` job fails on a tape missing from either list.
+4. Embed the GIF in `commands.mdx` at `/sal/demos/sal-<name>.gif`.
 
 Commands that need credentials or that block — `push`, `clone`, `pull`, `upload`,
 `serve` — are deliberately not recorded.
