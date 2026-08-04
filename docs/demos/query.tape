@@ -7,19 +7,30 @@ Output docs/public/demos/sal-query.gif
 Source docs/demos/common.tape
 Set Width 1360
 Set Height 700
+
+# In a TTY, DuckDB pipes its output through a pager. Left alone the recording shows
+# `less` rather than the shell, and the `.exit` below goes to the pager instead of
+# DuckDB. Only the paging is suppressed; the output itself is unchanged.
+Env PAGER cat
+
 Source docs/demos/prompt.tape
 
 Type "sal query"
-Sleep 500ms
+Sleep 300ms
 Enter
-Sleep 6s
+# Inside the DuckDB shell the prompt is `<database> D `, not the `$ ` that the
+# default WaitPattern in common.tape matches.
+Wait /D ?$/
+Sleep 1500ms
 
 Type "SELECT predicate, object FROM triples WHERE predicate LIKE '%name%';"
-Sleep 500ms
+Sleep 300ms
 Enter
-Sleep 5s
+Wait /D ?$/
+Sleep 2500ms
 
 Type ".exit"
-Sleep 500ms
+Sleep 300ms
 Enter
-Sleep 2s
+Wait
+Sleep 1500ms

@@ -9,11 +9,13 @@ Set Height 680
 Source docs/demos/prompt.tape
 
 Type "sal build data/"
-Sleep 500ms
+Sleep 300ms
 Enter
-Sleep 6s
+Wait
+Sleep 2s
 
 Type "sal build data/"
-Sleep 500ms
+Sleep 300ms
 Enter
-Sleep 6s
+Wait
+Sleep 3s

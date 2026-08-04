@@ -20,10 +20,13 @@ concurrency:
 
 jobs:
   # Records the terminal demos embedded in the command reference and publishes them
-  # as the `demo-gifs` artifact. It runs in this workflow so the GIFs shipped with
-  # the site are always recorded from the commit being deployed.
+  # as `demo-gifs-<tape>` artifacts. It runs in this workflow so the GIFs shipped
+  # with the site are always recorded from the commit being deployed. Branch pushes
+  # only check the tapes, so this is the one place a full recording happens.
   demos:
     uses: ./.github/workflows/demos.yml
+    with:
+      record: true
 
   build:
     needs: demos
@@ -45,11 +48,14 @@ jobs:
       # Downloaded after the ontology step for the same reason docs/dist survives it:
       # that action git-cleans the workspace, which would delete the untracked GIFs.
       # docs/public is copied verbatim into the built site, so this lands them at
-      # /sal/demos/<name>.gif.
+      # /sal/demos/<name>.gif. Each tape uploads its own artifact, since
+      # upload-artifact v4 artifacts are immutable and the recordings run as a
+      # matrix, so merge-multiple flattens them back into one directory.
       - name: Download the demo GIFs
         uses: actions/download-artifact@v4
         with:
-          name: demo-gifs
+          pattern: demo-gifs-*
+          merge-multiple: true
           path: docs/public/demos
 
       - name: Setup Node

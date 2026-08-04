@@ -3,18 +3,33 @@
 
 # Records the terminal demos embedded in the command reference. The GIFs are not
 # committed: this workflow regenerates them from the working tree so they can never
-# drift from the CLI's real output, and publishes them as the `demo-gifs` artifact.
-# The Pages deploy downloads that artifact into docs/public/demos before building
+# drift from the CLI's real output, and publishes them as `demo-gifs-<tape>`
+# artifacts. The Pages deploy merges those into docs/public/demos before building
 # the site.
+#
+# Recording is only worth its cost when something consumes the result, which means a
+# deploy of main. A branch push runs the `check` job alone: it catches a broken tape
+# in seconds without building sal, installing a recording toolchain, rendering five
+# GIFs, or uploading artifacts nothing will read.
 
 name: SAL Demo GIFs
 
 on:
   workflow_dispatch:
+    inputs:
+      record:
+        description: Record and upload the GIFs, rather than only checking the tapes
+        type: boolean
+        default: true
   # Called by push_pages.yml so a deploy of main records the GIFs inside the same
-  # run and can hand them to the site build as an artifact. Pushes to main are
-  # therefore excluded here, otherwise every one of them would record twice.
+  # run and can hand them to the site build as artifacts. Pushes to main are
+  # therefore excluded from the push trigger below, otherwise every one of them
+  # would record twice.
   workflow_call:
+    inputs:
+      record:
+        type: boolean
+        default: true
   push:
     branches-ignore: [main]
 
@@ -24,22 +39,113 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  record:
+  # The only job a branch push runs. Parsing the tapes needs the vhs binary but not
+  # ttyd, ffmpeg, or sal, so this is a single small download rather than an apt
+  # install. `go build` is already covered on every push by go_tests.yml.
+  check:
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
 
+      # Pinned rather than taken from the charm apt repo: this needs one file, and
+      # apt would cost more than the check itself.
+      - name: Install VHS
+        run: |
+          curl -fsSL -o /tmp/vhs.tar.gz \
+            https://github.com/charmbracelet/vhs/releases/download/v0.11.0/vhs_0.11.0_Linux_x86_64.tar.gz
+          sudo tar -xzf /tmp/vhs.tar.gz --strip-components=1 -C /usr/local/bin \
+            vhs_0.11.0_Linux_x86_64/vhs
+          vhs --version
+
+      - name: Check the tapes parse
+        run: vhs validate "docs/demos/*.tape"
+
+      - name: Check the recording scripts parse
+        run: bash -n docs/demos/generate.sh docs/demos/scenario.sh
+
+      # A tape that generate.sh does not know about is never recorded, and a tape
+      # missing from the record matrix below is never uploaded. Both are silent.
+      - name: Check every tape is wired up
+        run: |
+          rc=0
+          for tape in docs/demos/*.tape; do
+            name=$(basename "$tape" .tape)
+            case "$name" in common | prompt) continue ;; esac
+            grep -q "^TAPES=.*\b$name\b" docs/demos/generate.sh || {
+              echo "$tape is not listed in the TAPES line of generate.sh" >&2
+              rc=1
+            }
+            grep -q "tape: \[.*\b$name\b.*\]" .github/workflows/demos.yml || {
+              echo "$tape is not in the record matrix of demos.yml" >&2
+              rc=1
+            }
+          done
+          exit $rc
+
+  # Built once and shared with every tape job below, so the five recordings do not
+  # each pay for a compile of the same binary.
+  build-sal:
+    # Empty for a push event, so branch pushes skip straight past the recording jobs.
+    if: inputs.record
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout the repository
         uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v6
         with:
-          go-version: 1.25
+          go-version: '1.25'
+          cache-dependency-path: go.sum
 
-      # ttyd is the terminal VHS drives and ffmpeg is what encodes the frames, so
-      # both have to be present before vhs will record anything. fonts-jetbrains-mono
-      # is VHS's default font; without it the recordings fall back to whatever the
-      # runner happens to have and the GIFs change size between runs.
+      - name: Build sal
+        run: go build -o sal .
+
+      - name: Upload the sal binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: sal-binary
+          path: sal
+          retention-days: 1
+          if-no-files-found: error
+
+  record:
+    needs: build-sal
+    if: inputs.record
+    runs-on: ubuntu-latest
+    strategy:
+      # One tape per job. A failing tape should not hide the state of the others.
+      fail-fast: false
+      matrix:
+        tape: [help, init, validate, build, query]
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      # generate.sh runs whatever is at docs/demos/.bin/sal when SAL_DEMO_SKIP_BUILD
+      # is set, so the binary has to land there rather than on PATH.
+      - name: Download the sal binary
+        uses: actions/download-artifact@v4
+        with:
+          name: sal-binary
+          path: docs/demos/.bin
+
+      - name: Make the sal binary executable
+        run: chmod +x docs/demos/.bin/sal
+
+      # ttyd is the terminal VHS drives and ffmpeg is what encodes the frames, so both
+      # have to be present before vhs will record anything. fonts-jetbrains-mono is
+      # VHS's default font; without it the recordings fall back to whatever the runner
+      # happens to have, which changes the column count the tapes are sized against.
+      # Chrome, which VHS renders through, is already on the runner image.
+      #
+      # Not charmbracelet/vhs-action: its ffmpeg installer looks for a
+      # `ffmpeg-n5.1-*-linux64-gpl-5.1.tar.xz` asset in the latest BtbN/FFmpeg-Builds
+      # release, and BtbN no longer publishes 5.1 builds, so it fails with "Failed to
+      # install ffmpeg". Pinning the action's version does not help, since the asset
+      # it wants is gone from the release it reads.
       - name: Install VHS and its dependencies
         run: |
           sudo mkdir -p /etc/apt/keyrings
@@ -50,20 +156,25 @@ jobs:
           vhs --version
           ttyd --version
 
-      # `sal query` shells out to duckdb, so the query demo needs the CLI on PATH.
+      # `sal query` shells out to duckdb, so only that tape needs the CLI.
       - name: Install DuckDB
+        if: matrix.tape == 'query'
         run: |
           curl -fsSL -o /tmp/duckdb.zip \
             https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip
           sudo unzip -o /tmp/duckdb.zip -d /usr/local/bin
           duckdb --version
 
-      - name: Record the demos
-        run: ./docs/demos/generate.sh
+      - name: Record the demo
+        env:
+          SAL_DEMO_SKIP_BUILD: "1"
+        run: ./docs/demos/generate.sh ${{ matrix.tape }}
 
-      - name: Upload the demo GIFs
+      # upload-artifact v4 artifacts are immutable, so each tape needs its own name.
+      # push_pages.yml merges them back together with a `demo-gifs-*` pattern.
+      - name: Upload the demo GIF
         uses: actions/upload-artifact@v4
         with:
-          name: demo-gifs
+          name: demo-gifs-${{ matrix.tape }}
           path: docs/public/demos
           if-no-files-found: error
