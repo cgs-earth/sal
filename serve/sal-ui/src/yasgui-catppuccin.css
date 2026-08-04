@@ -16,38 +16,64 @@
   border-bottom: 1px solid var(--surface1);
 }
 
-.yasgui .tabsList li a,
+/* YASGUI paints tab labels for a light strip: #888 when idle and #555 when
+   active, hovered, or focused, all of which sink into the dark background. Each
+   of those selectors carries its own `.tab` class, so the overrides have to
+   match it rather than the plainer `li a` form. */
+.yasgui .tabsList .tab a,
 .yasgui .tabsList .tab {
   background: transparent;
-  border: none;
-  color: var(--overlay2);
+  border-bottom-color: transparent;
+  color: var(--subtext0);
   font-size: 13px;
 }
 
-.yasgui .tabsList li.active a,
-.yasgui .tabsList li a.active {
+.yasgui .tabsList .tab.active a {
   background: var(--base);
+  border-bottom-color: var(--lavender);
   color: var(--lavender);
-  box-shadow: inset 0 -2px 0 var(--lavender);
 }
 
-.yasgui .tabsList li a:hover {
+.yasgui .tabsList .tab a:hover,
+.yasgui .tabsList .tab a:focus {
   background: var(--surface0);
+  border-bottom-color: var(--lavender);
   color: var(--text);
 }
 
-.yasgui .addTab,
-.yasgui .tabContextButton,
-.yasgui .closeTab {
-  color: var(--overlay1);
+/* The querying indicator under a tab, light greys by default. */
+.yasgui .tabsList .tab .loader {
+  background-color: var(--surface2);
+}
+
+.yasgui .tabsList .tab.active .loader,
+.yasgui .tabsList .tab:hover .loader {
+  background-color: var(--lavender);
+}
+
+.yasgui .tabsList .addTab,
+.yasgui .tabContextButton {
+  color: var(--lavender);
   background: transparent;
 }
 
-.yasgui .addTab:hover,
-.yasgui .tabContextButton:hover,
-.yasgui .closeTab:hover {
-  color: var(--lavender);
+/* Black with a white text-shadow at 20% opacity, so effectively invisible here. */
+.yasgui .tabsList .tab a .closeTab {
+  color: var(--overlay2);
+  opacity: 1;
+  text-shadow: none;
+}
+
+.yasgui .tabsList .addTab:hover,
+.yasgui .tabsList .addTab:focus,
+.yasgui .tabContextButton:hover {
+  color: var(--text);
   background: var(--surface0);
+}
+
+.yasgui .tabsList .tab a .closeTab:hover {
+  color: var(--red);
+  opacity: 1;
 }
 
 .yasgui .tabMenu,
@@ -328,8 +354,30 @@
   fill: var(--lavender);
 }
 
+/* These buttons default to a white face with #333 text. */
+.yasgui .yasqe .yasqe_btn,
 .yasgui .yasqe_buttons .yasqe_btn,
 .yasgui .yasqe_share {
+  background-color: var(--surface0);
+  border: 1px solid var(--surface1);
+  color: var(--text);
+}
+
+.yasgui .yasqe .yasqe_btn:hover {
+  background-color: var(--surface1);
+  border-color: var(--surface2);
+}
+
+.yasgui .yasqe .yasqe_btn.selected,
+.yasgui .yasqe .yasqe_btn:focus {
+  background-color: var(--lavender);
+  border-color: var(--lavender);
+  color: var(--crust);
+}
+
+/* The prefix/shortcut hint under the editor: #999 on #eee. */
+.yasgui .yasqe .notification {
+  background-color: var(--surface0);
   color: var(--subtext0);
 }
 
@@ -362,11 +410,18 @@
   color: var(--text);
 }
 
-.yasgui .yasr .yasr_btn:hover {
+/* YASGUI turns these black on hover and #337ab7 on focus, both of which are
+   unreadable against the dark chrome. */
+.yasgui .yasr .yasr_btn:not(.disabled):hover,
+.yasgui .yasr .yasr_btn:focus {
   background: var(--surface1);
+  color: var(--text);
+  fill: var(--text);
 }
 
 .yasgui .yasr .yasr_btn.selected,
+.yasgui .yasr .yasr_btn.selected:focus,
+.yasgui .yasr .yasr_btn.selected:not(.disabled):hover,
 .yasgui .yasr .yasr_btnGroup .selected {
   background: var(--lavender);
   border-color: var(--lavender);

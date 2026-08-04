@@ -28,3 +28,6 @@ integration_test_salmodule:
 # TODO in the future explore making this write to a tmp dir
 integration_test_pyspark:
 	cd integration_tests/pyspark/ && uv sync --locked && uv run pytest -s
+
+ui:
+	cd serve/sal-ui && npm run build && cd ../.. && go run . serve --with-ui
