@@ -15,7 +15,7 @@ Env PAGER cat
 
 Source docs/demos/prompt.tape
 
-Type "sal query"
+Type "sal query --info properties"
 Sleep 300ms
 Enter
 # Inside the DuckDB shell the prompt is `<database> D `, not the `$ ` that the
