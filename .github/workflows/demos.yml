@@ -73,14 +73,26 @@ jobs:
       - name: Make the sal binary executable
         run: chmod +x docs/demos/.bin/sal
 
-      # Installs vhs along with ttyd, ffmpeg, and JetBrains Mono as prebuilt binaries
-      # through the runner tool cache. An empty path installs without recording, which
-      # is what we want since generate.sh drives vhs itself. Chrome, which VHS renders
-      # through, is already on the runner image.
+      # ttyd is the terminal VHS drives and ffmpeg is what encodes the frames, so both
+      # have to be present before vhs will record anything. fonts-jetbrains-mono is
+      # VHS's default font; without it the recordings fall back to whatever the runner
+      # happens to have, which changes the column count the tapes are sized against.
+      # Chrome, which VHS renders through, is already on the runner image.
+      #
+      # Not charmbracelet/vhs-action: its ffmpeg installer looks for a
+      # `ffmpeg-n5.1-*-linux64-gpl-5.1.tar.xz` asset in the latest BtbN/FFmpeg-Builds
+      # release, and BtbN no longer publishes 5.1 builds, so it fails with "Failed to
+      # install ffmpeg". Pinning the action's version does not help, since the asset
+      # it wants is gone from the release it reads.
       - name: Install VHS and its dependencies
-        uses: charmbracelet/vhs-action@v2
-        with:
-          path: ""
+        run: |
+          sudo mkdir -p /etc/apt/keyrings
+          curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
+          sudo apt-get update
+          sudo apt-get install -y vhs ffmpeg ttyd fonts-jetbrains-mono
+          vhs --version
+          ttyd --version
 
       # `sal query` shells out to duckdb, so only that tape needs the CLI.
       - name: Install DuckDB
