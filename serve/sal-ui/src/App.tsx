@@ -81,7 +81,7 @@ export function App() {
             <SparqlTab />
           </Suspense>
         )}
-        {active === 'Modules' && <ModulesTab />}
+        {active === 'Modules' && <ModulesTab modules={stats?.modules ?? null} />}
         {active === 'Map' && <MapTab />}
       </main>
     </div>

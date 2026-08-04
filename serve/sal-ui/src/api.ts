@@ -14,6 +14,8 @@ export type TableStats = {
   snapshots: QueryResult
   properties: QueryResult
   columnStats: QueryResult
+  /** The `salmodule://` URIs of the modules the build that wrote this table downloaded. */
+  modules: string[] | null
 }
 
 export type ModuleOntology = {

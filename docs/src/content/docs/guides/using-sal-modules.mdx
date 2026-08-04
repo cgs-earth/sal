@@ -113,6 +113,19 @@ Those triples land in the Iceberg table alongside the triples from your source f
 
 If a task emits `salmodule:Error` nodes instead of data, the build fails with the messages the module reported.
 
+## Modules recorded in the table
+
+Every module a build downloaded, whether it was dereferenced for its vocabulary or run as a task, is written to
+the Iceberg table metadata as a JSON list under the `sal.salmodules` property:
+
+```json
+["salmodule://github.com/cgs-earth/python-geoconnex"]
+```
+
+The list is rewritten on every build, so dropping a module from your RDF drops it from the table too.
+`sal query --info properties` prints it, and the **Modules** tab of `sal serve --with-ui` offers each entry as
+a chip and as an autocompletion so a module the table was built from can be inspected without typing its URI.
+
 ## Requirements
 
 - A reachable docker daemon. SAL talks to whatever `DOCKER_HOST` points at, defaulting to the local socket.

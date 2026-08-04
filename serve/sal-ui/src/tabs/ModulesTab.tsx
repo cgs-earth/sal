@@ -3,12 +3,28 @@ import { inspectModule, type ModuleOntology } from '../api'
 
 const EXAMPLE = 'salmodule://github.com/adplincinst/sample-salmodule-1'
 
-export function ModulesTab() {
+type ModulesTabProps = {
+  /** The modules the built table recorded, or null when the table records none. */
+  modules: string[] | null
+}
+
+/** Shortens a module URI to the OWNER/REPO a chip has room for. */
+function chipLabel(module: string) {
+  const segments = module.replace(/^salmodule:\/\//, '').split('/').filter(Boolean)
+  return segments.slice(-2).join('/') || module
+}
+
+export function ModulesTab({ modules }: ModulesTabProps) {
   const [reference, setReference] = useState('')
   const [result, setResult] = useState<ModuleOntology | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const [copied, setCopied] = useState(false)
+
+  const tracked = modules ?? []
+  // a table built without modules still gets one thing to click, so the tab is
+  // never an empty box with no idea of what belongs in it
+  const suggestions = tracked.length > 0 ? tracked : [EXAMPLE]
 
   const inspect = useCallback(async (text: string) => {
     if (!text.trim()) {
@@ -49,9 +65,18 @@ export function ModulesTab() {
           </p>
         </header>
         <div className="chips">
-          <button type="button" className="chip" onClick={() => setReference(EXAMPLE)}>
-            Example
-          </button>
+          {tracked.length > 0 && <span className="chips-label">In this table</span>}
+          {suggestions.map((module) => (
+            <button
+              key={module}
+              type="button"
+              className="chip"
+              title={module}
+              onClick={() => setReference(module)}
+            >
+              {tracked.length > 0 ? chipLabel(module) : 'Example'}
+            </button>
+          ))}
         </div>
         <form
           className="module-form"
@@ -65,10 +90,17 @@ export function ModulesTab() {
             type="text"
             value={reference}
             spellCheck={false}
-            placeholder={EXAMPLE}
+            placeholder={suggestions[0]}
             aria-label="SAL module reference"
+            list="salmodule-suggestions"
             onChange={(event) => setReference(event.target.value)}
           />
+          {/* the modules the table was built from autocomplete as the reference is typed */}
+          <datalist id="salmodule-suggestions">
+            {tracked.map((module) => (
+              <option key={module} value={module} />
+            ))}
+          </datalist>
           <button type="submit" className="button primary" disabled={running}>
             {running ? 'Inspecting…' : 'Inspect'}
           </button>
@@ -76,6 +108,7 @@ export function ModulesTab() {
         <p className="hint module-hint">
           The <code>salmodule://</code> scheme is optional; <code>OWNER/REPO</code> is enough for a module on
           GitHub. The first inspection of a module builds its image, which can take a few minutes.
+          {tracked.length > 0 && ' The suggestions above are the modules recorded in this table’s Iceberg metadata.'}
         </p>
       </section>
 

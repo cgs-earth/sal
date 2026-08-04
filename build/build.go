@@ -154,7 +154,8 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		slog.Warn("Creating build with modified source tree. This should only be done for testing purposes.")
 	}
 
-	if err := MaterializeSalModules(context.Background(), finalGraph, salmodule.Default()); err != nil {
+	resolver := salmodule.Default()
+	if err := MaterializeSalModules(context.Background(), finalGraph, resolver); err != nil {
 		return nil, err
 	}
 
@@ -162,7 +163,9 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		return nil, err
 	}
 
-	if err := ExportGraph(finalGraph, cfg.Format, hash, cfg.DataTypeCols); err != nil {
+	// every module downloaded so far, both the ones validation dereferenced for
+	// their vocabulary and the ones materialization ran, is recorded in the table
+	if err := ExportGraph(finalGraph, cfg.Format, hash, cfg.DataTypeCols, resolver.Downloaded()); err != nil {
 		return nil, err
 	}
 

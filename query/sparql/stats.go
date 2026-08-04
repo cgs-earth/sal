@@ -2,9 +2,14 @@ package sparql
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/cgs-earth/sal/salmodule"
 )
 
 // TableStats summarizes an Iceberg triples table for the `sal serve --with-ui` stats view.
@@ -17,6 +22,8 @@ type TableStats struct {
 	Snapshots   Result `json:"snapshots"`
 	Properties  Result `json:"properties"`
 	ColumnStats Result `json:"columnStats"`
+	// Modules are the SAL module URIs the build that wrote this table downloaded.
+	Modules []string `json:"modules"`
 }
 
 // Stats collects the counts, snapshots, table properties, and column statistics of the triples table.
@@ -56,7 +63,31 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 		}
 		*section.target = result
 	}
+	stats.Modules = modulesFromProperties(stats.Properties)
 	return stats, nil
+}
+
+// modulesFromProperties reads the SAL module URIs a build recorded in the
+// Iceberg table properties. A table built without modules, or by a version of
+// SAL that did not record them, simply has none.
+func modulesFromProperties(properties Result) []string {
+	keyIndex := slices.Index(properties.Header, "key")
+	valueIndex := slices.Index(properties.Header, "value")
+	if keyIndex < 0 || valueIndex < 0 {
+		return nil
+	}
+	for _, row := range properties.Rows {
+		if len(row) <= max(keyIndex, valueIndex) || row[keyIndex] != salmodule.IcebergTableProperty {
+			continue
+		}
+		var modules []string
+		if err := json.Unmarshal([]byte(row[valueIndex]), &modules); err != nil {
+			slog.Warn("ignoring malformed "+salmodule.IcebergTableProperty+" table property", "error", err)
+			return nil
+		}
+		return modules
+	}
+	return nil
 }
 
 func countsSQL(layout ObjectLayout) string {

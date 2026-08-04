@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -54,6 +55,22 @@ func (r *Resolver) Reset() {
 	defer r.mu.Unlock()
 	r.images = nil
 	r.ontologies = nil
+}
+
+// Downloaded returns the salmodule:// URI of every module the resolver has
+// cloned and built, whether it was dereferenced for its vocabulary or run as a
+// task. A build records these so that a table says which modules produced it.
+func (r *Resolver) Downloaded() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	uris := make([]string, 0, len(r.images))
+	for namespace := range r.images {
+		// a namespace is a vocabulary base and so ends in a slash; the module
+		// itself is named by the IRI without it
+		uris = append(uris, strings.TrimSuffix(namespace, "/"))
+	}
+	slices.Sort(uris)
+	return uris
 }
 
 // Ontology returns the vocabulary the module publishes through its ontology command.

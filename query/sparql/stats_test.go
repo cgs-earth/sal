@@ -6,6 +6,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// tableProperties mimics the two column result the properties query returns.
+func tableProperties(rows ...[]string) Result {
+	return Result{Header: []string{"key", "value"}, Rows: rows}
+}
+
+func TestModulesFromPropertiesReadsRecordedModules(t *testing.T) {
+	properties := tableProperties(
+		[]string{"sal.hash", "abc123"},
+		[]string{"sal.salmodules", `["salmodule://github.com/test/one","salmodule://github.com/test/two"]`},
+	)
+
+	modules := modulesFromProperties(properties)
+
+	require.Equal(t, []string{"salmodule://github.com/test/one", "salmodule://github.com/test/two"}, modules)
+}
+
+func TestModulesFromPropertiesIsEmptyWithoutTheProperty(t *testing.T) {
+	require.Empty(t, modulesFromProperties(tableProperties([]string{"sal.hash", "abc123"})))
+}
+
+func TestModulesFromPropertiesIgnoresMalformedJSON(t *testing.T) {
+	require.Empty(t, modulesFromProperties(tableProperties([]string{"sal.salmodules", "not json"})))
+}
+
 func TestInfoSQLRejectsUnknownInfo(t *testing.T) {
 	_, err := InfoSQL("bogus", "/tmp/table")
 
