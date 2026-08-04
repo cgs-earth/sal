@@ -136,7 +136,8 @@
 
 .tab-body.split,
 .tab-body.sparql,
-.tab-body.map {
+.tab-body.map,
+.tab-body.module {
   display: grid;
   gap: 18px;
   overflow: hidden;
@@ -144,6 +145,11 @@
 
 .tab-body.split {
   grid-template-rows: minmax(220px, 42%) minmax(0, 1fr);
+}
+
+/* the module form is only as tall as its controls, so the ontology gets the rest */
+.tab-body.module {
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .tab-body.sparql,
@@ -484,6 +490,87 @@ kbd {
 
 .result-table .null {
   color: var(--overlay0);
+}
+
+/* ---------- modules ---------- */
+
+.module-form {
+  display: flex;
+  gap: 10px;
+  flex: none;
+  padding: 12px 16px 0;
+}
+
+.module-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 12px;
+  border: var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--crust);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.module-input:focus {
+  outline: none;
+  border-color: var(--lavender);
+}
+
+.module-input::placeholder {
+  color: var(--overlay0);
+}
+
+.module-hint {
+  padding: 10px 16px 14px;
+}
+
+.module-hint code {
+  color: var(--teal);
+}
+
+.icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface0);
+  color: var(--subtext0);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.icon-button:hover {
+  background: var(--surface1);
+  border-color: var(--surface2);
+  color: var(--text);
+}
+
+.icon-button.copied,
+.icon-button.copied:hover {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.json-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.json-block {
+  margin: 0;
+  padding: 14px 16px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  tab-size: 2;
 }
 
 /* ---------- map ---------- */

@@ -3,13 +3,14 @@ import { fetchStats, type TableStats } from './api'
 import { StatsTab } from './tabs/StatsTab'
 import { SqlTab } from './tabs/SqlTab'
 import { MapTab } from './tabs/MapTab'
+import { ModulesTab } from './tabs/ModulesTab'
 import './App.css'
 
 // YASGUI and its CodeMirror 5 bundle dominate the build, so keep them out of the
 // initial chunk and load them the first time the SPARQL tab is opened.
 const SparqlTab = lazy(() => import('./tabs/SparqlTab').then((module) => ({ default: module.SparqlTab })))
 
-const TABS = ['Stats', 'SQL', 'SPARQL', 'Map'] as const
+const TABS = ['Stats', 'SQL', 'SPARQL', 'Modules', 'Map'] as const
 type TabName = (typeof TABS)[number]
 
 export function App() {
@@ -80,6 +81,7 @@ export function App() {
             <SparqlTab />
           </Suspense>
         )}
+        {active === 'Modules' && <ModulesTab />}
         {active === 'Map' && <MapTab />}
       </main>
     </div>
