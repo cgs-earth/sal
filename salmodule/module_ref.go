@@ -9,7 +9,7 @@ import (
 // Constants describing the SAL Module specification. The command line
 // conventions mirror the salmodule:baseCommand, salmodule:ontologyCommand,
 // salmodule:runCommand, and salmodule:taskInstanceEnvVar ontology properties
-// declared in build/testdata/reference/salmodule.ttl.
+// declared in build/testdata/reference/public/salmodule.ttl.
 const (
 	// Namespace is the IRI of the SAL Module ontology itself.
 	Namespace = "https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#"
