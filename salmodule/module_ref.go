@@ -26,6 +26,10 @@ const (
 
 	// defaultModuleHost is assumed when a salmodule:// IRI omits the host.
 	defaultModuleHost = "github.com"
+
+	// IcebergTableProperty is the Iceberg table property a build records the
+	// JSON list of every SAL module it downloaded under.
+	IcebergTableProperty = "sal.salmodules"
 )
 
 // Task classes defined by the SAL Module ontology. A module declares its own

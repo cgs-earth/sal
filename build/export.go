@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/cgs-earth/sal/build/load"
 	"github.com/cgs-earth/sal/pkg"
+	"github.com/cgs-earth/sal/salmodule"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/nq"
 )
@@ -21,8 +23,9 @@ const (
 )
 
 // Export graph takes in a rdflib format graph struct and
-// serializes it to disk in the specified format
-func ExportGraph(graph *rdflibgo.Graph, format GraphExportFormat, hash string, dataTypeCols bool) error {
+// serializes it to disk in the specified format. modules are the SAL modules
+// the build downloaded, which are recorded in the Iceberg table metadata.
+func ExportGraph(graph *rdflibgo.Graph, format GraphExportFormat, hash string, dataTypeCols bool, modules []string) error {
 
 	switch format {
 	case "nq":
@@ -54,6 +57,10 @@ func ExportGraph(graph *rdflibgo.Graph, format GraphExportFormat, hash string, d
 		if err != nil {
 			return err
 		}
+		properties, err := icebergTableProperties(hash, modules)
+		if err != nil {
+			return err
+		}
 		err = load.WriteGraphToIceberg(context.Background(), graph, &load.LoadConfig{
 			BatchSize:          131072,
 			ParquetCompression: "snappy",
@@ -61,7 +68,7 @@ func ExportGraph(graph *rdflibgo.Graph, format GraphExportFormat, hash string, d
 			Warehouse:          dataDir,
 			Namespace:          gitProject,
 			DataTypeCols:       dataTypeCols,
-		}, map[string]string{"sal.hash": hash})
+		}, properties)
 		if err != nil {
 			return err
 		}
@@ -71,4 +78,21 @@ func ExportGraph(graph *rdflibgo.Graph, format GraphExportFormat, hash string, d
 	}
 
 	return nil
+}
+
+// icebergTableProperties describes a build in the Iceberg table metadata. The
+// module list is written even when it is empty, so that a build which no longer
+// downloads a module clears what an earlier build recorded.
+func icebergTableProperties(hash string, modules []string) (map[string]string, error) {
+	if modules == nil {
+		modules = []string{}
+	}
+	encodedModules, err := json.Marshal(modules)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{
+		"sal.hash":                     hash,
+		salmodule.IcebergTableProperty: string(encodedModules),
+	}, nil
 }

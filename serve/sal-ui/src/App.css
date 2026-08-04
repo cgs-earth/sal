@@ -279,6 +279,14 @@
   padding: 10px 16px 0;
 }
 
+.chips-label {
+  align-self: center;
+  color: var(--overlay1);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 .chip {
   padding: 3px 10px;
   border: var(--border-strong);

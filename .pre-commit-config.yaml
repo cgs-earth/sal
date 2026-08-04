@@ -4,7 +4,7 @@
 minimum_pre_commit_version: "2.9.0"
 ci:
   autoupdate_schedule: monthly
-  skip: [golang lint, gofmt, gotest, deadcode]
+  skip: [golang lint, gofmt, gotest, deadcode, npm_build]
 repos:
   - repo: meta
     hooks:
@@ -56,4 +56,10 @@ repos:
         entry: deadcode -test ./...
         language: system
         types: [go]
+        pass_filenames: false
+      - id: npm_build
+        name: Run npm build
+        entry: bash -c "cd serve/sal-ui && npm run build"
+        language: system
+        types: [javascript]
         pass_filenames: false

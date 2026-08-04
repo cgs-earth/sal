@@ -6,10 +6,6 @@ install:
 ui:
 	cd serve/sal-ui && npm ci && npm run build
 
-# Runs the UI against a `sal serve --with-ui` on port 8080 with hot reloading
-ui_dev:
-	cd serve/sal-ui && npm run dev
-
 # Records the demo GIFs embedded in the command reference into docs/public/demos.
 # CI does this on every push, so this is only needed to preview a tape locally.
 # Needs vhs, ttyd, ffmpeg, and duckdb on PATH.
@@ -29,5 +25,5 @@ integration_test_salmodule:
 integration_test_pyspark:
 	cd integration_tests/pyspark/ && uv sync --locked && uv run pytest -s
 
-ui:
-	cd serve/sal-ui && npm run build && cd ../.. && go run . serve --with-ui
+ui_dev:
+	@trap 'kill 0' EXIT INT TERM; (cd serve/sal-ui && npm run dev) & go run . serve --with-ui

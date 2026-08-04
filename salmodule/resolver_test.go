@@ -83,6 +83,20 @@ func TestResolverBuildsEachModuleOnlyOnce(t *testing.T) {
 	require.Len(t, runner.runs, 2)
 }
 
+func TestResolverReportsDownloadedModules(t *testing.T) {
+	runner := &fakeRunner{ontology: testOntology}
+	resolver := newTestResolver(runner)
+	ref, err := ParseModuleIRI(testModuleNamespace)
+	require.NoError(t, err)
+
+	require.Empty(t, resolver.Downloaded())
+	_, err = resolver.Ontology(context.Background(), ref)
+	require.NoError(t, err)
+
+	// the module URI is the namespace without the trailing slash a vocabulary base has
+	require.Equal(t, []string{"salmodule://www.github.com/test/history-getter"}, resolver.Downloaded())
+}
+
 func TestResolverRunTaskPassesTaskInstanceThroughEnvironment(t *testing.T) {
 	runner := &fakeRunner{ontology: testOntology}
 	ref, err := ParseModuleIRI(testModuleNamespace)
