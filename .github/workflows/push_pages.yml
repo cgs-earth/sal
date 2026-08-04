@@ -14,19 +14,51 @@ permissions:
   pages: write
   id-token: write
 
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout your repository using git
         uses: actions/checkout@v7
-      - name: Install, build, and upload your site
-        uses: withastro/action@v6
+
+      # This has to run before the astro build: the action does its own
+      # actions/checkout, which git-cleans the workspace and would delete
+      # docs/dist. ./sal-gha is outside docs/, so `astro build` leaves it alone.
+      - name: Build the ontology docs
+        uses: cgs-earth/onto-to-pages@main
         with:
-          path: docs
-          # node-version: 24 # The specific version of Node that should be used to build your site. Defaults to 24. (optional)
-          # package-manager: pnpm@latest # The Node package manager that should be used to install dependencies and build your site. Automatically detected based on your lockfile. (optional)
-          # build-cmd: pnpm run build # The command to run to build your site. Runs the package build script/task by default. (optional)
+          input_dir: ./build/testdata/reference/public
+          output_dir: ./sal-gha
+          deploy: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Build the docs site
+        working-directory: docs
+        run: |
+          npm ci
+          npm run build
+
+      # pylode writes its own index.html, so it gets its own subdirectory
+      # rather than overwriting astro's. Served at <pages url>/ontology/.
+      - name: Merge the ontology docs into the site
+        run: |
+          mkdir -p docs/dist/ontology
+          cp -R ./sal-gha/. docs/dist/ontology/
+
+      - name: Upload the combined site
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/dist
 
   deploy:
     needs: build
