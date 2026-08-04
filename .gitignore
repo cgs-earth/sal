@@ -9,3 +9,8 @@ sal
 .sal/data
 .env
 .venv/
+
+# Demo GIFs are recorded by .github/workflows/demos.yml on every push rather than
+# committed, so they can never show output the CLI no longer produces.
+docs/demos/.bin/
+docs/public/demos/

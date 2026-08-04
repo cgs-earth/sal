@@ -1,0 +1,11 @@
+@prefix schema: <https://schema.org/> .
+
+<gauge-01>
+    a schema:Place ;
+    schema:name "Colorado River at Lees Ferry" ;
+    schema:identifier "09380000" .
+
+<gauge-02>
+    a schema:Place ;
+    schema:name "Rio Grande at Embudo" ;
+    schema:identifier "08279500" .

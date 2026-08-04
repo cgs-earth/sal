@@ -1,0 +1,7 @@
+{
+    "@context": { "@vocab": "https://schema.org/" },
+    "@id": "usgs",
+    "@type": "Organization",
+    "name": "U.S. Geological Survey",
+    "url": "https://www.usgs.gov"
+}

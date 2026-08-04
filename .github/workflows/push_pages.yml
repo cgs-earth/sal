@@ -19,7 +19,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Records the terminal demos embedded in the command reference and publishes them
+  # as the `demo-gifs` artifact. It runs in this workflow so the GIFs shipped with
+  # the site are always recorded from the commit being deployed.
+  demos:
+    uses: ./.github/workflows/demos.yml
+
   build:
+    needs: demos
     runs-on: ubuntu-latest
     steps:
       - name: Checkout your repository using git
@@ -34,6 +41,16 @@ jobs:
           input_dir: ./build/testdata/reference/public
           output_dir: ./sal-gha
           deploy: false
+
+      # Downloaded after the ontology step for the same reason docs/dist survives it:
+      # that action git-cleans the workspace, which would delete the untracked GIFs.
+      # docs/public is copied verbatim into the built site, so this lands them at
+      # /sal/demos/<name>.gif.
+      - name: Download the demo GIFs
+        uses: actions/download-artifact@v4
+        with:
+          name: demo-gifs
+          path: docs/public/demos
 
       - name: Setup Node
         uses: actions/setup-node@v4
