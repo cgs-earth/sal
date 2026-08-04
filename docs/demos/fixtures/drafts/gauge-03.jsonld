@@ -1,0 +1,7 @@
+{
+    "@context": { "@vocab": "https://schema.org/" },
+    "@id": "gauge-03",
+    "@type": "Place",
+    "namee": "Snake River at Moose",
+    "identifier": "13013650"
+}

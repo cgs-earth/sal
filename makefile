@@ -10,6 +10,13 @@ ui:
 ui_dev:
 	cd serve/sal-ui && npm run dev
 
+# Records the demo GIFs embedded in the command reference into docs/public/demos.
+# CI does this on every push, so this is only needed to preview a tape locally.
+# Needs vhs, ttyd, ffmpeg, and duckdb on PATH.
+.PHONY: demos
+demos:
+	./docs/demos/generate.sh
+
 deadcode:
 	deadcode ./...
 

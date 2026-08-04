@@ -6,6 +6,8 @@ description: High-level reference for SAL CLI subcommands.
 SAL commands operate on a Git-backed project and the generated data under `.sal/data`.
 For a step-by-step flow, start with [Getting Started](/sal/guides/getting-started/).
 
+![The sal help output, listing every subcommand](/sal/demos/sal-help.gif)
+
 ## `sal init`
 
 Initializes a SAL project in the current Git repository.
@@ -17,6 +19,8 @@ The repository must not be your home directory and must already have a Git remot
 - `~/.sal/cache` for user-level cache data.
 - `~/.sal/config.jsonld` for user-level SAL configuration.
 - A `.gitignore` entry for `.sal/data`.
+
+![sal init running in a repository that already has a remote](/sal/demos/sal-init.gif)
 
 ## `sal validate`
 
@@ -32,6 +36,10 @@ Important flags:
 - `--prefix-maps`: apply prefix mappings as `source=target` entries or source/target pairs.
 - `--format`: choose `iceberg` or `nq`; defaults to `iceberg`.
 - `--no-cache`: clear SAL's temp cache before validating, while still caching new fetches during the run.
+
+An undefined term is reported with the file and the line number it appears on:
+
+![sal validate passing on one directory and reporting an undefined term in another](/sal/demos/sal-validate.gif)
 
 Validating a file that references a SAL module clones and builds that module so its vocabulary can be checked.
 `sal validate` does not run module tasks; only `sal build` does.
@@ -55,6 +63,10 @@ Important flags:
 - `--force`: build even when the Git working tree has uncommitted changes.
 - `--no-cache`: clear SAL's temp cache before building, while still caching new fetches during the run.
 
+Only triples that are not already in the table are committed, so rebuilding unchanged sources creates no new snapshot:
+
+![sal build writing nine triples, then reporting no changes on a second run](/sal/demos/sal-build.gif)
+
 `sal build` also materializes any SAL module the source files reference.
 It clones each referenced module, builds the `Dockerfile` in its repository root, runs the task instance
 declared in the RDF, and merges the triples the module produced into the data product.
@@ -69,6 +81,8 @@ Opens DuckDB with a `triples` view over the built Iceberg table.
 ```sh
 sal query
 ```
+
+![sal query opening a DuckDB shell with a triples view over the built table](/sal/demos/sal-query.gif)
 
 Info modes:
 
