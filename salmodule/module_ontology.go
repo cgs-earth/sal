@@ -25,6 +25,9 @@ type ModuleOntology struct {
 	TaskInstanceEnvVar string
 
 	taskClasses map[string]bool
+	// prefixes are the namespace bindings of Context, used to write the IRIs of a
+	// task instance the way the module's own ontology writes them.
+	prefixes map[string]string
 }
 
 // IsTaskClass reports whether the ontology declares iri as a subclass of one of
@@ -54,6 +57,7 @@ func parseModuleOntology(namespace string, document []byte) (*ModuleOntology, er
 		Context:            envelope.Context,
 		TaskInstanceEnvVar: taskInstanceEnvVar(graph),
 		taskClasses:        taskClasses(graph),
+		prefixes:           contextPrefixes(envelope.Context),
 	}, nil
 }
 

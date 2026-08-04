@@ -5,12 +5,14 @@
 # runs the module with the task instance declared below, and merges the U.S.
 # state reference features the module emits into the built triples.
 
-@prefix salmodule: <https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#> .
 @prefix states: <salmodule://github.com/adplincinst/sample-salmodule-1/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
 # The module's own ontology declares GeoconnexReferenceFeatureStates as a
 # subclass of salmodule:Task, which is how SAL knows this instance is runnable.
 # maxRetries is likewise defined by the module, so the module decides what a
-# valid task instance looks like.
+# valid task instance looks like. Every property of the instance that the
+# module's vocabulary defines is serialized into the JSON-LD node object SAL
+# passes the module through its task instance environment variable.
 <GeoconnexStates> a states:GeoconnexReferenceFeatureStates ;
-    salmodule:taskInstanceEnvVar '{"@id":"https://github.com/adplincinst/sample-salmodule-1/GeoconnexStates","@type":"GeoconnexReferenceFeatureStates","maxRetries":{"@value":"5","@type":"xsd:integer"}}' .
+    states:maxRetries "5"^^xsd:integer .

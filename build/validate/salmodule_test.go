@@ -17,7 +17,8 @@ const testModuleOntology = `{
 		"salmodule": "https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#"
 	},
 	"@graph": [
-		{"@id": "EducationalHistoryFinder", "@type": "owl:Class", "rdfs:subClassOf": {"@id": "salmodule:Task"}}
+		{"@id": "EducationalHistoryFinder", "@type": "owl:Class", "rdfs:subClassOf": {"@id": "salmodule:Task"}},
+		{"@id": "maxRetries", "@type": "owl:DatatypeProperty"}
 	]
 }`
 
@@ -61,13 +62,34 @@ func TestValidateAcceptsTermsDefinedBySalModuleOntology(t *testing.T) {
 	useFakeSalModule(t)
 	path := writeTurtleTestFile(t, `
 		@prefix history: <salmodule://www.github.com/test/history-getter/> .
+		@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
-		<EducationFinder> a history:EducationalHistoryFinder .
+		<EducationFinder> a history:EducationalHistoryFinder ;
+			history:maxRetries "5"^^xsd:integer .
 	`)
 
 	_, err := ValidateRDFFile(path, nil, testBase)
 
 	require.NoError(t, err)
+}
+
+// The properties a task instance is configured with come from the module's own
+// vocabulary, so a typo in one is reported like a typo in any other term.
+func TestValidateChecksTaskConfigurationPropertiesAgainstTheModuleOntology(t *testing.T) {
+	useFakeSalModule(t)
+	path := writeTurtleTestFile(t, `
+		@prefix history: <salmodule://www.github.com/test/history-getter/> .
+		@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+		<EducationFinder> a history:EducationalHistoryFinder ;
+			history:maxRetriess "5"^^xsd:integer .
+	`)
+
+	_, err := ValidateRDFFile(path, nil, testBase)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "undefined term")
+	require.Contains(t, err.Error(), "history:maxRetriess")
 }
 
 func TestValidateRejectsTermsMissingFromSalModuleOntology(t *testing.T) {
