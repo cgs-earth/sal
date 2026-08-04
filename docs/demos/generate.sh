@@ -41,7 +41,19 @@ for name in $TAPES; do
 done
 
 mkdir -p "$BIN_DIR" "$OUT_DIR"
-go build -o "$BIN_DIR/sal" "$REPO_ROOT"
+
+# CI builds `sal` once and hands the same binary to every tape job, so those runs set
+# SAL_DEMO_SKIP_BUILD rather than rebuilding it five times. Local runs always build,
+# so `make demos` can never record an out of date binary.
+if [ "${SAL_DEMO_SKIP_BUILD:-}" = "1" ]; then
+	if [ ! -x "$BIN_DIR/sal" ]; then
+		echo "generate.sh: SAL_DEMO_SKIP_BUILD=1 but no executable at $BIN_DIR/sal" >&2
+		exit 1
+	fi
+	echo "==> using prebuilt $BIN_DIR/sal"
+else
+	go build -o "$BIN_DIR/sal" "$REPO_ROOT"
+fi
 export PATH="$BIN_DIR:$PATH"
 
 # Tapes reference their Output and Source paths relative to the repository root.
@@ -51,6 +63,11 @@ for name in $TAPES; do
 	state="$(state_for "$name")"
 	echo "==> recording $name ($state)"
 	"$DEMOS_DIR/scenario.sh" "$state"
+	# DuckDB downloads these on first use. Left to itself that happens inside the
+	# recording, which both slows the tape and leaves a dead pause in the GIF.
+	if [ "$name" = "query" ]; then
+		duckdb -c "INSTALL iceberg; INSTALL spatial;" >/dev/null
+	fi
 	vhs "docs/demos/$name.tape"
 done
 

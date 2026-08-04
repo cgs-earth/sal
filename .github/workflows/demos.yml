@@ -3,8 +3,8 @@
 
 # Records the terminal demos embedded in the command reference. The GIFs are not
 # committed: this workflow regenerates them from the working tree so they can never
-# drift from the CLI's real output, and publishes them as the `demo-gifs` artifact.
-# The Pages deploy downloads that artifact into docs/public/demos before building
+# drift from the CLI's real output, and publishes them as `demo-gifs-<tape>`
+# artifacts. The Pages deploy merges those into docs/public/demos before building
 # the site.
 
 name: SAL Demo GIFs
@@ -12,7 +12,7 @@ name: SAL Demo GIFs
 on:
   workflow_dispatch:
   # Called by push_pages.yml so a deploy of main records the GIFs inside the same
-  # run and can hand them to the site build as an artifact. Pushes to main are
+  # run and can hand them to the site build as artifacts. Pushes to main are
   # therefore excluded here, otherwise every one of them would record twice.
   workflow_call:
   push:
@@ -24,46 +24,83 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  record:
+  # Built once and shared with every tape job below, so the five recordings do not
+  # each pay for a compile of the same binary.
+  build-sal:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout the repository
         uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v6
         with:
-          go-version: 1.25
+          go-version: '1.25'
+          cache-dependency-path: go.sum
 
-      # ttyd is the terminal VHS drives and ffmpeg is what encodes the frames, so
-      # both have to be present before vhs will record anything. fonts-jetbrains-mono
-      # is VHS's default font; without it the recordings fall back to whatever the
-      # runner happens to have and the GIFs change size between runs.
+      - name: Build sal
+        run: go build -o sal .
+
+      - name: Upload the sal binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: sal-binary
+          path: sal
+          retention-days: 1
+          if-no-files-found: error
+
+  record:
+    needs: build-sal
+    runs-on: ubuntu-latest
+    strategy:
+      # One tape per job. A failing tape should not hide the state of the others.
+      fail-fast: false
+      matrix:
+        tape: [help, init, validate, build, query]
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      # generate.sh runs whatever is at docs/demos/.bin/sal when SAL_DEMO_SKIP_BUILD
+      # is set, so the binary has to land there rather than on PATH.
+      - name: Download the sal binary
+        uses: actions/download-artifact@v4
+        with:
+          name: sal-binary
+          path: docs/demos/.bin
+
+      - name: Make the sal binary executable
+        run: chmod +x docs/demos/.bin/sal
+
+      # Installs vhs along with ttyd, ffmpeg, and JetBrains Mono as prebuilt binaries
+      # through the runner tool cache. An empty path installs without recording, which
+      # is what we want since generate.sh drives vhs itself. Chrome, which VHS renders
+      # through, is already on the runner image.
       - name: Install VHS and its dependencies
-        run: |
-          sudo mkdir -p /etc/apt/keyrings
-          curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
-          echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
-          sudo apt-get update
-          sudo apt-get install -y vhs ffmpeg ttyd fonts-jetbrains-mono
-          vhs --version
-          ttyd --version
+        uses: charmbracelet/vhs-action@v2
+        with:
+          path: ""
 
-      # `sal query` shells out to duckdb, so the query demo needs the CLI on PATH.
+      # `sal query` shells out to duckdb, so only that tape needs the CLI.
       - name: Install DuckDB
+        if: matrix.tape == 'query'
         run: |
           curl -fsSL -o /tmp/duckdb.zip \
             https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip
           sudo unzip -o /tmp/duckdb.zip -d /usr/local/bin
           duckdb --version
 
-      - name: Record the demos
-        run: ./docs/demos/generate.sh
+      - name: Record the demo
+        env:
+          SAL_DEMO_SKIP_BUILD: "1"
+        run: ./docs/demos/generate.sh ${{ matrix.tape }}
 
-      - name: Upload the demo GIFs
+      # upload-artifact v4 artifacts are immutable, so each tape needs its own name.
+      # push_pages.yml merges them back together with a `demo-gifs-*` pattern.
+      - name: Upload the demo GIF
         uses: actions/upload-artifact@v4
         with:
-          name: demo-gifs
+          name: demo-gifs-${{ matrix.tape }}
           path: docs/public/demos
           if-no-files-found: error

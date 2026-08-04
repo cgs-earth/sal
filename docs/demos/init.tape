@@ -7,16 +7,19 @@ Source docs/demos/common.tape
 Source docs/demos/prompt.tape
 
 Type "git remote -v"
-Sleep 500ms
+Sleep 300ms
 Enter
-Sleep 1500ms
+Wait
+Sleep 1200ms
 
 Type "sal init"
-Sleep 500ms
+Sleep 300ms
 Enter
-Sleep 2500ms
+Wait
+Sleep 2s
 
 Type "cat .gitignore"
-Sleep 500ms
+Sleep 300ms
 Enter
-Sleep 3s
+Wait
+Sleep 2500ms

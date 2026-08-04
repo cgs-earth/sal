@@ -4,10 +4,14 @@ The terminal GIFs embedded in [the command reference](../src/content/docs/refere
 recorded with [VHS](https://github.com/charmbracelet/vhs).
 
 The GIFs are **not committed**. `.github/workflows/demos.yml` records them from the
-working tree on every push and uploads them as the `demo-gifs` artifact;
-`push_pages.yml` downloads that artifact into `docs/public/demos` before building the
-site, so what the docs show is always what the current CLI prints. Recording locally
-writes to the same gitignored `docs/public/demos`.
+working tree on every push and uploads them as `demo-gifs-<tape>` artifacts;
+`push_pages.yml` merges those into `docs/public/demos` before building the site, so
+what the docs show is always what the current CLI prints. Recording locally writes to
+the same gitignored `docs/public/demos`.
+
+That workflow builds `sal` once in a `build-sal` job and then records the tapes as a
+matrix, one job per tape. The tape jobs set `SAL_DEMO_SKIP_BUILD=1` so they use the
+binary they downloaded instead of compiling it five times.
 
 ## Layout
 
@@ -30,7 +34,25 @@ make demos                       # every tape
 ```
 
 `generate.sh` builds `sal` from the working tree into `docs/demos/.bin`, so a tape
-always records the code you have checked out rather than an installed release.
+always records the code you have checked out rather than an installed release. Set
+`SAL_DEMO_SKIP_BUILD=1` to reuse whatever is already at `docs/demos/.bin/sal`.
+
+## Checking what a tape recorded
+
+VHS renders text as well as video, which is the quickest way to see what a tape
+actually put on screen — and the only way if ffmpeg is unavailable, since the text is
+written before the encode:
+
+```sh
+sed 's|^Output .*|Output /tmp/out.txt|' docs/demos/build.tape > /tmp/build.tape
+./docs/demos/scenario.sh committed
+vhs /tmp/build.tape && tail -30 /tmp/out.txt
+```
+
+Frames are separated by a rule of 80 dashes, so the last one is the frame the GIF
+rests on. This catches wrapped tables and truncated output that are otherwise
+invisible until the GIF is published. It under-captures DuckDB's redraws, though, so
+`query.tape` still has to be checked as a real GIF.
 
 ## Adding a demo
 
@@ -55,3 +77,11 @@ Commands that need credentials or that block — `push`, `clone`, `pull`, `uploa
   turns that remote into the base IRI for relative subjects, so it is visible in
   `sal query` output and is kept short on purpose.
 - `vhs validate "docs/demos/*.tape"` checks tape syntax without recording anything.
+- Tapes wait for the prompt with `Wait` rather than sleeping for a guessed duration,
+  so a slow runner cannot finish a command after its `Sleep` elapsed and record the
+  output half drawn. `common.tape` sets the pattern that matches the demo prompt;
+  `query.tape` overrides it because DuckDB's prompt is not the shell's.
+- `query.tape` sets `PAGER=cat`. In a TTY, DuckDB pages its output, which would fill
+  the recording with `less` and swallow the `.exit` the tape types.
+- `sal query`'s startup table is wider than the recorded terminal, so it wraps. That
+  is known and accepted: the frames the GIF rests on are the `SELECT` result below it.
