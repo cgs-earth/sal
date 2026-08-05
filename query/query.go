@@ -6,13 +6,11 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path"
 	"strconv"
 	"strings"
 
 	"github.com/apache/iceberg-go/catalog/hadoop"
 	"github.com/apache/iceberg-go/table"
-	"github.com/cgs-earth/sal/pkg"
 	salsparql "github.com/cgs-earth/sal/query/sparql"
 )
 
@@ -26,29 +24,15 @@ func (cmd *QueryCmd) Run() error {
 	if cmd == nil {
 		return fmt.Errorf("query: missing arguments")
 	}
-	warehouse, err := pkg.SalDataDir()
+	table, err := salsparql.LocateTriplesTable()
 	if err != nil {
 		return err
 	}
-
-	entries, err := os.ReadDir(warehouse)
-	if err != nil {
-		return fmt.Errorf("failed to read SAL data directory: %w", err)
-	}
-	if len(entries) == 0 {
-		return fmt.Errorf("no data has been built yet; run `sal build` to build a data product first")
-	}
-
-	namespace, err := pkg.GitProjectName()
-	if err != nil {
-		return err
-	}
-
-	tablePath := joinRemote(warehouse, namespace, "triples")
+	tablePath := table.Path
 	escapedTablePath := strings.ReplaceAll(tablePath, "'", "''")
 
 	if cmd.SPARQL {
-		layout, err := salsparql.ObjectLayoutForTable(context.Background(), warehouse, namespace)
+		layout, err := salsparql.ObjectLayoutForTable(context.Background(), table.Warehouse, table.Namespace)
 		if err != nil {
 			return err
 		}
@@ -57,7 +41,7 @@ func (cmd *QueryCmd) Run() error {
 
 	infoQuery := ""
 	if cmd.SnapshotDiff != "" {
-		infoQuery, err = queryForSnapshotDiff(context.Background(), warehouse, namespace, tablePath, cmd.SnapshotDiff)
+		infoQuery, err = queryForSnapshotDiff(context.Background(), table.Warehouse, table.Namespace, tablePath, cmd.SnapshotDiff)
 		if err != nil {
 			return err
 		}
@@ -157,12 +141,4 @@ func snapshotForDiff(snapshotDiff string, currentSnapshot *table.Snapshot, snaps
 		return nil, fmt.Errorf("snapshot %d not found", snapshotID)
 	}
 	return snapshot, nil
-}
-
-func joinRemote(base string, parts ...string) string {
-	joined := path.Join(parts...)
-	if joined == "." {
-		return strings.TrimSuffix(base, "/")
-	}
-	return strings.TrimSuffix(base, "/") + "/" + joined
 }

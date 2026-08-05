@@ -97,6 +97,28 @@ To compare snapshots:
 sal query --snapshot-diff latest
 ```
 
+## `sal get`
+
+Looks up the RDF resources inside a built data product.
+Where `sal query` is about the Iceberg table that stores the triples, `sal get` is about the RDF the table describes.
+
+### `sal get classes`
+
+Lists every class the data product types a resource with, most instantiated first:
+
+```sh
+sal get classes
+```
+
+```
+class                                  instances
+https://schema.org/Organization        75
+http://www.w3.org/ns/dcat#Dataset      2
+https://schema.org/AdministrativeArea  1
+```
+
+A class is the object of an `rdf:type` statement, and `instances` counts the distinct subjects declared to be of that class.
+
 ## `sal serve`
 
 Serves the built triples table as a read-only SPARQL endpoint on port 8080:
