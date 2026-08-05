@@ -10,6 +10,8 @@ COPY . .
 ARG TARGETOS
 ARG TARGETARCH
 
+# -trimpath removes local filesystem paths from the binary.
+# -ldflags="-s -w" strips symbol and debug tables to keep the image smaller.
 RUN CGO_ENABLED=0 \
     GOOS=$TARGETOS \
     GOARCH=$TARGETARCH \
