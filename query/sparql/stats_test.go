@@ -11,6 +11,53 @@ func tableProperties(rows ...[]string) Result {
 	return Result{Header: []string{"key", "value"}, Rows: rows}
 }
 
+// batchedStatsResults mimics what RunSQLBatch returns for the four statements
+// Stats issues, in order.
+func batchedStatsResults(counts Result, properties Result) []Result {
+	snapshots := Result{
+		Header: []string{"sequence_number", "snapshot_id"},
+		Rows:   [][]string{{"2", "222"}, {"1", "111"}},
+	}
+	columnStats := Result{Header: []string{"column_name"}, Rows: [][]string{{"subject"}}}
+	return []Result{counts, snapshots, properties, columnStats}
+}
+
+func TestStatsFromResultsPopulatesCountsAndSections(t *testing.T) {
+	counts := Result{
+		Header: []string{"triples", "subjects", "predicates", "objects"},
+		Rows:   [][]string{{"554", "120", "17", "480"}},
+	}
+	properties := tableProperties([]string{"sal.salmodules", `["salmodule://github.com/test/one"]`})
+
+	stats, err := statsFromResults("/tmp/table", batchedStatsResults(counts, properties))
+
+	require.NoError(t, err)
+	require.Equal(t, "/tmp/table", stats.TablePath)
+	require.Equal(t, int64(554), stats.Triples)
+	require.Equal(t, int64(120), stats.Subjects)
+	require.Equal(t, int64(17), stats.Predicates)
+	require.Equal(t, int64(480), stats.Objects)
+	require.Equal(t, []string{"salmodule://github.com/test/one"}, stats.Modules)
+	require.Equal(t, properties, stats.Properties)
+	require.Len(t, stats.Snapshots.Rows, 2)
+	require.Equal(t, [][]string{{"subject"}}, stats.ColumnStats.Rows)
+	require.NotEmpty(t, stats.SnapshotQueries)
+}
+
+func TestStatsFromResultsRejectsAnEmptyCountsResult(t *testing.T) {
+	counts := Result{Header: []string{"triples", "subjects", "predicates", "objects"}}
+
+	_, err := statsFromResults("/tmp/table", batchedStatsResults(counts, tableProperties()))
+
+	require.ErrorContains(t, err, "no counts")
+}
+
+func TestStatsFromResultsRejectsTheWrongNumberOfResults(t *testing.T) {
+	_, err := statsFromResults("/tmp/table", []Result{{}, {}})
+
+	require.ErrorContains(t, err, "expected 4 stats results, got 2")
+}
+
 func TestModulesFromPropertiesReadsRecordedModules(t *testing.T) {
 	properties := tableProperties(
 		[]string{"sal.hash", "abc123"},

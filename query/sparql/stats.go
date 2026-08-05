@@ -29,45 +29,56 @@ type TableStats struct {
 	SnapshotQueries []NamedQuery `json:"snapshotQueries"`
 }
 
+// statsSections are the `sal query --info` options the stats view reports, in the
+// order statsFromResults expects them after the counts.
+var statsSections = []string{"snapshots", "properties", "column-stats"}
+
 // Stats collects the counts, snapshots, table properties, and column statistics of the triples table.
+//
+// All four queries go through one RunSQLBatch call: against a table this size,
+// starting duckdb costs far more than running them, so the page used to spend
+// almost all of its time paying that cost four times over.
 func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
-	counts, err := r.RunSQL(ctx, countsSQL(r.Layout))
+	statements := make([]string, 0, len(statsSections)+1)
+	statements = append(statements, countsSQL(r.Layout))
+	for _, section := range statsSections {
+		sql, err := InfoSQL(section, r.TablePath)
+		if err != nil {
+			return TableStats{}, err
+		}
+		statements = append(statements, sql)
+	}
+
+	results, err := r.RunSQLBatch(ctx, statements)
 	if err != nil {
 		return TableStats{}, err
 	}
+	return statsFromResults(r.TablePath, results)
+}
+
+// statsFromResults assembles the stats payload from the batched results, in the
+// order Stats issued them: counts, then one per statsSections entry.
+func statsFromResults(tablePath string, results []Result) (TableStats, error) {
+	if len(results) != len(statsSections)+1 {
+		return TableStats{}, fmt.Errorf("expected %d stats results, got %d", len(statsSections)+1, len(results))
+	}
+	counts := results[0]
 	if len(counts.Rows) == 0 || len(counts.Rows[0]) < 4 {
 		return TableStats{}, fmt.Errorf("triples table returned no counts")
 	}
 
 	stats := TableStats{
-		TablePath:  r.TablePath,
-		Triples:    parseCount(counts.Rows[0][0]),
-		Subjects:   parseCount(counts.Rows[0][1]),
-		Predicates: parseCount(counts.Rows[0][2]),
-		Objects:    parseCount(counts.Rows[0][3]),
-	}
-
-	sections := []struct {
-		info   string
-		target *Result
-	}{
-		{"snapshots", &stats.Snapshots},
-		{"properties", &stats.Properties},
-		{"column-stats", &stats.ColumnStats},
-	}
-	for _, section := range sections {
-		sql, err := InfoSQL(section.info, r.TablePath)
-		if err != nil {
-			return TableStats{}, err
-		}
-		result, err := r.RunSQL(ctx, sql)
-		if err != nil {
-			return TableStats{}, err
-		}
-		*section.target = result
+		TablePath:   tablePath,
+		Triples:     parseCount(counts.Rows[0][0]),
+		Subjects:    parseCount(counts.Rows[0][1]),
+		Predicates:  parseCount(counts.Rows[0][2]),
+		Objects:     parseCount(counts.Rows[0][3]),
+		Snapshots:   results[1],
+		Properties:  results[2],
+		ColumnStats: results[3],
 	}
 	stats.Modules = modulesFromProperties(stats.Properties)
-	stats.SnapshotQueries = snapshotQueries(r.TablePath, stats.Snapshots)
+	stats.SnapshotQueries = snapshotQueries(tablePath, stats.Snapshots)
 	return stats, nil
 }
 
