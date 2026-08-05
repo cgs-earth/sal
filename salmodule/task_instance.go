@@ -3,6 +3,7 @@ package salmodule
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	rdflibgo "github.com/tggo/goRDFlib"
@@ -60,6 +61,14 @@ func (o *ModuleOntology) nodeObject(graph *rdflibgo.Graph, subject rdflibgo.Subj
 			node[term] = list[0]
 			continue
 		}
+		// the graph iterates a subject's triples in an arbitrary order, so the
+		// values of a repeated property are ordered by their encoding to give a
+		// module the same node object for the same RDF on every run
+		sort.Slice(list, func(i int, j int) bool {
+			left, _ := json.Marshal(list[i])
+			right, _ := json.Marshal(list[j])
+			return string(left) < string(right)
+		})
 		node[term] = list
 	}
 	return node
