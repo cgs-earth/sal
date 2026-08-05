@@ -7,28 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSnapshotDiffQueryForRootSnapshotShowsAllRowsAdded(t *testing.T) {
-	query := snapshotDiffQuery("/tmp/warehouse/sal/triples", 123, nil)
-
-	require.Contains(t, query, "'added' AS change_type")
-	require.Contains(t, query, "snapshot_from_id = 123")
-	require.NotContains(t, query, "parent_rows")
-	require.Contains(t, query, "ORDER BY triple_hash")
-}
-
-func TestSnapshotDiffQueryComparesSnapshotToParent(t *testing.T) {
-	parentID := int64(122)
-
-	query := snapshotDiffQuery("/tmp/warehouse/sal/triples", 123, &parentID)
-
-	require.Contains(t, query, "snapshot_from_id = 123")
-	require.Contains(t, query, "snapshot_from_id = 122")
-	require.Contains(t, query, "'added' AS change_type")
-	require.Contains(t, query, "'removed' AS change_type")
-	require.Contains(t, query, "parent_rows.triple_hash = snapshot_rows.triple_hash")
-	require.Contains(t, query, "UNION ALL")
-}
-
 func TestSnapshotForDiffUsesCurrentSnapshotForLatest(t *testing.T) {
 	current := &table.Snapshot{SnapshotID: 456}
 

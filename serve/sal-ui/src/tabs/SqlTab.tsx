@@ -3,7 +3,7 @@ import CodeMirror from '@uiw/react-codemirror'
 import { PostgreSQL, sql } from '@codemirror/lang-sql'
 import { keymap } from '@codemirror/view'
 import { Prec } from '@codemirror/state'
-import { runSQL, type QueryResult } from '../api'
+import { runSQL, type NamedQuery, type QueryResult } from '../api'
 import { ResultTable } from '../components/ResultTable'
 import { toCSV } from '../csv'
 import { catppuccin } from '../theme'
@@ -22,10 +22,13 @@ const TRIPLES_COLUMNS = [
   'object_geometry',
 ]
 
-type Sample = { name: string; sql: string }
-
-function samplesFor(tablePath: string | null): Sample[] {
-  const samples: Sample[] = [
+/**
+ * The sample statements offered as chips. The snapshot samples are built by the
+ * server, since `iceberg_scan` only accepts a literal snapshot ID and the IDs
+ * are not known until the table's snapshots have been read.
+ */
+function samplesFor(tablePath: string | null, snapshotQueries: NamedQuery[] | null): NamedQuery[] {
+  const samples: NamedQuery[] = [
     { name: 'Head', sql: DEFAULT_SQL },
     { name: 'Schema', sql: 'DESCRIBE triples' },
     {
@@ -51,10 +54,16 @@ function samplesFor(tablePath: string | null): Sample[] {
       { name: 'Column stats', sql: `SELECT *\nFROM iceberg_column_stats('${escaped}')` },
     )
   }
-  return samples
+  return samples.concat(snapshotQueries ?? [])
 }
 
-export function SqlTab({ tablePath }: { tablePath: string | null }) {
+export function SqlTab({
+  tablePath,
+  snapshotQueries,
+}: {
+  tablePath: string | null
+  snapshotQueries: NamedQuery[] | null
+}) {
   const [statement, setStatement] = useState(DEFAULT_SQL)
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -125,8 +134,14 @@ export function SqlTab({ tablePath }: { tablePath: string | null }) {
           </p>
         </header>
         <div className="chips">
-          {samplesFor(tablePath).map((sample) => (
-            <button key={sample.name} type="button" className="chip" onClick={() => setStatement(sample.sql)}>
+          {samplesFor(tablePath, snapshotQueries).map((sample) => (
+            <button
+              key={sample.name}
+              type="button"
+              className="chip"
+              title={sample.sql}
+              onClick={() => setStatement(sample.sql)}
+            >
               {sample.name}
             </button>
           ))}

@@ -24,6 +24,9 @@ type TableStats struct {
 	ColumnStats Result `json:"columnStats"`
 	// Modules are the SAL module URIs the build that wrote this table downloaded.
 	Modules []string `json:"modules"`
+	// SnapshotQueries are the time travel sample queries the SQL editor offers,
+	// built from the snapshot IDs this table actually has.
+	SnapshotQueries []NamedQuery `json:"snapshotQueries"`
 }
 
 // Stats collects the counts, snapshots, table properties, and column statistics of the triples table.
@@ -64,6 +67,7 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 		*section.target = result
 	}
 	stats.Modules = modulesFromProperties(stats.Properties)
+	stats.SnapshotQueries = snapshotQueries(r.TablePath, stats.Snapshots)
 	return stats, nil
 }
 

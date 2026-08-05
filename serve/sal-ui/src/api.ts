@@ -16,6 +16,13 @@ export type TableStats = {
   columnStats: QueryResult
   /** The `salmodule://` URIs of the modules the build that wrote this table downloaded. */
   modules: string[] | null
+  /** Time travel sample queries built from the snapshot IDs this table has. */
+  snapshotQueries: NamedQuery[] | null
+}
+
+export type NamedQuery = {
+  name: string
+  sql: string
 }
 
 export type ModuleOntology = {
