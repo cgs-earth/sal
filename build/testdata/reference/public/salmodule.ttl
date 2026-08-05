@@ -142,8 +142,7 @@ salmodule:Task a owl:Class ;
                                                 sh:minCount 1 ;
                                                 sh:path rdfs:comment
                                               ] ,
-                                              [ sh:message "An rdfs:label is required for salmodule:Error instances"@en ;
-                                                sh:minCount 1 ;
+                                              [ sh:message "An rdfs:label is optional for salmodule:Error instances and can be used for display purposes"@en ;
                                                 sh:path rdfs:label
                                               ] ;
                                   sh:targetClass salmodule:Error
