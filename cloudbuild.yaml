@@ -3,16 +3,28 @@
 
 steps:
   - name: gcr.io/cloud-builders/docker
+    env:
+    - DOCKER_BUILDKIT=1
     args:
       - "-c"
-      # Pull the cache image if available, but don't fail if it doesn't exist
-      # Then build the image with the cache.
+      # Pull the cache image if available. The first build of a service has no
+      # cache tag to pull, so only pass --cache-from when the pull succeeded.
+      # BUILDKIT_INLINE_CACHE writes the cache metadata into the image being
+      # built; without it BuildKit finds nothing to reuse in the pulled tag.
       # $$ escapes the shell variable so Cloud Build leaves it for bash
       - |
+        set -e
         IMAGE="$_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME"
-        docker pull "$$IMAGE:cache" || true
+        CACHE_FROM=""
+        if docker pull "$$IMAGE:cache"; then
+          CACHE_FROM="--cache-from=$$IMAGE:cache"
+        else
+          echo "No cache image at $$IMAGE:cache; building without cache."
+        fi
         docker build \
-          --cache-from "$$IMAGE:cache" \
+          $$CACHE_FROM \
+          --progress=plain \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
           --build-arg DEMO=true \
           --tag "$$IMAGE:$COMMIT_SHA" \
           --tag "$$IMAGE:cache" \

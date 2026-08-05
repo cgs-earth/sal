@@ -3,6 +3,12 @@
 # and serves it, useful for the cloudbuild demo deployment.
 ARG DEMO=false
 
+# BUILDPLATFORM, TARGETOS, and TARGETARCH are only populated automatically by
+# BuildKit. The classic docker builder leaves them empty, which makes
+# `--platform=` fail to parse, so give them defaults matching the amd64 hosts
+# that build this image. BuildKit still overrides them for cross builds.
+ARG BUILDPLATFORM=linux/amd64
+
 FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS go-builder
 
 WORKDIR /app
@@ -12,8 +18,8 @@ RUN go mod download
 
 COPY . .
 
-ARG TARGETOS
-ARG TARGETARCH
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
 # -trimpath removes local filesystem paths from the binary.
 # -ldflags="-s -w" strips symbol and debug tables to keep the image smaller.
@@ -36,7 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 ARG DUCKDB_VERSION=1.5.5
-ARG TARGETARCH
+ARG TARGETARCH=amd64
 
 RUN curl -fsSL -o /tmp/duckdb.zip \
     "https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/duckdb_cli-linux-${TARGETARCH}.zip" \
