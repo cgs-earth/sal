@@ -57,7 +57,7 @@ func (cmd *QueryCmd) Run() error {
 
 	infoQuery := ""
 	if cmd.SnapshotDiff != "" {
-		infoQuery, err = queryForSnapshotDiff(context.Background(), warehouse, namespace, escapedTablePath, cmd.SnapshotDiff)
+		infoQuery, err = queryForSnapshotDiff(context.Background(), warehouse, namespace, tablePath, cmd.SnapshotDiff)
 		if err != nil {
 			return err
 		}
@@ -120,7 +120,7 @@ FROM iceberg_scan('%s', allow_moved_paths = true);
 	return nil
 }
 
-func queryForSnapshotDiff(ctx context.Context, warehouse string, namespace string, escapedTablePath string, snapshotDiff string) (string, error) {
+func queryForSnapshotDiff(ctx context.Context, warehouse string, namespace string, tablePath string, snapshotDiff string) (string, error) {
 	cat, err := hadoop.NewCatalog("local-catalog", warehouse, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create catalog: %w", err)
@@ -134,7 +134,7 @@ func queryForSnapshotDiff(ctx context.Context, warehouse string, namespace strin
 		return "", err
 	}
 
-	return snapshotDiffQuery(escapedTablePath, snapshot.SnapshotID, snapshot.ParentSnapshotID), nil
+	return salsparql.SnapshotDiffSQL(tablePath, snapshot.SnapshotID, snapshot.ParentSnapshotID), nil
 }
 
 func snapshotForDiff(snapshotDiff string, currentSnapshot *table.Snapshot, snapshotByID func(int64) *table.Snapshot) (*table.Snapshot, error) {
@@ -157,49 +157,6 @@ func snapshotForDiff(snapshotDiff string, currentSnapshot *table.Snapshot, snaps
 		return nil, fmt.Errorf("snapshot %d not found", snapshotID)
 	}
 	return snapshot, nil
-}
-
-// snapshotDiffQuery compares a snapshot to its parent by triple_hash and labels
-// rows as added or removed from the requested snapshot's point of view.
-func snapshotDiffQuery(escapedTablePath string, snapshotID int64, parentSnapshotID *int64) string {
-	if parentSnapshotID == nil {
-		return fmt.Sprintf(`
-SELECT
-	'added' AS change_type,
-	snapshot_rows.*
-FROM iceberg_scan('%s', allow_moved_paths = true, snapshot_from_id = %d) AS snapshot_rows
-ORDER BY triple_hash`, escapedTablePath, snapshotID)
-	}
-
-	return fmt.Sprintf(`
-WITH snapshot_rows AS (
-	SELECT *
-	FROM iceberg_scan('%s', allow_moved_paths = true, snapshot_from_id = %d)
-),
-parent_rows AS (
-	SELECT *
-	FROM iceberg_scan('%s', allow_moved_paths = true, snapshot_from_id = %d)
-)
-SELECT
-	'added' AS change_type,
-	snapshot_rows.*
-FROM snapshot_rows
-WHERE NOT EXISTS (
-	SELECT 1
-	FROM parent_rows
-	WHERE parent_rows.triple_hash = snapshot_rows.triple_hash
-)
-UNION ALL
-SELECT
-	'removed' AS change_type,
-	parent_rows.*
-FROM parent_rows
-WHERE NOT EXISTS (
-	SELECT 1
-	FROM snapshot_rows
-	WHERE snapshot_rows.triple_hash = parent_rows.triple_hash
-)
-ORDER BY change_type, triple_hash`, escapedTablePath, snapshotID, escapedTablePath, *parentSnapshotID)
 }
 
 func joinRemote(base string, parts ...string) string {
