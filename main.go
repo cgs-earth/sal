@@ -13,6 +13,7 @@ import (
 	"github.com/cgs-earth/sal/clean"
 	"github.com/cgs-earth/sal/clone"
 	"github.com/cgs-earth/sal/edit"
+	"github.com/cgs-earth/sal/get"
 	"github.com/cgs-earth/sal/initialization"
 	"github.com/cgs-earth/sal/push"
 	"github.com/cgs-earth/sal/query"
@@ -32,6 +33,7 @@ type args struct {
 	Build     *build.BuildCmd                `arg:"subcommand:build" help:"Build RDF data into a SAL data product in the iceberg table format"`
 	Validate  *build.ValidateCmd             `arg:"subcommand:validate" help:"Validate all RDF data is properly defined and structured"`
 	Query     *query.QueryCmd                `arg:"subcommand:query" help:"Use duckdb to query a built SAL data product"`
+	Get       *get.GetCmd                    `arg:"subcommand:get" help:"Look up RDF resources inside a built SAL data product"`
 	Serve     *serve.ServeCmd                `arg:"subcommand:serve" help:"Serve the built triples table as a read-only SPARQL endpoint on port 8080"`
 	Clean     *clean.CleanCmd                `arg:"subcommand:clean" help:"Remove build artifacts produced by a SAL project"`
 	Push      *push.PushCmd                  `arg:"subcommand:push" help:"Push a built SAL data product to a remote OCI registry"`
@@ -82,6 +84,8 @@ func main() {
 		err = cli.Init.Run()
 	case cli.Query != nil:
 		err = cli.Query.Run()
+	case cli.Get != nil:
+		err = cli.Get.Run()
 	case cli.Serve != nil:
 		err = cli.Serve.Run()
 	case cli.Clean != nil:
