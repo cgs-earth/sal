@@ -36,6 +36,35 @@ func TestDatatypesSQLLeftJoinsTheOptionalAnnotations(t *testing.T) {
 	require.Contains(t, sql, "MIN(comments.object) AS comment")
 }
 
+func TestInstancesSQLPairsEachSubjectWithTheClassItIsTypedWith(t *testing.T) {
+	sql := InstancesSQL(SimpleObjects)
+	require.Contains(t, sql, "instances.subject AS instance")
+	require.Contains(t, sql, "instances.object AS class")
+	require.Contains(t, sql, "WHERE instances.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'")
+}
+
+func TestInstancesSQLExcludesSubjectsThatAreThemselvesVocabulary(t *testing.T) {
+	sql := InstancesSQL(SimpleObjects)
+	require.Contains(t, sql, "AND instances.subject NOT IN (")
+	require.Contains(t, sql, "SELECT vocabulary.subject")
+	require.Contains(t, sql, "AND vocabulary.object IN ("+
+		"'http://www.w3.org/2000/01/rdf-schema#Class', "+
+		"'http://www.w3.org/2002/07/owl#Class', "+
+		"'http://www.w3.org/2000/01/rdf-schema#Datatype', "+
+		"'http://www.w3.org/1999/02/22-rdf-syntax-ns#Property', "+
+		"'http://www.w3.org/2002/07/owl#ObjectProperty', "+
+		"'http://www.w3.org/2002/07/owl#DatatypeProperty', "+
+		"'http://www.w3.org/2002/07/owl#AnnotationProperty', "+
+		"'http://www.w3.org/2002/07/owl#Ontology')")
+}
+
+func TestInstancesSQLReadsTypedObjectColumns(t *testing.T) {
+	sql := InstancesSQL(TypedObjects)
+	require.Contains(t, sql, "COALESCE(instances.object_iri, CAST(instances.object_float AS VARCHAR), instances.object_string) AS class")
+	require.Contains(t, sql, "AND COALESCE(vocabulary.object_iri, CAST(vocabulary.object_float AS VARCHAR), vocabulary.object_string) IN (")
+	require.NotContains(t, sql, "instances.object AS class")
+}
+
 func TestDatatypesSQLReadsTypedObjectColumns(t *testing.T) {
 	sql := DatatypesSQL(TypedObjects)
 	require.Contains(t, sql, "MIN(COALESCE(labels.object_iri, CAST(labels.object_float AS VARCHAR), labels.object_string)) AS label")

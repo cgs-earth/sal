@@ -1,6 +1,9 @@
 package sparql
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // RDFTypeIRI is the predicate that states the class of a resource.
 const RDFTypeIRI = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
@@ -12,6 +15,20 @@ const (
 	RDFSLabelIRI    = "http://www.w3.org/2000/01/rdf-schema#label"
 	RDFSCommentIRI  = "http://www.w3.org/2000/01/rdf-schema#comment"
 )
+
+// vocabularyClassIRIs are the classes a resource is typed with to declare that
+// it is part of a vocabulary. A subject carrying one of them describes the
+// schema rather than instantiating it, so an instance lookup leaves it out.
+var vocabularyClassIRIs = []string{
+	"http://www.w3.org/2000/01/rdf-schema#Class",
+	"http://www.w3.org/2002/07/owl#Class",
+	RDFSDatatypeIRI,
+	"http://www.w3.org/1999/02/22-rdf-syntax-ns#Property",
+	"http://www.w3.org/2002/07/owl#ObjectProperty",
+	"http://www.w3.org/2002/07/owl#DatatypeProperty",
+	"http://www.w3.org/2002/07/owl#AnnotationProperty",
+	"http://www.w3.org/2002/07/owl#Ontology",
+}
 
 // ClassesSQL lists every RDF class the data product types a resource with,
 // most instantiated first. A class is the object of an rdf:type statement, so
@@ -55,4 +72,36 @@ ORDER BY datatype`,
 		RDFTypeIRI,
 		bindingExpr("datatypes", "object", layout),
 		RDFSDatatypeIRI)
+}
+
+// InstancesSQL pairs every resource the data product instantiates with the
+// class it is typed with. The class is not required to be declared an
+// rdfs:Class or an owl:Class in the data product itself, since a data product
+// commonly types its resources with a vocabulary it does not carry. What is
+// filtered out instead is the other direction: a subject that is itself a
+// class, property, datatype, or ontology describes the schema and is not an
+// instance of it.
+func InstancesSQL(layout ObjectLayout) string {
+	quoted := make([]string, 0, len(vocabularyClassIRIs))
+	for _, iri := range vocabularyClassIRIs {
+		quoted = append(quoted, fmt.Sprintf("'%s'", iri))
+	}
+	return fmt.Sprintf(`
+SELECT DISTINCT
+	instances.subject AS instance,
+	%s AS class
+FROM triples AS instances
+WHERE instances.predicate = '%s'
+	AND instances.subject NOT IN (
+		SELECT vocabulary.subject
+		FROM triples AS vocabulary
+		WHERE vocabulary.predicate = '%s'
+			AND %s IN (%s)
+	)
+ORDER BY class, instance`,
+		bindingExpr("instances", "object", layout),
+		RDFTypeIRI,
+		RDFTypeIRI,
+		bindingExpr("vocabulary", "object", layout),
+		strings.Join(quoted, ", "))
 }
