@@ -8,11 +8,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -126,31 +130,20 @@ OFFSET %d`, bindingExpr("triples", "object", layout), limit, offset)
 
 // RunSQL executes a DuckDB statement with the Iceberg triples table registered as the `triples` view.
 func (r DuckDBRunner) RunSQL(ctx context.Context, sql string) (Result, error) {
-	tablePath := strings.ReplaceAll(r.TablePath, "'", "''")
-	statement := fmt.Sprintf(`
-INSTALL iceberg;
-LOAD iceberg;
-INSTALL spatial;
-LOAD spatial;
-CREATE OR REPLACE VIEW triples AS
-SELECT *
-FROM iceberg_scan('%s', allow_moved_paths = true);
-COPY (%s) TO STDOUT (HEADER, DELIMITER ',');
-`, tablePath, sql)
+	copyToStdout := fmt.Sprintf("COPY (%s) TO STDOUT (HEADER, DELIMITER ',');\n", sql)
 
-	cmd := exec.CommandContext(ctx, "duckdb", "-csv", "-c", statement)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if stderr.Len() > 0 {
-			return Result{}, fmt.Errorf("duckdb query failed: %s", strings.TrimSpace(stderr.String()))
-		}
-		return Result{}, fmt.Errorf("duckdb query failed: %w", err)
+	withSpatial := needsSpatial(sql, r.Layout)
+	stdout, err := runDuckDB(ctx, r.preamble(withSpatial)+copyToStdout)
+	// A statement can need spatial in a way needsSpatial does not recognize. Paying
+	// for a second process on that path beats failing a query that would have worked.
+	if err != nil && !withSpatial && missingSpatialExtension(err) {
+		stdout, err = runDuckDB(ctx, r.preamble(true)+copyToStdout)
+	}
+	if err != nil {
+		return Result{}, err
 	}
 
-	header, rows, err := parseCSVResult(stdout.String())
+	header, rows, err := parseCSVResult(stdout)
 	if err != nil {
 		return Result{}, err
 	}
@@ -160,6 +153,158 @@ COPY (%s) TO STDOUT (HEADER, DELIMITER ',');
 		Rows:    rows,
 		Message: fmt.Sprintf("%d rows", len(rows)),
 	}, nil
+}
+
+// RunSQLBatch executes several statements in one duckdb process, writing each
+// statement's rows to its own CSV file and reading them back.
+//
+// Starting duckdb and loading its extensions costs far more than any query SAL
+// runs against a triples table, so a caller that needs several results should pay
+// that startup once rather than once per query.
+func (r DuckDBRunner) RunSQLBatch(ctx context.Context, statements []string) ([]Result, error) {
+	if len(statements) == 0 {
+		return nil, nil
+	}
+	dir, err := os.MkdirTemp("", "sal-duckdb-batch-")
+	if err != nil {
+		return nil, fmt.Errorf("create duckdb batch output directory: %w", err)
+	}
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			slog.Warn("failed to remove the duckdb batch output directory", "dir", dir, "error", err)
+		}
+	}()
+
+	withSpatial := slices.ContainsFunc(statements, func(sql string) bool {
+		return needsSpatial(sql, r.Layout)
+	})
+	_, err = runDuckDB(ctx, batchScript(r.preamble(withSpatial), statements, dir))
+	if err != nil && !withSpatial && missingSpatialExtension(err) {
+		_, err = runDuckDB(ctx, batchScript(r.preamble(true), statements, dir))
+	}
+	if err != nil {
+		return nil, batchError(err, statements, dir)
+	}
+	return collectBatchResults(statements, dir)
+}
+
+// preamble is the statement prefix every DuckDB invocation shares: the extensions
+// the query needs, then the `triples` view over the Iceberg table.
+func (r DuckDBRunner) preamble(withSpatial bool) string {
+	var b strings.Builder
+	b.WriteString("INSTALL iceberg;\nLOAD iceberg;\n")
+	if withSpatial {
+		b.WriteString("INSTALL spatial;\nLOAD spatial;\n")
+	}
+	fmt.Fprintf(&b, `CREATE OR REPLACE VIEW triples AS
+SELECT *
+FROM iceberg_scan('%s', allow_moved_paths = true);
+`, escapeSQLLiteral(r.TablePath))
+	return b.String()
+}
+
+// countStar matches COUNT(*), which projects no column and so cannot pull in the
+// geometry column that `*` otherwise would.
+var countStar = regexp.MustCompile(`count\s*\(\s*\*\s*\)`)
+
+// needsSpatial reports whether a statement has to run with the spatial extension
+// loaded.
+//
+// The extension is around 60 MB and DuckDB cannot autoload it, so loading it
+// unconditionally costs roughly half of every duckdb invocation -- far more than
+// any query against a triples table costs to actually run. Two things need it:
+// the ST_ functions, and the typed layout's object_geometry column, which DuckDB
+// exposes as GEOMETRY and cannot read at all without spatial.
+func needsSpatial(sql string, layout ObjectLayout) bool {
+	lowered := strings.ToLower(sql)
+	// Every DuckDB spatial function is named ST_*.
+	if strings.Contains(lowered, "st_") {
+		return true
+	}
+	// The simple layout has no geometry column for a projection to reach.
+	if layout != TypedObjects {
+		return false
+	}
+	projected := countStar.ReplaceAllString(lowered, "")
+	return strings.Contains(projected, "object_geometry") || strings.Contains(projected, "*")
+}
+
+// missingSpatialExtension recognizes the two ways DuckDB reports that a statement
+// needed spatial: an ST_ function missing from the catalog, and a geometry column
+// it cannot cast without the extension loaded.
+func missingSpatialExtension(err error) bool {
+	message := err.Error()
+	return strings.Contains(message, "spatial extension") || strings.Contains(message, "GEOMETRY")
+}
+
+// batchScript builds one duckdb script that writes each statement's rows to its
+// own CSV file under dir.
+func batchScript(preamble string, statements []string, dir string) string {
+	var b strings.Builder
+	b.WriteString(preamble)
+	for i, sql := range statements {
+		fmt.Fprintf(&b, "COPY (%s) TO '%s' (HEADER, DELIMITER ',');\n", sql, escapeSQLLiteral(batchOutputPath(dir, i)))
+	}
+	return b.String()
+}
+
+func batchOutputPath(dir string, index int) string {
+	return filepath.ToSlash(filepath.Join(dir, strconv.Itoa(index)+".csv"))
+}
+
+// collectBatchResults reads back the CSV that each batched statement wrote.
+func collectBatchResults(statements []string, dir string) ([]Result, error) {
+	results := make([]Result, len(statements))
+	for i, sql := range statements {
+		content, err := os.ReadFile(batchOutputPath(dir, i))
+		if err != nil {
+			return nil, fmt.Errorf("read the duckdb output of statement %d: %w", i, err)
+		}
+		header, rows, err := parseCSVResult(string(content))
+		if err != nil {
+			return nil, err
+		}
+		results[i] = Result{
+			SQL:     sql,
+			Header:  header,
+			Rows:    rows,
+			Message: fmt.Sprintf("%d rows", len(rows)),
+		}
+	}
+	return results, nil
+}
+
+// batchError names the statement that failed. DuckDB runs a script in order and
+// stops at the first error, so the first statement with no output file is the one
+// that failed.
+func batchError(runErr error, statements []string, dir string) error {
+	for i := range statements {
+		if _, err := os.Stat(batchOutputPath(dir, i)); err == nil {
+			continue
+		}
+		return fmt.Errorf("batched statement %d: %w", i, runErr)
+	}
+	return runErr
+}
+
+// runDuckDB executes a script with the duckdb CLI and returns its stdout.
+func runDuckDB(ctx context.Context, script string) (string, error) {
+	cmd := exec.CommandContext(ctx, "duckdb", "-csv", "-c", script)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if stderr.Len() > 0 {
+			return "", fmt.Errorf("duckdb query failed: %s", strings.TrimSpace(stderr.String()))
+		}
+		return "", fmt.Errorf("duckdb query failed: %w", err)
+	}
+	return stdout.String(), nil
+}
+
+func escapeSQLLiteral(value string) string {
+	return strings.ReplaceAll(value, "'", "''")
 }
 
 func parseCSVResult(output string) ([]string, [][]string, error) {

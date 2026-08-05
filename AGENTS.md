@@ -112,7 +112,10 @@ LIMIT 5;
     - `serve/ui.go` embeds `serve/sal-ui/dist` with `//go:embed`, so that build output is committed to git rather than gitignored. `go install` must be able to produce a working UI without a Node toolchain.
     - Rebuild it with `make ui` after changing anything under `serve/sal-ui/src`. `.github/workflows/ui_build.yml` fails if the committed `dist` does not match the sources.
     - The Map tab is a placeholder. `/geometries` already serves GeoJSON, but no MapLibre client is wired to it.
-- DuckDB execution and the SQL behind each `sal query --info` option live in `query/sparql`, not in `serve` or `query`. `salsparql.InfoSQL` and `DuckDBRunner.RunSQL`/`Stats`/`Geometries` are shared by the `query` subcommand, the SPARQL shell, and the serve endpoints. Do not duplicate those queries.
+    - `serve/ui.go` gzips the embedded assets once at startup and serves them precompressed with `Vary: Accept-Encoding`. Do not precompress at `make ui` time instead: `ui_build.yml` diffs the committed `dist` against a fresh `npm run build`, so committed `.gz` files would have to be byte reproducible.
+- DuckDB execution and the SQL behind each `sal query --info` option live in `query/sparql`, not in `serve` or `query`. `salsparql.InfoSQL` and `DuckDBRunner.RunSQL`/`RunSQLBatch`/`Stats`/`Geometries` are shared by the `query` subcommand, the SPARQL shell, and the serve endpoints. Do not duplicate those queries.
+    - Every `RunSQL` call starts a `duckdb` process, and against a triples table that startup costs far more than the query. A caller that needs several results should use `RunSQLBatch`, which runs them in one process by having each statement `COPY` to its own CSV. `Stats` does this for its four queries; it must not go back to one `RunSQL` per section.
+    - The spatial extension is loaded per statement, not always. It is around 60 MB, DuckDB cannot autoload it, and loading it costs roughly half of a `duckdb` invocation. `needsSpatial` decides: the `ST_` functions need it, and so does anything projecting the typed layout's `object_geometry` column, which DuckDB exposes as `GEOMETRY` and cannot read without it. A statement that needs spatial in some way `needsSpatial` misses is retried once with it loaded, so widening the check is a performance fix, never a correctness one.
 
 ## Code Style
 
