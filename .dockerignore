@@ -5,3 +5,9 @@
 Dockerfile
 .dockerignore
 .git
+**/node_modules
+.env
+examples/**
+docs/**
+**/.astro
+.claude/**
