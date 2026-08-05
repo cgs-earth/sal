@@ -119,6 +119,26 @@ https://schema.org/AdministrativeArea  1
 
 A class is the object of an `rdf:type` statement, and `instances` counts the distinct subjects declared to be of that class.
 
+### `sal get datatypes`
+
+Lists every datatype the data product declares, with the annotations each one carries:
+
+```sh
+sal get datatypes
+```
+
+```
+datatype                                                          label              comment
+https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#inbou...  Inbound Listener   Literal representing a [host:]<port>
+https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#outbo...  Outbound Endpoint  Literal representing a URL or <host>:<port>
+```
+
+A datatype is a subject declared to be an `rdfs:Datatype`, so a data product that only holds instance data lists none.
+`rdfs:label` and `rdfs:comment` are optional; a column that no datatype states is left out of the table entirely.
+
+Note that this lists the datatypes a data product *defines*, not the datatypes its literals are *tagged with*.
+The built triples table stores the lexical value of a literal rather than its datatype IRI, so `^^xsd:date` and friends cannot be listed back out of it.
+
 ## `sal serve`
 
 Serves the built triples table as a read-only SPARQL endpoint on port 8080:
