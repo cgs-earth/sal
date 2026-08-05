@@ -1,6 +1,6 @@
 # Selects which of the two runtime stages below becomes the final image. `false`
 # ships the bare CLI; `true` adds the sample data and the entrypoint that builds
-# and serves it, which is what a deployment of this image wants.
+# and serves it, useful for the cloudbuild demo deployment.
 ARG DEMO=false
 
 FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS go-builder
