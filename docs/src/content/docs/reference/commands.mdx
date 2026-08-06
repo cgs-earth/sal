@@ -177,7 +177,15 @@ http://www.w3.org/1999/02/22-rdf-syntax-ns#type  http://schema.org/Person
 ```
 
 This is the `<subject> ?p ?o` pattern, so it is a filter on the subject column rather than a SPARQL query.
-The subject is matched as a full IRI; a prefixed name such as `schema:Bob` is not expanded.
+
+A subject with no scheme is a term the project defined itself, so it is resolved against the project base the same way `sal build` resolves a relative term in the project's RDF. In a checkout of `https://github.com/cgs-earth/sal`, the command above can be written as:
+
+```sh
+sal describe Bob
+```
+
+The project base comes from the git remote, so a relative subject only works inside a checkout that has one.
+A prefixed name such as `schema:Bob` is not expanded; a scheme is what makes a subject absolute, and `schema:` is one.
 
 An IRI copied out of Turtle or a SPARQL pattern can be passed with the angle brackets it is written in:
 
