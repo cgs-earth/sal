@@ -48,6 +48,11 @@ build_demo_data() {
 	git config user.name "SAL Demo"
 
 	/app/sal init
+	# An import the demo can show off: it puts an owl:imports in .sal/ontology.ttl
+	# for the stats view, and build merges the OWL vocabulary into the table. The
+	# ontology is fetched at build time, so a container with no route to w3.org
+	# fails here rather than serving a table without it.
+	/app/sal import "https://www.w3.org/2002/07/owl#"
 	git add -A
 	# build refuses to snapshot a tree with uncommitted changes.
 	git commit -qm "Add sample RDF data"
