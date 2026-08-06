@@ -5,11 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"strings"
+	"sync/atomic"
 
 	"github.com/apache/iceberg-go/catalog"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"golang.org/x/sync/errgroup"
 	"oras.land/oras-go/v2"
+	"oras.land/oras-go/v2/content/file"
 	"oras.land/oras-go/v2/registry"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
@@ -17,6 +22,8 @@ import (
 )
 
 const DefaultAssumedRegistry = "ghcr.io"
+
+const MaxConcurrentPulls = 8
 
 type CmdWithAuth interface {
 	GetUsername() string
@@ -154,4 +161,61 @@ func fetchAndDiffSnapshots(src oras.ReadOnlyTarget, reference string, getLocalSn
 	}
 
 	return SnapshotDiff(localSnapshots, remoteSnapshots)
+}
+
+// PullManifestLayers copies an OCI artifact into destination, restoring layers
+// according to their exact org.opencontainers.image.title annotations. It backs
+// `sal clone`, `sal pull`, and the OCI artifacts `sal import` records.
+func PullManifestLayers(ctx context.Context, src oras.ReadOnlyTarget, manifest ocispec.Manifest, desc ocispec.Descriptor, reference string, destination string) error {
+	if err := os.MkdirAll(destination, 0755); err != nil {
+		return fmt.Errorf("create pull destination %s: %w", destination, err)
+	}
+
+	fs, err := file.New(destination)
+	if err != nil {
+		return fmt.Errorf("create destination file store: %w", err)
+	}
+	defer func() {
+		if err := fs.Close(); err != nil {
+			slog.Warn("failed to clean up pull file store: " + err.Error())
+		}
+	}()
+
+	var pulledFiles atomic.Int64
+	group, pullCtx := errgroup.WithContext(ctx)
+	group.SetLimit(MaxConcurrentPulls)
+	for _, layer := range manifest.Layers {
+		title := layer.Annotations[ocispec.AnnotationTitle]
+		if title == "" {
+			continue
+		}
+
+		group.Go(func() error {
+			rc, err := src.Fetch(pullCtx, layer)
+			if err != nil {
+				return fmt.Errorf("fetch layer %s: %w", title, err)
+			}
+			layer.Annotations[ocispec.AnnotationTitle] = title
+			err = fs.Push(pullCtx, layer, rc)
+			closeErr := rc.Close()
+			if err != nil {
+				return fmt.Errorf("write layer %s: %w", title, err)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("close layer %s: %w", title, closeErr)
+			}
+			pulledFiles.Add(1)
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return err
+	}
+
+	if pulledFiles.Load() == 0 {
+		return fmt.Errorf("artifact %s has no layers with %s annotations", reference, ocispec.AnnotationTitle)
+	}
+
+	slog.Info("Pulled "+reference+" to "+destination, "digest", desc.Digest.String(), "files", pulledFiles.Load())
+	return nil
 }

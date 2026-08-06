@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -34,11 +35,12 @@ func appendProjectOntology(files []string) ([]string, error) {
 	return append(files, path), nil
 }
 
-// ImportOntologies merges every ontology the project's .sal/ontology.ttl lists
-// with owl:imports into the graph being built, so that an ontology a project
-// depends on is carried by the data product rather than only referenced from it.
-// The statements the file makes about the project itself arrive with it as a
-// source file; see appendProjectOntology.
+// ImportOntologies resolves everything the project's .sal/ontology.ttl lists
+// with owl:imports. An ontology document is merged into the graph being built,
+// so that an ontology a project depends on is carried by the data product rather
+// than only referenced from it. An OCI artifact is pulled to disk instead and
+// kept out of the table entirely. The statements the file makes about the
+// project itself arrive with it as a source file; see appendProjectOntology.
 func ImportOntologies(graph *rdflibgo.Graph) error {
 	path, err := pkg.SalOntologyPath()
 	if err != nil {
@@ -48,10 +50,19 @@ func ImportOntologies(graph *rdflibgo.Graph) error {
 	if err != nil {
 		return err
 	}
-	return importOntologies(graph, path, base, validate.FetchGraph)
+	importsDir, err := pkg.SalImportsDir()
+	if err != nil {
+		return err
+	}
+	pull := func(iri string) error {
+		// build has no registry flags, so an artifact behind a private registry
+		// is authenticated with the environment the other commands fall back to
+		return importation.PullArtifact(context.Background(), importsDir, iri, importation.ArtifactCredentialsFromEnv())
+	}
+	return importOntologies(graph, path, base, validate.FetchGraph, pull)
 }
 
-func importOntologies(graph *rdflibgo.Graph, path string, base string, fetch func(string) (*rdflibgo.Graph, error)) error {
+func importOntologies(graph *rdflibgo.Graph, path string, base string, fetch func(string) (*rdflibgo.Graph, error), pull func(string) error) error {
 	ontology, err := importation.ReadOntology(path, base)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
@@ -61,6 +72,14 @@ func importOntologies(graph *rdflibgo.Graph, path string, base string, fetch fun
 	}
 
 	for _, iri := range ontology.Imports {
+		if importation.IsOciImport(iri) {
+			if err := pull(iri); err != nil {
+				return fmt.Errorf("build: import %s: %w", iri, err)
+			}
+			dropImportStatement(graph, iri)
+			continue
+		}
+
 		imported, err := fetch(iri)
 		if err != nil {
 			return fmt.Errorf("build: import %s: %w", iri, err)
@@ -75,3 +94,14 @@ func importOntologies(graph *rdflibgo.Graph, path string, base string, fetch fun
 	}
 	return nil
 }
+
+// dropImportStatement removes the owl:imports statement naming an OCI artifact
+// from the graph. The artifact is a file the project pulls rather than an
+// ontology it merges, so nothing about it belongs in the triples table; the
+// project's .sal/ontology.ttl stays the record of what was imported.
+func dropImportStatement(graph *rdflibgo.Graph, iri string) {
+	imports := rdflibgo.NewURIRefUnsafe(owlImportsIRI)
+	graph.Remove(nil, &imports, rdflibgo.NewURIRefUnsafe(iri))
+}
+
+const owlImportsIRI = "http://www.w3.org/2002/07/owl#imports"

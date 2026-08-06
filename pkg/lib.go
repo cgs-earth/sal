@@ -151,6 +151,17 @@ func SalOntologyPath() (string, error) {
 	return filepath.Join(projectDir, ".sal", "ontology.ttl"), nil
 }
 
+// SalImportsDir returns the directory the OCI artifacts a project imports are
+// pulled into. It sits under .sal/data because its contents are pulled rather
+// than authored, but it is not part of the built data product.
+func SalImportsDir() (string, error) {
+	dataDir, err := SalDataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dataDir, "imports"), nil
+}
+
 // Return the path to the build iceberg data product in the .sal/data directory
 func SalBuiltDataProductPath() (string, error) {
 	salDataDir, err := SalDataDir()

@@ -273,6 +273,7 @@ func TestEndpointWithUIReturnsTableStats(t *testing.T) {
 			Header: []string{"snapshot_id"},
 			Rows:   [][]string{{"123"}},
 		},
+		Imports: []string{"https://schema.org/", "oci://ghcr.io/cgs-earth/sal:abc123"},
 	}}
 	server := newUIServer(t, runner)
 	defer server.Close()
@@ -290,6 +291,7 @@ func TestEndpointWithUIReturnsTableStats(t *testing.T) {
 	require.Equal(t, int64(9), body.Objects)
 	require.Equal(t, "/tmp/warehouse/sal/triples", body.TablePath)
 	require.Equal(t, [][]string{{"123"}}, body.Snapshots.Rows)
+	require.Equal(t, []string{"https://schema.org/", "oci://ghcr.io/cgs-earth/sal:abc123"}, body.Imports)
 }
 
 func TestEndpointWithUIReturnsGeometryFeatureCollection(t *testing.T) {

@@ -10,6 +10,9 @@ type StatsTabProps = {
 
 const formatCount = (value: number) => new Intl.NumberFormat().format(value)
 
+/** Says what a build does with an import: an oci:// reference is pulled to disk, everything else is merged. */
+const importKind = (iri: string) => (iri.startsWith('oci://') ? 'OCI artifact' : 'ontology')
+
 export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
   return (
     <div className="tab-body stats">
@@ -42,6 +45,17 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
 
           <Section title="Snapshots" caption="Every commit written to the Iceberg table, newest first.">
             <ResultTable header={stats.snapshots.header} rows={stats.snapshots.rows} empty="No snapshots yet" />
+          </Section>
+
+          <Section
+            title="Imports"
+            caption="The ontologies and OCI artifacts this project imports in .sal/ontology.ttl."
+          >
+            <ResultTable
+              header={['owl:imports', 'kind']}
+              rows={(stats.imports ?? []).map((iri) => [iri, importKind(iri)])}
+              empty="Nothing imported; record one with sal import <url>"
+            />
           </Section>
 
           <Section title="Table properties" caption="Iceberg metadata properties from the latest metadata file.">

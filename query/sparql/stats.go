@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cgs-earth/sal/importation"
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/salmodule"
 )
 
@@ -24,6 +26,8 @@ type TableStats struct {
 	ColumnStats Result `json:"columnStats"`
 	// Modules are the SAL module URIs the build that wrote this table downloaded.
 	Modules []string `json:"modules"`
+	// Imports are the owl:imports IRIs the project's .sal/ontology.ttl records.
+	Imports []string `json:"imports"`
 	// SnapshotQueries are the time travel sample queries the SQL editor offers,
 	// built from the snapshot IDs this table actually has.
 	SnapshotQueries []NamedQuery `json:"snapshotQueries"`
@@ -58,7 +62,39 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 		}
 		results = append(results, result)
 	}
-	return statsFromResults(r.TablePath, results)
+	stats, err := statsFromResults(r.TablePath, results)
+	if err != nil {
+		return TableStats{}, err
+	}
+	stats.Imports = projectImports()
+	return stats, nil
+}
+
+// projectImports reads the owl:imports IRIs out of the project's
+// .sal/ontology.ttl. They come from disk rather than from the table because the
+// table carries the imported statements, not the documents they were fetched
+// from. A directory that is not a SAL project, or a project that has imported
+// nothing, simply reports none rather than failing the whole stats view.
+func projectImports() []string {
+	path, err := pkg.SalOntologyPath()
+	if err != nil {
+		slog.Debug("not reporting project imports", "error", err)
+		return nil
+	}
+	base, err := pkg.DefaultSalBase()
+	if err != nil {
+		slog.Debug("not reporting project imports", "error", err)
+		return nil
+	}
+	ontology, err := importation.ReadOntology(path, base)
+	if err != nil {
+		slog.Warn("ignoring unreadable project ontology", "path", path, "error", err)
+		return nil
+	}
+	if ontology == nil {
+		return nil
+	}
+	return ontology.Imports
 }
 
 // statsFromResults assembles the stats payload from the batched results, in the
