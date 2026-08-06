@@ -180,7 +180,7 @@ func stagedDataDirForDeploy(dataDir string, bucketURL string) (string, func(), e
 
 // deployUploadRoot returns the directory whose contents should be uploaded to the provided bucket URL.
 func deployUploadRoot(stagedDataDir string, bucketURL string) (string, error) {
-	tables, err := icebergTablePaths(stagedDataDir)
+	tables, err := pkg.IcebergTablePaths(stagedDataDir)
 	if err != nil {
 		return "", err
 	}
@@ -254,7 +254,7 @@ func copyFile(src string, dst string, mode os.FileMode) (err error) {
 
 // rewriteStagedIcebergRoots points each staged Iceberg table at its final remote object URI.
 func rewriteStagedIcebergRoots(stagedDataDir string, bucketURL string) error {
-	tables, err := icebergTablePaths(stagedDataDir)
+	tables, err := pkg.IcebergTablePaths(stagedDataDir)
 	if err != nil {
 		return err
 	}
@@ -290,35 +290,6 @@ func rewriteStagedIcebergRoots(stagedDataDir string, bucketURL string) error {
 		)
 	}
 	return nil
-}
-
-func icebergTablePaths(root string) ([]string, error) {
-	var tables []string
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if !entry.IsDir() {
-			return nil
-		}
-		if path == root || entry.Name() != "metadata" {
-			return nil
-		}
-		tablePath := filepath.Dir(path)
-		matches, err := filepath.Glob(filepath.Join(path, "*.metadata.json"))
-		if err != nil {
-			return err
-		}
-		if len(matches) > 0 {
-			tables = append(tables, tablePath)
-			return filepath.SkipDir
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("find Iceberg tables in %s: %w", root, err)
-	}
-	return tables, nil
 }
 
 func objectBaseURL(bucketURL string) string {

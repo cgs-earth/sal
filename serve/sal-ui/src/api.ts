@@ -18,8 +18,17 @@ export type TableStats = {
   modules: string[] | null
   /** The `owl:imports` IRIs the project's `.sal/ontology.ttl` records. */
   imports: string[] | null
-  /** Time travel sample queries built from the snapshot IDs this table has. */
-  snapshotQueries: NamedQuery[] | null
+  /** The imported data products, each queryable as a view of its own. */
+  importedTables: ImportedTable[] | null
+  /** Sample queries only the server can write, such as time travel and the import listing. */
+  sampleQueries: NamedQuery[] | null
+}
+
+/** An imported SAL data product, registered as a DuckDB view named after its OCI artifact. */
+export type ImportedTable = {
+  view: string
+  artifact: string
+  path: string
 }
 
 export type NamedQuery = {

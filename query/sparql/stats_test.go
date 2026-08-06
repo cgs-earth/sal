@@ -40,7 +40,7 @@ func TestStatsFromResultsPopulatesCountsAndSections(t *testing.T) {
 	require.Equal(t, properties, stats.Properties)
 	require.Len(t, stats.Snapshots.Rows, 2)
 	require.Equal(t, [][]string{{"subject"}}, stats.ColumnStats.Rows)
-	require.NotEmpty(t, stats.SnapshotQueries)
+	require.NotEmpty(t, stats.SampleQueries)
 }
 
 func TestStatsFromResultsRejectsAnEmptyCountsResult(t *testing.T) {

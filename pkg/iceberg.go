@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/catalog/hadoop"
@@ -13,6 +15,39 @@ import (
 )
 
 const DefaultSalIcebergTable = "triples"
+
+// IcebergTablePaths returns the root directory of every Iceberg table under
+// root. A table root is the parent of a `metadata` directory holding at least
+// one metadata JSON file. A root that does not exist holds no tables rather
+// than being an error, since a project may never have written the directory
+// being asked about.
+func IcebergTablePaths(root string) ([]string, error) {
+	var tables []string
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.IsDir() || path == root || entry.Name() != "metadata" {
+			return nil
+		}
+		matches, err := filepath.Glob(filepath.Join(path, "*.metadata.json"))
+		if err != nil {
+			return err
+		}
+		if len(matches) > 0 {
+			tables = append(tables, filepath.Dir(path))
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find Iceberg tables in %s: %w", root, err)
+	}
+	return tables, nil
+}
 
 func SalIcebergCatalog() (catalog.Catalog, error) {
 	dataDir, err := SalDataDir()

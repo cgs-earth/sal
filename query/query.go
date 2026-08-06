@@ -27,13 +27,13 @@ func (cmd *QueryCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	layout, err := salsparql.ObjectLayoutForTable(ctx, table.Warehouse, table.Namespace)
+	runner, err := table.Runner(ctx, 100)
 	if err != nil {
 		return err
 	}
 
 	if cmd.SPARQL {
-		return salsparql.RunShell(ctx, table.Path, layout)
+		return salsparql.RunShell(ctx, runner)
 	}
 
 	// The shell opens on the requested info query, so `sal query --info snapshots`
@@ -47,7 +47,7 @@ func (cmd *QueryCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	return salsparql.RunSQLShell(ctx, table.Path, layout, infoQuery)
+	return salsparql.RunSQLShell(ctx, runner, infoQuery)
 }
 
 // InstallExtensionsCmd downloads the DuckDB extensions sal queries load.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -35,11 +36,14 @@ type duckdbInstance struct {
 	spatial bool
 	// viewPath is the table the `triples` view currently reads.
 	viewPath string
+	// imports are the imported data products already registered as views.
+	imports []ImportedTable
 }
 
-// prepare returns the shared handle with the `triples` view over tablePath and,
-// when the statement needs it, the spatial extension loaded.
-func (d *duckdbInstance) prepare(ctx context.Context, tablePath string, withSpatial bool) (*sql.DB, error) {
+// prepare returns the shared handle with the `triples` view over tablePath, a
+// view per imported data product, and, when the statement needs it, the spatial
+// extension loaded.
+func (d *duckdbInstance) prepare(ctx context.Context, tablePath string, imports []ImportedTable, withSpatial bool) (*sql.DB, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -74,14 +78,41 @@ func (d *duckdbInstance) prepare(ctx context.Context, tablePath string, withSpat
 		}
 		d.viewPath = tablePath
 	}
+	d.registerImports(ctx, imports)
 	return d.db, nil
+}
+
+// registerImports registers a view per imported data product plus the `imports`
+// view they stack into. A table DuckDB cannot read is warned about and left
+// unregistered rather than failing the query that was actually asked, which is
+// against the project's own table.
+func (d *duckdbInstance) registerImports(ctx context.Context, imports []ImportedTable) {
+	if len(imports) == 0 || slices.Equal(imports, d.imports) {
+		return
+	}
+	registered := make([]ImportedTable, 0, len(imports))
+	for _, table := range imports {
+		if _, err := d.db.ExecContext(ctx, importViewSQL(table)); err != nil {
+			slog.Warn("skipping an unreadable imported data product", "view", table.View, "path", table.Path, "error", err)
+			continue
+		}
+		registered = append(registered, table)
+	}
+	if len(registered) > 0 {
+		if _, err := d.db.ExecContext(ctx, importsViewSQL(registered)); err != nil {
+			slog.Warn("not registering the "+ImportsView+" view over the imported data products", "error", err)
+		}
+	}
+	// The requested set is what is recorded, not the subset that registered, so
+	// that a table DuckDB refused is not retried on every query.
+	d.imports = imports
 }
 
 // InstallExtensions downloads every extension sal loads into the DuckDB
 // extension cache, so a machine or a container image can be primed for queries
 // ahead of the first one.
 func InstallExtensions(ctx context.Context) error {
-	db, err := instance.prepare(ctx, "", false)
+	db, err := instance.prepare(ctx, "", nil, false)
 	if err != nil {
 		return err
 	}
@@ -98,6 +129,14 @@ func viewSQL(tablePath string) string {
 	return fmt.Sprintf(`CREATE OR REPLACE VIEW triples AS
 SELECT *
 FROM iceberg_scan('%s', allow_moved_paths = true)`, escapeSQLLiteral(tablePath))
+}
+
+// importViewSQL is the view an imported data product is queried through. It is
+// the same scan the `triples` view is, under the name the import was given.
+func importViewSQL(table ImportedTable) string {
+	return fmt.Sprintf(`CREATE OR REPLACE VIEW %s AS
+SELECT *
+FROM iceberg_scan('%s', allow_moved_paths = true)`, quoteIdentifier(table.View), escapeSQLLiteral(table.Path))
 }
 
 // RunSQL executes a DuckDB statement with the Iceberg triples table registered as the `triples` view.
@@ -121,7 +160,7 @@ func (r DuckDBRunner) RunSQL(ctx context.Context, statement string) (Result, err
 }
 
 func (r DuckDBRunner) runSQL(ctx context.Context, statement string, withSpatial bool) ([]string, [][]string, error) {
-	db, err := instance.prepare(ctx, r.TablePath, withSpatial)
+	db, err := instance.prepare(ctx, r.TablePath, r.Imports, withSpatial)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -216,4 +255,10 @@ func missingSpatialExtension(err error) bool {
 
 func escapeSQLLiteral(value string) string {
 	return strings.ReplaceAll(value, "'", "''")
+}
+
+// quoteIdentifier quotes a view name, since an artifact name is whatever the
+// registry called it rather than a bare SQL identifier.
+func quoteIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
