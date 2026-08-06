@@ -28,6 +28,11 @@ func FindRdfDataInPaths(paths []string) ([]string, error) {
 			if err != nil {
 				return err
 			}
+			// .sal holds generated data and SAL's own project files, not the
+			// project's RDF sources; its ontology.ttl is read by build directly
+			if d.IsDir() && d.Name() == ".sal" && p != path {
+				return filepath.SkipDir
+			}
 			if !d.IsDir() && isRdfData(p) {
 				files = append(files, p)
 			}
