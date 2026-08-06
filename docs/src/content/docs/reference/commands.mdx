@@ -160,6 +160,33 @@ A resource typed with several classes is listed once per class.
 The class is not required to be declared an `rdfs:Class` or an `owl:Class` in the data product, since a data product commonly types its resources with a vocabulary it does not itself carry.
 What is left out is the other direction: a subject that is itself an `rdfs:Class`, `owl:Class`, `rdf:Property`, `owl:ObjectProperty`, `owl:DatatypeProperty`, `owl:AnnotationProperty`, `rdfs:Datatype`, or `owl:Ontology` describes the schema rather than instantiating it, so it is not reported as an instance.
 
+## `sal describe`
+
+Shows every statement the data product makes about one subject:
+
+```sh
+sal describe https://github.com/cgs-earth/sal/Bob
+```
+
+```
+predicate                                        object
+http://schema.org/jobTitle                       Professor
+http://schema.org/name                           Jane Doe
+http://schema.org/url                            http://www.janedoe.com
+http://www.w3.org/1999/02/22-rdf-syntax-ns#type  http://schema.org/Person
+```
+
+This is the `<subject> ?p ?o` pattern, so it is a filter on the subject column rather than a SPARQL query.
+The subject is matched as a full IRI; a prefixed name such as `schema:Bob` is not expanded.
+
+An IRI copied out of Turtle or a SPARQL pattern can be passed with the angle brackets it is written in:
+
+```sh
+sal describe '<https://geoconnex.us/ontologies/method/pastor>'
+```
+
+A subject with no statements is reported rather than printed as an empty table.
+
 ## `sal serve`
 
 Serves the built triples table as a read-only SPARQL endpoint on port 8080:

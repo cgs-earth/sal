@@ -9,7 +9,7 @@ import (
 type instancesCmd struct{}
 
 func (cmd *instancesCmd) Run() error {
-	result, err := runLookup(salsparql.InstancesSQL)
+	result, err := salsparql.RunLookup(salsparql.InstancesSQL)
 	if err != nil {
 		return err
 	}
@@ -17,6 +17,6 @@ func (cmd *instancesCmd) Run() error {
 		fmt.Println("no instances found; the data product has no rdf:type statements outside its vocabulary")
 		return nil
 	}
-	fmt.Print(formatTable(result.Header, result.Rows))
+	fmt.Print(salsparql.FormatTable(result.Header, result.Rows))
 	return nil
 }

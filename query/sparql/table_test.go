@@ -1,4 +1,4 @@
-package get
+package sparql
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 )
 
 func TestFormatTableAlignsColumnsUnderTheirHeader(t *testing.T) {
-	output := formatTable(
+	output := FormatTable(
 		[]string{"class", "instances"},
 		[][]string{
 			{"https://schema.org/Person", "12"},
@@ -21,5 +21,5 @@ func TestFormatTableAlignsColumnsUnderTheirHeader(t *testing.T) {
 }
 
 func TestFormatTableOmitsHeaderRowWhenThereIsNoHeader(t *testing.T) {
-	require.Equal(t, "https://schema.org/Person\n", formatTable(nil, [][]string{{"https://schema.org/Person"}}))
+	require.Equal(t, "https://schema.org/Person\n", FormatTable(nil, [][]string{{"https://schema.org/Person"}}))
 }

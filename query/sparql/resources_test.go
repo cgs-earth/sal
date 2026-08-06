@@ -71,3 +71,21 @@ func TestDatatypesSQLReadsTypedObjectColumns(t *testing.T) {
 	require.Contains(t, sql, "AND COALESCE(datatypes.object_iri, CAST(datatypes.object_float AS VARCHAR), datatypes.object_string) = 'http://www.w3.org/2000/01/rdf-schema#Datatype'")
 	require.NotContains(t, sql, "datatypes.object =")
 }
+
+func TestDescribeSQLFiltersOnTheSubjectForSimpleObjects(t *testing.T) {
+	sql := DescribeSQL("https://geoconnex.us/ontologies/method/pastor", SimpleObjects)
+	require.Contains(t, sql, "WHERE triples.subject = 'https://geoconnex.us/ontologies/method/pastor'")
+	require.Contains(t, sql, "triples.predicate AS predicate")
+	require.Contains(t, sql, "triples.object AS object")
+}
+
+func TestDescribeSQLReadsTypedObjectColumns(t *testing.T) {
+	sql := DescribeSQL("https://geoconnex.us/ontologies/method/pastor", TypedObjects)
+	require.Contains(t, sql, "COALESCE(triples.object_iri, CAST(triples.object_float AS VARCHAR), triples.object_string) AS object")
+	require.NotContains(t, sql, "triples.object AS object")
+}
+
+func TestDescribeSQLEscapesQuotesInTheSubject(t *testing.T) {
+	sql := DescribeSQL("https://example.org/o'brien", SimpleObjects)
+	require.Contains(t, sql, "WHERE triples.subject = 'https://example.org/o''brien'")
+}

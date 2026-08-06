@@ -9,7 +9,7 @@ import (
 type classesCmd struct{}
 
 func (cmd *classesCmd) Run() error {
-	result, err := runLookup(salsparql.ClassesSQL)
+	result, err := salsparql.RunLookup(salsparql.ClassesSQL)
 	if err != nil {
 		return err
 	}
@@ -17,6 +17,6 @@ func (cmd *classesCmd) Run() error {
 		fmt.Println("no RDF classes found; the data product has no rdf:type statements")
 		return nil
 	}
-	fmt.Print(formatTable(result.Header, result.Rows))
+	fmt.Print(salsparql.FormatTable(result.Header, result.Rows))
 	return nil
 }

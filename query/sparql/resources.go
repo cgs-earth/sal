@@ -74,6 +74,19 @@ ORDER BY datatype`,
 		RDFSDatatypeIRI)
 }
 
+// DescribeSQL lists every statement the data product makes about one subject.
+// It is the `<subject> ?p ?o` pattern, and since the subject is bound it stays a
+// filter on the subject column rather than going through SPARQL translation.
+func DescribeSQL(subject string, layout ObjectLayout) string {
+	return fmt.Sprintf(`
+SELECT
+	triples.predicate AS predicate,
+	%s AS object
+FROM triples
+WHERE triples.subject = %s
+ORDER BY predicate, object`, bindingExpr("triples", "object", layout), sqlString(subject))
+}
+
 // InstancesSQL pairs every resource the data product instantiates with the
 // class it is typed with. The class is not required to be declared an
 // rdfs:Class or an owl:Class in the data product itself, since a data product
