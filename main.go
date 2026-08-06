@@ -33,7 +33,7 @@ type args struct {
 	Init      *initialization.InitCmd        `arg:"subcommand:init" help:"Initialize a SAL project in the current directory"`
 	Build     *build.BuildCmd                `arg:"subcommand:build" help:"Build RDF data into a SAL data product in the iceberg table format"`
 	Validate  *build.ValidateCmd             `arg:"subcommand:validate" help:"Validate all RDF data is properly defined and structured"`
-	Query     *query.QueryCmd                `arg:"subcommand:query" help:"Use duckdb to query a built SAL data product"`
+	Query     *query.QueryCmd                `arg:"subcommand:query" help:"Open a SQL shell over a built SAL data product"`
 	Get       *get.GetCmd                    `arg:"subcommand:get" help:"Look up RDF resources inside a built SAL data product"`
 	Describe  *describe.DescribeCmd          `arg:"subcommand:describe" help:"Show every statement a built SAL data product makes about a subject IRI"`
 	Serve     *serve.ServeCmd                `arg:"subcommand:serve" help:"Serve the built triples table as a read-only SPARQL endpoint on port 8080"`
@@ -45,6 +45,10 @@ type args struct {
 	Upload    *upload.UploadCmd              `arg:"subcommand:upload" help:"Upload a built SAL data product to an object store"`
 	Test      *test.TestCmd                  `arg:"subcommand:test" help:"Run tests on a built SAL data product"`
 	Pull      *clone.OciArtifactRetrievalCmd `arg:"subcommand:pull" help:"Pull a built SAL data product from a remote OCI registry"`
+	// DuckDB is linked into sal, but its extensions are downloaded on first use.
+	// This primes that cache and exists for the container image to call, so it is
+	// kept out of the help output.
+	DuckDBExtensions *query.InstallExtensionsCmd `arg:"subcommand:duckdb-extensions,hidden" help:"Download the DuckDB extensions sal queries load"`
 }
 
 func (args) Description() string {
@@ -108,6 +112,8 @@ func main() {
 		err = cli.Test.Run()
 	case cli.Pull != nil:
 		err = cli.Pull.RunPull()
+	case cli.DuckDBExtensions != nil:
+		err = cli.DuckDBExtensions.Run()
 	case cli.Validate != nil:
 		_, err = cli.Validate.Run()
 		if err != nil {

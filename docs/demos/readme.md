@@ -32,7 +32,7 @@ merges. Use `workflow_dispatch` on the branch to force a full recording.
 
 ## Recording locally
 
-Needs `vhs`, `ttyd`, `ffmpeg`, and `duckdb` on `PATH`:
+Needs `vhs`, `ttyd`, and `ffmpeg` on `PATH`:
 
 ```sh
 make demos                       # every tape
@@ -57,8 +57,8 @@ vhs /tmp/build.tape && tail -30 /tmp/out.txt
 
 Frames are separated by a rule of 80 dashes, so the last one is the frame the GIF
 rests on. This catches wrapped tables and truncated output that are otherwise
-invisible until the GIF is published. It under-captures DuckDB's redraws, though, so
-`query.tape` still has to be checked as a real GIF.
+invisible until the GIF is published. It under-captures the SQL shell's redraws,
+though, so `query.tape` still has to be checked as a real GIF.
 
 ## Adding a demo
 
@@ -87,9 +87,9 @@ Commands that need credentials or that block — `push`, `clone`, `pull`, `uploa
 - `vhs validate "docs/demos/*.tape"` checks tape syntax without recording anything.
 - Tapes wait for the prompt with `Wait` rather than sleeping for a guessed duration,
   so a slow runner cannot finish a command after its `Sleep` elapsed and record the
-  output half drawn. `common.tape` sets the pattern that matches the demo prompt;
-  `query.tape` overrides it because DuckDB's prompt is not the shell's.
-- `query.tape` sets `PAGER=cat`. In a TTY, DuckDB pages its output, which would fill
-  the recording with `less` and swallow the `.exit` the tape types.
-- `sal query`'s startup table is wider than the recorded terminal, so it wraps. That
-  is known and accepted: the frames the GIF rests on are the `SELECT` result below it.
+  output half drawn. `common.tape` sets the pattern that matches the demo prompt.
+  `query.tape` sleeps instead: `sal query` opens a full screen shell, so the prompt
+  the pattern matches is not on screen until `Ctrl+D` closes it again.
+- `generate.sh` runs `sal duckdb-extensions` before `query.tape`. DuckDB is linked
+  into `sal`, but its extensions are downloaded on first use, and left to itself that
+  download happens inside the recording.

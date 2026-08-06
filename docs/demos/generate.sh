@@ -5,7 +5,7 @@
 #   ./docs/demos/generate.sh            record every tape
 #   ./docs/demos/generate.sh build      record docs/demos/build.tape only
 #
-# Requires vhs, ttyd, ffmpeg, and duckdb on PATH. `sal` is built from the working
+# Requires vhs, ttyd, and ffmpeg on PATH. `sal` is built from the working
 # tree into docs/demos/.bin so the GIFs always show the current code. Output lands in
 # docs/public/demos, which Astro serves at /sal/demos/<name>.gif.
 set -euo pipefail
@@ -63,10 +63,11 @@ for name in $TAPES; do
 	state="$(state_for "$name")"
 	echo "==> recording $name ($state)"
 	"$DEMOS_DIR/scenario.sh" "$state"
-	# DuckDB downloads these on first use. Left to itself that happens inside the
-	# recording, which both slows the tape and leaves a dead pause in the GIF.
+	# DuckDB is linked into sal, but it downloads its extensions on first use.
+	# Left to itself that happens inside the recording, which both slows the tape
+	# and leaves a dead pause in the GIF.
 	if [ "$name" = "query" ]; then
-		duckdb -c "INSTALL iceberg; INSTALL spatial;" >/dev/null
+		"$BIN_DIR/sal" duckdb-extensions >/dev/null
 	fi
 	vhs "docs/demos/$name.tape"
 done

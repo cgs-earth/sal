@@ -3,13 +3,12 @@
 # and serves it, useful for the cloudbuild demo deployment.
 ARG DEMO=false
 
-# BUILDPLATFORM, TARGETOS, and TARGETARCH are only populated automatically by
-# BuildKit. The classic docker builder leaves them empty, which makes
-# `--platform=` fail to parse, so give them defaults matching the amd64 hosts
-# that build this image. BuildKit still overrides them for cross builds.
-ARG BUILDPLATFORM=linux/amd64
-
-FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS go-builder
+# DuckDB is a C++ library linked into the sal binary, so this build needs cgo and
+# a toolchain for the architecture it is producing. Building natively on the
+# target platform is what keeps that simple: BuildKit runs this stage under
+# emulation for a cross build rather than needing a cross compiler installed. The
+# push_to_ghcr workflow only builds linux/amd64, so nothing is emulated in CI.
+FROM golang:1.25-bookworm AS go-builder
 
 WORKDIR /app
 
@@ -18,58 +17,40 @@ RUN go mod download
 
 COPY . .
 
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
-
 # -trimpath removes local filesystem paths from the binary.
 # -ldflags="-s -w" strips symbol and debug tables to keep the image smaller.
-RUN CGO_ENABLED=0 \
-    GOOS=$TARGETOS \
-    GOARCH=$TARGETARCH \
+#
+# The DuckDB library itself is linked statically, so no libduckdb has to be
+# shipped and no duckdb CLI has to be installed. The binary is not fully static:
+# DuckDB dlopens its extensions, which a statically linked glibc cannot do, so
+# libstdc++ and glibc stay dynamic and the runtime stage installs them.
+RUN CGO_ENABLED=1 \
     go build \
     -trimpath \
     -ldflags="-s -w" \
     -o sal .
 
 
-# `sal query` shells out to the duckdb CLI, so ship the standalone binary.
-FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS duckdb-fetcher
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    unzip \
-    && rm -rf /var/lib/apt/lists/*
-
-ARG DUCKDB_VERSION=1.5.5
-ARG TARGETARCH=amd64
-
-RUN curl -fsSL -o /tmp/duckdb.zip \
-    "https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/duckdb_cli-linux-${TARGETARCH}.zip" \
-    && unzip -o /tmp/duckdb.zip -d /usr/local/bin \
-    && chmod +x /usr/local/bin/duckdb \
-    && rm /tmp/duckdb.zip
-
-
 FROM debian:bookworm-slim AS runtime
 
 # git is a runtime dependency: sal shells out to it for project metadata,
-# `sal clone`, and cloning sal modules.
-RUN apt-get update && apt-get install -y \
+# `sal clone`, and cloning sal modules. libstdc++6 is what the linked in DuckDB
+# needs, and it is not in the slim image by default.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     git \
+    libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY --from=go-builder /app/sal /app/sal
-COPY --from=duckdb-fetcher /usr/local/bin/duckdb /usr/local/bin/duckdb
 
 # Bake in the extensions every sal query loads, so a container does not need to
-# reach extensions.duckdb.org before it can answer its first query. avro and
-# httpfs are not installed by sal itself; iceberg loads the first and needs the
-# second to scan a table on object storage.
-RUN duckdb -c "INSTALL iceberg; INSTALL avro; INSTALL httpfs; INSTALL spatial;" \
-    && duckdb -c "LOAD iceberg; LOAD spatial;"
+# reach extensions.duckdb.org before it can answer its first query. Only the
+# extensions DuckDB is compiled with are linked in; iceberg reads the table,
+# httpfs lets it do so on object storage, avro reads Iceberg manifests, and
+# spatial handles geometry objects.
+RUN /app/sal duckdb-extensions
 
 
 # DEMO=false: the plain CLI, with no sample data and no startup work.

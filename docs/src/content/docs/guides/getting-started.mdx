@@ -15,7 +15,8 @@ go install -a github.com/cgs-earth/sal@latest
 ```
 
 SAL also expects Git for project metadata.
-[`sal query`](/sal/reference/commands/#sal-query) opens DuckDB, so install DuckDB if you want to inspect built tables interactively.
+DuckDB is linked into `sal` rather than shelled out to, so there is no DuckDB to install.
+It is a C++ library, though, so building `sal` needs cgo and a C toolchain (`build-essential` on Debian or Ubuntu, the Xcode command line tools on macOS).
 
 ## Initialize a repository
 
@@ -55,13 +56,13 @@ For validation-only workflows or debugging, see [`sal validate`](/sal/reference/
 
 ## Query the result
 
-Open the built table through DuckDB:
+Open the built table in the SQL shell:
 
 ```sh
 sal query
 ```
 
-SAL creates a `triples` view in the DuckDB shell.
+SAL creates a `triples` view in the shell.
 From there, run SQL such as:
 
 ```sql

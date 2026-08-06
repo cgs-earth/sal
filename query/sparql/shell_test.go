@@ -16,7 +16,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	shellHistoryDir = func() string { return "" }
+	shellHistoryDir = func(shellMode) string { return "" }
 	os.Exit(m.Run())
 }
 
@@ -29,14 +29,6 @@ type fakeRunner struct {
 func (r *fakeRunner) Run(_ context.Context, query string) (Result, error) {
 	r.query = query
 	return r.result, r.err
-}
-
-func TestParseCSVResultReadsHeaderAndRows(t *testing.T) {
-	header, rows, err := parseCSVResult("s,name\nhttps://example.org/a,bob\n")
-
-	require.NoError(t, err)
-	require.Equal(t, []string{"s", "name"}, header)
-	require.Equal(t, [][]string{{"https://example.org/a", "bob"}}, rows)
 }
 
 func TestGeometrySQLForTypedObjectsUsesTypedObjectColumns(t *testing.T) {
@@ -146,7 +138,7 @@ func TestShellViewEnablesMouseSelection(t *testing.T) {
 }
 
 func TestShellHelpStylesKeyboardDescriptions(t *testing.T) {
-	help := renderHelp(80)
+	help := renderHelp(80, modeSPARQL)
 
 	require.Contains(t, help, shellHelpKeyStyle.Render("Ctrl+H"))
 	require.Contains(t, help, shellHelpDescriptionStyle.Render("toggle help"))
@@ -274,7 +266,7 @@ func TestRenderEditorUsesThickBorderWhenFocused(t *testing.T) {
 }
 
 func TestRenderEditorBodyShowsCursor(t *testing.T) {
-	body := renderEditorBody(`SELECT ?s WHERE { ?s ?p ?o . }`, 7)
+	body := renderEditorBody(modeSPARQL, `SELECT ?s WHERE { ?s ?p ?o . }`, 7)
 
 	require.Contains(t, body, "\x1b[")
 	require.Contains(t, body, "SELECT")
@@ -282,14 +274,14 @@ func TestRenderEditorBodyShowsCursor(t *testing.T) {
 }
 
 func TestRenderEmptyEditorBodyShowsPlaceholderAndCursor(t *testing.T) {
-	body := renderEditorBody("", 0)
+	body := renderEditorBody(modeSPARQL, "", 0)
 
 	require.Contains(t, body, "Enter a SPARQL SELECT query")
 	require.Contains(t, body, editorCursorStyle.Render(" "))
 }
 
 func TestRenderEditorBodyShowsSelection(t *testing.T) {
-	body := renderEditorBody("SELECT ?s WHERE {}", len("SELECT ?s"), len("SELECT "), len("SELECT ?s"))
+	body := renderEditorBody(modeSPARQL, "SELECT ?s WHERE {}", len("SELECT ?s"), len("SELECT "), len("SELECT ?s"))
 
 	require.Contains(t, body, editorSelectionStyle.Render("?s"))
 }

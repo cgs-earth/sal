@@ -3,14 +3,12 @@ package query
 import (
 	"context"
 	"fmt"
-	"log/slog"
-	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
 	"github.com/apache/iceberg-go/catalog/hadoop"
 	"github.com/apache/iceberg-go/table"
+	"github.com/cgs-earth/sal/pkg"
 	salsparql "github.com/cgs-earth/sal/query/sparql"
 )
 
@@ -24,83 +22,47 @@ func (cmd *QueryCmd) Run() error {
 	if cmd == nil {
 		return fmt.Errorf("query: missing arguments")
 	}
+	ctx := context.Background()
 	table, err := salsparql.LocateTriplesTable()
 	if err != nil {
 		return err
 	}
-	tablePath := table.Path
-	escapedTablePath := strings.ReplaceAll(tablePath, "'", "''")
+	layout, err := salsparql.ObjectLayoutForTable(ctx, table.Warehouse, table.Namespace)
+	if err != nil {
+		return err
+	}
 
 	if cmd.SPARQL {
-		layout, err := salsparql.ObjectLayoutForTable(context.Background(), table.Warehouse, table.Namespace)
-		if err != nil {
-			return err
-		}
-		return salsparql.RunShell(context.Background(), tablePath, layout)
+		return salsparql.RunShell(ctx, table.Path, layout)
 	}
 
+	// The shell opens on the requested info query, so `sal query --info snapshots`
+	// shows the snapshots and then leaves the triples view there to explore.
 	infoQuery := ""
 	if cmd.SnapshotDiff != "" {
-		infoQuery, err = queryForSnapshotDiff(context.Background(), table.Warehouse, table.Namespace, tablePath, cmd.SnapshotDiff)
-		if err != nil {
-			return err
-		}
+		infoQuery, err = queryForSnapshotDiff(ctx, table.Warehouse, table.Namespace, table.Path, cmd.SnapshotDiff)
 	} else {
-		infoQuery, err = salsparql.InfoSQL(cmd.Info, tablePath)
-		if err != nil {
-			return err
-		}
+		infoQuery, err = salsparql.InfoSQL(cmd.Info, table.Path)
 	}
-
-	tmp, err := os.CreateTemp("", "sal-duckdb-*.sql")
 	if err != nil {
-		return fmt.Errorf("failed to create duckdb init file: %w", err)
+		return err
 	}
-	defer func() {
-		if err := os.Remove(tmp.Name()); err != nil {
-			slog.Error(err.Error())
-		}
-	}()
+	return salsparql.RunSQLShell(ctx, table.Path, layout, infoQuery)
+}
 
-	_, err = fmt.Fprintf(tmp, `
-INSTALL iceberg;
-LOAD iceberg;
+// InstallExtensionsCmd downloads the DuckDB extensions sal queries load.
+//
+// DuckDB is linked into the binary, but its extensions are not, so they are
+// fetched from extensions.duckdb.org on first use. Running this ahead of time
+// primes that cache, which is what the container image does so that a query
+// never has to reach the network.
+type InstallExtensionsCmd struct{}
 
-INSTALL spatial;
-LOAD spatial;
-
-CREATE OR REPLACE VIEW triples AS
-SELECT *
-FROM iceberg_scan('%s', allow_moved_paths = true);
-
-.mode box
-
-%s;
-
-.print ''
-.print 'Connected to Iceberg table as view: triples'
-.print 'You can now query it, e.g.:'
-.print '  SELECT * FROM triples LIMIT 10;'
-.print ''
-`, escapedTablePath, infoQuery)
-	if err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("failed to write duckdb init file: %w", err)
+func (cmd *InstallExtensionsCmd) Run() error {
+	if err := salsparql.InstallExtensions(context.Background()); err != nil {
+		return err
 	}
-
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("failed to close duckdb init file: %w", err)
-	}
-
-	duck := exec.Command("duckdb", "-init", tmp.Name())
-	duck.Stdin = os.Stdin
-	duck.Stdout = os.Stdout
-	duck.Stderr = os.Stderr
-
-	if err := duck.Run(); err != nil {
-		return fmt.Errorf("failed to open duckdb shell: %w", err)
-	}
-
+	pkg.Infof("Installed the DuckDB extensions: %s\n", strings.Join(salsparql.Extensions, ", "))
 	return nil
 }
 

@@ -9,6 +9,7 @@ require (
 	github.com/apache/arrow-go/v18 v18.6.1-0.20260623163317-4a540f514484
 	github.com/apache/iceberg-go v0.6.1-0.20260716175942-cce412f42895
 	github.com/cgs-earth/json-gold v0.0.0-20260623123334-63cdb5b88cb8
+	github.com/duckdb/duckdb-go/v2 v2.10505.0
 	github.com/geoarrow/geoarrow-go v0.0.0-20260525170239-1af41a063b49
 	github.com/lmittmann/tint v1.1.3
 	github.com/moby/moby/api v1.55.0
@@ -101,6 +102,12 @@ require (
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.7.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
+	github.com/duckdb/duckdb-go-bindings v0.10505.0 // indirect
+	github.com/duckdb/duckdb-go-bindings/lib/darwin-amd64 v0.10505.0 // indirect
+	github.com/duckdb/duckdb-go-bindings/lib/darwin-arm64 v0.10505.0 // indirect
+	github.com/duckdb/duckdb-go-bindings/lib/linux-amd64 v0.10505.0 // indirect
+	github.com/duckdb/duckdb-go-bindings/lib/linux-arm64 v0.10505.0 // indirect
+	github.com/duckdb/duckdb-go-bindings/lib/windows-amd64 v0.10505.0 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
@@ -109,6 +116,7 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
+	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/go-zookeeper/zk v1.0.4 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/goccy/go-yaml v1.17.1 // indirect

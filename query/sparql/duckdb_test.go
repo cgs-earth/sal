@@ -1,14 +1,25 @@
 package sparql
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+// localDB opens a DuckDB database with nothing loaded beyond the extensions the
+// library is linked against, so these tests never reach extensions.duckdb.org.
+func localDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("duckdb", "")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, db.Close())
+	})
+	return db
+}
 
 func TestNeedsSpatialDetectsSTFunctions(t *testing.T) {
 	require.True(t, needsSpatial(geometrySQL(SimpleObjects, 10, 0), SimpleObjects))
@@ -33,100 +44,72 @@ func TestNeedsSpatialCoversStarProjectionsOnTheTypedLayout(t *testing.T) {
 	require.True(t, needsSpatial("SELECT object_geometry FROM triples", TypedObjects))
 }
 
-func TestPreambleOmitsSpatialUnlessAsked(t *testing.T) {
-	runner := DuckDBRunner{TablePath: "/tmp/table"}
-
-	without := runner.preamble(false)
-
-	require.Contains(t, without, "LOAD iceberg;")
-	require.NotContains(t, without, "LOAD spatial;")
-	require.Contains(t, without, "iceberg_scan('/tmp/table', allow_moved_paths = true)")
-}
-
-func TestPreambleLoadsSpatialWhenAsked(t *testing.T) {
-	require.Contains(t, DuckDBRunner{TablePath: "/tmp/table"}.preamble(true), "LOAD spatial;")
-}
-
-func TestPreambleEscapesSingleQuotesInTheTablePath(t *testing.T) {
-	preamble := DuckDBRunner{TablePath: "/tmp/o'brien/triples"}.preamble(false)
-
-	require.Contains(t, preamble, "iceberg_scan('/tmp/o''brien/triples'")
-}
-
-func TestBatchScriptWritesOneCopyPerStatement(t *testing.T) {
-	script := batchScript("LOAD iceberg;\n", []string{"SELECT 1", "SELECT 2"}, "/tmp/batch")
-
-	require.Contains(t, script, "LOAD iceberg;")
-	require.Contains(t, script, "COPY (SELECT 1) TO '/tmp/batch/0.csv' (HEADER, DELIMITER ',');")
-	require.Contains(t, script, "COPY (SELECT 2) TO '/tmp/batch/1.csv' (HEADER, DELIMITER ',');")
-	require.Less(t, indexOf(t, script, "0.csv"), indexOf(t, script, "1.csv"))
-}
-
-func TestBatchScriptEscapesSingleQuotesInTheOutputDirectory(t *testing.T) {
-	script := batchScript("", []string{"SELECT 1"}, "/tmp/o'brien")
-
-	require.Contains(t, script, "TO '/tmp/o''brien/0.csv'")
-}
-
-func TestCollectBatchResultsReadsEachStatementsCSV(t *testing.T) {
-	dir := t.TempDir()
-	writeBatchOutput(t, dir, 0, "count\n7\n")
-	writeBatchOutput(t, dir, 1, "key,value\nsal.hash,abc\n")
-
-	results, err := collectBatchResults([]string{"SELECT 1", "SELECT 2"}, dir)
-
-	require.NoError(t, err)
-	require.Len(t, results, 2)
-	require.Equal(t, "SELECT 1", results[0].SQL)
-	require.Equal(t, []string{"count"}, results[0].Header)
-	require.Equal(t, [][]string{{"7"}}, results[0].Rows)
-	require.Equal(t, "1 rows", results[0].Message)
-	require.Equal(t, []string{"key", "value"}, results[1].Header)
-	require.Equal(t, [][]string{{"sal.hash", "abc"}}, results[1].Rows)
-}
-
-func TestCollectBatchResultsReportsAMissingOutputFile(t *testing.T) {
-	dir := t.TempDir()
-	writeBatchOutput(t, dir, 0, "count\n7\n")
-
-	_, err := collectBatchResults([]string{"SELECT 1", "SELECT 2"}, dir)
-
-	require.ErrorContains(t, err, "statement 1")
-}
-
-func TestBatchErrorNamesTheFirstStatementWithoutOutput(t *testing.T) {
-	dir := t.TempDir()
-	writeBatchOutput(t, dir, 0, "count\n7\n")
-	runErr := fmt.Errorf("duckdb query failed: Parser Error")
-
-	err := batchError(runErr, []string{"SELECT 1", "SELECT bad", "SELECT 3"}, dir)
-
-	require.ErrorContains(t, err, "batched statement 1")
-	require.ErrorIs(t, err, runErr)
-}
-
-func TestBatchErrorFallsBackWhenEveryStatementWroteOutput(t *testing.T) {
-	dir := t.TempDir()
-	writeBatchOutput(t, dir, 0, "count\n7\n")
-	runErr := fmt.Errorf("duckdb query failed: something else")
-
-	require.Equal(t, runErr, batchError(runErr, []string{"SELECT 1"}, dir))
-}
-
 func TestMissingSpatialExtensionRecognizesBothDuckDBReports(t *testing.T) {
 	require.True(t, missingSpatialExtension(fmt.Errorf(`Catalog Error: Scalar Function with name "st_point" is not in the catalog, but it exists in the spatial extension`)))
 	require.True(t, missingSpatialExtension(fmt.Errorf("Conversion Error: Unimplemented type for cast (BLOB -> GEOMETRY)")))
 	require.False(t, missingSpatialExtension(fmt.Errorf("Parser Error: syntax error at or near SELCT")))
 }
 
-func writeBatchOutput(t *testing.T, dir string, index int, content string) {
-	t.Helper()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d.csv", index)), []byte(content), 0o600))
+func TestViewSQLScansTheTablePath(t *testing.T) {
+	require.Contains(t, viewSQL("/tmp/table"), "iceberg_scan('/tmp/table', allow_moved_paths = true)")
 }
 
-func indexOf(t *testing.T, haystack string, needle string) int {
-	t.Helper()
-	index := strings.Index(haystack, needle)
-	require.GreaterOrEqual(t, index, 0, "expected %q in the script", needle)
-	return index
+func TestViewSQLEscapesSingleQuotesInTheTablePath(t *testing.T) {
+	require.Contains(t, viewSQL("/tmp/o'brien/triples"), "iceberg_scan('/tmp/o''brien/triples'")
+}
+
+func TestTextQueryStripsTheTrailingSemicolon(t *testing.T) {
+	// A trailing semicolon would close the statement inside the wrapper.
+	require.Equal(t, "SELECT COLUMNS(*)::VARCHAR FROM (SELECT 1)", textQuery("  SELECT 1;  "))
+}
+
+func TestQueryRowsKeepsTheColumnNamesOfTheStatement(t *testing.T) {
+	header, rows, err := queryRows(context.Background(), localDB(t), "SELECT 1 AS subject, 'a' AS predicate")
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"subject", "predicate"}, header)
+	require.Equal(t, [][]string{{"1", "a"}}, rows)
+}
+
+func TestQueryRowsReadsNullAsAnEmptyString(t *testing.T) {
+	_, rows, err := queryRows(context.Background(), localDB(t), "SELECT NULL AS object")
+
+	require.NoError(t, err)
+	require.Equal(t, [][]string{{""}}, rows)
+}
+
+func TestQueryRowsRendersNonScalarColumnsAsDuckDBText(t *testing.T) {
+	// These are the types a triples table and the Iceberg metadata functions
+	// produce that have no Go value formatting the same way DuckDB does.
+	_, rows, err := queryRows(context.Background(), localDB(t),
+		"SELECT [1, 2] AS list, {'x': 1} AS struct, 1.5::DECIMAL(4,2) AS decimal, TIMESTAMP '2024-01-02 03:04:05' AS ts")
+
+	require.NoError(t, err)
+	require.Equal(t, [][]string{{"[1, 2]", "{'x': 1}", "1.50", "2024-01-02 03:04:05"}}, rows)
+}
+
+func TestQueryRowsKeepsValuesWithCommasAndQuotesIntact(t *testing.T) {
+	// The duckdb CLI used to hand these back as CSV, which had to be parsed to
+	// recover them. Reading rows through the driver removes that round trip.
+	_, rows, err := queryRows(context.Background(), localDB(t), `SELECT 'a,b' AS one, 'say "hi"' AS two`)
+
+	require.NoError(t, err)
+	require.Equal(t, [][]string{{"a,b", `say "hi"`}}, rows)
+}
+
+func TestQueryRowsPreservesTheOrderingOfTheStatement(t *testing.T) {
+	// InfoSQL("snapshots") orders newest first and SnapshotDiffSQL depends on it,
+	// so the wrapper textQuery adds must not disturb the inner ORDER BY. The row
+	// count is large enough to make DuckDB run the scan in parallel.
+	_, rows, err := queryRows(context.Background(), localDB(t), "SELECT i FROM range(200000) t(i) ORDER BY i DESC")
+
+	require.NoError(t, err)
+	require.Len(t, rows, 200000)
+	require.Equal(t, [][]string{{"199999"}, {"199998"}, {"199997"}}, rows[:3])
+}
+
+func TestQueryRowsReportsAStatementThatDoesNotParse(t *testing.T) {
+	_, _, err := queryRows(context.Background(), localDB(t), "SELCT 1")
+
+	require.ErrorContains(t, err, "duckdb query failed")
 }

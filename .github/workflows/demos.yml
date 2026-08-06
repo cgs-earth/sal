@@ -156,14 +156,11 @@ jobs:
           vhs --version
           ttyd --version
 
-      # `sal query` shells out to duckdb, so only that tape needs the CLI.
-      - name: Install DuckDB
+      # DuckDB is linked into sal, but its extensions are downloaded on first
+      # use. Priming the cache keeps that download out of the recording.
+      - name: Install the DuckDB extensions
         if: matrix.tape == 'query'
-        run: |
-          curl -fsSL -o /tmp/duckdb.zip \
-            https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip
-          sudo unzip -o /tmp/duckdb.zip -d /usr/local/bin
-          duckdb --version
+        run: ./docs/demos/.bin/sal duckdb-extensions
 
       - name: Record the demo
         env:

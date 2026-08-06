@@ -11,9 +11,8 @@ func tableProperties(rows ...[]string) Result {
 	return Result{Header: []string{"key", "value"}, Rows: rows}
 }
 
-// batchedStatsResults mimics what RunSQLBatch returns for the four statements
-// Stats issues, in order.
-func batchedStatsResults(counts Result, properties Result) []Result {
+// statsResults mimics what the four statements Stats issues return, in order.
+func statsResults(counts Result, properties Result) []Result {
 	snapshots := Result{
 		Header: []string{"sequence_number", "snapshot_id"},
 		Rows:   [][]string{{"2", "222"}, {"1", "111"}},
@@ -29,7 +28,7 @@ func TestStatsFromResultsPopulatesCountsAndSections(t *testing.T) {
 	}
 	properties := tableProperties([]string{"sal.salmodules", `["salmodule://github.com/test/one"]`})
 
-	stats, err := statsFromResults("/tmp/table", batchedStatsResults(counts, properties))
+	stats, err := statsFromResults("/tmp/table", statsResults(counts, properties))
 
 	require.NoError(t, err)
 	require.Equal(t, "/tmp/table", stats.TablePath)
@@ -47,7 +46,7 @@ func TestStatsFromResultsPopulatesCountsAndSections(t *testing.T) {
 func TestStatsFromResultsRejectsAnEmptyCountsResult(t *testing.T) {
 	counts := Result{Header: []string{"triples", "subjects", "predicates", "objects"}}
 
-	_, err := statsFromResults("/tmp/table", batchedStatsResults(counts, tableProperties()))
+	_, err := statsFromResults("/tmp/table", statsResults(counts, tableProperties()))
 
 	require.ErrorContains(t, err, "no counts")
 }
