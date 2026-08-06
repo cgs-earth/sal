@@ -188,9 +188,20 @@ func (cmd *CleanCmd) GetArtifactReference() (pkg.ArtifactReference, error) {
 }
 
 func wipe() error {
-	proceed := pkg.Confirm("This will permanently delete the entire data product. Continue?")
+	ontologyPath, err := pkg.SalOntologyPath()
+	if err != nil {
+		return err
+	}
+	// the ontology is a source file rather than a build artifact, so the prompt
+	// names it whenever a wipe would take it with the data product
+	prompt := "This will permanently delete the entire data product. Continue?"
+	if _, err := os.Stat(ontologyPath); err == nil {
+		prompt = "This will permanently delete the entire data product and the project ontology at " + ontologyPath + ". Continue?"
+	} else if !os.IsNotExist(err) {
+		return err
+	}
 
-	if !proceed {
+	if !pkg.Confirm(prompt) {
 		slog.Info("Wipe cancelled")
 		return nil
 	}
@@ -220,22 +231,33 @@ func wipe() error {
 		return nil
 	})
 
-	if errors.Is(err, os.ErrNotExist) {
+	switch {
+	case errors.Is(err, os.ErrNotExist):
 		slog.Warn("No data product to clean at " + dataProductPath)
-		return nil
+	case err != nil:
+		return err
+	default:
+		if err := os.RemoveAll(dataProductPath); err != nil {
+			return err
+		}
+		slog.Info(fmt.Sprintf("Removed %s of data artifacts from %s", pkg.BytesToHumanReadable(totalBytes), dataProductPath))
 	}
-	if err != nil {
+
+	return removeProjectOntology(ontologyPath)
+}
+
+// removeProjectOntology deletes the ontology `sal import` maintains. A wipe puts
+// the project back to the state it was in before anything was built, and the
+// ontology only describes what a build would produce, so it goes with the data
+// product rather than outliving it.
+func removeProjectOntology(path string) error {
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
-
-	if err := os.RemoveAll(dataProductPath); err != nil {
-		return err
-	}
-
-	msg := fmt.Sprintf("Removed %s of data artifacts from %s", pkg.BytesToHumanReadable(totalBytes), dataProductPath)
-
-	slog.Info(msg)
-
+	slog.Info("Removed the project ontology at " + path)
 	return nil
 }
 

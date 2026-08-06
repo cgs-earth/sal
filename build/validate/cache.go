@@ -338,6 +338,23 @@ func extractVocabularyTermsFromGraph(g *rdflibgo.Graph) map[string]bool {
 	return terms
 }
 
+// FetchGraph dereferences an RDF document and parses it into a graph. It is how
+// build resolves the ontologies a project's .sal/ontology.ttl imports, and it
+// reuses the same content negotiation and format sniffing a vocabulary lookup
+// does. Terms in the document that are written relative resolve against the
+// document's own IRI, not against the SAL project being built.
+func FetchGraph(iri string) (*rdflibgo.Graph, error) {
+	body, contentType, err := fetchVocabularyDocument(iri)
+	if err != nil {
+		return nil, err
+	}
+	_, graph, err := serializeRdfDataAndGetVocab(contentType, body, iri)
+	if err != nil {
+		return nil, err
+	}
+	return graph, nil
+}
+
 func fetchVocabularyDocument(u string) ([]byte, string, error) {
 	// a salmodule:// vocabulary is not served over HTTP; it is obtained by
 	// building the module's container and asking it for its ontology

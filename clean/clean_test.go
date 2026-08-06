@@ -3,6 +3,8 @@ package clean
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/apache/iceberg-go/catalog/hadoop"
@@ -125,4 +127,16 @@ func graphForSnapshot(i int) *rdflibgo.Graph {
 		rdflibgo.NewLiteral(fmt.Sprintf("value-%d", i)),
 	)
 	return graph
+}
+
+func TestRemoveProjectOntologyDeletesTheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ontology.ttl")
+	require.NoError(t, os.WriteFile(path, []byte("# managed by sal import\n"), 0644))
+
+	require.NoError(t, removeProjectOntology(path))
+	require.NoFileExists(t, path)
+}
+
+func TestRemoveProjectOntologySucceedsWhenThereIsNoOntology(t *testing.T) {
+	require.NoError(t, removeProjectOntology(filepath.Join(t.TempDir(), "ontology.ttl")))
 }

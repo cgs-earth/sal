@@ -13,6 +13,7 @@ SAL, (semantic accessibility layer), is a CLI tool for creating RDF data and met
     - Any broadly reusable code is present in the `pkg` folder
     - `integration_tests/` contains integration tests which require spinning up additional services. They don't request real data from remote servers though.
     - `initialization` is an exception to the folder-per-subcommand pattern. This is since `init` is a keyword that can cause issues in golang.
+    - `importation` is an exception for the same reason; `import` is a golang keyword. It owns `.sal/ontology.ttl` in both directions: the `sal import` subcommand writes the file, and `build` reads it through `importation.ReadOntology`.
     - `salmodule/` is an exception to the folder-per-subcommand pattern. It holds the entire SAL Module specification implementation, in both directions:
         - the `sal salmodule` subcommand, which makes the sal CLI itself a sal module
         - dereferencing, building, and running the sal modules that a project references. `salmodule.Resolver` clones the module repository, builds its Dockerfile, and invokes the SAL Module CLI inside the resulting image.
@@ -42,6 +43,21 @@ SAL, (semantic accessibility layer), is a CLI tool for creating RDF data and met
         - A task writes newline delimited JSON, not JSON-LD, to stdout. The module ontology's `@context` must be injected into each node before it is converted to RDF, since it is what resolves the task output's keys to the module's vocabulary.
         - A task that emits `salmodule:Error` nodes instead of data fails the build with the messages the module reported.
         - Materialization happens in `build` only, after validation and after the uncommitted changes check, so that nothing is run for a build that would be rejected anyway.
+    - Build also merges in the ontologies the project imports. `build.ImportOntologies` reads the `owl:imports` IRIs out of `.sal/ontology.ttl` and dereferences each one with `validate.FetchGraph`, so that an imported ontology is carried by the data product rather than only referenced from it.
+        - The project ontology's own statements do not arrive this way. `build.appendProjectOntology` adds `.sal/ontology.ttl` to the files being built, so it is validated, counted, and hashed like any other source file. The walk that collects source files skips `.sal`, which is why the ontology has to be named explicitly.
+        - Fetching the imports happens in `build` only, in the same place as module materialization: after validation and after the uncommitted changes check. `validate` never fetches imports.
+        - Imports are fetched with the same content negotiation and format sniffing a vocabulary lookup uses, but they are not cached; only vocabulary term sets are.
+        - The imported statements are added after `NewTermsHaveClassDefinitions` has run, so an imported ontology is not subject to the project's own RDFS checks.
+
+### `import`
+
+- Records an external ontology in `.sal/ontology.ttl`, the file `build` reads its `owl:imports` from. `sal import` creates the file if it does not exist.
+- The file names the project itself as `<.>`, which resolves against `pkg.DefaultSalBase()`, the same base the project's own relative terms resolve against. `dc:title` defaults to the git project name and `--title` overrides it.
+- `importation` parses the file with the real Turtle parser but renders it from a template, so the generated shape stays flat and readable. A file carrying statements the template does not cover is written back through `turtle.Serialize` instead, so hand written triples are never dropped.
+- Every write is headed by `generatedBanner`. The file is regenerated on each import, so a hand edit only survives when it is a statement; comments never do, including the banner itself, which is re-added rather than preserved.
+- Only `http` and `https` URLs are supported. An OCI artifact reference is recognized by `isOciReference` so that it can be reported as not yet implemented rather than as a malformed URL; anything else is reported as not a URL.
+- `.sal/ontology.ttl` is a source file that belongs in git, and `build` treats it as one. `pkg.FindRdfDataInPaths` skips the `.sal` directory so that iceberg metadata under `.sal/data` is never mistaken for project RDF; `build.appendProjectOntology` puts the ontology back into the file list.
+- `sal clean --wipe` removes the ontology along with the data product, so a wipe returns the project to the state it was in before anything was built or imported. It is removed even when there is no data product to delete, and `wipe`'s confirmation prompt names the file whenever one exists since it is a source file rather than a build artifact.
 
 ### `validate`
 

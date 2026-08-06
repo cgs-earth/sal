@@ -141,6 +141,16 @@ func SalDataDir() (string, error) {
 	return filepath.Join(salDir, ".sal", "data"), nil
 }
 
+// SalOntologyPath returns the path to the project ontology that `sal import`
+// maintains and that `sal build` reads its owl:imports from.
+func SalOntologyPath() (string, error) {
+	projectDir, err := SALProjectDir(os.UserHomeDir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(projectDir, ".sal", "ontology.ttl"), nil
+}
+
 // Return the path to the build iceberg data product in the .sal/data directory
 func SalBuiltDataProductPath() (string, error) {
 	salDataDir, err := SalDataDir()

@@ -15,6 +15,7 @@ import (
 	"github.com/cgs-earth/sal/describe"
 	"github.com/cgs-earth/sal/edit"
 	"github.com/cgs-earth/sal/get"
+	"github.com/cgs-earth/sal/importation"
 	"github.com/cgs-earth/sal/initialization"
 	"github.com/cgs-earth/sal/push"
 	"github.com/cgs-earth/sal/query"
@@ -31,6 +32,7 @@ import (
 // the order changes how the CLI presents them in the help message.
 type args struct {
 	Init      *initialization.InitCmd        `arg:"subcommand:init" help:"Initialize a SAL project in the current directory"`
+	Import    *importation.ImportCmd         `arg:"subcommand:import" help:"Import an external ontology so builds merge it into the data product"`
 	Build     *build.BuildCmd                `arg:"subcommand:build" help:"Build RDF data into a SAL data product in the iceberg table format"`
 	Validate  *build.ValidateCmd             `arg:"subcommand:validate" help:"Validate all RDF data is properly defined and structured"`
 	Query     *query.QueryCmd                `arg:"subcommand:query" help:"Open a SQL shell over a built SAL data product"`
@@ -88,6 +90,8 @@ func main() {
 		}
 	case cli.Init != nil:
 		err = cli.Init.Run()
+	case cli.Import != nil:
+		err = cli.Import.Run()
 	case cli.Query != nil:
 		err = cli.Query.Run()
 	case cli.Get != nil:

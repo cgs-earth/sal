@@ -83,6 +83,11 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no JSON-LD or TTL files found in %s", strings.Join(paths, ", "))
 	}
+	if !cfg.skipProjectChecks {
+		if files, err = appendProjectOntology(files); err != nil {
+			return nil, err
+		}
+	}
 
 	hash, err := pkg.HashAllFiles(files)
 	if err != nil {
@@ -152,6 +157,10 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 	}
 	if cfg.Force {
 		slog.Warn("Creating build with modified source tree. This should only be done for testing purposes.")
+	}
+
+	if err := ImportOntologies(finalGraph); err != nil {
+		return nil, err
 	}
 
 	resolver := salmodule.Default()
