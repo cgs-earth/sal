@@ -28,9 +28,14 @@ type TableStats struct {
 	Modules []string `json:"modules"`
 	// Imports are the owl:imports IRIs the project's .sal/ontology.ttl records.
 	Imports []string `json:"imports"`
-	// SnapshotQueries are the time travel sample queries the SQL editor offers,
-	// built from the snapshot IDs this table actually has.
-	SnapshotQueries []NamedQuery `json:"snapshotQueries"`
+	// ImportedTables are the imported data products queryable as views of their
+	// own, one per OCI artifact the project imported.
+	ImportedTables []ImportedTable `json:"importedTables"`
+	// SampleQueries are the sample statements the SQL editor offers that only
+	// the server can write: time travel needs the literal snapshot IDs this
+	// table has, and listing the imports needs the artifact each view came
+	// from, which DuckDB has no catalog of.
+	SampleQueries []NamedQuery `json:"sampleQueries"`
 }
 
 // statsSections are the `sal query --info` options the stats view reports, in the
@@ -67,6 +72,13 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 		return TableStats{}, err
 	}
 	stats.Imports = projectImports()
+	stats.ImportedTables = r.Imports
+	if len(r.Imports) > 0 {
+		stats.SampleQueries = append(stats.SampleQueries, NamedQuery{
+			Name: "Imported data products",
+			SQL:  ImportedTablesSQL,
+		})
+	}
 	return stats, nil
 }
 
@@ -119,7 +131,7 @@ func statsFromResults(tablePath string, results []Result) (TableStats, error) {
 		ColumnStats: results[3],
 	}
 	stats.Modules = modulesFromProperties(stats.Properties)
-	stats.SnapshotQueries = snapshotQueries(tablePath, stats.Snapshots)
+	stats.SampleQueries = snapshotQueries(tablePath, stats.Snapshots)
 	return stats, nil
 }
 

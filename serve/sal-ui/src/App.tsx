@@ -75,7 +75,11 @@ export function App() {
           <StatsTab stats={stats} error={error} loading={loading} onReload={() => void loadStats()} />
         )}
         {active === 'SQL' && (
-          <SqlTab tablePath={stats?.tablePath ?? null} snapshotQueries={stats?.snapshotQueries ?? null} />
+          <SqlTab
+            tablePath={stats?.tablePath ?? null}
+            sampleQueries={stats?.sampleQueries ?? null}
+            importedTables={stats?.importedTables ?? null}
+          />
         )}
         {/* YASGUI restores its own query state from localStorage, so remounting is safe. */}
         {active === 'SPARQL' && (

@@ -47,27 +47,20 @@ type DuckDBRunner struct {
 	TablePath string
 	Layout    ObjectLayout
 	Limit     int
+	// Imports are the imported data products registered as views of their own
+	// beside the project's `triples` view.
+	Imports []ImportedTable
 }
 
 // RunShell opens an interactive SPARQL prompt against the Iceberg triples table.
-func RunShell(ctx context.Context, tablePath string, layout ObjectLayout) error {
-	runner := DuckDBRunner{
-		TablePath: tablePath,
-		Layout:    layout,
-		Limit:     100,
-	}
+func RunShell(ctx context.Context, runner DuckDBRunner) error {
 	_, err := tea.NewProgram(newShellModel(ctx, runner)).Run()
 	return err
 }
 
 // RunSQLShell opens an interactive DuckDB SQL prompt against the Iceberg triples
 // table, optionally starting with a statement already in the editor.
-func RunSQLShell(ctx context.Context, tablePath string, layout ObjectLayout, initialQuery string) error {
-	runner := DuckDBRunner{
-		TablePath: tablePath,
-		Layout:    layout,
-		Limit:     100,
-	}
+func RunSQLShell(ctx context.Context, runner DuckDBRunner, initialQuery string) error {
 	_, err := tea.NewProgram(newSQLShellModel(ctx, runner, initialQuery)).Run()
 	return err
 }

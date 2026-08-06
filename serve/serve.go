@@ -15,14 +15,14 @@ func (cmd *ServeCmd) Run() error {
 	if cmd == nil {
 		return fmt.Errorf("serve: missing arguments")
 	}
+	ctx := context.Background()
 	table, err := salsparql.LocateTriplesTable()
 	if err != nil {
 		return err
 	}
-
-	layout, err := salsparql.ObjectLayoutForTable(context.Background(), table.Warehouse, table.Namespace)
+	runner, err := table.Runner(ctx, 0)
 	if err != nil {
 		return err
 	}
-	return Serve(context.Background(), ":8080", table.Path, layout, cmd.WithUI)
+	return Serve(ctx, ":8080", runner, cmd.WithUI)
 }

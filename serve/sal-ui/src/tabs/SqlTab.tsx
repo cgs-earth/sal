@@ -3,7 +3,7 @@ import CodeMirror from '@uiw/react-codemirror'
 import { PostgreSQL, sql } from '@codemirror/lang-sql'
 import { keymap } from '@codemirror/view'
 import { Prec } from '@codemirror/state'
-import { runSQL, type NamedQuery, type QueryResult } from '../api'
+import { runSQL, type ImportedTable, type NamedQuery, type QueryResult } from '../api'
 import { ResultTable } from '../components/ResultTable'
 import { toCSV } from '../csv'
 import { catppuccin } from '../theme'
@@ -23,11 +23,12 @@ const TRIPLES_COLUMNS = [
 ]
 
 /**
- * The sample statements offered as chips. The snapshot samples are built by the
- * server, since `iceberg_scan` only accepts a literal snapshot ID and the IDs
- * are not known until the table's snapshots have been read.
+ * The sample statements offered as chips. The time travel and imported artifact
+ * samples are built by the server rather than here: `iceberg_scan` only accepts
+ * a literal snapshot ID, and the artifact behind an imported view is known to
+ * sal rather than to DuckDB.
  */
-function samplesFor(tablePath: string | null, snapshotQueries: NamedQuery[] | null): NamedQuery[] {
+function samplesFor(tablePath: string | null, sampleQueries: NamedQuery[] | null): NamedQuery[] {
   const samples: NamedQuery[] = [
     { name: 'Head', sql: DEFAULT_SQL },
     { name: 'Schema', sql: 'DESCRIBE triples' },
@@ -54,15 +55,17 @@ function samplesFor(tablePath: string | null, snapshotQueries: NamedQuery[] | nu
       { name: 'Column stats', sql: `SELECT *\nFROM iceberg_column_stats('${escaped}')` },
     )
   }
-  return samples.concat(snapshotQueries ?? [])
+  return samples.concat(sampleQueries ?? [])
 }
 
 export function SqlTab({
   tablePath,
-  snapshotQueries,
+  sampleQueries,
+  importedTables,
 }: {
   tablePath: string | null
-  snapshotQueries: NamedQuery[] | null
+  sampleQueries: NamedQuery[] | null
+  importedTables: ImportedTable[] | null
 }) {
   const [statement, setStatement] = useState(DEFAULT_SQL)
   const [result, setResult] = useState<QueryResult | null>(null)
@@ -93,9 +96,17 @@ export function SqlTab({
   const runRef = useRef(run)
   runRef.current = run
 
+  // Every imported data product has the same columns as the project's own
+  // table, so each one completes like `triples` does.
+  const schema = useMemo(() => {
+    const views: Record<string, string[]> = { triples: TRIPLES_COLUMNS }
+    for (const table of importedTables ?? []) views[table.view] = TRIPLES_COLUMNS
+    return views
+  }, [importedTables])
+
   const extensions = useMemo(
     () => [
-      sql({ dialect: PostgreSQL, upperCaseKeywords: true, schema: { triples: TRIPLES_COLUMNS } }),
+      sql({ dialect: PostgreSQL, upperCaseKeywords: true, schema }),
       Prec.highest(
         keymap.of([
           {
@@ -109,7 +120,7 @@ export function SqlTab({
       ),
       ...catppuccin,
     ],
-    [],
+    [schema],
   )
 
   useEffect(() => {
@@ -130,11 +141,24 @@ export function SqlTab({
         <header className="panel-header">
           <h3>DuckDB SQL</h3>
           <p>
-            The Iceberg table is registered as the <code>triples</code> view.
+            The Iceberg table is registered as the <code>triples</code> view
+            {importedTables && importedTables.length > 0 && (
+              <>
+                , each imported data product as{' '}
+                {importedTables.map((table, index) => (
+                  <span key={table.view}>
+                    {index > 0 && ', '}
+                    <code title={table.artifact}>{table.view}</code>
+                  </span>
+                ))}
+                , and all of them together as <code>imports</code>
+              </>
+            )}
+            .
           </p>
         </header>
         <div className="chips">
-          {samplesFor(tablePath, snapshotQueries).map((sample) => (
+          {samplesFor(tablePath, sampleQueries).map((sample) => (
             <button
               key={sample.name}
               type="button"
