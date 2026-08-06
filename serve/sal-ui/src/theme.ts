@@ -59,10 +59,13 @@ const editorTheme = EditorView.theme(
       fontFamily: 'var(--font-mono)',
       padding: '12px 0',
     },
+    // A CodeMirror editor with a fixed height only scrolls if its scroller says
+    // so; the base theme sets overflow-x alone, which clips longer statements.
     '.cm-scroller': {
       backgroundColor: mocha.mantle,
       fontFamily: 'var(--font-mono)',
       lineHeight: '1.6',
+      overflow: 'auto',
     },
     '&.cm-focused': { outline: 'none' },
     '.cm-cursor, .cm-dropCursor': { borderLeftColor: mocha.lavender, borderLeftWidth: '2px' },
