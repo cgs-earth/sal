@@ -9,7 +9,7 @@ import (
 type datatypesCmd struct{}
 
 func (cmd *datatypesCmd) Run() error {
-	result, err := runLookup(salsparql.DatatypesSQL)
+	result, err := salsparql.RunLookup(salsparql.DatatypesSQL)
 	if err != nil {
 		return err
 	}
@@ -18,7 +18,7 @@ func (cmd *datatypesCmd) Run() error {
 		return nil
 	}
 	header, rows := dropEmptyColumns(result.Header, result.Rows)
-	fmt.Print(formatTable(header, rows))
+	fmt.Print(salsparql.FormatTable(header, rows))
 	return nil
 }
 

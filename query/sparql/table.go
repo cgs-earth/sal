@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/cgs-earth/sal/pkg"
 )
@@ -56,6 +57,37 @@ func (t TriplesTable) Runner(ctx context.Context, limit int) (DuckDBRunner, erro
 		return DuckDBRunner{}, err
 	}
 	return DuckDBRunner{TablePath: t.Path, Layout: layout, Limit: limit}, nil
+}
+
+// RunLookup opens the triples table of the SAL project in the current working
+// directory and runs the SQL the lookup builds for the object column layout the
+// table was built with.
+func RunLookup(sqlFor func(ObjectLayout) string) (Result, error) {
+	ctx := context.Background()
+	table, err := LocateTriplesTable()
+	if err != nil {
+		return Result{}, err
+	}
+	runner, err := table.Runner(ctx, 0)
+	if err != nil {
+		return Result{}, err
+	}
+	return runner.RunSQL(ctx, sqlFor(runner.Layout))
+}
+
+// FormatTable renders a DuckDB result as aligned columns so that a lookup
+// prints readably whatever columns it selected.
+func FormatTable(header []string, rows [][]string) string {
+	var out strings.Builder
+	writer := tabwriter.NewWriter(&out, 0, 0, 2, ' ', 0)
+	if len(header) > 0 {
+		_, _ = fmt.Fprintln(writer, strings.Join(header, "\t"))
+	}
+	for _, row := range rows {
+		_, _ = fmt.Fprintln(writer, strings.Join(row, "\t"))
+	}
+	_ = writer.Flush()
+	return out.String()
 }
 
 func joinRemote(base string, parts ...string) string {
