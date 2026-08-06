@@ -144,19 +144,13 @@ func TestWriteOntologyReplacesAnExistingTitleInAFileWithExtraStatements(t *testi
 	require.Equal(t, 1, titles)
 }
 
-func TestImportURLAcceptsAnHTTPSURL(t *testing.T) {
-	value, err := importURL("  <https://schema.org/version/latest/schemaorg-current-https.ttl>  ")
+func TestImportIRIAcceptsAnHTTPSURL(t *testing.T) {
+	value, err := importIRI("  <https://schema.org/version/latest/schemaorg-current-https.ttl>  ")
 	require.NoError(t, err)
 	require.Equal(t, "https://schema.org/version/latest/schemaorg-current-https.ttl", value)
 }
 
-func TestImportURLRejectsAnOciArtifactReferenceAsNotYetSupported(t *testing.T) {
-	_, err := importURL("ghcr.io/cgs-earth/sal:latest")
-	require.ErrorContains(t, err, "OCI artifact reference")
-	require.ErrorContains(t, err, "TODO")
-}
-
-func TestImportURLRejectsSomethingThatIsNeitherAURLNorAnArtifact(t *testing.T) {
-	_, err := importURL("./local/ontology.ttl")
-	require.ErrorContains(t, err, "is not an http or https URL")
+func TestImportIRIRejectsSomethingThatIsNeitherAURLNorAnArtifact(t *testing.T) {
+	_, err := importIRI("./local/ontology.ttl")
+	require.ErrorContains(t, err, "is not an http or https URL or an oci:// reference")
 }

@@ -20,6 +20,16 @@ func writeProjectOntology(t *testing.T, content string) string {
 	return path
 }
 
+// failOnPull is the pull for a project whose imports are all ontology documents,
+// where reaching a registry at all would be the bug.
+func failOnPull(t *testing.T) func(string) error {
+	t.Helper()
+	return func(iri string) error {
+		t.Fatalf("unexpected artifact pull of %s", iri)
+		return nil
+	}
+}
+
 func graphTripleCount(graph *rdflibgo.Graph) int {
 	var count int
 	graph.Triples(nil, nil, nil)(func(rdflibgo.Triple) bool {
@@ -37,7 +47,7 @@ func TestImportOntologiesDoesNothingWithoutAProjectOntology(t *testing.T) {
 	err := importOntologies(graph, path, ontologyTestBase, func(string) (*rdflibgo.Graph, error) {
 		fetched = true
 		return nil, nil
-	})
+	}, failOnPull(t))
 
 	require.NoError(t, err)
 	require.False(t, fetched)
@@ -66,7 +76,7 @@ func TestImportOntologiesMergesEveryImport(t *testing.T) {
 	}
 
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase(ontologyTestBase))
-	require.NoError(t, importOntologies(graph, path, ontologyTestBase, fetch))
+	require.NoError(t, importOntologies(graph, path, ontologyTestBase, fetch, failOnPull(t)))
 
 	require.Equal(t, []string{"https://example.com/onto1", "https://example.com/onto2"}, requested)
 	// one statement per import; the project ontology's own statements arrive
@@ -122,8 +132,65 @@ func TestImportOntologiesReportsWhichImportCouldNotBeFetched(t *testing.T) {
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase(ontologyTestBase))
 	err := importOntologies(graph, path, ontologyTestBase, func(string) (*rdflibgo.Graph, error) {
 		return nil, fmt.Errorf("bad response status code: 404")
-	})
+	}, failOnPull(t))
 
 	require.ErrorContains(t, err, "import https://example.com/missing")
 	require.ErrorContains(t, err, "404")
+}
+
+func TestImportOntologiesPullsAnOciArtifactAndKeepsItOutOfTheGraph(t *testing.T) {
+	path := writeProjectOntology(t, `@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+<.> a owl:Ontology ;
+    owl:imports <https://example.com/onto1>, <oci://ghcr.io/cgs-earth/sal:e57e9af> .
+`)
+
+	// the ontology file is a build source, so its statements are already in the
+	// graph by the time the imports are resolved
+	graph := rdflibgo.NewGraph(rdflibgo.WithBase(ontologyTestBase))
+	project := rdflibgo.NewURIRefUnsafe(ontologyTestBase)
+	imports := rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#imports")
+	artifact := rdflibgo.NewURIRefUnsafe("oci://ghcr.io/cgs-earth/sal:e57e9af")
+	graph.Add(project, imports, rdflibgo.NewURIRefUnsafe("https://example.com/onto1"))
+	graph.Add(project, imports, artifact)
+
+	var pulled []string
+	fetch := func(iri string) (*rdflibgo.Graph, error) {
+		imported := rdflibgo.NewGraph()
+		imported.Add(rdflibgo.NewURIRefUnsafe(iri+"#Thing"), rdflibgo.RDF.Type, rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"))
+		return imported, nil
+	}
+	pull := func(iri string) error {
+		pulled = append(pulled, iri)
+		return nil
+	}
+
+	require.NoError(t, importOntologies(graph, path, ontologyTestBase, fetch, pull))
+
+	require.Equal(t, []string{"oci://ghcr.io/cgs-earth/sal:e57e9af"}, pulled)
+	// the artifact reference is gone from the graph, while the ontology import
+	// sitting next to it in the same file is untouched and was merged
+	require.False(t, graph.Contains(project, imports, artifact))
+	require.True(t, graph.Contains(project, imports, rdflibgo.NewURIRefUnsafe("https://example.com/onto1")))
+	require.True(t, graph.Contains(
+		rdflibgo.NewURIRefUnsafe("https://example.com/onto1#Thing"),
+		rdflibgo.RDF.Type,
+		rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"),
+	))
+}
+
+func TestImportOntologiesReportsWhichArtifactCouldNotBePulled(t *testing.T) {
+	path := writeProjectOntology(t, `@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+<.> a owl:Ontology ;
+    owl:imports <oci://ghcr.io/cgs-earth/sal:e57e9af> .
+`)
+
+	graph := rdflibgo.NewGraph(rdflibgo.WithBase(ontologyTestBase))
+	err := importOntologies(graph, path, ontologyTestBase, nil, func(string) error {
+		return fmt.Errorf("unauthorized")
+	})
+
+	require.ErrorContains(t, err, "import oci://ghcr.io/cgs-earth/sal:e57e9af")
+	require.ErrorContains(t, err, "unauthorized")
 }

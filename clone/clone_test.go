@@ -20,7 +20,7 @@ func pull(ctx context.Context, src oras.ReadOnlyTarget, reference string, destin
 	if err != nil {
 		return err
 	}
-	return pullManifestLayers(ctx, src, manifest, desc, reference, destination)
+	return pkg.PullManifestLayers(ctx, src, manifest, desc, reference, destination)
 }
 
 func TestPullRestoresArtifactFilesToDestination(t *testing.T) {
@@ -74,7 +74,7 @@ func TestPullManifestLayersPreservesArtifactNamePrefix(t *testing.T) {
 		Layers: []ocispec.Descriptor{layer},
 	}
 	destination := t.TempDir()
-	err = pullManifestLayers(ctx, store, manifest, ocispec.Descriptor{}, "latest", destination)
+	err = pkg.PullManifestLayers(ctx, store, manifest, ocispec.Descriptor{}, "latest", destination)
 
 	require.NoError(t, err)
 	got, err := os.ReadFile(filepath.Join(destination, "sal", "triples"))

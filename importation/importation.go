@@ -6,6 +6,7 @@ package importation
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -31,11 +32,18 @@ var (
 	dcTitle     = rdflibgo.NewURIRefUnsafe(dcNamespace + "title")
 )
 
-// ImportCmd records an external ontology in the project's .sal/ontology.ttl so
-// that `sal build` dereferences it and merges it into the data product.
+// ImportCmd records what a project imports in its .sal/ontology.ttl. An http or
+// https URL is an ontology document that `sal build` merges into the data
+// product; an oci:// reference is an artifact that is pulled to disk instead.
 type ImportCmd struct {
-	References []string `arg:"positional,required" help:"URLs of the ontologies to import"`
+	References []string `arg:"positional,required" help:"URLs of the ontologies to import, or oci:// references to the OCI artifacts to import"`
 	Title      string   `arg:"--title" help:"Title recorded for this project's own ontology; defaults to the git project name"`
+	Username   string   `arg:"--username,env:OCI_USERNAME" help:"Username for the OCI registry"`
+	Password   string   `arg:"--password,env:OCI_PASSWORD" help:"Password for the OCI registry"`
+}
+
+func (cmd *ImportCmd) Credentials() ArtifactCredentials {
+	return ArtifactCredentials{Username: cmd.Username, Password: cmd.Password}
 }
 
 func (cmd *ImportCmd) Run() error {
@@ -44,6 +52,10 @@ func (cmd *ImportCmd) Run() error {
 		return err
 	}
 	path, err := pkg.SalOntologyPath()
+	if err != nil {
+		return err
+	}
+	importsDir, err := pkg.SalImportsDir()
 	if err != nil {
 		return err
 	}
@@ -65,9 +77,19 @@ func (cmd *ImportCmd) Run() error {
 	}
 
 	for _, reference := range cmd.References {
-		imported, err := importURL(reference)
+		imported, err := importIRI(reference)
 		if err != nil {
 			return err
+		}
+		// an artifact is pulled even when it is already recorded, so that an
+		// import missing from disk is restored rather than silently skipped
+		if IsOciImport(imported) {
+			if err := supersedeArtifactImport(ontology, imported, importsDir); err != nil {
+				return fmt.Errorf("import %s: %w", imported, err)
+			}
+			if err := PullArtifact(context.Background(), importsDir, imported, cmd.Credentials()); err != nil {
+				return fmt.Errorf("import %s: %w", imported, err)
+			}
 		}
 		if slices.Contains(ontology.Imports, imported) {
 			slog.Warn(imported + " is already imported by " + path)
@@ -246,32 +268,38 @@ func turtleString(value string) string {
 	return `"` + turtleStringEscaper.Replace(value) + `"`
 }
 
-// importURL resolves what an import was given as into the URL of an ontology
-// document. An OCI artifact reference is recognized so that it can be reported
-// as not supported yet rather than as a malformed URL.
-func importURL(reference string) (string, error) {
+// importIRI resolves what an import was given as into the IRI recorded with
+// owl:imports. An http or https URL is an ontology document that build merges;
+// an oci:// reference is an artifact that build pulls to disk instead.
+func importIRI(reference string) (string, error) {
 	value := strings.TrimSpace(reference)
 	value = strings.TrimSuffix(strings.TrimPrefix(value, "<"), ">")
 	if value == "" {
 		return "", fmt.Errorf("import: empty ontology reference")
 	}
 
+	if IsOciImport(value) {
+		if _, err := artifactName(value); err != nil {
+			return "", fmt.Errorf("import: %w", err)
+		}
+		return value, nil
+	}
+
 	parsed, err := url.Parse(value)
 	if err == nil && parsed.Host != "" && (parsed.Scheme == "http" || parsed.Scheme == "https") {
 		return value, nil
 	}
-	if isOciReference(value) {
-		return "", fmt.Errorf("import: %s looks like an OCI artifact reference. TODO: importing an ontology from an OCI artifact is not supported yet; pass the URL of an ontology document instead", value)
+	if looksLikeArtifactReference(value) {
+		return "", fmt.Errorf("import: %s looks like an OCI artifact reference; write it as %s%s", value, OciScheme, value)
 	}
-	return "", fmt.Errorf("import: %s is not an http or https URL", value)
+	return "", fmt.Errorf("import: %s is not an http or https URL or an %s reference", value, OciScheme)
 }
 
-// isOciReference reports whether a reference names an OCI artifact rather than a
-// document URL. The registry host is what separates the two, and as with docker
-// a leading path component only counts as a registry when it carries a dot or a
-// port, or is localhost.
-func isOciReference(value string) bool {
-	value = strings.TrimPrefix(value, "oci://")
+// looksLikeArtifactReference reports whether a reference with no scheme names an
+// OCI artifact, so that a missing oci:// can be reported as the real problem. As
+// with docker, a leading path component only counts as a registry when it
+// carries a dot or a port, or is localhost.
+func looksLikeArtifactReference(value string) bool {
 	if _, err := pkg.ParseArtifact(value); err != nil {
 		return false
 	}

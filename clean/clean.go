@@ -243,6 +243,14 @@ func wipe() error {
 		slog.Info(fmt.Sprintf("Removed %s of data artifacts from %s", pkg.BytesToHumanReadable(totalBytes), dataProductPath))
 	}
 
+	importsDir, err := pkg.SalImportsDir()
+	if err != nil {
+		return err
+	}
+	if err := removePulledImports(importsDir); err != nil {
+		return err
+	}
+
 	return removeProjectOntology(ontologyPath)
 }
 
@@ -258,6 +266,22 @@ func removeProjectOntology(path string) error {
 		return err
 	}
 	slog.Info("Removed the project ontology at " + path)
+	return nil
+}
+
+// removePulledImports deletes the OCI artifacts the project imported. They are
+// pulled from what the ontology declares, so leaving them behind a wipe that
+// removes the ontology would orphan them.
+func removePulledImports(importsDir string) error {
+	if _, err := os.Stat(importsDir); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(importsDir); err != nil {
+		return err
+	}
+	slog.Info("Removed the imported OCI artifacts at " + importsDir)
 	return nil
 }
 

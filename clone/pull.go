@@ -61,5 +61,5 @@ func (cmd *OciArtifactRetrievalCmd) RunPull() error {
 	}
 
 	slog.Info("Pulling data product", "destination", dataDir)
-	return pullManifestLayers(ctx, repo, manifest, desc, ref.Reference, dataDir)
+	return pkg.PullManifestLayers(ctx, repo, manifest, desc, ref.Reference, dataDir)
 }
