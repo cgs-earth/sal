@@ -76,13 +76,18 @@ See [Data Layout](/sal/reference/data-layout/) for the generated table structure
 
 ## `sal query`
 
-Opens DuckDB with a `triples` view over the built Iceberg table.
+Opens an interactive SQL shell with a `triples` view over the built Iceberg table.
+DuckDB is linked into `sal`, so nothing has to be installed alongside it.
 
 ```sh
 sal query
 ```
 
-![sal query opening a DuckDB shell with a triples view over the built table](/sal/demos/sal-query.gif)
+![sal query opening a SQL shell with a triples view over the built table](/sal/demos/sal-query.gif)
+
+The shell opens on the requested info query and leaves the `triples` view there to
+explore. `Ctrl` + `R` runs the editor's statement, `Ctrl` + `H` lists the other keys,
+and `Ctrl` + `D` exits.
 
 Info modes:
 

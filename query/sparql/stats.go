@@ -35,9 +35,10 @@ var statsSections = []string{"snapshots", "properties", "column-stats"}
 
 // Stats collects the counts, snapshots, table properties, and column statistics of the triples table.
 //
-// All four queries go through one RunSQLBatch call: against a table this size,
-// starting duckdb costs far more than running them, so the page used to spend
-// almost all of its time paying that cost four times over.
+// The four queries run one after another on the shared DuckDB handle. They used
+// to be batched into a single duckdb process because starting one cost far more
+// than running them; with DuckDB linked in there is no per query startup left to
+// amortize.
 func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 	statements := make([]string, 0, len(statsSections)+1)
 	statements = append(statements, countsSQL(r.Layout))
@@ -49,9 +50,13 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 		statements = append(statements, sql)
 	}
 
-	results, err := r.RunSQLBatch(ctx, statements)
-	if err != nil {
-		return TableStats{}, err
+	results := make([]Result, 0, len(statements))
+	for i, statement := range statements {
+		result, err := r.RunSQL(ctx, statement)
+		if err != nil {
+			return TableStats{}, fmt.Errorf("stats statement %d: %w", i, err)
+		}
+		results = append(results, result)
 	}
 	return statsFromResults(r.TablePath, results)
 }

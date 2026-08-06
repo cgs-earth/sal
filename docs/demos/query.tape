@@ -1,4 +1,4 @@
-# `sal query`: the DuckDB shell SAL opens over the built table, with its `triples`
+# `sal query`: the SQL shell SAL opens over the built table, with its `triples`
 # view already created.
 # Scenario state: built
 
@@ -8,29 +8,23 @@ Source docs/demos/common.tape
 Set Width 1360
 Set Height 700
 
-# In a TTY, DuckDB pipes its output through a pager. Left alone the recording shows
-# `less` rather than the shell, and the `.exit` below goes to the pager instead of
-# DuckDB. Only the paging is suppressed; the output itself is unchanged.
-Env PAGER cat
-
 Source docs/demos/prompt.tape
 
-Type "sal query --info properties"
+Type "sal query"
 Sleep 300ms
 Enter
-# Inside the DuckDB shell the prompt is `<database> D `, not the `$ ` that the
-# default WaitPattern in common.tape matches.
-Wait /D ?$/
-Sleep 1500ms
+# The shell takes over the alternate screen and runs the statement it opened on,
+# so there is no shell prompt for the default WaitPattern to match here.
+Sleep 4s
 
-Type "SELECT predicate, object FROM triples WHERE predicate LIKE '%name%';"
+# Ctrl+U clears the editor line the shell opened with, Ctrl+R runs what replaces it.
+Ctrl+U
+Sleep 500ms
+Type "SELECT predicate, object FROM triples WHERE predicate LIKE '%name%'"
 Sleep 300ms
-Enter
-Wait /D ?$/
-Sleep 2500ms
+Ctrl+R
+Sleep 3s
 
-Type ".exit"
-Sleep 300ms
-Enter
+Ctrl+D
 Wait
 Sleep 1500ms

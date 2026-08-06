@@ -1,22 +1,16 @@
 package sparql
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
-	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -64,6 +58,29 @@ func RunShell(ctx context.Context, tablePath string, layout ObjectLayout) error 
 	}
 	_, err := tea.NewProgram(newShellModel(ctx, runner)).Run()
 	return err
+}
+
+// RunSQLShell opens an interactive DuckDB SQL prompt against the Iceberg triples
+// table, optionally starting with a statement already in the editor.
+func RunSQLShell(ctx context.Context, tablePath string, layout ObjectLayout, initialQuery string) error {
+	runner := DuckDBRunner{
+		TablePath: tablePath,
+		Layout:    layout,
+		Limit:     100,
+	}
+	_, err := tea.NewProgram(newSQLShellModel(ctx, runner, initialQuery)).Run()
+	return err
+}
+
+// sqlRunner adapts a DuckDB runner to the Runner the shell submits through, so
+// that in SQL mode the editor's statement reaches DuckDB unchanged rather than
+// being parsed as SPARQL.
+type sqlRunner struct {
+	runner SQLRunner
+}
+
+func (r sqlRunner) Run(ctx context.Context, query string) (Result, error) {
+	return r.runner.RunSQL(ctx, query)
 }
 
 // Run translates SPARQL to SQL and executes it through DuckDB.
@@ -128,200 +145,6 @@ LIMIT %d
 OFFSET %d`, bindingExpr("triples", "object", layout), limit, offset)
 }
 
-// RunSQL executes a DuckDB statement with the Iceberg triples table registered as the `triples` view.
-func (r DuckDBRunner) RunSQL(ctx context.Context, sql string) (Result, error) {
-	copyToStdout := fmt.Sprintf("COPY (%s) TO STDOUT (HEADER, DELIMITER ',');\n", sql)
-
-	withSpatial := needsSpatial(sql, r.Layout)
-	stdout, err := runDuckDB(ctx, r.preamble(withSpatial)+copyToStdout)
-	// A statement can need spatial in a way needsSpatial does not recognize. Paying
-	// for a second process on that path beats failing a query that would have worked.
-	if err != nil && !withSpatial && missingSpatialExtension(err) {
-		stdout, err = runDuckDB(ctx, r.preamble(true)+copyToStdout)
-	}
-	if err != nil {
-		return Result{}, err
-	}
-
-	header, rows, err := parseCSVResult(stdout)
-	if err != nil {
-		return Result{}, err
-	}
-	return Result{
-		SQL:     sql,
-		Header:  header,
-		Rows:    rows,
-		Message: fmt.Sprintf("%d rows", len(rows)),
-	}, nil
-}
-
-// RunSQLBatch executes several statements in one duckdb process, writing each
-// statement's rows to its own CSV file and reading them back.
-//
-// Starting duckdb and loading its extensions costs far more than any query SAL
-// runs against a triples table, so a caller that needs several results should pay
-// that startup once rather than once per query.
-func (r DuckDBRunner) RunSQLBatch(ctx context.Context, statements []string) ([]Result, error) {
-	if len(statements) == 0 {
-		return nil, nil
-	}
-	dir, err := os.MkdirTemp("", "sal-duckdb-batch-")
-	if err != nil {
-		return nil, fmt.Errorf("create duckdb batch output directory: %w", err)
-	}
-	defer func() {
-		if err := os.RemoveAll(dir); err != nil {
-			slog.Warn("failed to remove the duckdb batch output directory", "dir", dir, "error", err)
-		}
-	}()
-
-	withSpatial := slices.ContainsFunc(statements, func(sql string) bool {
-		return needsSpatial(sql, r.Layout)
-	})
-	_, err = runDuckDB(ctx, batchScript(r.preamble(withSpatial), statements, dir))
-	if err != nil && !withSpatial && missingSpatialExtension(err) {
-		_, err = runDuckDB(ctx, batchScript(r.preamble(true), statements, dir))
-	}
-	if err != nil {
-		return nil, batchError(err, statements, dir)
-	}
-	return collectBatchResults(statements, dir)
-}
-
-// preamble is the statement prefix every DuckDB invocation shares: the extensions
-// the query needs, then the `triples` view over the Iceberg table.
-func (r DuckDBRunner) preamble(withSpatial bool) string {
-	var b strings.Builder
-	b.WriteString("INSTALL iceberg;\nLOAD iceberg;\n")
-	if withSpatial {
-		b.WriteString("INSTALL spatial;\nLOAD spatial;\n")
-	}
-	fmt.Fprintf(&b, `CREATE OR REPLACE VIEW triples AS
-SELECT *
-FROM iceberg_scan('%s', allow_moved_paths = true);
-`, escapeSQLLiteral(r.TablePath))
-	return b.String()
-}
-
-// countStar matches COUNT(*), which projects no column and so cannot pull in the
-// geometry column that `*` otherwise would.
-var countStar = regexp.MustCompile(`count\s*\(\s*\*\s*\)`)
-
-// needsSpatial reports whether a statement has to run with the spatial extension
-// loaded.
-//
-// The extension is around 60 MB and DuckDB cannot autoload it, so loading it
-// unconditionally costs roughly half of every duckdb invocation -- far more than
-// any query against a triples table costs to actually run. Two things need it:
-// the ST_ functions, and the typed layout's object_geometry column, which DuckDB
-// exposes as GEOMETRY and cannot read at all without spatial.
-func needsSpatial(sql string, layout ObjectLayout) bool {
-	lowered := strings.ToLower(sql)
-	// Every DuckDB spatial function is named ST_*.
-	if strings.Contains(lowered, "st_") {
-		return true
-	}
-	// The simple layout has no geometry column for a projection to reach.
-	if layout != TypedObjects {
-		return false
-	}
-	projected := countStar.ReplaceAllString(lowered, "")
-	return strings.Contains(projected, "object_geometry") || strings.Contains(projected, "*")
-}
-
-// missingSpatialExtension recognizes the two ways DuckDB reports that a statement
-// needed spatial: an ST_ function missing from the catalog, and a geometry column
-// it cannot cast without the extension loaded.
-func missingSpatialExtension(err error) bool {
-	message := err.Error()
-	return strings.Contains(message, "spatial extension") || strings.Contains(message, "GEOMETRY")
-}
-
-// batchScript builds one duckdb script that writes each statement's rows to its
-// own CSV file under dir.
-func batchScript(preamble string, statements []string, dir string) string {
-	var b strings.Builder
-	b.WriteString(preamble)
-	for i, sql := range statements {
-		fmt.Fprintf(&b, "COPY (%s) TO '%s' (HEADER, DELIMITER ',');\n", sql, escapeSQLLiteral(batchOutputPath(dir, i)))
-	}
-	return b.String()
-}
-
-func batchOutputPath(dir string, index int) string {
-	return filepath.ToSlash(filepath.Join(dir, strconv.Itoa(index)+".csv"))
-}
-
-// collectBatchResults reads back the CSV that each batched statement wrote.
-func collectBatchResults(statements []string, dir string) ([]Result, error) {
-	results := make([]Result, len(statements))
-	for i, sql := range statements {
-		content, err := os.ReadFile(batchOutputPath(dir, i))
-		if err != nil {
-			return nil, fmt.Errorf("read the duckdb output of statement %d: %w", i, err)
-		}
-		header, rows, err := parseCSVResult(string(content))
-		if err != nil {
-			return nil, err
-		}
-		results[i] = Result{
-			SQL:     sql,
-			Header:  header,
-			Rows:    rows,
-			Message: fmt.Sprintf("%d rows", len(rows)),
-		}
-	}
-	return results, nil
-}
-
-// batchError names the statement that failed. DuckDB runs a script in order and
-// stops at the first error, so the first statement with no output file is the one
-// that failed.
-func batchError(runErr error, statements []string, dir string) error {
-	for i := range statements {
-		if _, err := os.Stat(batchOutputPath(dir, i)); err == nil {
-			continue
-		}
-		return fmt.Errorf("batched statement %d: %w", i, runErr)
-	}
-	return runErr
-}
-
-// runDuckDB executes a script with the duckdb CLI and returns its stdout.
-func runDuckDB(ctx context.Context, script string) (string, error) {
-	cmd := exec.CommandContext(ctx, "duckdb", "-csv", "-c", script)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if stderr.Len() > 0 {
-			return "", fmt.Errorf("duckdb query failed: %s", strings.TrimSpace(stderr.String()))
-		}
-		return "", fmt.Errorf("duckdb query failed: %w", err)
-	}
-	return stdout.String(), nil
-}
-
-func escapeSQLLiteral(value string) string {
-	return strings.ReplaceAll(value, "'", "''")
-}
-
-func parseCSVResult(output string) ([]string, [][]string, error) {
-	output = strings.TrimSpace(output)
-	if output == "" {
-		return nil, nil, nil
-	}
-	records, err := csv.NewReader(strings.NewReader(output)).ReadAll()
-	if err != nil {
-		return nil, nil, fmt.Errorf("parse duckdb CSV output: %w", err)
-	}
-	if len(records) == 0 {
-		return nil, nil, nil
-	}
-	return records[0], records[1:], nil
-}
-
 func hasLimit(sql string) bool {
 	return strings.Contains(strings.ToUpper(sql), "\nLIMIT ") || strings.Contains(strings.ToUpper(sql), " LIMIT ")
 }
@@ -361,6 +184,24 @@ const (
 	pageSQL
 )
 
+// shellMode selects what the editor accepts. SPARQL is translated to SQL before
+// it runs and has an SQL page showing that translation; SQL is handed to DuckDB
+// as written, so there is nothing to translate and no second page.
+type shellMode int
+
+const (
+	modeSPARQL shellMode = iota
+	modeSQL
+)
+
+// language names the mode in the messages the shell shows.
+func (m shellMode) language() string {
+	if m == modeSQL {
+		return "SQL"
+	}
+	return "SPARQL"
+}
+
 type shellModel struct {
 	ctx                context.Context
 	runner             Runner
@@ -388,20 +229,36 @@ type shellModel struct {
 	mouseSelectAnchor  int
 	showHelp           bool
 	page               shellPage
+	mode               shellMode
 }
 
 func newShellModel(ctx context.Context, runner Runner) shellModel {
-	defaultQuery := `PREFIX schema: <https://schema.org/>
+	return newModeShellModel(ctx, runner, modeSPARQL, `PREFIX schema: <https://schema.org/>
 
 SELECT ?s ?p ?o
 WHERE {
   ?s ?p ?o .
-}`
-	historyDir := shellHistoryDir()
+}`)
+}
+
+// newSQLShellModel opens the same shell over DuckDB SQL instead of SPARQL.
+func newSQLShellModel(ctx context.Context, runner SQLRunner, initialQuery string) shellModel {
+	if strings.TrimSpace(initialQuery) == "" {
+		initialQuery = "SELECT * FROM triples LIMIT 20"
+	}
+	model := newModeShellModel(ctx, sqlRunner{runner: runner}, modeSQL, initialQuery)
+	model.submitted = strings.TrimSpace(initialQuery)
+	model.running = true
+	return model
+}
+
+func newModeShellModel(ctx context.Context, runner Runner, mode shellMode, defaultQuery string) shellModel {
+	historyDir := shellHistoryDir(mode)
 	history, _ := loadQueryHistory(historyDir)
 	return shellModel{
 		ctx:          ctx,
 		runner:       runner,
+		mode:         mode,
 		query:        defaultQuery,
 		cursor:       len([]rune(defaultQuery)),
 		width:        100,
@@ -415,8 +272,14 @@ WHERE {
 
 var shellHistoryDir = defaultHistoryDir
 
+// Init runs the query the shell opened on. SQL mode is entered from `sal query`,
+// which asked for a specific info query, so showing its result straight away is
+// what the duckdb shell that command used to open did.
 func (m shellModel) Init() tea.Cmd {
-	return nil
+	if m.mode != modeSQL || strings.TrimSpace(m.query) == "" {
+		return nil
+	}
+	return runQueryCmd(m.ctx, m.runner, strings.TrimSpace(m.query))
 }
 
 func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -470,7 +333,8 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showHelp = !m.showHelp
 			return m, nil
 		}
-		if isSQLPageToggleKey(msg) {
+		// SQL mode runs what the editor holds, so there is no translation to show.
+		if isSQLPageToggleKey(msg) && m.mode != modeSQL {
 			if m.page == pageSQL {
 				m.page = pageMain
 			} else {
@@ -522,7 +386,7 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.submitted = strings.TrimSpace(m.query)
 			if m.submitted == "" {
-				m.err = "enter a SPARQL SELECT query"
+				m.err = "enter a " + m.mode.language() + " SELECT query"
 				return m, nil
 			}
 			m.err = ""
@@ -713,7 +577,12 @@ func (m shellModel) View() tea.View {
 			m.renderSQL(contentWidth),
 		)
 	} else {
-		header := shellTitleStyle.Width(contentWidth).Render("SAL SPARQL  Ctrl+H: help  F2: SQL View")
+		title := "SAL SPARQL  Ctrl+H: help  F2: SQL View"
+		if m.mode == modeSQL {
+			// SQL mode has no translation step, so there is no SQL page to switch to.
+			title = "SAL SQL  Ctrl+H: help"
+		}
+		header := shellTitleStyle.Width(contentWidth).Render(title)
 		editorColumn := m.renderEditorColumn(contentWidth)
 		resultsHeight := m.resultsHeight(header, editorColumn)
 		results := m.renderResults(contentWidth, resultsHeight)
@@ -727,7 +596,7 @@ func (m shellModel) View() tea.View {
 	}
 	rendered := shellAppStyle.Width(width).Render(body)
 	if m.showHelp {
-		rendered = renderHelpLayer(rendered, width)
+		rendered = renderHelpLayer(rendered, width, m.mode)
 	}
 	view := tea.NewView(rendered)
 	view.AltScreen = true
@@ -750,7 +619,7 @@ func (m shellModel) renderEditor(width int) string {
 	if m.running {
 		status = shellRunningStyle.Render("running")
 	}
-	body := renderEditorBody(m.query, m.cursor, m.selectionStart, m.selectionEnd)
+	body := renderEditorBody(m.mode, m.query, m.cursor, m.selectionStart, m.selectionEnd)
 	titleStyle := sectionTitleStyle
 	panelStyle := editorPanelStyle
 	if m.focus == focusEditor {
@@ -925,7 +794,7 @@ func (m shellModel) editorBodyBounds() (int, int, int, int) {
 	y := 1 + 1 + 1 + 1
 	y += lipgloss.Height(m.renderHistory(editorWidth))
 	bodyWidth := max(1, editorWidth-2-4)
-	bodyHeight := max(1, lipgloss.Height(renderEditorBody(m.query, m.cursor, m.selectionStart, m.selectionEnd)))
+	bodyHeight := max(1, lipgloss.Height(renderEditorBody(m.mode, m.query, m.cursor, m.selectionStart, m.selectionEnd)))
 	return x, y, bodyWidth, bodyHeight
 }
 
@@ -1095,10 +964,15 @@ func clearCopyFlashCmd(id int) tea.Cmd {
 	})
 }
 
-func defaultHistoryDir() string {
+// defaultHistoryDir keeps each mode's history separate, since a SPARQL query
+// and a SQL statement are not interchangeable in the editor.
+func defaultHistoryDir(mode shellMode) string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""
+	}
+	if mode == modeSQL {
+		return filepath.Join(home, ".sal", "sql_history")
 	}
 	return filepath.Join(home, ".sal", "sparql_history")
 }
@@ -1113,7 +987,9 @@ func saveQueryHistory(dir string, query string) ([]historyEntry, error) {
 		return nil, err
 	}
 	sum := sha256.Sum256([]byte(query))
-	path := filepath.Join(dir, hex.EncodeToString(sum[:])+".sparql")
+	// The directory already names the language, and loadQueryHistory reads every
+	// file in it, so the suffix is only there to make the directory browsable.
+	path := filepath.Join(dir, hex.EncodeToString(sum[:])+".txt")
 	if err := os.WriteFile(path, []byte(query), 0o644); err != nil {
 		return nil, err
 	}
@@ -1262,8 +1138,8 @@ func truncateTableCell(value string, width int) string {
 	return value[:width-3] + "..."
 }
 
-func renderHelpLayer(base string, width int) string {
-	help := renderHelp(width)
+func renderHelpLayer(base string, width int, mode shellMode) string {
+	help := renderHelp(width, mode)
 	x := max(0, (lipgloss.Width(base)-lipgloss.Width(help))/2)
 	y := max(1, min(5, lipgloss.Height(base)/3))
 	return lipgloss.NewCompositor(
@@ -1272,12 +1148,16 @@ func renderHelpLayer(base string, width int) string {
 	).Render()
 }
 
-func renderHelp(width int) string {
+func renderHelp(width int, mode shellMode) string {
 	helpWidth := min(max(36, width-12), 72)
 	items := []string{
 		helpItem("Ctrl+H", "toggle help"),
 		helpItem("Ctrl+R", "run query"),
-		helpItem("F2", "switch main and SQL pages"),
+	}
+	if mode != modeSQL {
+		items = append(items, helpItem("F2", "switch main and SQL pages"))
+	}
+	items = append(items,
 		helpItem("Shift+←/→", "change focus"),
 		helpItem("Left/Right", "browse history when history is focused"),
 		helpItem("Up/Down", "move cursor or selected result row"),
@@ -1288,7 +1168,7 @@ func renderHelp(width int) string {
 		helpItem("Ctrl+V", "paste into editor"),
 		helpItem("Ctrl+L", "clear screen"),
 		helpItem("Ctrl+D", "quit"),
-	}
+	)
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		shellHelpTitleStyle.Render("Help"),
@@ -1301,27 +1181,31 @@ func helpItem(key string, description string) string {
 	return shellHelpRowStyle.Render(shellHelpKeyStyle.Render(key) + "  " + shellHelpDescriptionStyle.Render(description))
 }
 
-func renderEditorBody(query string, cursor int, selection ...int) string {
+func renderEditorBody(mode shellMode, query string, cursor int, selection ...int) string {
+	highlight := syntaxHighlight
+	if mode == modeSQL {
+		highlight = highlightSQL
+	}
 	renderedCursor := editorCursorStyle.Render(" ")
 	if strings.TrimSpace(query) == "" {
-		return shellMutedStyle.Render("Enter a SPARQL SELECT query...") + renderedCursor
+		return shellMutedStyle.Render("Enter a "+mode.language()+" SELECT query...") + renderedCursor
 	}
 	if len(selection) >= 2 {
 		if start, end, ok := selectionBounds(query, selection[0], selection[1]); ok {
 			runes := []rune(query)
-			return syntaxHighlight(string(runes[:start])) +
+			return highlight(string(runes[:start])) +
 				editorSelectionStyle.Render(string(runes[start:end])) +
-				syntaxHighlight(string(runes[end:]))
+				highlight(string(runes[end:]))
 		}
 	}
 	before, at, after := splitAtCursor(query, cursor)
 	if at != "" {
 		if at == "\n" {
-			return syntaxHighlight(before) + renderedCursor + "\n" + syntaxHighlight(after)
+			return highlight(before) + renderedCursor + "\n" + highlight(after)
 		}
 		renderedCursor = editorCursorStyle.Render(at)
 	}
-	return syntaxHighlight(before) + renderedCursor + syntaxHighlight(after)
+	return highlight(before) + renderedCursor + highlight(after)
 }
 
 func selectionBounds(value string, start int, end int) (int, int, bool) {
