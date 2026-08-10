@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/cgs-earth/sal/pkg"
+	"github.com/cgs-earth/sal/salmodule"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/turtle"
 )
@@ -34,9 +35,11 @@ var (
 
 // ImportCmd records what a project imports in its .sal/ontology.ttl. An http or
 // https URL is an ontology document that `sal build` merges into the data
-// product; an oci:// reference is an artifact that is pulled to disk instead.
+// product, as is a salmodule:// reference, whose document is obtained by
+// building the module rather than over HTTP; an oci:// reference is an artifact
+// that is pulled to disk instead.
 type ImportCmd struct {
-	References []string `arg:"positional,required" help:"URLs of the ontologies to import, or oci:// references to the OCI artifacts to import"`
+	References []string `arg:"positional,required" help:"URLs of the ontologies to import, salmodule:// references to the SAL modules whose ontologies to import, or oci:// references to the OCI artifacts to import"`
 	Title      string   `arg:"--title" help:"Title recorded for this project's own ontology; defaults to the git project name"`
 	Username   string   `arg:"--username,env:OCI_USERNAME" help:"Username for the OCI registry"`
 	Password   string   `arg:"--password,env:OCI_PASSWORD" help:"Password for the OCI registry"`
@@ -269,8 +272,9 @@ func turtleString(value string) string {
 }
 
 // importIRI resolves what an import was given as into the IRI recorded with
-// owl:imports. An http or https URL is an ontology document that build merges;
-// an oci:// reference is an artifact that build pulls to disk instead.
+// owl:imports. An http or https URL is an ontology document that build merges,
+// as is a salmodule:// reference; an oci:// reference is an artifact that build
+// pulls to disk instead.
 func importIRI(reference string) (string, error) {
 	value := strings.TrimSpace(reference)
 	value = strings.TrimSuffix(strings.TrimPrefix(value, "<"), ">")
@@ -285,6 +289,18 @@ func importIRI(reference string) (string, error) {
 		return value, nil
 	}
 
+	if salmodule.IsModuleIRI(value) {
+		ref, err := salmodule.ParseModuleIRI(value)
+		if err != nil {
+			return "", fmt.Errorf("import: %w", err)
+		}
+		// the module is recorded under the IRI that names it rather than under
+		// its vocabulary base, which is the same IRI with a trailing slash. A
+		// project that binds a prefix to the base would otherwise have the
+		// import statement itself checked against the module's own terms.
+		return strings.TrimSuffix(ref.Namespace, "/"), nil
+	}
+
 	parsed, err := url.Parse(value)
 	if err == nil && parsed.Host != "" && (parsed.Scheme == "http" || parsed.Scheme == "https") {
 		return value, nil
@@ -292,7 +308,7 @@ func importIRI(reference string) (string, error) {
 	if looksLikeArtifactReference(value) {
 		return "", fmt.Errorf("import: %s looks like an OCI artifact reference; write it as %s%s", value, OciScheme, value)
 	}
-	return "", fmt.Errorf("import: %s is not an http or https URL or an %s reference", value, OciScheme)
+	return "", fmt.Errorf("import: %s is not an http or https URL, a %s:// reference, or an %s reference", value, salmodule.ProtocolScheme, OciScheme)
 }
 
 // looksLikeArtifactReference reports whether a reference with no scheme names an

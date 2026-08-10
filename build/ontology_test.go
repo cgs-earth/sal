@@ -179,6 +179,38 @@ func TestImportOntologiesPullsAnOciArtifactAndKeepsItOutOfTheGraph(t *testing.T)
 	))
 }
 
+// A module's vocabulary is an ontology document like any other; only where it is
+// fetched from differs, so it is merged rather than pulled to disk.
+func TestImportOntologiesMergesASalModuleOntology(t *testing.T) {
+	path := writeProjectOntology(t, `@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+<.> a owl:Ontology ;
+    owl:imports <salmodule://github.com/adplincinst/sample-salmodule-1> .
+`)
+
+	var requested []string
+	fetch := func(iri string) (*rdflibgo.Graph, error) {
+		requested = append(requested, iri)
+		imported := rdflibgo.NewGraph()
+		imported.Add(
+			rdflibgo.NewURIRefUnsafe(iri+"/EducationalHistoryFinder"),
+			rdflibgo.RDF.Type,
+			rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"),
+		)
+		return imported, nil
+	}
+
+	graph := rdflibgo.NewGraph(rdflibgo.WithBase(ontologyTestBase))
+	require.NoError(t, importOntologies(graph, path, ontologyTestBase, fetch, failOnPull(t)))
+
+	require.Equal(t, []string{"salmodule://github.com/adplincinst/sample-salmodule-1"}, requested)
+	require.True(t, graph.Contains(
+		rdflibgo.NewURIRefUnsafe("salmodule://github.com/adplincinst/sample-salmodule-1/EducationalHistoryFinder"),
+		rdflibgo.RDF.Type,
+		rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"),
+	))
+}
+
 func TestImportOntologiesReportsWhichArtifactCouldNotBePulled(t *testing.T) {
 	path := writeProjectOntology(t, `@prefix owl: <http://www.w3.org/2002/07/owl#> .
 

@@ -58,8 +58,58 @@ sal import https://www.w3.org/ns/sosa/ http://www.w3.org/ns/ssn/
 The file is regenerated on every import.
 A statement added by hand survives, since `sal import` keeps anything the generated shape does not cover, but comments do not.
 
-Importing an ontology from an OCI artifact reference is not supported yet.
-A reference such as `ghcr.io/my-org/my-ontology:latest` is recognized and reported as unsupported rather than treated as a URL.
+### Importing a SAL module's ontology
+
+A `salmodule://` reference imports the vocabulary a [SAL module](/sal/guides/using-sal-modules/) publishes:
+
+```sh
+sal import salmodule://github.com/adplincinst/sample-salmodule-1
+```
+
+The module is recorded like any other import:
+
+```turtle
+<.> a owl:Ontology ;
+    dc:title "my-project" ;
+    owl:imports <salmodule://github.com/adplincinst/sample-salmodule-1> .
+```
+
+A module ontology is not served over HTTP, so `sal build` resolves the import the way the SAL Module specification
+says a `salmodule://` IRI is dereferenced: it clones the repository, builds the `Dockerfile` in its root, and runs
+the image's `salmodule ontology` command. The JSON-LD the module prints is merged into the data product, so the
+module's terms end up in the triples table alongside the project's own.
+
+The host may be left out, in which case `github.com` is assumed; `salmodule://adplincinst/sample-salmodule-1` and
+`salmodule://github.com/adplincinst/sample-salmodule-1` are the same import.
+Importing a module records it but does not build it, exactly as importing a URL records it without fetching it.
+Nothing is cloned or built until `sal build` runs.
+
+### Importing another data product
+
+An `oci://` reference imports a published SAL data product rather than an ontology document:
+
+```sh
+sal import oci://ghcr.io/cgs-earth/water:v1
+```
+
+Unlike the other kinds, an artifact is pulled as it is recorded, into `.sal/data/imports/` under a directory named
+after the artifact itself. That path sits inside `.sal/data`, so what was pulled is not committed to Git;
+re-running `sal import` on an artifact already listed restores it to disk rather than skipping it.
+Pass `--username` and `--password` for a private registry, or set `OCI_USERNAME` and `OCI_PASSWORD`.
+`sal build` reads only the environment variables, since it takes no registry flags of its own.
+
+Because artifacts are laid out by name, a project holds one version of each at a time.
+Importing `oci://ghcr.io/cgs-earth/water:v2` replaces the `:v1` entry in `.sal/ontology.ttl` and deletes what it
+pulled.
+
+An imported data product's triples are not merged into your table.
+Its Iceberg table is registered beside your own instead, so `sal query` gets a view named after the artifact
+(`water`) next to `triples`, plus an `imports` view stacking every imported product with a `view` column naming
+which one each row came from.
+An import that has not been pulled, or that holds no Iceberg table, is skipped rather than failing the query.
+
+A reference such as `ghcr.io/my-org/my-ontology:latest`, written without a scheme, is recognized as an artifact
+and reported as a missing `oci://` rather than treated as a malformed URL.
 
 ## `sal validate`
 
@@ -108,6 +158,7 @@ Only triples that are not already in the table are committed, so rebuilding unch
 
 `sal build` validates `.sal/ontology.ttl` alongside the project's other RDF if the project has one,
 then dereferences every ontology it lists with `owl:imports` and merges those statements into the data product.
+A `salmodule://` import is dereferenced by cloning and building the module and asking it for its ontology.
 An import that cannot be fetched fails the build, naming the ontology that could not be resolved.
 `sal validate` does not fetch imports; only `sal build` does.
 
@@ -132,6 +183,9 @@ sal query
 The shell opens on the requested info query and leaves the `triples` view there to
 explore. `Ctrl` + `R` runs the editor's statement, `Ctrl` + `H` lists the other keys,
 and `Ctrl` + `D` exits.
+
+A project that imported a data product with `sal import oci://...` gets a view per imported table alongside
+`triples`, plus an `imports` view stacking them all.
 
 Info modes:
 
@@ -336,7 +390,8 @@ It does not rewrite Parquet data files.
 Removes or reshapes local build artifacts.
 Use `--wipe` to delete the local data product, or `--squash` to condense local snapshots ahead of a remote artifact.
 
-`--wipe` also deletes `.sal/ontology.ttl`, putting the project back to the state it was in before anything was built or imported.
+`--wipe` also deletes `.sal/ontology.ttl` and any data products pulled under `.sal/data/imports`, putting the
+project back to the state it was in before anything was built or imported.
 The confirmation prompt names the ontology whenever there is one to remove, since it is a source file rather than a build artifact.
 Run `sal import` again to recreate it.
 
