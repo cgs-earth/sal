@@ -58,6 +58,17 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
             />
           </Section>
 
+          <Section
+            title="Imported data products"
+            caption="Each imported OCI artifact is queryable in the SQL tab as the view named here."
+          >
+            <ResultTable
+              header={['view', 'artifact', 'table']}
+              rows={(stats.importedTables ?? []).map((table) => [table.view, table.artifact, table.path])}
+              empty="No imported data products; pull one with sal import oci://<reference>"
+            />
+          </Section>
+
           <Section title="Table properties" caption="Iceberg metadata properties from the latest metadata file.">
             <ResultTable header={stats.properties.header} rows={stats.properties.rows} empty="No properties set" />
           </Section>

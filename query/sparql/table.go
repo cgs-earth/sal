@@ -17,6 +17,9 @@ type TriplesTable struct {
 	Warehouse string
 	Namespace string
 	Path      string
+	// Imports are the triples tables of the OCI artifacts the project imports,
+	// which queries reach through a view named after each artifact.
+	Imports []ImportedTable
 }
 
 // LocateTriplesTable resolves the triples table of the SAL project in the
@@ -45,6 +48,7 @@ func LocateTriplesTable() (TriplesTable, error) {
 		Warehouse: warehouse,
 		Namespace: namespace,
 		Path:      joinRemote(warehouse, namespace, "triples"),
+		Imports:   LocateImportedTables(),
 	}, nil
 }
 
@@ -56,7 +60,7 @@ func (t TriplesTable) Runner(ctx context.Context, limit int) (DuckDBRunner, erro
 	if err != nil {
 		return DuckDBRunner{}, err
 	}
-	return DuckDBRunner{TablePath: t.Path, Layout: layout, Limit: limit}, nil
+	return DuckDBRunner{TablePath: t.Path, Layout: layout, Limit: limit, Imports: t.Imports}, nil
 }
 
 // RunLookup opens the triples table of the SAL project in the current working

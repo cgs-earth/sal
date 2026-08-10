@@ -30,11 +30,7 @@ type UIRunner interface {
 }
 
 // Serve starts a read-only SPARQL Protocol HTTP endpoint backed by DuckDB.
-func Serve(ctx context.Context, addr string, tablePath string, layout salsparql.ObjectLayout, withUI bool) error {
-	runner := salsparql.DuckDBRunner{
-		TablePath: tablePath,
-		Layout:    layout,
-	}
+func Serve(ctx context.Context, addr string, runner salsparql.DuckDBRunner, withUI bool) error {
 	handler := NewEndpoint(runner)
 	if withUI {
 		ui, err := NewEndpointWithUI(runner)
