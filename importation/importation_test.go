@@ -96,6 +96,16 @@ func TestWrittenOntologyReadsBackWithTheSameImports(t *testing.T) {
 	require.Equal(t, imports, ontology.Imports)
 }
 
+func TestWrittenOntologyReadsBackASalModuleImport(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ontology.ttl")
+	module := "salmodule://github.com/adplincinst/sample-salmodule-1"
+	require.NoError(t, writeOntology(path, &Ontology{IRI: testBase, Base: testBase, Title: "sal", Imports: []string{module}}))
+
+	ontology, err := ReadOntology(path, testBase)
+	require.NoError(t, err)
+	require.Equal(t, []string{module}, ontology.Imports)
+}
+
 func TestWriteOntologyKeepsStatementsTheTemplateDoesNotCover(t *testing.T) {
 	path := writeTestOntology(t, `@prefix dc: <http://purl.org/dc/elements/1.1/> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -152,5 +162,25 @@ func TestImportIRIAcceptsAnHTTPSURL(t *testing.T) {
 
 func TestImportIRIRejectsSomethingThatIsNeitherAURLNorAnArtifact(t *testing.T) {
 	_, err := importIRI("./local/ontology.ttl")
-	require.ErrorContains(t, err, "is not an http or https URL or an oci:// reference")
+	require.ErrorContains(t, err, "is not an http or https URL, a salmodule:// reference, or an oci:// reference")
+}
+
+func TestImportIRIRecordsASalModuleUnderTheIRINamingIt(t *testing.T) {
+	value, err := importIRI("salmodule://github.com/adplincinst/sample-salmodule-1")
+	require.NoError(t, err)
+	require.Equal(t, "salmodule://github.com/adplincinst/sample-salmodule-1", value)
+}
+
+// A module reference may leave the host out, in which case github.com is
+// assumed. Recording the resolved form means the same module imported both ways
+// is only recorded once.
+func TestImportIRIFillsInTheDefaultHostOfASalModule(t *testing.T) {
+	value, err := importIRI("  <salmodule://adplincinst/sample-salmodule-1>  ")
+	require.NoError(t, err)
+	require.Equal(t, "salmodule://github.com/adplincinst/sample-salmodule-1", value)
+}
+
+func TestImportIRIRejectsASalModuleThatDoesNotNameARepository(t *testing.T) {
+	_, err := importIRI("salmodule://adplincinst")
+	require.ErrorContains(t, err, "must be of the form salmodule://[HOST/]OWNER/REPO")
 }

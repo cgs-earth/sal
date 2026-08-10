@@ -113,6 +113,22 @@ Those triples land in the Iceberg table alongside the triples from your source f
 
 If a task emits `salmodule:Error` nodes instead of data, the build fails with the messages the module reported.
 
+## Importing a module's ontology
+
+Referencing a module checks its terms and runs its tasks, but the vocabulary itself stays outside the data
+product. Import the module to carry it too:
+
+```sh
+sal import salmodule://github.com/cgs-earth/python-geoconnex
+```
+
+`sal build` dereferences the import the same way it dereferences a `salmodule://` prefix, by cloning the
+repository, building the image, and running `salmodule ontology`, and merges the resulting triples into the
+table. The module is written without a trailing slash here, since the import names the module rather than the
+vocabulary base its terms resolve against.
+
+See [`sal import`](/sal/reference/commands/#sal-import).
+
 ## Modules recorded in the table
 
 Every module a build downloaded, whether it was dereferenced for its vocabulary or run as a task, is written to

@@ -9,6 +9,7 @@ import (
 
 	"github.com/cgs-earth/sal/salmodule"
 	"github.com/stretchr/testify/require"
+	rdflibgo "github.com/tggo/goRDFlib"
 )
 
 const testModuleOntology = `{
@@ -90,6 +91,23 @@ func TestValidateChecksTaskConfigurationPropertiesAgainstTheModuleOntology(t *te
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "undefined term")
 	require.Contains(t, err.Error(), "history:maxRetriess")
+}
+
+// `sal import` records a module under the IRI naming it, which is its
+// vocabulary base without the trailing slash. The ontology it publishes still
+// has to parse against the base, or none of its terms would match the ones a
+// project references.
+func TestFetchGraphResolvesAModuleOntologyAgainstTheModuleNamespace(t *testing.T) {
+	useFakeSalModule(t)
+
+	graph, err := FetchGraph("salmodule://www.github.com/test/history-getter")
+
+	require.NoError(t, err)
+	require.True(t, graph.Contains(
+		rdflibgo.NewURIRefUnsafe("salmodule://www.github.com/test/history-getter/EducationalHistoryFinder"),
+		rdflibgo.RDF.Type,
+		rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"),
+	))
 }
 
 func TestValidateRejectsTermsMissingFromSalModuleOntology(t *testing.T) {
