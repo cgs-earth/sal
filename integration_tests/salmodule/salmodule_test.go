@@ -90,7 +90,7 @@ func (s *SalModuleSuite) commitFixtureModuleToGitRepository() string {
 // cloneFixtureModule stands in for SAL's git clone. It performs a real clone but
 // substitutes the local fixture repository for the remote URL SAL derived from
 // the salmodule:// IRI.
-func (s *SalModuleSuite) cloneFixtureModule(ctx context.Context, dir string, name string, args ...string) error {
+func (s *SalModuleSuite) cloneFixtureModule(ctx context.Context, dir string, name string, args ...string) ([]byte, error) {
 	rewritten := make([]string, len(args))
 	copy(rewritten, args)
 	for i, arg := range rewritten {
@@ -103,9 +103,9 @@ func (s *SalModuleSuite) cloneFixtureModule(ctx context.Context, dir string, nam
 	command.Dir = dir
 	out, err := command.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%s %s: %s: %w", name, strings.Join(rewritten, " "), strings.TrimSpace(string(out)), err)
+		return nil, fmt.Errorf("%s %s: %s: %w", name, strings.Join(rewritten, " "), strings.TrimSpace(string(out)), err)
 	}
-	return nil
+	return out, nil
 }
 
 func (s *SalModuleSuite) git(dir string, args ...string) {

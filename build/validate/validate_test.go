@@ -43,8 +43,8 @@ func TestPinDeclaredPrefixesPinsAPrefixNoTermUses(t *testing.T) {
 
 func TestPinDeclaredPrefixesFailsWhenADeclaredVocabularyCannotBeResolved(t *testing.T) {
 	pins := EphemeralVocabularies()
-	pins.Fetch = func(string) ([]byte, string, error) {
-		return nil, "", fmt.Errorf("bad response status code: 404")
+	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
+		return nil, "", PinnedVersion{}, fmt.Errorf("bad response status code: 404")
 	}
 	path := writeTurtleTestFileNamed(t, "missing.ttl", `
 		@prefix gone: <https://vocab.test/gone#> .
@@ -67,8 +67,8 @@ func TestPinDeclaredPrefixesFailsWhenADeclaredVocabularyCannotBeResolved(t *test
 // vocabulary document, so there is no version of either to pin.
 func TestPinDeclaredPrefixesSkipsTheProjectBaseAndXsd(t *testing.T) {
 	pins := EphemeralVocabularies()
-	pins.Fetch = func(u string) ([]byte, string, error) {
-		return nil, "", fmt.Errorf("%s should not have been dereferenced", u)
+	pins.Fetch = func(u string) ([]byte, string, PinnedVersion, error) {
+		return nil, "", PinnedVersion{}, fmt.Errorf("%s should not have been dereferenced", u)
 	}
 	path := writeTurtleTestFileNamed(t, "builtins.ttl", `
 		@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
@@ -90,8 +90,8 @@ func TestPinDeclaredPrefixesSkipsTheProjectBaseAndXsd(t *testing.T) {
 func TestAVocabularyThatCannotBeFetchedPinsSalsBundledCopy(t *testing.T) {
 	projectDir := t.TempDir()
 	pins := newTestPins(t, projectDir, "", nil)
-	pins.Fetch = func(string) ([]byte, string, error) {
-		return nil, "", fmt.Errorf("bad response status code: 403")
+	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
+		return nil, "", PinnedVersion{}, fmt.Errorf("bad response status code: 403")
 	}
 	path := writeTurtleTestFileNamed(t, "schema.ttl", `
 		@prefix schema: <https://schema.org/> .
@@ -140,9 +140,9 @@ func TestPinnedGraphMergesTheVersionTheProjectPinned(t *testing.T) {
 func TestOneValidatorResolvesAVocabularyOnceAcrossFiles(t *testing.T) {
 	fetches := 0
 	pins := EphemeralVocabularies()
-	pins.Fetch = func(string) ([]byte, string, error) {
+	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
 		fetches++
-		return []byte(testVocabularyDocument), "text/turtle", nil
+		return []byte(testVocabularyDocument), "text/turtle", PinnedVersion{}, nil
 	}
 	const uses = `
 		@prefix things: <https://vocab.test/things#> .
