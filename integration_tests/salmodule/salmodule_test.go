@@ -29,6 +29,10 @@ import (
 // fixture repository so the test never reaches the network for the module.
 const moduleNamespace = "salmodule://github.com/cgs-earth/sal-integration-test-module/"
 
+// placeNamespace heads the @id of every place the fixture module emits, so it is
+// what tells the module's output apart from the rest of what a build writes.
+const placeNamespace = "https://example.test/place/"
+
 // SalModuleSuite exercises SAL's docker round trip against the fixture module in
 // ./module: SAL clones it, builds its Dockerfile, runs the SAL Module command
 // line interface inside the container, and folds the RDF it emits into a built
@@ -250,7 +254,8 @@ func (s *SalModuleSuite) TestBuildReportsModuleErrors() {
 }
 
 // TestBuildSkipsClassesThatAreNotTasks checks that referencing a module term
-// which is not a task leaves the module's run command uninvoked.
+// which is not a task leaves the module's run command uninvoked, so that the
+// build carries no place of the module's making.
 func (s *SalModuleSuite) TestBuildSkipsClassesThatAreNotTasks() {
 	s.newSalProject(fmt.Sprintf(`
 @prefix fixture: <%s> .
@@ -266,7 +271,12 @@ func (s *SalModuleSuite) TestBuildSkipsClassesThatAreNotTasks() {
 }
 
 // builtObjectsForPredicate reads the built Iceberg table and returns every
-// object written for a predicate.
+// object written for a predicate of a place the module produced. A build writes
+// more than the module's output to the table: it also records DCAT metadata for
+// the files in .sal/data, which includes the vocabulary documents the project
+// pinned, and one of those triples is a schema:name of the document's digest.
+// Restricting to the module's own subjects is what keeps these assertions about
+// what the module produced.
 func (s *SalModuleSuite) builtObjectsForPredicate(predicate string) []string {
 	tbl, err := pkg.GetSalIcebergTable()
 	s.Require().NoError(err)
@@ -275,7 +285,7 @@ func (s *SalModuleSuite) builtObjectsForPredicate(predicate string) []string {
 	}
 
 	_, records, err := tbl.Scan(
-		table.WithSelectedFields("predicate", "object"),
+		table.WithSelectedFields("subject", "predicate", "object"),
 		table.WithCaseSensitive(true),
 	).ToArrowRecords(context.Background())
 	s.Require().NoError(err)
@@ -286,10 +296,11 @@ func (s *SalModuleSuite) builtObjectsForPredicate(predicate string) []string {
 		if record == nil {
 			continue
 		}
-		predicates := record.Column(0).(*array.String)
-		values := record.Column(1).(*array.String)
+		subjects := record.Column(0).(*array.String)
+		predicates := record.Column(1).(*array.String)
+		values := record.Column(2).(*array.String)
 		for i := range int(record.NumRows()) {
-			if predicates.Value(i) == predicate {
+			if strings.HasPrefix(subjects.Value(i), placeNamespace) && predicates.Value(i) == predicate {
 				objects = append(objects, values.Value(i))
 			}
 		}
