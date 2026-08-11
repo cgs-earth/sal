@@ -40,9 +40,11 @@ func appendProjectOntology(files []string) ([]string, error) {
 // document is merged into the graph being built, so that an ontology a project
 // depends on is carried by the data product rather than only referenced from
 // it; a vocabulary the project pins but does not import stays out of the graph.
-// An OCI artifact is pulled to disk instead and kept out of the table entirely.
-// The statements the file makes about the project itself arrive with it as a
-// source file; see appendProjectOntology.
+// A salmodule:// import is such a document too; validate.FetchGraph obtains it
+// by cloning and building the module rather than over HTTP. An OCI artifact is
+// pulled to disk instead and kept out of the table entirely. The statements the
+// file makes about the project itself arrive with it as a source file; see
+// appendProjectOntology.
 func ImportOntologies(graph *rdflibgo.Graph, pins *validate.PinnedVocabularies) error {
 	path, err := pkg.SalOntologyPath()
 	if err != nil {

@@ -270,7 +270,17 @@ func PinnedGraph(pins *PinnedVocabularies, iri string) (*rdflibgo.Graph, error) 
 	if err != nil {
 		return nil, err
 	}
-	_, graph, err := serializeRdfDataAndGetVocab(contentType, body, iri)
+	base := iri
+	// a module names itself without the trailing slash its vocabulary base
+	// carries, so an import written that way still has to parse against the base
+	if salmodule.IsModuleIRI(iri) {
+		ref, err := salmodule.ParseModuleIRI(iri)
+		if err != nil {
+			return nil, err
+		}
+		base = ref.Namespace
+	}
+	_, graph, err := serializeRdfDataAndGetVocab(contentType, body, base)
 	if err != nil {
 		return nil, err
 	}
