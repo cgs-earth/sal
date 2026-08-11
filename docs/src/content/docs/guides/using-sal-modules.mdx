@@ -132,4 +132,11 @@ a chip and as an autocompletion so a module the table was built from can be insp
 - `git` on `PATH`, used to clone the module repository.
 
 Each module is cloned and built once per `sal build` invocation.
-Dereferenced module ontologies are cached alongside SAL's other vocabularies; `--no-cache` clears that cache.
+
+A dereferenced module ontology is pinned like any other vocabulary the project resolves against: its JSON-LD is
+stored under `.sal/data` and recorded in `.sal/ns-prefix-versions.jsonld`, so a later build validates against the
+same version of the module's vocabulary without rebuilding the module to ask for it again. `--no-cache` builds
+every referenced module again and re-pins the ontology each one reports. See
+[Pinned vocabularies](/sal/reference/data-layout/#pinned-vocabularies).
+
+Materialization is not pinned: `sal build` still runs each task, since a task's output is data rather than vocabulary.

@@ -36,12 +36,14 @@ func appendProjectOntology(files []string) ([]string, error) {
 }
 
 // ImportOntologies resolves everything the project's .sal/ontology.ttl lists
-// with owl:imports. An ontology document is merged into the graph being built,
-// so that an ontology a project depends on is carried by the data product rather
-// than only referenced from it. An OCI artifact is pulled to disk instead and
-// kept out of the table entirely. The statements the file makes about the
-// project itself arrive with it as a source file; see appendProjectOntology.
-func ImportOntologies(graph *rdflibgo.Graph) error {
+// with owl:imports, at the version the project pins for it. An ontology
+// document is merged into the graph being built, so that an ontology a project
+// depends on is carried by the data product rather than only referenced from
+// it; a vocabulary the project pins but does not import stays out of the graph.
+// An OCI artifact is pulled to disk instead and kept out of the table entirely.
+// The statements the file makes about the project itself arrive with it as a
+// source file; see appendProjectOntology.
+func ImportOntologies(graph *rdflibgo.Graph, pins *validate.PinnedVocabularies) error {
 	path, err := pkg.SalOntologyPath()
 	if err != nil {
 		return err
@@ -59,7 +61,10 @@ func ImportOntologies(graph *rdflibgo.Graph) error {
 		// is authenticated with the environment the other commands fall back to
 		return importation.PullArtifact(context.Background(), importsDir, iri, importation.ArtifactCredentialsFromEnv())
 	}
-	return importOntologies(graph, path, base, validate.FetchGraph, pull)
+	fetch := func(iri string) (*rdflibgo.Graph, error) {
+		return validate.PinnedGraph(pins, iri)
+	}
+	return importOntologies(graph, path, base, fetch, pull)
 }
 
 func importOntologies(graph *rdflibgo.Graph, path string, base string, fetch func(string) (*rdflibgo.Graph, error), pull func(string) error) error {

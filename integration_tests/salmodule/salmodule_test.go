@@ -16,7 +16,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/iceberg-go/table"
 	"github.com/cgs-earth/sal/build"
-	"github.com/cgs-earth/sal/build/validate"
 	"github.com/cgs-earth/sal/initialization"
 	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/salmodule"
@@ -54,10 +53,6 @@ func (s *SalModuleSuite) SetupSuite() {
 	s.originalWorkingDir = workingDir
 
 	s.moduleRepo = s.commitFixtureModuleToGitRepository()
-
-	// the fixture module's ontology changes with the fixture, so a vocabulary
-	// cached by an earlier run would validate this run against the wrong terms
-	s.Require().NoError(validate.ClearCache())
 
 	resolver := salmodule.Default()
 	resolver.Reset()

@@ -74,7 +74,10 @@ Important flags:
 
 - `--prefix-maps`: apply prefix mappings as `source=target` entries or source/target pairs.
 - `--format`: choose `iceberg` or `nq`; defaults to `iceberg`.
-- `--no-cache`: clear SAL's temp cache before validating, while still caching new fetches during the run.
+- `--no-cache`: resolve every vocabulary from its source instead of from the versions pinned in `.sal/ns-prefix-versions.jsonld`.
+
+`sal validate` reads the project's pinned vocabulary versions but never writes them; only `sal build` records a pin.
+Run outside a SAL project, it resolves vocabularies from their sources with nothing pinned at all.
 
 An undefined term is reported with the file and the line number it appears on:
 
@@ -100,7 +103,11 @@ Important flags:
 - `--format`: choose `iceberg` or `nq`; defaults to `iceberg`.
 - `--typed`: split distinct RDF data types into separate output columns.
 - `--force`: build even when the Git working tree has uncommitted changes.
-- `--no-cache`: clear SAL's temp cache before building, while still caching new fetches during the run.
+- `--no-cache`: resolve every vocabulary from its source again and re-pin it in `.sal/ns-prefix-versions.jsonld`.
+
+`sal build` pins the exact version of every vocabulary the project resolves against, so a later build validates against the same versions this one did.
+A build that pinned something new writes `.sal/ns-prefix-versions.jsonld`, which belongs in Git; commit it before the next build, which otherwise refuses to run against a dirty working tree.
+See [Pinned vocabularies](/sal/reference/data-layout/#pinned-vocabularies) for the file's shape and where the documents it names are stored.
 
 Only triples that are not already in the table are committed, so rebuilding unchanged sources creates no new snapshot:
 
@@ -336,9 +343,10 @@ It does not rewrite Parquet data files.
 Removes or reshapes local build artifacts.
 Use `--wipe` to delete the local data product, or `--squash` to condense local snapshots ahead of a remote artifact.
 
-`--wipe` also deletes `.sal/ontology.ttl`, putting the project back to the state it was in before anything was built or imported.
-The confirmation prompt names the ontology whenever there is one to remove, since it is a source file rather than a build artifact.
-Run `sal import` again to recreate it.
+`--wipe` also deletes `.sal/ontology.ttl` and `.sal/ns-prefix-versions.jsonld` along with the vocabulary documents it names,
+putting the project back to the state it was in before anything was built or imported.
+The confirmation prompt names whichever of those two files exists, since they are files the project keeps in Git rather than build artifacts.
+Run `sal import` again to recreate the ontology; the next `sal build` pins the vocabularies again.
 
 ## `sal salmodule`
 

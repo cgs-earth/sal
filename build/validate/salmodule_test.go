@@ -33,15 +33,11 @@ func (testModuleRunner) RunContainer(_ context.Context, _ string, _ []string, cm
 	return nil, nil, fmt.Errorf("unexpected command %v", cmd)
 }
 
-// useFakeSalModule points the shared module resolver and the vocabulary cache at
-// test doubles so that dereferencing a salmodule:// vocabulary neither clones a
-// repository nor runs a container.
+// useFakeSalModule points the shared module resolver at test doubles so that
+// dereferencing a salmodule:// vocabulary neither clones a repository nor runs a
+// container.
 func useFakeSalModule(t *testing.T) {
 	t.Helper()
-
-	cacheDir := filepath.Join(t.TempDir(), "sal", "cache")
-	originalCacheRootDir := cacheRootDir
-	cacheRootDir = func() string { return cacheDir }
 
 	resolver := salmodule.Default()
 	originalRunner, originalCommand := resolver.Runner, resolver.Command
@@ -52,7 +48,6 @@ func useFakeSalModule(t *testing.T) {
 	}
 
 	t.Cleanup(func() {
-		cacheRootDir = originalCacheRootDir
 		resolver.Runner, resolver.Command = originalRunner, originalCommand
 		resolver.Reset()
 	})

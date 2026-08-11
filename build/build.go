@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,7 +17,7 @@ import (
 type ValidateCmd struct {
 	Paths      []string `arg:"positional" help:"RDF files to validate"`
 	PrefixMaps []string `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
-	NoCache    bool     `arg:"--no-cache" help:"fetch vocab prefixes directly from remote sources and skip using locally cached definitions"`
+	NoCache    bool     `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources instead of the versions pinned in .sal/ns-prefix-versions.jsonld"`
 }
 
 func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
@@ -36,7 +37,7 @@ type BuildCmd struct {
 	Format       GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
 	Force        bool              `arg:"--force" help:"force build even if there are uncommitted changes in the git repository"`
 	DataTypeCols bool              `arg:"--typed" help:"Split distinct data types into separate columns" default:"false"`
-	NoCache      bool              `arg:"--no-cache" help:"fetch vocab prefixes directly from remote sources and skip using locally cached definitions"`
+	NoCache      bool              `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources and re-pin them in .sal/ns-prefix-versions.jsonld"`
 
 	// skip committing the built data to iceberg
 	skipCommit bool
@@ -55,10 +56,9 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		return nil, fmt.Errorf("build: missing arguments")
 	}
 
-	if cfg.NoCache {
-		if err := validate.ClearCache(); err != nil {
-			return nil, fmt.Errorf("build: clear cache: %w", err)
-		}
+	pins, err := projectVocabularies(cfg.NoCache)
+	if err != nil {
+		return nil, err
 	}
 
 	var paths []string
@@ -112,10 +112,11 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 	}
 
 	finalGraph := rdflibgo.NewGraph(rdflibgo.WithBase(base))
+	validator := validate.NewValidator(pins, base, vocabsToReplace)
 	var errs validate.MultiError
 	for _, file := range files {
 		// TODO do this in parallel.
-		graph, err := validate.ValidateRDFFile(file, vocabsToReplace, base)
+		graph, err := validator.ValidateFile(file)
 		if err != nil {
 			if nested, ok := err.(validate.MultiError); ok {
 				errs = append(errs, nested...)
@@ -128,6 +129,11 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 	}
 	if len(errs) > 0 {
 		return nil, errs
+	}
+	// a prefix a file declares is pinned even when no term from it was used, so
+	// that what a project resolves against is what it declares
+	if err := validator.PinDeclaredPrefixes(); err != nil {
+		return nil, err
 	}
 	if len(files) == 1 {
 		slog.Info("Validated 1 file")
@@ -159,8 +165,15 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		slog.Warn("Creating build with modified source tree. This should only be done for testing purposes.")
 	}
 
-	if err := ImportOntologies(finalGraph); err != nil {
+	if err := ImportOntologies(finalGraph, pins); err != nil {
 		return nil, err
+	}
+
+	// the pins are written only once the build is known to be committable, so
+	// that a rejected build does not leave the worktree dirty with a lockfile
+	// change the next build would then refuse to run against
+	if err := pins.Save(); err != nil {
+		return nil, fmt.Errorf("build: record pinned vocabularies: %w", err)
 	}
 
 	resolver := salmodule.Default()
@@ -179,6 +192,30 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 	}
 
 	return finalGraph, err
+}
+
+// projectVocabularies opens the vocabulary versions the SAL project being built
+// has pinned. RDF validated outside a SAL project has no project to pin
+// anything for, so it resolves its vocabularies without recording them.
+var projectVocabularies = func(refresh bool) (*validate.PinnedVocabularies, error) {
+	path, err := pkg.SalNsPrefixVersionsPath()
+	if errors.Is(err, pkg.ErrSalDirNotFound) || errors.Is(err, pkg.ErrCantMakeSalDirInHome) {
+		return validate.EphemeralVocabularies(), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	dataDir, err := pkg.SalDataDir()
+	if err != nil {
+		return nil, err
+	}
+
+	pins, err := validate.LoadPinnedVocabularies(path, dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("build: read pinned vocabularies: %w", err)
+	}
+	pins.Refresh = refresh
+	return pins, nil
 }
 
 func parsePrefixMaps(values []string) (map[string]string, error) {
