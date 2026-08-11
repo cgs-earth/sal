@@ -168,7 +168,7 @@ func (c *vocabularyCache) loadTerms(namespace string) (map[string]bool, error) {
 		return nil, err
 	}
 	slog.Warn("Could not read the vocabulary at " + namespace + ", so SAL's bundled copy is pinned instead: " + err.Error())
-	c.pins.Pin(namespace, bundled, bundledType)
+	c.pins.Pin(namespace, bundled, bundledType, PinnedVersion{})
 	return terms, nil
 }
 
@@ -287,33 +287,40 @@ func PinnedGraph(pins *PinnedVocabularies, iri string) (*rdflibgo.Graph, error) 
 	return graph, nil
 }
 
-func fetchVocabularyDocument(u string) ([]byte, string, error) {
+func fetchVocabularyDocument(u string) ([]byte, string, PinnedVersion, error) {
 	// a salmodule:// vocabulary is not served over HTTP; it is obtained by
-	// building the module's container and asking it for its ontology
+	// building the module's container and asking it for its ontology, and it is
+	// pinned by the git commit hash of the module repository rather than by the
+	// digest of the ontology document, since code the module runs can change
+	// without the ontology itself changing
 	if salmodule.IsModuleIRI(u) {
-		return salmodule.FetchOntologyDocument(u)
+		document, mediaType, commitHash, err := salmodule.FetchOntologyDocument(u)
+		if err != nil {
+			return nil, "", PinnedVersion{}, err
+		}
+		return document, mediaType, PinnedVersion{Scheme: gitCommitVersionScheme, Value: commitHash}, nil
 	}
 
 	req, err := http.NewRequest(http.MethodGet, u, http.NoBody)
 	if err != nil {
-		return nil, "", err
+		return nil, "", PinnedVersion{}, err
 	}
 	req.Header.Set("Accept", "application/ld+json, application/json;q=0.9, text/turtle;q=0.8, application/rdf+xml;q=0.7, text/plain;q=0.6, */*;q=0.1")
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, "", err
+		return nil, "", PinnedVersion{}, err
 	}
 	defer func() { _ = res.Body.Close() }()
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		return nil, res.Header.Get("Content-Type"), err
+		return nil, "", PinnedVersion{}, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, res.Header.Get("Content-Type"), fmt.Errorf("bad response status code: %d", res.StatusCode)
+		return nil, "", PinnedVersion{}, fmt.Errorf("bad response status code: %d", res.StatusCode)
 	}
-	return body, res.Header.Get("Content-Type"), nil
+	return body, res.Header.Get("Content-Type"), PinnedVersion{}, nil
 }
 
 func looksLikeJSON(body []byte) bool {

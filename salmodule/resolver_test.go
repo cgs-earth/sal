@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testModuleCommitHash = "abc123def456abc123def456abc123def456abc"
+
 type recordedRun struct {
 	image string
 	env   []string
@@ -42,10 +44,14 @@ func (f *fakeRunner) RunContainer(_ context.Context, image string, env []string,
 }
 
 // fakeClone populates the clone destination the way git would, so the resolver
-// finds the Dockerfile it expects in the repository root.
-func fakeClone(_ context.Context, _ string, _ string, args ...string) error {
+// finds the Dockerfile it expects in the repository root, and answers a
+// rev-parse HEAD with a fixed commit hash.
+func fakeClone(_ context.Context, _ string, _ string, args ...string) ([]byte, error) {
+	if args[0] == "rev-parse" {
+		return []byte(testModuleCommitHash), nil
+	}
 	destination := args[len(args)-1]
-	return os.WriteFile(filepath.Join(destination, "Dockerfile"), []byte("FROM scratch\n"), 0644)
+	return nil, os.WriteFile(filepath.Join(destination, "Dockerfile"), []byte("FROM scratch\n"), 0644)
 }
 
 func newTestResolver(runner *fakeRunner) *Resolver {
@@ -83,6 +89,35 @@ func TestResolverBuildsEachModuleOnlyOnce(t *testing.T) {
 	require.Len(t, runner.runs, 2)
 }
 
+func TestResolverCommitHashReturnsTheClonedRepositorysHead(t *testing.T) {
+	runner := &fakeRunner{ontology: testOntology}
+	ref, err := ParseModuleIRI(testModuleNamespace)
+	require.NoError(t, err)
+
+	hash, err := newTestResolver(runner).CommitHash(context.Background(), ref)
+
+	require.NoError(t, err)
+	require.Equal(t, testModuleCommitHash, hash)
+}
+
+func TestFetchOntologyDocumentReportsTheCommitHashOfTheModuleItBuilt(t *testing.T) {
+	resolver := Default()
+	originalRunner, originalCommand := resolver.Runner, resolver.Command
+	resolver.Reset()
+	resolver.Runner = &fakeRunner{ontology: testOntology}
+	resolver.Command = fakeClone
+	t.Cleanup(func() {
+		resolver.Runner, resolver.Command = originalRunner, originalCommand
+		resolver.Reset()
+	})
+
+	_, mediaType, commitHash, err := FetchOntologyDocument(testModuleNamespace)
+
+	require.NoError(t, err)
+	require.Equal(t, "application/ld+json", mediaType)
+	require.Equal(t, testModuleCommitHash, commitHash)
+}
+
 func TestResolverReportsDownloadedModules(t *testing.T) {
 	runner := &fakeRunner{ontology: testOntology}
 	resolver := newTestResolver(runner)
@@ -112,7 +147,7 @@ func TestResolverRunTaskPassesTaskInstanceThroughEnvironment(t *testing.T) {
 func TestResolverRejectsModuleWithoutDockerfile(t *testing.T) {
 	resolver := &Resolver{
 		Runner:  &fakeRunner{},
-		Command: func(context.Context, string, string, ...string) error { return nil },
+		Command: func(context.Context, string, string, ...string) ([]byte, error) { return nil, nil },
 	}
 	ref, err := ParseModuleIRI(testModuleNamespace)
 	require.NoError(t, err)
@@ -126,8 +161,8 @@ func TestResolverRejectsModuleWithoutDockerfile(t *testing.T) {
 func TestResolverReportsCloneFailures(t *testing.T) {
 	resolver := &Resolver{
 		Runner: &fakeRunner{},
-		Command: func(context.Context, string, string, ...string) error {
-			return fmt.Errorf("repository not found")
+		Command: func(context.Context, string, string, ...string) ([]byte, error) {
+			return nil, fmt.Errorf("repository not found")
 		},
 	}
 	ref, err := ParseModuleIRI(testModuleNamespace)

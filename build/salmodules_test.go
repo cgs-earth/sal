@@ -17,6 +17,8 @@ import (
 
 const testModuleNamespace = "salmodule://www.github.com/test/history-getter/"
 
+const testModuleCommitHash = "abc123def456abc123def456abc123def456abc"
+
 const testModuleOntology = `{
 	"@context": {
 		"schema": "https://schema.org/",
@@ -77,8 +79,11 @@ func (r *testContainerRunner) RunContainer(_ context.Context, _ string, env []st
 func testResolver(runner salmodule.ContainerRunner) *salmodule.Resolver {
 	return &salmodule.Resolver{
 		Runner: runner,
-		Command: func(_ context.Context, _ string, _ string, args ...string) error {
-			return os.WriteFile(filepath.Join(args[len(args)-1], "Dockerfile"), []byte("FROM scratch\n"), 0644)
+		Command: func(_ context.Context, _ string, _ string, args ...string) ([]byte, error) {
+			if args[0] == "rev-parse" {
+				return []byte(testModuleCommitHash), nil
+			}
+			return nil, os.WriteFile(filepath.Join(args[len(args)-1], "Dockerfile"), []byte("FROM scratch\n"), 0644)
 		},
 	}
 }

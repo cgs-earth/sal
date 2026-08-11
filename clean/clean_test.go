@@ -152,7 +152,7 @@ func TestRemovePinnedVocabulariesDeletesTheDocumentsItNames(t *testing.T) {
 
 	pins, err := validate.LoadPinnedVocabularies(pinsPath, dataDir)
 	require.NoError(t, err)
-	pins.Pin("https://vocab.test/things#", []byte("@prefix owl: <http://www.w3.org/2002/07/owl#> .\n"), "text/turtle")
+	pins.Pin("https://vocab.test/things#", []byte("@prefix owl: <http://www.w3.org/2002/07/owl#> .\n"), "text/turtle", validate.PinnedVersion{})
 	require.NoError(t, pins.Save())
 	documents := pins.Documents()
 	require.Len(t, documents, 1)

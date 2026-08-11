@@ -12,6 +12,8 @@ import (
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
+const testModuleCommitHash = "abc123def456abc123def456abc123def456abc"
+
 const testModuleOntology = `{
 	"@context": {
 		"owl": "http://www.w3.org/2002/07/owl#",
@@ -44,8 +46,11 @@ func useFakeSalModule(t *testing.T) {
 	originalRunner, originalCommand := resolver.Runner, resolver.Command
 	resolver.Reset()
 	resolver.Runner = testModuleRunner{}
-	resolver.Command = func(_ context.Context, _ string, _ string, args ...string) error {
-		return os.WriteFile(filepath.Join(args[len(args)-1], "Dockerfile"), []byte("FROM scratch\n"), 0644)
+	resolver.Command = func(_ context.Context, _ string, _ string, args ...string) ([]byte, error) {
+		if args[0] == "rev-parse" {
+			return []byte(testModuleCommitHash), nil
+		}
+		return nil, os.WriteFile(filepath.Join(args[len(args)-1], "Dockerfile"), []byte("FROM scratch\n"), 0644)
 	}
 
 	t.Cleanup(func() {
@@ -103,6 +108,22 @@ func TestPinnedGraphResolvesAModuleOntologyAgainstTheModuleNamespace(t *testing.
 		rdflibgo.RDF.Type,
 		rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"),
 	))
+}
+
+// A salmodule:// vocabulary is pinned by the git commit hash of the module
+// repository it was built from, not by the digest of its ontology document,
+// since code the module runs can change without the ontology itself changing.
+func TestPinnedGraphPinsASalModuleVocabularyByItsCommitHash(t *testing.T) {
+	useFakeSalModule(t)
+	pins := EphemeralVocabularies()
+
+	_, err := PinnedGraph(pins, "salmodule://www.github.com/test/history-getter")
+	require.NoError(t, err)
+
+	entry, ok := pins.entries["salmodule://www.github.com/test/history-getter"]
+	require.True(t, ok)
+	require.Equal(t, gitCommitVersionScheme, entry.Scheme)
+	require.Equal(t, testModuleCommitHash, entry.Version)
 }
 
 func TestValidateRejectsTermsMissingFromSalModuleOntology(t *testing.T) {

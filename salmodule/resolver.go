@@ -12,17 +12,18 @@ import (
 	"sync"
 )
 
-// CommandRunner runs an external command, allowing git usage to be faked in tests.
-type CommandRunner func(ctx context.Context, dir string, name string, args ...string) error
+// CommandRunner runs an external command and returns its combined output,
+// allowing git usage to be faked in tests.
+type CommandRunner func(ctx context.Context, dir string, name string, args ...string) ([]byte, error)
 
-func runCommand(ctx context.Context, dir string, name string, args ...string) error {
+func runCommand(ctx context.Context, dir string, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%s %s failed: %s: %w", name, strings.Join(args, " "), strings.TrimSpace(string(out)), err)
+		return nil, fmt.Errorf("%s %s failed: %s: %w", name, strings.Join(args, " "), strings.TrimSpace(string(out)), err)
 	}
-	return nil
+	return out, nil
 }
 
 // Resolver dereferences salmodule:// IRIs by cloning the module's git
@@ -39,6 +40,7 @@ type Resolver struct {
 
 	mu         sync.Mutex
 	images     map[string]string
+	commits    map[string]string
 	ontologies map[string]*ModuleOntology
 }
 
@@ -54,6 +56,7 @@ func (r *Resolver) Reset() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.images = nil
+	r.commits = nil
 	r.ontologies = nil
 }
 
@@ -162,12 +165,17 @@ func (r *Resolver) image(ctx context.Context, ref ModuleRef) (string, error) {
 	if command == nil {
 		command = runCommand
 	}
-	if err := command(ctx, "", "git", "clone", "--depth", "1", ref.CloneURL, repoDir); err != nil {
+	if _, err := command(ctx, "", "git", "clone", "--depth", "1", ref.CloneURL, repoDir); err != nil {
 		return "", fmt.Errorf("clone SAL module %s: %w", ref.Namespace, err)
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "Dockerfile")); err != nil {
 		return "", fmt.Errorf("SAL module %s has no Dockerfile in its repository root", ref.Namespace)
 	}
+	commitOut, err := command(ctx, repoDir, "git", "rev-parse", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("read HEAD commit of SAL module %s: %w", ref.Namespace, err)
+	}
+	commit := strings.TrimSpace(string(commitOut))
 
 	slog.Info("Building SAL module image " + ref.ImageTag)
 	if err := runner.BuildImage(ctx, repoDir, ref.ImageTag); err != nil {
@@ -179,8 +187,26 @@ func (r *Resolver) image(ctx context.Context, ref ModuleRef) (string, error) {
 	if r.images == nil {
 		r.images = map[string]string{}
 	}
+	if r.commits == nil {
+		r.commits = map[string]string{}
+	}
 	r.images[ref.Namespace] = ref.ImageTag
+	r.commits[ref.Namespace] = commit
 	return ref.ImageTag, nil
+}
+
+// CommitHash returns the git commit hash of the HEAD of the module repository
+// the last time it was cloned, cloning and building it first if it has not
+// been referenced yet. A salmodule:// vocabulary is pinned by this rather than
+// by the digest of its ontology document, since code in the module that
+// changes what a task does is not necessarily a change to the ontology itself.
+func (r *Resolver) CommitHash(ctx context.Context, ref ModuleRef) (string, error) {
+	if _, err := r.image(ctx, ref); err != nil {
+		return "", err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.commits[ref.Namespace], nil
 }
 
 func (r *Resolver) containerRunner() (ContainerRunner, error) {
@@ -197,15 +223,21 @@ func (r *Resolver) containerRunner() (ContainerRunner, error) {
 }
 
 // FetchOntologyDocument dereferences a salmodule:// IRI to the module's
-// ontology document so that RDF validation can resolve the module's terms.
-func FetchOntologyDocument(iri string) ([]byte, string, error) {
+// ontology document so that RDF validation can resolve the module's terms, and
+// to the git commit hash of the module repository it was built from, which is
+// what a salmodule:// vocabulary is pinned at.
+func FetchOntologyDocument(iri string) (document []byte, mediaType string, commitHash string, err error) {
 	ref, err := ParseModuleIRI(iri)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	ontology, err := Default().Ontology(context.Background(), ref)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
-	return ontology.Document, "application/ld+json", nil
+	commitHash, err = Default().CommitHash(context.Background(), ref)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return ontology.Document, "application/ld+json", commitHash, nil
 }

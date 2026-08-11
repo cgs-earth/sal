@@ -25,11 +25,11 @@ func newTestPins(t *testing.T, projectDir string, body string, fetches *int) *Pi
 
 	pins, err := LoadPinnedVocabularies(filepath.Join(projectDir, "ns-prefix-versions.jsonld"), filepath.Join(projectDir, "data"))
 	require.NoError(t, err)
-	pins.Fetch = func(string) ([]byte, string, error) {
+	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
 		if fetches != nil {
 			*fetches++
 		}
-		return []byte(body), "text/turtle", nil
+		return []byte(body), "text/turtle", PinnedVersion{}, nil
 	}
 	return pins
 }
@@ -61,6 +61,47 @@ func TestSaveWritesTheDocumentUnderItsHashAndPinsThatVersion(t *testing.T) {
 	require.Equal(t, "urn:sha256:"+digest, doc.Graph[0].VersionIRI.ID)
 	require.Equal(t, "text/turtle", doc.Graph[0].Format)
 	require.NotNil(t, doc.Graph[0].Modified)
+}
+
+// A salmodule:// vocabulary's Fetch reports the git commit hash of the module
+// repository instead of leaving the version to be derived from the document,
+// since code the module runs can change without its ontology document changing.
+func TestADocumentPinnedByFetchIsRecordedAtTheCommitHashRatherThanItsDigest(t *testing.T) {
+	projectDir := t.TempDir()
+	pins, err := LoadPinnedVocabularies(filepath.Join(projectDir, "ns-prefix-versions.jsonld"), filepath.Join(projectDir, "data"))
+	require.NoError(t, err)
+	const commitHash = "abc123def456abc123def456abc123def456abc"
+	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
+		return []byte(testVocabularyDocument), "application/ld+json", PinnedVersion{Scheme: gitCommitVersionScheme, Value: commitHash}, nil
+	}
+
+	_, _, pinned, err := pins.Document(testVocabularyNamespace, "salmodule://example.test/module")
+	require.NoError(t, err)
+	require.False(t, pinned)
+	require.NoError(t, pins.Save())
+
+	document, err := os.ReadFile(filepath.Join(projectDir, "data", commitHash))
+	require.NoError(t, err)
+	require.Equal(t, testVocabularyDocument, string(document))
+
+	content, err := os.ReadFile(filepath.Join(projectDir, "ns-prefix-versions.jsonld"))
+	require.NoError(t, err)
+	var doc pinnedVocabulariesDocument
+	require.NoError(t, json.Unmarshal(content, &doc))
+	require.Len(t, doc.Graph, 1)
+	require.Equal(t, "urn:git-commit-hash:"+commitHash, doc.Graph[0].VersionIRI.ID)
+
+	// reopening resolves the pin from disk rather than fetching it again
+	reopened, err := LoadPinnedVocabularies(filepath.Join(projectDir, "ns-prefix-versions.jsonld"), filepath.Join(projectDir, "data"))
+	require.NoError(t, err)
+	reopened.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
+		t.Fatal("should not have been fetched again")
+		return nil, "", PinnedVersion{}, nil
+	}
+	body, _, pinned, err := reopened.Document(testVocabularyNamespace, "salmodule://example.test/module")
+	require.NoError(t, err)
+	require.True(t, pinned)
+	require.Equal(t, testVocabularyDocument, string(body))
 }
 
 func TestAPinnedVocabularyIsResolvedFromDiskRatherThanFetched(t *testing.T) {
@@ -186,8 +227,8 @@ func TestTwoNamespacesServedByOneDocumentAreFetchedOnce(t *testing.T) {
 func TestAnEphemeralStoreWritesNothing(t *testing.T) {
 	projectDir := t.TempDir()
 	pins := EphemeralVocabularies()
-	pins.Fetch = func(string) ([]byte, string, error) {
-		return []byte(testVocabularyDocument), "text/turtle", nil
+	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
+		return []byte(testVocabularyDocument), "text/turtle", PinnedVersion{}, nil
 	}
 
 	_, _, pinned, err := pins.Document(testVocabularyNamespace, "https://vocab.test/things")

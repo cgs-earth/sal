@@ -18,17 +18,33 @@ import (
 const (
 	owlNamespaceIRI     = "http://www.w3.org/2002/07/owl#"
 	dctermsNamespaceIRI = "http://purl.org/dc/terms/"
-	// digestScheme heads the owl:versionIRI of a pinned vocabulary, so that the
-	// version a project resolves a prefix against names the exact bytes behind it
-	digestScheme = "urn:sha256:"
+	// sha256VersionScheme heads the owl:versionIRI of a pinned vocabulary, so that
+	// the version a project resolves a prefix against names the exact bytes behind it
+	sha256VersionScheme = "urn:sha256:"
+	// gitCommitVersionScheme heads the owl:versionIRI of a pinned salmodule://
+	// vocabulary instead: the git commit hash of the module repository the
+	// ontology was read from, so that a build the module's own code changed can
+	// be told apart even when the ontology document it prints did not
+	gitCommitVersionScheme = "urn:git-commit-hash:"
 )
+
+// PinnedVersion overrides the version a document is pinned at instead of the
+// SHA-256 of its bytes. The zero value means no override: a pin gets
+// sha256VersionScheme and the digest of the document. Fetch returns this for a
+// salmodule:// vocabulary, pinning it at gitCommitVersionScheme instead.
+type PinnedVersion struct {
+	Scheme string
+	Value  string
+}
 
 // PinnedVocabularies is the set of vocabulary documents a project resolves its
 // prefixes against. It is read from and written to .sal/ns-prefix-versions.jsonld,
 // which records a prefix's namespace against the SHA-256 of the document behind
-// it; the document itself is stored under .sal/data named by that hash, so the
-// data product carries the vocabularies it was validated against and a later
-// build validates against the same versions the first one did.
+// it -- or, for a salmodule:// vocabulary, the git commit hash of the module
+// repository it was built from; the document itself is stored under .sal/data
+// named by that same version, so the data product carries the vocabularies it
+// was validated against and a later build validates against the same versions
+// the first one did.
 //
 // A store with no path is ephemeral: nothing is read from disk, Save writes
 // nothing, and every document is fetched. That is what validating RDF outside a
@@ -40,21 +56,28 @@ type PinnedVocabularies struct {
 	// Refresh ignores the versions already pinned so that every document is
 	// fetched again and pinned anew. It is what --no-cache does.
 	Refresh bool
-	// Fetch dereferences a vocabulary document. Tests replace it.
-	Fetch func(string) ([]byte, string, error)
+	// Fetch dereferences a vocabulary document. Tests replace it. The returned
+	// PinnedVersion overrides how the document is pinned; a salmodule:// source
+	// returns one, everything else returns the zero value.
+	Fetch func(string) ([]byte, string, PinnedVersion, error)
 
 	entries map[string]pinnedVocabulary
 	// fetched memoizes by source URL so two namespaces that resolve to the same
 	// document are only dereferenced once
 	fetched map[string]fetchedDocument
-	// pending holds documents fetched this run, keyed by digest, until Save
-	// writes them out
+	// pending holds documents fetched this run, keyed by the version they are
+	// pinned at, until Save writes them out
 	pending map[string][]byte
 	dirty   bool
 }
 
 type pinnedVocabulary struct {
-	Digest    string
+	// Scheme and Version together are this pin's owl:versionIRI: Scheme is
+	// sha256VersionScheme or gitCommitVersionScheme, and Version is the digest or
+	// commit hash it names. Version also names the file the document is stored
+	// under in blobDir.
+	Scheme    string
+	Version   string
 	MediaType string
 	Modified  time.Time
 }
@@ -62,6 +85,7 @@ type pinnedVocabulary struct {
 type fetchedDocument struct {
 	body      []byte
 	mediaType string
+	version   PinnedVersion
 }
 
 // EphemeralVocabularies returns a store that pins nothing. Every document it is
@@ -105,7 +129,7 @@ func LoadPinnedVocabularies(path string, blobDir string) (*PinnedVocabularies, e
 func (p *PinnedVocabularies) Document(id string, source string) ([]byte, string, bool, error) {
 	if !p.Refresh {
 		if entry, ok := p.entries[id]; ok {
-			body, err := p.readDocument(entry.Digest)
+			body, err := p.readDocument(entry)
 			if err == nil {
 				return body, entry.MediaType, true, nil
 			}
@@ -117,27 +141,31 @@ func (p *PinnedVocabularies) Document(id string, source string) ([]byte, string,
 	}
 
 	if doc, ok := p.fetched[source]; ok {
-		p.Pin(id, doc.body, doc.mediaType)
+		p.Pin(id, doc.body, doc.mediaType, doc.version)
 		return doc.body, doc.mediaType, false, nil
 	}
 
-	body, mediaType, err := p.Fetch(source)
+	body, mediaType, version, err := p.Fetch(source)
 	if err != nil {
 		return nil, "", false, err
 	}
-	p.fetched[source] = fetchedDocument{body: body, mediaType: mediaType}
-	p.Pin(id, body, mediaType)
+	p.fetched[source] = fetchedDocument{body: body, mediaType: mediaType, version: version}
+	p.Pin(id, body, mediaType, version)
 	return body, mediaType, false, nil
 }
 
 // Pin records a document as the version of id the project resolves against.
-func (p *PinnedVocabularies) Pin(id string, body []byte, mediaType string) {
-	digest := documentDigest(body)
-	if existing, ok := p.entries[id]; ok && existing.Digest == digest && existing.MediaType == mediaType {
+// version overrides what the document is pinned at instead of the SHA-256 of
+// body; pass the zero value for a vocabulary with no such override.
+func (p *PinnedVocabularies) Pin(id string, body []byte, mediaType string, version PinnedVersion) {
+	if version.Scheme == "" {
+		version = PinnedVersion{Scheme: sha256VersionScheme, Value: documentDigest(body)}
+	}
+	if existing, ok := p.entries[id]; ok && existing.Scheme == version.Scheme && existing.Version == version.Value && existing.MediaType == mediaType {
 		return
 	}
-	p.entries[id] = pinnedVocabulary{Digest: digest, MediaType: mediaType, Modified: time.Now().UTC()}
-	p.pending[digest] = body
+	p.entries[id] = pinnedVocabulary{Scheme: version.Scheme, Version: version.Value, MediaType: mediaType, Modified: time.Now().UTC()}
+	p.pending[version.Value] = body
 	p.dirty = true
 }
 
@@ -156,7 +184,7 @@ func (p *PinnedVocabularies) Documents() []string {
 	paths := make([]string, 0, len(p.entries))
 	seen := map[string]bool{}
 	for _, entry := range p.entries {
-		path := p.documentPath(entry.Digest)
+		path := p.documentPath(entry.Version)
 		if seen[path] {
 			continue
 		}
@@ -188,7 +216,7 @@ func (p *PinnedVocabularies) AppendProvenance(graph *rdflibgo.Graph) {
 		entry := p.entries[id]
 		subject := rdflibgo.NewURIRefUnsafe(id)
 		graph.Add(subject, rdflibgo.RDF.Type, owlOntology)
-		graph.Add(subject, versionIRI, rdflibgo.NewURIRefUnsafe(digestScheme+entry.Digest))
+		graph.Add(subject, versionIRI, rdflibgo.NewURIRefUnsafe(entry.Scheme+entry.Version))
 		if entry.MediaType != "" {
 			graph.Add(subject, format, rdflibgo.NewLiteral(entry.MediaType))
 		}
@@ -230,13 +258,13 @@ func (p *PinnedVocabularies) writeDocuments() error {
 		return err
 	}
 	for _, entry := range p.entries {
-		body, ok := p.pending[entry.Digest]
+		body, ok := p.pending[entry.Version]
 		if !ok {
 			continue
 		}
-		path := p.documentPath(entry.Digest)
-		// the name of a document is the hash of its contents, so one already on
-		// disk is the one being written
+		path := p.documentPath(entry.Version)
+		// the name of a document is the version it is pinned at, so one already
+		// on disk is the one being written
 		if _, err := os.Stat(path); err == nil {
 			continue
 		}
@@ -247,29 +275,33 @@ func (p *PinnedVocabularies) writeDocuments() error {
 	return nil
 }
 
-// readDocument returns a pinned document, checking that it still hashes to the
-// version it is pinned at.
-func (p *PinnedVocabularies) readDocument(digest string) ([]byte, error) {
-	if body, ok := p.pending[digest]; ok {
+// readDocument returns a pinned document. A document pinned by the digest of
+// its contents is checked to still hash to that version; a document pinned by
+// a git commit hash cannot be verified this way, since the hash does not
+// derive from the document's bytes, so its presence on disk is trusted.
+func (p *PinnedVocabularies) readDocument(entry pinnedVocabulary) ([]byte, error) {
+	if body, ok := p.pending[entry.Version]; ok {
 		return body, nil
 	}
 	if p.blobDir == "" {
-		return nil, fmt.Errorf("no vocabulary directory to read %s from", digest)
+		return nil, fmt.Errorf("no vocabulary directory to read %s from", entry.Version)
 	}
 
-	path := p.documentPath(digest)
+	path := p.documentPath(entry.Version)
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	if actual := documentDigest(body); actual != digest {
-		return nil, fmt.Errorf("%s hashes to %s rather than the pinned %s", path, actual, digest)
+	if entry.Scheme == sha256VersionScheme {
+		if actual := documentDigest(body); actual != entry.Version {
+			return nil, fmt.Errorf("%s hashes to %s rather than the pinned %s", path, actual, entry.Version)
+		}
 	}
 	return body, nil
 }
 
-func (p *PinnedVocabularies) documentPath(digest string) string {
-	return filepath.Join(p.blobDir, digest)
+func (p *PinnedVocabularies) documentPath(version string) string {
+	return filepath.Join(p.blobDir, version)
 }
 
 func documentDigest(body []byte) string {
@@ -321,7 +353,7 @@ func (p *PinnedVocabularies) marshal() ([]byte, error) {
 		node := pinnedVocabularyNode{
 			ID:         id,
 			Type:       "owl:Ontology",
-			VersionIRI: iriValue{ID: digestScheme + entry.Digest},
+			VersionIRI: iriValue{ID: entry.Scheme + entry.Version},
 			Format:     entry.MediaType,
 		}
 		if !entry.Modified.IsZero() {
@@ -347,11 +379,11 @@ func (p *PinnedVocabularies) unmarshal(content []byte) error {
 		if node.ID == "" {
 			return fmt.Errorf("a pinned vocabulary has no @id")
 		}
-		digest, ok := strings.CutPrefix(node.VersionIRI.ID, digestScheme)
-		if !ok || len(digest) != sha256.Size*2 {
-			return fmt.Errorf("%s is pinned at %q rather than a %s version", node.ID, node.VersionIRI.ID, digestScheme)
+		scheme, version, ok := splitVersionIRI(node.VersionIRI.ID)
+		if !ok {
+			return fmt.Errorf("%s is pinned at %q rather than a %s or %s version", node.ID, node.VersionIRI.ID, sha256VersionScheme, gitCommitVersionScheme)
 		}
-		entry := pinnedVocabulary{Digest: digest, MediaType: node.Format}
+		entry := pinnedVocabulary{Scheme: scheme, Version: version, MediaType: node.Format}
 		if node.Modified != nil {
 			// a modification time SAL cannot read is not worth failing a build
 			// over; it is recorded for a human rather than resolved against
@@ -360,4 +392,22 @@ func (p *PinnedVocabularies) unmarshal(content []byte) error {
 		p.entries[node.ID] = entry
 	}
 	return nil
+}
+
+// splitVersionIRI splits a pinned vocabulary's owl:versionIRI into the scheme
+// it is pinned under and the digest or commit hash it names.
+func splitVersionIRI(versionIRI string) (scheme string, version string, ok bool) {
+	if digest, found := strings.CutPrefix(versionIRI, sha256VersionScheme); found {
+		if len(digest) != sha256.Size*2 {
+			return "", "", false
+		}
+		return sha256VersionScheme, digest, true
+	}
+	if commit, found := strings.CutPrefix(versionIRI, gitCommitVersionScheme); found {
+		if commit == "" {
+			return "", "", false
+		}
+		return gitCommitVersionScheme, commit, true
+	}
+	return "", "", false
 }

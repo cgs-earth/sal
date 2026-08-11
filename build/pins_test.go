@@ -63,12 +63,12 @@ func servePinsTestVocabulary(t *testing.T) *int {
 		if err != nil {
 			return nil, err
 		}
-		pins.Fetch = func(source string) ([]byte, string, error) {
+		pins.Fetch = func(source string) ([]byte, string, validate.PinnedVersion, error) {
 			fetches++
 			if source != "https://vocab.test/things" {
-				return nil, "", fmt.Errorf("bad response status code: 404")
+				return nil, "", validate.PinnedVersion{}, fmt.Errorf("bad response status code: 404")
 			}
-			return []byte(pinsTestVocabulary), "text/turtle", nil
+			return []byte(pinsTestVocabulary), "text/turtle", validate.PinnedVersion{}, nil
 		}
 		return pins, nil
 	}
