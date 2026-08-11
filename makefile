@@ -27,3 +27,6 @@ integration_test_pyspark:
 
 ui_dev:
 	@trap 'kill 0' EXIT INT TERM; (cd serve/sal-ui && npm run dev) & go run . serve --with-ui
+
+init_sandbox:
+	sbx kit add claude-sal-cli ./sal-sbx-dev-kit/

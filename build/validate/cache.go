@@ -2,17 +2,12 @@ package validate
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
-	"os"
-	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/cgs-earth/sal/build/vocab"
@@ -23,90 +18,15 @@ import (
 	"github.com/tggo/goRDFlib/turtle"
 )
 
+// vocabularyCache holds the term sets a run has resolved. The documents those
+// terms come from are resolved through the project's pins rather than fetched
+// here, so a run validates against the versions the project recorded.
 type vocabularyCache struct {
-	cacheDir string
-	cache    map[string]Vocabulary
-	failures map[string]error
-	fetch    func(string) ([]byte, string, error)
-	base     string
-}
-
-const vocabularyCacheVersion = 11
-
-var cacheRootDir = func() string {
-	return filepath.Join(os.TempDir(), "sal", "cache")
-}
-
-func defaultCacheDir() string {
-	return cacheRootDir()
-}
-
-func defaultVocabularyCacheDir() string {
-	return filepath.Join(defaultCacheDir(), "vocab")
-}
-
-// ClearCache removes cached validation data from the platform temp directory.
-func ClearCache() error {
-	return os.RemoveAll(defaultCacheDir())
-}
-
-type cachedVocabulary struct {
-	Version int      `json:"version"`
-	Base    string   `json:"base"`
-	Terms   []string `json:"terms"`
-}
-
-func (c *vocabularyCache) loadTermsFromDisk(base string) (map[string]bool, error) {
-	data, err := os.ReadFile(c.cachePath(base))
-	if err != nil {
-		return nil, err
-	}
-
-	var cached cachedVocabulary
-	if err := json.Unmarshal(data, &cached); err != nil {
-		return nil, err
-	}
-	if cached.Version != vocabularyCacheVersion {
-		return nil, fmt.Errorf("cache version mismatch")
-	}
-
-	terms := make(map[string]bool, len(cached.Terms))
-	for _, term := range cached.Terms {
-		terms[term] = true
-	}
-	return terms, nil
-}
-
-func (c *vocabularyCache) storeTermsToDisk(base string, terms map[string]bool) error {
-	if err := os.MkdirAll(c.cacheDir, 0755); err != nil {
-		return err
-	}
-
-	list := make([]string, 0, len(terms))
-	for term := range terms {
-		list = append(list, term)
-	}
-	sort.Strings(list)
-
-	payload, err := json.Marshal(cachedVocabulary{Version: vocabularyCacheVersion, Base: base, Terms: list})
-	if err != nil {
-		return err
-	}
-
-	tmpPath := c.cachePath(base) + ".tmp"
-	if err := os.WriteFile(tmpPath, payload, 0644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, c.cachePath(base)); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	return nil
-}
-
-func (c *vocabularyCache) cachePath(base string) string {
-	sum := sha256.Sum256([]byte(base))
-	return filepath.Join(c.cacheDir, hex.EncodeToString(sum[:])+".json")
+	pins         *PinnedVocabularies
+	cache        map[string]Vocabulary
+	failures     map[string]error
+	replacements map[string]string
+	base         string
 }
 
 func longestPrefixBase(iri string, ctx RdfContext) (string, string, bool) {
@@ -124,7 +44,7 @@ func longestPrefixBase(iri string, ctx RdfContext) (string, string, bool) {
 	return bestPrefix, bestBase, bestBase != ""
 }
 
-func (c *vocabularyCache) isDefined(iri string, ctx RdfContext, replacements map[string]string) (bool, error) {
+func (c *vocabularyCache) isDefined(iri string, ctx RdfContext) (bool, error) {
 	if c.base != "" && strings.HasPrefix(iri, c.base) {
 		return true, nil
 	}
@@ -136,13 +56,24 @@ func (c *vocabularyCache) isDefined(iri string, ctx RdfContext, replacements map
 	if !ok {
 		return true, nil
 	}
-	lookupIRI := replacementVocabularyTerm(iri, base, replacements)
-	base = replacementVocabularyBase(base, replacements)
+	lookupIRI := replacementVocabularyTerm(iri, base, c.replacements)
+	base = replacementVocabularyBase(base, c.replacements)
 	vocab, err := c.load(base)
 	if err != nil {
 		return false, err
 	}
 	return vocab.terms[lookupIRI], nil
+}
+
+// resolvable reports whether a declared prefix names a vocabulary that has to
+// be dereferenced. Terms in the project's own base and the XSD built-in
+// datatypes are checked without a vocabulary document, so there is no version
+// of them to pin.
+func (c *vocabularyCache) resolvable(namespace string) bool {
+	if c.base != "" && strings.HasPrefix(namespace, c.base) {
+		return false
+	}
+	return namespace != xsdNamespaceIRI
 }
 
 func replacementVocabularyBase(base string, replacements map[string]string) string {
@@ -176,25 +107,24 @@ func vocabularyDocumentURL(base string) string {
 	return base
 }
 
-func (c *vocabularyCache) load(base string) (Vocabulary, error) {
-	base = vocabularyDocumentURL(base)
-	if vocab, ok := c.cache[base]; ok {
+// load resolves the vocabulary a prefix namespace names. The namespace rather
+// than the document URL is the key, since that is what a project pins a version
+// against; two namespaces served by one document are only fetched once.
+func (c *vocabularyCache) load(namespace string) (Vocabulary, error) {
+	if vocab, ok := c.cache[namespace]; ok {
 		return vocab, nil
 	}
-	if c.failures == nil {
-		c.failures = map[string]error{}
-	}
-	if err, ok := c.failures[base]; ok {
+	if err, ok := c.failures[namespace]; ok {
 		return Vocabulary{}, err
 	}
 
-	terms, err := c.loadTerms(base)
+	terms, err := c.loadTerms(namespace)
 	if err != nil {
-		c.failures[base] = err
+		c.failures[namespace] = err
 		return Vocabulary{}, err
 	}
 	vocab := Vocabulary{terms: terms}
-	c.cache[base] = vocab
+	c.cache[namespace] = vocab
 	return vocab, nil
 }
 
@@ -208,47 +138,38 @@ func (c *vocabularyCache) parseBase(base string) string {
 	return c.base
 }
 
-func (c *vocabularyCache) loadTerms(base string) (map[string]bool, error) {
-	if terms, err := c.loadTermsFromDisk(base); err == nil {
-		return terms, nil
-	}
-
-	var fetchErr error
-	body, contentType, err := c.fetch(base)
-	if err != nil {
-		fetchErr = err
-	} else {
-		terms, _, err := serializeRdfDataAndGetVocab(contentType, body, c.parseBase(base))
-		if err == nil {
-			if err := c.storeTermsToDisk(base, terms); err != nil {
-				return nil, err
-			}
+// loadTerms reads the terms a vocabulary defines out of the version the project
+// pins for it, pinning what it fetched when there is no pin yet. A document SAL
+// cannot parse falls back to the bundled copy in build/vocab, which is then
+// pinned in its place; a pinned document that no longer parses is an error,
+// since silently validating against something else would defeat the pin.
+func (c *vocabularyCache) loadTerms(namespace string) (map[string]bool, error) {
+	body, mediaType, pinned, err := c.pins.Document(namespace, vocabularyDocumentURL(namespace))
+	if err == nil {
+		terms, _, parseErr := serializeRdfDataAndGetVocab(mediaType, body, c.parseBase(namespace))
+		if parseErr == nil {
 			return terms, nil
 		}
-		fetchErr = err
+		if pinned {
+			return nil, parseErr
+		}
+		// what was just fetched is not RDF SAL can read, so it is not the
+		// version this project should record
+		c.pins.Unpin(namespace)
+		err = parseErr
 	}
 
-	terms, err := loadBundledVocabularyTerms(base, c.base)
-	if err != nil {
-		return nil, fetchErr
-	}
-
-	if err := c.storeTermsToDisk(base, terms); err != nil {
+	bundled, bundledType, ok, bundledErr := vocab.Load(namespace)
+	if bundledErr != nil || !ok {
 		return nil, err
 	}
+	terms, _, parseErr := serializeRdfDataAndGetVocab(bundledType, bundled, c.parseBase(namespace))
+	if parseErr != nil {
+		return nil, err
+	}
+	slog.Warn("Could not read the vocabulary at " + namespace + ", so SAL's bundled copy is pinned instead: " + err.Error())
+	c.pins.Pin(namespace, bundled, bundledType)
 	return terms, nil
-}
-
-func loadBundledVocabularyTerms(base, buildBase string) (map[string]bool, error) {
-	body, contentType, ok, err := vocab.Load(base)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, vocab.MissingError(base)
-	}
-	terms, _, err := serializeRdfDataAndGetVocab(contentType, body, buildBase)
-	return terms, err
 }
 
 type rdfFormat string
@@ -338,13 +259,14 @@ func extractVocabularyTermsFromGraph(g *rdflibgo.Graph) map[string]bool {
 	return terms
 }
 
-// FetchGraph dereferences an RDF document and parses it into a graph. It is how
-// build resolves the ontologies a project's .sal/ontology.ttl imports, and it
-// reuses the same content negotiation and format sniffing a vocabulary lookup
-// does. Terms in the document that are written relative resolve against the
-// document's own IRI, not against the SAL project being built.
-func FetchGraph(iri string) (*rdflibgo.Graph, error) {
-	body, contentType, err := fetchVocabularyDocument(iri)
+// PinnedGraph parses the version a project pins of an ontology document into a
+// graph, dereferencing and pinning it when the project has no pin for it yet.
+// It is how build merges the ontologies a project's .sal/ontology.ttl imports,
+// so that an import is carried at the exact version the project recorded. Terms
+// in the document that are written relative resolve against the document's own
+// IRI, not against the SAL project being built.
+func PinnedGraph(pins *PinnedVocabularies, iri string) (*rdflibgo.Graph, error) {
+	body, contentType, _, err := pins.Document(iri, iri)
 	if err != nil {
 		return nil, err
 	}

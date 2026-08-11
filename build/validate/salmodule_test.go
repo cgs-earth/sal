@@ -34,15 +34,11 @@ func (testModuleRunner) RunContainer(_ context.Context, _ string, _ []string, cm
 	return nil, nil, fmt.Errorf("unexpected command %v", cmd)
 }
 
-// useFakeSalModule points the shared module resolver and the vocabulary cache at
-// test doubles so that dereferencing a salmodule:// vocabulary neither clones a
-// repository nor runs a container.
+// useFakeSalModule points the shared module resolver at test doubles so that
+// dereferencing a salmodule:// vocabulary neither clones a repository nor runs a
+// container.
 func useFakeSalModule(t *testing.T) {
 	t.Helper()
-
-	cacheDir := filepath.Join(t.TempDir(), "sal", "cache")
-	originalCacheRootDir := cacheRootDir
-	cacheRootDir = func() string { return cacheDir }
 
 	resolver := salmodule.Default()
 	originalRunner, originalCommand := resolver.Runner, resolver.Command
@@ -53,7 +49,6 @@ func useFakeSalModule(t *testing.T) {
 	}
 
 	t.Cleanup(func() {
-		cacheRootDir = originalCacheRootDir
 		resolver.Runner, resolver.Command = originalRunner, originalCommand
 		resolver.Reset()
 	})
@@ -97,10 +92,10 @@ func TestValidateChecksTaskConfigurationPropertiesAgainstTheModuleOntology(t *te
 // vocabulary base without the trailing slash. The ontology it publishes still
 // has to parse against the base, or none of its terms would match the ones a
 // project references.
-func TestFetchGraphResolvesAModuleOntologyAgainstTheModuleNamespace(t *testing.T) {
+func TestPinnedGraphResolvesAModuleOntologyAgainstTheModuleNamespace(t *testing.T) {
 	useFakeSalModule(t)
 
-	graph, err := FetchGraph("salmodule://www.github.com/test/history-getter")
+	graph, err := PinnedGraph(EphemeralVocabularies(), "salmodule://www.github.com/test/history-getter")
 
 	require.NoError(t, err)
 	require.True(t, graph.Contains(

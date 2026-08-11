@@ -14,6 +14,7 @@ import (
 
 	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/table"
+	"github.com/cgs-earth/sal/build/validate"
 	"github.com/cgs-earth/sal/pkg"
 	"oras.land/oras-go/v2/registry/remote"
 )
@@ -192,13 +193,25 @@ func wipe() error {
 	if err != nil {
 		return err
 	}
-	// the ontology is a source file rather than a build artifact, so the prompt
-	// names it whenever a wipe would take it with the data product
-	prompt := "This will permanently delete the entire data product. Continue?"
-	if _, err := os.Stat(ontologyPath); err == nil {
-		prompt = "This will permanently delete the entire data product and the project ontology at " + ontologyPath + ". Continue?"
-	} else if !os.IsNotExist(err) {
+	pinsPath, err := pkg.SalNsPrefixVersionsPath()
+	if err != nil {
 		return err
+	}
+
+	// the ontology and the pinned vocabulary versions are files a project keeps
+	// in git rather than build artifacts, so the prompt names whichever of them
+	// a wipe would take with the data product
+	prompt := "This will permanently delete the entire data product. Continue?"
+	var projectFiles []string
+	for _, path := range []string{ontologyPath, pinsPath} {
+		if _, err := os.Stat(path); err == nil {
+			projectFiles = append(projectFiles, path)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if len(projectFiles) > 0 {
+		prompt = "This will permanently delete the entire data product and " + strings.Join(projectFiles, " and ") + ". Continue?"
 	}
 
 	if !pkg.Confirm(prompt) {
@@ -251,7 +264,46 @@ func wipe() error {
 		return err
 	}
 
+	dataDir, err := pkg.SalDataDir()
+	if err != nil {
+		return err
+	}
+
+	if err := removePinnedVocabularies(pinsPath, dataDir); err != nil {
+		return err
+	}
+
 	return removeProjectOntology(ontologyPath)
+}
+
+// removePinnedVocabularies deletes the vocabulary versions the project pinned
+// along with the documents they name. The documents live directly under
+// .sal/data rather than inside the table, so removing the data product leaves
+// them behind; the pins record what a build resolved against, so like the
+// project ontology they go with it.
+func removePinnedVocabularies(path string, dataDir string) error {
+	pins, err := validate.LoadPinnedVocabularies(path, dataDir)
+	if err != nil {
+		// a wipe is how a project in a bad state is recovered, so a lockfile SAL
+		// cannot read is still removed; only the documents it named are left
+		slog.Warn("Could not read " + path + ", so the vocabulary documents it names are being left in place: " + err.Error())
+	}
+
+	if pins != nil {
+		for _, document := range pins.Documents() {
+			if err := os.Remove(document); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		}
+	}
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	slog.Info("Removed the pinned vocabulary versions at " + path)
+	return nil
 }
 
 // removeProjectOntology deletes the ontology `sal import` maintains. A wipe puts

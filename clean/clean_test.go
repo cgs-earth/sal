@@ -10,6 +10,7 @@ import (
 	"github.com/apache/iceberg-go/catalog/hadoop"
 	"github.com/apache/iceberg-go/table"
 	"github.com/cgs-earth/sal/build/load"
+	"github.com/cgs-earth/sal/build/validate"
 	"github.com/cgs-earth/sal/pkg"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
@@ -139,4 +140,32 @@ func TestRemoveProjectOntologyDeletesTheFile(t *testing.T) {
 
 func TestRemoveProjectOntologySucceedsWhenThereIsNoOntology(t *testing.T) {
 	require.NoError(t, removeProjectOntology(filepath.Join(t.TempDir(), "ontology.ttl")))
+}
+
+// The pinned documents sit directly under .sal/data rather than inside the
+// table, so removing the data product leaves them behind unless the wipe reads
+// the pins and takes them too.
+func TestRemovePinnedVocabulariesDeletesTheDocumentsItNames(t *testing.T) {
+	project := t.TempDir()
+	dataDir := filepath.Join(project, "data")
+	pinsPath := filepath.Join(project, "ns-prefix-versions.jsonld")
+
+	pins, err := validate.LoadPinnedVocabularies(pinsPath, dataDir)
+	require.NoError(t, err)
+	pins.Pin("https://vocab.test/things#", []byte("@prefix owl: <http://www.w3.org/2002/07/owl#> .\n"), "text/turtle")
+	require.NoError(t, pins.Save())
+	documents := pins.Documents()
+	require.Len(t, documents, 1)
+	require.FileExists(t, documents[0])
+
+	require.NoError(t, removePinnedVocabularies(pinsPath, dataDir))
+
+	require.NoFileExists(t, documents[0])
+	require.NoFileExists(t, pinsPath)
+}
+
+func TestRemovePinnedVocabulariesSucceedsWhenNothingIsPinned(t *testing.T) {
+	project := t.TempDir()
+
+	require.NoError(t, removePinnedVocabularies(filepath.Join(project, "ns-prefix-versions.jsonld"), filepath.Join(project, "data")))
 }

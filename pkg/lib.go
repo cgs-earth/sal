@@ -151,6 +151,18 @@ func SalOntologyPath() (string, error) {
 	return filepath.Join(projectDir, ".sal", "ontology.ttl"), nil
 }
 
+// SalNsPrefixVersionsPath returns the path to the file recording the exact
+// version of every vocabulary a project resolves its prefixes against. It is a
+// lockfile that belongs in git, unlike the documents it names, which are stored
+// content addressed under the gitignored .sal/data.
+func SalNsPrefixVersionsPath() (string, error) {
+	projectDir, err := SALProjectDir(os.UserHomeDir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(projectDir, ".sal", "ns-prefix-versions.jsonld"), nil
+}
+
 // SalImportsDir returns the directory the OCI artifacts a project imports are
 // pulled into. It sits under .sal/data because its contents are pulled rather
 // than authored, but it is not part of the built data product.
