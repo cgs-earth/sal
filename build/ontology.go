@@ -13,7 +13,7 @@ import (
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
-// appendProjectOntology adds .sal/ontology.ttl to the files being built. The
+// appendProjectOntology adds .sal/ontology.jsonld to the files being built. The
 // project ontology is a source file like any other, so it is validated and its
 // own statements land in the data product; only the ontologies it imports are
 // resolved later, once the build is known to be committable. The walk that
@@ -35,7 +35,7 @@ func appendProjectOntology(files []string) ([]string, error) {
 	return append(files, path), nil
 }
 
-// ImportOntologies resolves everything the project's .sal/ontology.ttl lists
+// ImportOntologies resolves everything the project's .sal/ontology.jsonld lists
 // with owl:imports, at the version the project pins for it. An ontology
 // document is merged into the graph being built, so that an ontology a project
 // depends on is carried by the data product rather than only referenced from
@@ -105,7 +105,7 @@ func importOntologies(graph *rdflibgo.Graph, path string, base string, fetch fun
 // dropImportStatement removes the owl:imports statement naming an OCI artifact
 // from the graph. The artifact is a file the project pulls rather than an
 // ontology it merges, so nothing about it belongs in the triples table; the
-// project's .sal/ontology.ttl stays the record of what was imported.
+// project's .sal/ontology.jsonld stays the record of what was imported.
 func dropImportStatement(graph *rdflibgo.Graph, iri string) {
 	imports := rdflibgo.NewURIRefUnsafe(owlImportsIRI)
 	graph.Remove(nil, &imports, rdflibgo.NewURIRefUnsafe(iri))

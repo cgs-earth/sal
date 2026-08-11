@@ -94,10 +94,39 @@ Validation therefore checks terms against the exact version of a vocabulary the 
 A prefix that is declared but never used is pinned too, so adding a term from it later does not silently change which version the project validates against.
 A pin whose document is missing locally — as in a fresh clone that has not pulled the data product — is fetched again rather than failing the build.
 
-Ontologies listed with `owl:imports` in `.sal/ontology.ttl` are merged at the version pinned for them.
+Ontologies listed with `owl:imports` in `.sal/ontology.jsonld` are merged at the version pinned for them.
 Pinning a vocabulary does not merge it: a vocabulary the project validates against but does not import stays out of the triples table.
 
 Use `--no-cache` on `sal build` to resolve every prefix from its source again and re-pin it, which is how a project moves to newer vocabulary versions.
+
+### Querying pinned vocabularies
+
+Every entry `sal build` writes to `.sal/ns-prefix-versions.jsonld` is also written into the triples table itself, as an `owl:Ontology` node carrying the same `owl:versionIRI`, `dcterms:format`, and `dcterms:modified` the lockfile records.
+This is provenance: it says which exact version of each vocabulary the data next to it was validated against, and it is queryable like any other triple, through `sal query --sparql`, `sal serve`'s `/sparql` endpoint, or the **Ontology versions** sample in the SPARQL tab of `sal serve --with-ui`.
+
+`/sparql` translates SPARQL to DuckDB SQL and only understands basic triple patterns, `FILTER` comparisons, `DISTINCT`, and `LIMIT` — no `OPTIONAL` and no `ORDER BY` — so the query stays inside that subset:
+
+```sparql
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX dcterms: <http://purl.org/dc/terms/>
+
+SELECT ?ontology ?versionIRI ?format ?modified
+WHERE {
+  ?ontology rdf:type owl:Ontology .
+  ?ontology owl:versionIRI ?versionIRI .
+  ?ontology dcterms:format ?format .
+  ?ontology dcterms:modified ?modified .
+}
+```
+
+```
+ontology                                    versionIRI                                                          format              modified
+http://www.opengis.net/ont/geosparql#       urn:sha256:6a55c78c2b38c077a31075363ef5e908fa683c61eb059a0fc9828aeb…  application/rdf+xml  2026-08-11T17:21:12Z
+https://schema.org/                         urn:sha256:c3a1e7c9c4b6f6b1a3f5e6d7c8b9a0e1f2d3c4b5a6978869e6fa84d…  application/ld+json  2026-08-11T17:21:12Z
+```
+
+A vocabulary the project pins but does not import, one it only checks terms against, shows up here the same as an imported one; whether an ontology's own statements were merged into the table is a separate question from which version it validated against.
 
 ## Published layout
 

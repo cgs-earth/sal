@@ -26,7 +26,7 @@ type TableStats struct {
 	ColumnStats Result `json:"columnStats"`
 	// Modules are the SAL module URIs the build that wrote this table downloaded.
 	Modules []string `json:"modules"`
-	// Imports are the owl:imports IRIs the project's .sal/ontology.ttl records.
+	// Imports are the owl:imports IRIs the project's .sal/ontology.jsonld records.
 	Imports []string `json:"imports"`
 	// ImportedTables are the imported data products queryable as views of their
 	// own, one per OCI artifact the project imported.
@@ -83,7 +83,7 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 }
 
 // projectImports reads the owl:imports IRIs out of the project's
-// .sal/ontology.ttl. They come from disk rather than from the table because the
+// .sal/ontology.jsonld. They come from disk rather than from the table because the
 // table carries the imported statements, not the documents they were fetched
 // from. A directory that is not a SAL project, or a project that has imported
 // nothing, simply reports none rather than failing the whole stats view.

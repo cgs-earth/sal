@@ -131,7 +131,7 @@ func graphForSnapshot(i int) *rdflibgo.Graph {
 }
 
 func TestRemoveProjectOntologyDeletesTheFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "ontology.ttl")
+	path := filepath.Join(t.TempDir(), "ontology.jsonld")
 	require.NoError(t, os.WriteFile(path, []byte("# managed by sal import\n"), 0644))
 
 	require.NoError(t, removeProjectOntology(path))
@@ -139,7 +139,7 @@ func TestRemoveProjectOntologyDeletesTheFile(t *testing.T) {
 }
 
 func TestRemoveProjectOntologySucceedsWhenThereIsNoOntology(t *testing.T) {
-	require.NoError(t, removeProjectOntology(filepath.Join(t.TempDir(), "ontology.ttl")))
+	require.NoError(t, removeProjectOntology(filepath.Join(t.TempDir(), "ontology.jsonld")))
 }
 
 // The pinned documents sit directly under .sal/data rather than inside the

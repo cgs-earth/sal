@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	rdflibgo "github.com/tggo/goRDFlib"
 )
 
 const (
@@ -163,6 +165,37 @@ func (p *PinnedVocabularies) Documents() []string {
 	}
 	sort.Strings(paths)
 	return paths
+}
+
+// AppendProvenance adds an owl:Ontology node for every vocabulary the project
+// pins to graph, carrying the same owl:versionIRI, dcterms:format, and
+// dcterms:modified a build writes to .sal/ns-prefix-versions.jsonld. This is
+// what makes a pinned vocabulary's exact version queryable alongside the data
+// it validated, rather than only recorded in the lockfile on disk.
+func (p *PinnedVocabularies) AppendProvenance(graph *rdflibgo.Graph) {
+	owlOntology := rdflibgo.NewURIRefUnsafe(owlNamespaceIRI + "Ontology")
+	versionIRI := rdflibgo.NewURIRefUnsafe(owlNamespaceIRI + "versionIRI")
+	format := rdflibgo.NewURIRefUnsafe(dctermsNamespaceIRI + "format")
+	modified := rdflibgo.NewURIRefUnsafe(dctermsNamespaceIRI + "modified")
+
+	ids := make([]string, 0, len(p.entries))
+	for id := range p.entries {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	for _, id := range ids {
+		entry := p.entries[id]
+		subject := rdflibgo.NewURIRefUnsafe(id)
+		graph.Add(subject, rdflibgo.RDF.Type, owlOntology)
+		graph.Add(subject, versionIRI, rdflibgo.NewURIRefUnsafe(digestScheme+entry.Digest))
+		if entry.MediaType != "" {
+			graph.Add(subject, format, rdflibgo.NewLiteral(entry.MediaType))
+		}
+		if !entry.Modified.IsZero() {
+			graph.Add(subject, modified, rdflibgo.NewLiteral(entry.Modified.Format(time.RFC3339), rdflibgo.WithDatatype(rdflibgo.XSDDateTime)))
+		}
+	}
 }
 
 // Save writes the pins and the documents they name. It does nothing when

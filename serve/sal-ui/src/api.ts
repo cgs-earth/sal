@@ -16,7 +16,7 @@ export type TableStats = {
   columnStats: QueryResult
   /** The `salmodule://` URIs of the modules the build that wrote this table downloaded. */
   modules: string[] | null
-  /** The `owl:imports` IRIs the project's `.sal/ontology.ttl` records. */
+  /** The `owl:imports` IRIs the project's `.sal/ontology.jsonld` records. */
   imports: string[] | null
   /** The imported data products, each queryable as a view of its own. */
   importedTables: ImportedTable[] | null

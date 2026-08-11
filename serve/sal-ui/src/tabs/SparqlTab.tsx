@@ -91,6 +91,20 @@ WHERE {
 }
 LIMIT 50`,
   },
+  {
+    name: 'Ontology versions',
+    query: `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX dcterms: <http://purl.org/dc/terms/>
+
+SELECT ?ontology ?versionIRI ?format ?modified
+WHERE {
+  ?ontology rdf:type owl:Ontology .
+  ?ontology owl:versionIRI ?versionIRI .
+  ?ontology dcterms:format ?format .
+  ?ontology dcterms:modified ?modified .
+}`,
+  },
 ]
 
 export function SparqlTab() {

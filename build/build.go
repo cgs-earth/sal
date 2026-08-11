@@ -176,6 +176,11 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		return nil, fmt.Errorf("build: record pinned vocabularies: %w", err)
 	}
 
+	// every vocabulary the project pins becomes provenance in the graph itself,
+	// so which exact version a build validated against is queryable alongside
+	// the data rather than only recorded in .sal/ns-prefix-versions.jsonld
+	pins.AppendProvenance(finalGraph)
+
 	resolver := salmodule.Default()
 	if err := MaterializeSalModules(context.Background(), finalGraph, resolver); err != nil {
 		return nil, err
