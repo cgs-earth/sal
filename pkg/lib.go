@@ -148,7 +148,7 @@ func SalOntologyPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(projectDir, ".sal", "ontology.ttl"), nil
+	return filepath.Join(projectDir, ".sal", "ontology.jsonld"), nil
 }
 
 // SalNsPrefixVersionsPath returns the path to the file recording the exact

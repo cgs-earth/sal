@@ -15,7 +15,7 @@ const ontologyTestBase = "https://github.com/cgs-earth/sal/"
 
 func writeProjectOntology(t *testing.T, content string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "ontology.ttl")
+	path := filepath.Join(t.TempDir(), "ontology.jsonld")
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
 	return path
 }
@@ -41,7 +41,7 @@ func graphTripleCount(graph *rdflibgo.Graph) int {
 
 func TestImportOntologiesDoesNothingWithoutAProjectOntology(t *testing.T) {
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase(ontologyTestBase))
-	path := filepath.Join(t.TempDir(), "ontology.ttl")
+	path := filepath.Join(t.TempDir(), "ontology.jsonld")
 
 	fetched := false
 	err := importOntologies(graph, path, ontologyTestBase, func(string) (*rdflibgo.Graph, error) {
@@ -55,13 +55,19 @@ func TestImportOntologiesDoesNothingWithoutAProjectOntology(t *testing.T) {
 }
 
 func TestImportOntologiesMergesEveryImport(t *testing.T) {
-	path := writeProjectOntology(t, `@prefix dc: <http://purl.org/dc/elements/1.1/> .
-@prefix owl: <http://www.w3.org/2002/07/owl#> .
-
-<.> a owl:Ontology ;
-    dc:title "My Ontology" ;
-    owl:imports <https://example.com/onto1>, <https://example.com/onto2> .
-`)
+	path := writeProjectOntology(t, `{
+  "@context": {
+    "dc": "http://purl.org/dc/elements/1.1/",
+    "owl": "http://www.w3.org/2002/07/owl#"
+  },
+  "@id": ".",
+  "@type": "owl:Ontology",
+  "dc:title": "My Ontology",
+  "owl:imports": [
+    { "@id": "https://example.com/onto1" },
+    { "@id": "https://example.com/onto2" }
+  ]
+}`)
 
 	var requested []string
 	fetch := func(iri string) (*rdflibgo.Graph, error) {
@@ -92,8 +98,8 @@ func TestImportOntologiesMergesEveryImport(t *testing.T) {
 func TestAppendProjectOntologyAddsTheOntologyToTheFilesBeingBuilt(t *testing.T) {
 	project := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(project, ".sal"), 0755))
-	ontology := filepath.Join(project, ".sal", "ontology.ttl")
-	require.NoError(t, os.WriteFile(ontology, []byte("# managed by sal import\n"), 0644))
+	ontology := filepath.Join(project, ".sal", "ontology.jsonld")
+	require.NoError(t, os.WriteFile(ontology, []byte(`{"@id": "."}`), 0644))
 	t.Chdir(project)
 
 	files, err := appendProjectOntology([]string{filepath.Join(project, "data.ttl")})
@@ -123,11 +129,12 @@ func TestAppendProjectOntologyLeavesTheFilesAloneWithoutOne(t *testing.T) {
 }
 
 func TestImportOntologiesReportsWhichImportCouldNotBeFetched(t *testing.T) {
-	path := writeProjectOntology(t, `@prefix owl: <http://www.w3.org/2002/07/owl#> .
-
-<.> a owl:Ontology ;
-    owl:imports <https://example.com/missing> .
-`)
+	path := writeProjectOntology(t, `{
+  "@context": { "owl": "http://www.w3.org/2002/07/owl#" },
+  "@id": ".",
+  "@type": "owl:Ontology",
+  "owl:imports": [{ "@id": "https://example.com/missing" }]
+}`)
 
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase(ontologyTestBase))
 	err := importOntologies(graph, path, ontologyTestBase, func(string) (*rdflibgo.Graph, error) {
@@ -139,11 +146,15 @@ func TestImportOntologiesReportsWhichImportCouldNotBeFetched(t *testing.T) {
 }
 
 func TestImportOntologiesPullsAnOciArtifactAndKeepsItOutOfTheGraph(t *testing.T) {
-	path := writeProjectOntology(t, `@prefix owl: <http://www.w3.org/2002/07/owl#> .
-
-<.> a owl:Ontology ;
-    owl:imports <https://example.com/onto1>, <oci://ghcr.io/cgs-earth/sal:e57e9af> .
-`)
+	path := writeProjectOntology(t, `{
+  "@context": { "owl": "http://www.w3.org/2002/07/owl#" },
+  "@id": ".",
+  "@type": "owl:Ontology",
+  "owl:imports": [
+    { "@id": "https://example.com/onto1" },
+    { "@id": "oci://ghcr.io/cgs-earth/sal:e57e9af" }
+  ]
+}`)
 
 	// the ontology file is a build source, so its statements are already in the
 	// graph by the time the imports are resolved
@@ -182,11 +193,12 @@ func TestImportOntologiesPullsAnOciArtifactAndKeepsItOutOfTheGraph(t *testing.T)
 // A module's vocabulary is an ontology document like any other; only where it is
 // fetched from differs, so it is merged rather than pulled to disk.
 func TestImportOntologiesMergesASalModuleOntology(t *testing.T) {
-	path := writeProjectOntology(t, `@prefix owl: <http://www.w3.org/2002/07/owl#> .
-
-<.> a owl:Ontology ;
-    owl:imports <salmodule://github.com/adplincinst/sample-salmodule-1> .
-`)
+	path := writeProjectOntology(t, `{
+  "@context": { "owl": "http://www.w3.org/2002/07/owl#" },
+  "@id": ".",
+  "@type": "owl:Ontology",
+  "owl:imports": [{ "@id": "salmodule://github.com/adplincinst/sample-salmodule-1" }]
+}`)
 
 	var requested []string
 	fetch := func(iri string) (*rdflibgo.Graph, error) {
@@ -212,11 +224,12 @@ func TestImportOntologiesMergesASalModuleOntology(t *testing.T) {
 }
 
 func TestImportOntologiesReportsWhichArtifactCouldNotBePulled(t *testing.T) {
-	path := writeProjectOntology(t, `@prefix owl: <http://www.w3.org/2002/07/owl#> .
-
-<.> a owl:Ontology ;
-    owl:imports <oci://ghcr.io/cgs-earth/sal:e57e9af> .
-`)
+	path := writeProjectOntology(t, `{
+  "@context": { "owl": "http://www.w3.org/2002/07/owl#" },
+  "@id": ".",
+  "@type": "owl:Ontology",
+  "owl:imports": [{ "@id": "oci://ghcr.io/cgs-earth/sal:e57e9af" }]
+}`)
 
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase(ontologyTestBase))
 	err := importOntologies(graph, path, ontologyTestBase, nil, func(string) error {

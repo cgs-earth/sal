@@ -110,7 +110,7 @@ func TestAVocabularyThatCannotBeFetchedPinsSalsBundledCopy(t *testing.T) {
 	require.Len(t, pins.Documents(), 1)
 }
 
-// An ontology .sal/ontology.ttl imports is merged at the version the project
+// An ontology .sal/ontology.jsonld imports is merged at the version the project
 // pinned rather than at whatever its source is serving now.
 func TestPinnedGraphMergesTheVersionTheProjectPinned(t *testing.T) {
 	projectDir := t.TempDir()

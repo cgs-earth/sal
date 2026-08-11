@@ -9,6 +9,7 @@ import (
 
 	"github.com/cgs-earth/sal/build/validate"
 	"github.com/stretchr/testify/require"
+	rdflibgo "github.com/tggo/goRDFlib"
 )
 
 const pinsTestVocabulary = `@prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -79,7 +80,7 @@ func TestBuildPinsEveryVocabularyItResolved(t *testing.T) {
 	project := newPinsTestProject(t)
 	fetches := servePinsTestVocabulary(t)
 
-	_, err := (&BuildCmd{Format: GraphExportFormatNQuads}).Run()
+	graph, err := (&BuildCmd{Format: GraphExportFormatNQuads}).Run()
 	require.NoError(t, err)
 
 	require.Equal(t, 1, *fetches)
@@ -90,6 +91,17 @@ func TestBuildPinsEveryVocabularyItResolved(t *testing.T) {
 	// the XSD built-ins are checked without a vocabulary document, so the prefix
 	// the source declares for them has no version to pin
 	require.NotContains(t, string(content), `"@id": "http://www.w3.org/2001/XMLSchema#"`)
+
+	// the pin is also carried as provenance in the built graph itself, not only
+	// in the lockfile on disk
+	var versionIRIs int
+	subject := rdflibgo.NewURIRefUnsafe("https://vocab.test/things#")
+	predicate := rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#versionIRI")
+	graph.Triples(subject, &predicate, nil)(func(rdflibgo.Triple) bool {
+		versionIRIs++
+		return true
+	})
+	require.Equal(t, 1, versionIRIs)
 
 	pins, err := validate.LoadPinnedVocabularies(filepath.Join(project, ".sal", "ns-prefix-versions.jsonld"), filepath.Join(project, ".sal", "data"))
 	require.NoError(t, err)

@@ -48,7 +48,7 @@ build_demo_data() {
 	git config user.name "SAL Demo"
 
 	/app/sal init
-	# An import the demo can show off: it puts an owl:imports in .sal/ontology.ttl
+	# An import the demo can show off: it puts an owl:imports in .sal/ontology.jsonld
 	# for the stats view, and build merges the OWL vocabulary into the table. The
 	# ontology is fetched at build time, so a container with no route to w3.org
 	# fails here rather than serving a table without it.

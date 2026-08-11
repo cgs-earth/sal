@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	rdflibgo "github.com/tggo/goRDFlib"
 )
 
 const testVocabularyNamespace = "https://vocab.test/things#"
@@ -197,6 +198,45 @@ func TestAnEphemeralStoreWritesNothing(t *testing.T) {
 	entries, err := os.ReadDir(projectDir)
 	require.NoError(t, err)
 	require.Empty(t, entries)
+}
+
+func TestAppendProvenanceAddsAnOntologyNodeForEveryPin(t *testing.T) {
+	projectDir := t.TempDir()
+	pins := newTestPins(t, projectDir, testVocabularyDocument, nil)
+	_, mediaType, _, err := pins.Document(testVocabularyNamespace, "https://vocab.test/things")
+	require.NoError(t, err)
+	require.NoError(t, pins.Save())
+
+	sum := sha256.Sum256([]byte(testVocabularyDocument))
+	digest := hex.EncodeToString(sum[:])
+
+	graph := rdflibgo.NewGraph()
+	pins.AppendProvenance(graph)
+
+	subject := rdflibgo.NewURIRefUnsafe(testVocabularyNamespace)
+	require.True(t, graph.Contains(subject, rdflibgo.RDF.Type, rdflibgo.NewURIRefUnsafe(owlNamespaceIRI+"Ontology")))
+	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(owlNamespaceIRI+"versionIRI"), rdflibgo.NewURIRefUnsafe("urn:sha256:"+digest)))
+	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(dctermsNamespaceIRI+"format"), rdflibgo.NewLiteral(mediaType)))
+
+	var modifiedCount int
+	predicate := rdflibgo.NewURIRefUnsafe(dctermsNamespaceIRI + "modified")
+	graph.Triples(subject, &predicate, nil)(func(rdflibgo.Triple) bool {
+		modifiedCount++
+		return true
+	})
+	require.Equal(t, 1, modifiedCount)
+}
+
+func TestAppendProvenanceAddsNothingForAnEmptyStore(t *testing.T) {
+	graph := rdflibgo.NewGraph()
+	EphemeralVocabularies().AppendProvenance(graph)
+
+	var count int
+	graph.Triples(nil, nil, nil)(func(rdflibgo.Triple) bool {
+		count++
+		return true
+	})
+	require.Equal(t, 0, count)
 }
 
 func TestLoadingAVersionThatIsNotAHashIsAnError(t *testing.T) {
