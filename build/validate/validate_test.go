@@ -36,7 +36,7 @@ func TestPinDeclaredPrefixesPinsAPrefixNoTermUses(t *testing.T) {
 	require.NoError(t, validator.PinDeclaredPrefixes())
 	require.NoError(t, pins.Save())
 
-	content, err := os.ReadFile(filepath.Join(projectDir, "ns-prefix-versions.jsonld"))
+	content, err := os.ReadFile(filepath.Join(projectDir, "config.jsonld"))
 	require.NoError(t, err)
 	require.Contains(t, string(content), testVocabularyNamespace)
 }
@@ -104,13 +104,13 @@ func TestAVocabularyThatCannotBeFetchedPinsSalsBundledCopy(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, pins.Save())
 
-	content, err := os.ReadFile(filepath.Join(projectDir, "ns-prefix-versions.jsonld"))
+	content, err := os.ReadFile(filepath.Join(projectDir, "config.jsonld"))
 	require.NoError(t, err)
 	require.Contains(t, string(content), "https://schema.org/")
 	require.Len(t, pins.Documents(), 1)
 }
 
-// An ontology .sal/ontology.jsonld imports is merged at the version the project
+// An ontology the config file's ontology node imports is merged at the version the project
 // pinned rather than at whatever its source is serving now.
 func TestPinnedGraphMergesTheVersionTheProjectPinned(t *testing.T) {
 	projectDir := t.TempDir()

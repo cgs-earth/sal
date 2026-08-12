@@ -12,12 +12,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
 const (
 	owlNamespaceIRI     = "http://www.w3.org/2002/07/owl#"
 	dctermsNamespaceIRI = "http://purl.org/dc/terms/"
+	rdfsNamespaceIRI    = "http://www.w3.org/2000/01/rdf-schema#"
 	// sha256VersionScheme heads the owl:versionIRI of a pinned vocabulary, so that
 	// the version a project resolves a prefix against names the exact bytes behind it
 	sha256VersionScheme = "urn:sha256:"
@@ -38,13 +40,15 @@ type PinnedVersion struct {
 }
 
 // PinnedVocabularies is the set of vocabulary documents a project resolves its
-// prefixes against. It is read from and written to .sal/ns-prefix-versions.jsonld,
-// which records a prefix's namespace against the SHA-256 of the document behind
-// it -- or, for a salmodule:// vocabulary, the git commit hash of the module
-// repository it was built from; the document itself is stored under .sal/data
-// named by that same version, so the data product carries the vocabularies it
-// was validated against and a later build validates against the same versions
-// the first one did.
+// prefixes against. It is read from and written to the pinned vocabulary nodes
+// in .sal/config.jsonld, which record a prefix's namespace against the SHA-256
+// of the document behind it -- or, for a salmodule:// vocabulary, the git
+// commit hash of the module repository it was built from; the document itself
+// is stored under .sal/data named by that same version, so the data product
+// carries the vocabularies it was validated against and a later build
+// validates against the same versions the first one did. The project ontology
+// node .sal/config.jsonld also carries is a different package's concern;
+// PinnedVocabularies carries it forward untouched rather than reading it.
 //
 // A store with no path is ephemeral: nothing is read from disk, Save writes
 // nothing, and every document is fetched. That is what validating RDF outside a
@@ -69,6 +73,10 @@ type PinnedVocabularies struct {
 	// pinned at, until Save writes them out
 	pending map[string][]byte
 	dirty   bool
+	// ontologyNode is the project ontology node .sal/config.jsonld carried when
+	// it was loaded, if any. Save carries it forward untouched, since it is the
+	// importation package's concern, not this store's.
+	ontologyNode json.RawMessage
 }
 
 type pinnedVocabulary struct {
@@ -99,21 +107,24 @@ func EphemeralVocabularies() *PinnedVocabularies {
 	}
 }
 
-// LoadPinnedVocabularies reads the versions a project has pinned. A project that
-// has never pinned anything is not an error; it starts with an empty set.
+// LoadPinnedVocabularies reads the versions a project has pinned out of
+// .sal/config.jsonld. A project that has never pinned anything is not an
+// error; it starts with an empty set.
 func LoadPinnedVocabularies(path string, blobDir string) (*PinnedVocabularies, error) {
 	pins := EphemeralVocabularies()
 	pins.path = path
 	pins.blobDir = blobDir
 
-	content, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return pins, nil
-	}
+	doc, err := pkg.ReadConfigDocument(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	if err := pins.unmarshal(content); err != nil {
+	ontologyNode, pinnedNodes, err := pkg.PartitionConfigGraph(doc.Graph)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	pins.ontologyNode = ontologyNode
+	if err := pins.unmarshal(pinnedNodes); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return pins, nil
@@ -196,15 +207,16 @@ func (p *PinnedVocabularies) Documents() []string {
 }
 
 // AppendProvenance adds an owl:Ontology node for every vocabulary the project
-// pins to graph, carrying the same owl:versionIRI, dcterms:format, and
-// dcterms:modified a build writes to .sal/ns-prefix-versions.jsonld. This is
-// what makes a pinned vocabulary's exact version queryable alongside the data
-// it validated, rather than only recorded in the lockfile on disk.
+// pins to graph, carrying the same owl:versionIRI, dcterms:format,
+// dcterms:modified, and rdfs:comment a build writes to .sal/config.jsonld.
+// This is what makes a pinned vocabulary's exact version queryable alongside
+// the data it validated, rather than only recorded in the lockfile on disk.
 func (p *PinnedVocabularies) AppendProvenance(graph *rdflibgo.Graph) {
 	owlOntology := rdflibgo.NewURIRefUnsafe(owlNamespaceIRI + "Ontology")
 	versionIRI := rdflibgo.NewURIRefUnsafe(owlNamespaceIRI + "versionIRI")
 	format := rdflibgo.NewURIRefUnsafe(dctermsNamespaceIRI + "format")
 	modified := rdflibgo.NewURIRefUnsafe(dctermsNamespaceIRI + "modified")
+	comment := rdflibgo.NewURIRefUnsafe(rdfsNamespaceIRI + "comment")
 
 	ids := make([]string, 0, len(p.entries))
 	for id := range p.entries {
@@ -222,8 +234,15 @@ func (p *PinnedVocabularies) AppendProvenance(graph *rdflibgo.Graph) {
 		}
 		if !entry.Modified.IsZero() {
 			graph.Add(subject, modified, rdflibgo.NewLiteral(entry.Modified.Format(time.RFC3339), rdflibgo.WithDatatype(rdflibgo.XSDDateTime)))
+			graph.Add(subject, comment, rdflibgo.NewLiteral(pinnedVocabularyComment(id, entry.Modified)))
 		}
 	}
+}
+
+// pinnedVocabularyComment is the rdfs:comment recorded for a pinned
+// vocabulary node, both in .sal/config.jsonld and as build provenance.
+func pinnedVocabularyComment(id string, modified time.Time) string {
+	return fmt.Sprintf("Represents the cached version of the %s vocabulary as of %s used for validation in this project.", id, modified.Format(time.RFC3339))
 }
 
 // Save writes the pins and the documents they name. It does nothing when
@@ -237,14 +256,15 @@ func (p *PinnedVocabularies) Save() error {
 	if err := p.writeDocuments(); err != nil {
 		return err
 	}
-	content, err := p.marshal()
+	nodes, err := p.nodes()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(p.path), 0755); err != nil {
+	doc := &pkg.ConfigDocument{Context: pkg.SalConfigContext}
+	if doc.Graph, err = pkg.AssembleConfigGraph(p.ontologyNode, nodes); err != nil {
 		return err
 	}
-	if err := os.WriteFile(p.path, content, 0644); err != nil {
+	if err := pkg.WriteConfigDocument(p.path, doc); err != nil {
 		return err
 	}
 
@@ -309,20 +329,16 @@ func documentDigest(body []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// pinnedVocabulariesDocument is the JSON-LD shape of
-// .sal/ns-prefix-versions.jsonld. The file is generated on every build that
-// pins something new, so a hand edit to it does not survive.
-type pinnedVocabulariesDocument struct {
-	Context map[string]string      `json:"@context"`
-	Graph   []pinnedVocabularyNode `json:"@graph"`
-}
-
+// pinnedVocabularyNode is the JSON-LD shape a pinned vocabulary is written as
+// in .sal/config.jsonld. It is generated on every build that pins something
+// new, so a hand edit to one does not survive.
 type pinnedVocabularyNode struct {
 	ID         string        `json:"@id"`
 	Type       string        `json:"@type"`
 	VersionIRI iriValue      `json:"owl:versionIRI"`
 	Format     string        `json:"dcterms:format,omitempty"`
 	Modified   *typedLiteral `json:"dcterms:modified,omitempty"`
+	Comment    string        `json:"rdfs:comment,omitempty"`
 }
 
 type iriValue struct {
@@ -334,20 +350,16 @@ type typedLiteral struct {
 	Type  string `json:"@type"`
 }
 
-var pinnedVocabulariesContext = map[string]string{
-	"owl":     owlNamespaceIRI,
-	"dcterms": dctermsNamespaceIRI,
-	"xsd":     xsdNamespaceIRI,
-}
-
-func (p *PinnedVocabularies) marshal() ([]byte, error) {
+// nodes renders every pinned vocabulary as a graph node, sorted by @id so a
+// rewrite is a stable diff.
+func (p *PinnedVocabularies) nodes() ([]json.RawMessage, error) {
 	ids := make([]string, 0, len(p.entries))
 	for id := range p.entries {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 
-	doc := pinnedVocabulariesDocument{Context: pinnedVocabulariesContext, Graph: make([]pinnedVocabularyNode, 0, len(ids))}
+	nodes := make([]json.RawMessage, 0, len(ids))
 	for _, id := range ids {
 		entry := p.entries[id]
 		node := pinnedVocabularyNode{
@@ -358,24 +370,25 @@ func (p *PinnedVocabularies) marshal() ([]byte, error) {
 		}
 		if !entry.Modified.IsZero() {
 			node.Modified = &typedLiteral{Value: entry.Modified.Format(time.RFC3339), Type: "xsd:dateTime"}
+			node.Comment = pinnedVocabularyComment(id, entry.Modified)
 		}
-		doc.Graph = append(doc.Graph, node)
+		raw, err := json.Marshal(node)
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, raw)
 	}
-
-	content, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	return append(content, '\n'), nil
+	return nodes, nil
 }
 
-func (p *PinnedVocabularies) unmarshal(content []byte) error {
-	var doc pinnedVocabulariesDocument
-	if err := json.Unmarshal(content, &doc); err != nil {
-		return err
-	}
-
-	for _, node := range doc.Graph {
+// unmarshal reads the pinned vocabulary nodes .sal/config.jsonld carried,
+// already separated from the project ontology node by PartitionConfigGraph.
+func (p *PinnedVocabularies) unmarshal(rawNodes []json.RawMessage) error {
+	for _, raw := range rawNodes {
+		var node pinnedVocabularyNode
+		if err := json.Unmarshal(raw, &node); err != nil {
+			return err
+		}
 		if node.ID == "" {
 			return fmt.Errorf("a pinned vocabulary has no @id")
 		}
