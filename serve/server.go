@@ -8,6 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -29,11 +31,13 @@ type UIRunner interface {
 	salsparql.StatsRunner
 }
 
-// Serve starts a read-only SPARQL Protocol HTTP endpoint backed by DuckDB.
-func Serve(ctx context.Context, addr string, runner salsparql.DuckDBRunner, withUI bool) error {
-	handler := NewEndpoint(runner)
+// Serve starts a read-only SPARQL Protocol HTTP endpoint backed by DuckDB, plus
+// the /blob endpoint serving the vocabulary and imported ontology documents
+// pinned under blobDir.
+func Serve(ctx context.Context, addr string, runner salsparql.DuckDBRunner, blobDir string, withUI bool) error {
+	handler := NewEndpoint(runner, blobDir)
 	if withUI {
-		ui, err := NewEndpointWithUI(runner)
+		ui, err := NewEndpointWithUI(runner, blobDir)
 		if err != nil {
 			return err
 		}
@@ -61,18 +65,22 @@ func Serve(ctx context.Context, addr string, runner salsparql.DuckDBRunner, with
 	return err
 }
 
-// NewEndpoint returns an HTTP handler for the SPARQL Protocol query operation.
-func NewEndpoint(runner salsparql.Runner) http.Handler {
+// NewEndpoint returns an HTTP handler for the SPARQL Protocol query operation,
+// plus the /blob endpoint serving the vocabulary and imported ontology
+// documents pinned under blobDir.
+func NewEndpoint(runner salsparql.Runner, blobDir string) http.Handler {
 	mux := http.NewServeMux()
 	handler := sparqlHandler{runner: runner}
 	mux.Handle("/", handler)
 	mux.Handle("/sparql", handler)
+	mux.Handle("/blob/", blobHandler{dir: blobDir})
 	return mux
 }
 
 // NewEndpointWithUI returns an HTTP handler serving the embedded SAL UI at / along
-// with the SPARQL endpoint and the JSON APIs the UI reads.
-func NewEndpointWithUI(runner UIRunner) (http.Handler, error) {
+// with the SPARQL endpoint, the JSON APIs the UI reads, and the /blob endpoint
+// serving the vocabulary and imported ontology documents pinned under blobDir.
+func NewEndpointWithUI(runner UIRunner, blobDir string) (http.Handler, error) {
 	ui, err := uiHandler()
 	if err != nil {
 		return nil, err
@@ -83,8 +91,73 @@ func NewEndpointWithUI(runner UIRunner) (http.Handler, error) {
 	mux.Handle("/api/sql", sqlHandler{runner: runner})
 	mux.Handle("/api/stats", statsHandler{runner: runner})
 	mux.Handle("/api/salmodule", salmoduleHandler{inspect: salmodule.Inspect})
+	mux.Handle("/blob/", blobHandler{dir: blobDir})
 	mux.Handle("/", ui)
 	return mux, nil
+}
+
+// blobHandler serves the vocabulary and imported ontology documents a project
+// has pinned, which PinnedVocabularies names by their SHA-256 digest (or, for
+// a salmodule:// vocabulary, a git commit hash) under .sal/data/blobs. A
+// request may give the digest either bare or prefixed with "urn:sha256:";
+// the prefix is stripped before it is looked up. Range requests are honored
+// via http.ServeContent.
+type blobHandler struct {
+	dir string
+}
+
+func (h blobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "the blob endpoint only supports GET requests", http.StatusMethodNotAllowed)
+		return
+	}
+
+	digest := strings.TrimPrefix(r.URL.Path, "/blob/")
+	digest = strings.TrimPrefix(digest, "urn:sha256:")
+	if !isSHA256Hex(digest) {
+		http.NotFound(w, r)
+		return
+	}
+
+	file, err := os.Open(filepath.Join(h.dir, digest))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer func() {
+		if err := file.Close(); err != nil {
+			slog.Error("failed to close blob file", "error", err)
+		}
+	}()
+
+	info, err := file.Stat()
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	// a blob is an opaque pinned document, not necessarily text; setting this
+	// keeps http.ServeContent from sniffing the content and reporting it as
+	// text/plain
+	w.Header().Set("Content-Type", "application/octet-stream")
+	http.ServeContent(w, r, digest, info.ModTime(), file)
+}
+
+// isSHA256Hex reports whether s is a 64 character hex encoded SHA-256 digest,
+// the shape a blob is named by. This also guards against a request path
+// escaping the blob directory, since a bare hex string has no path separators.
+func isSHA256Hex(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			if c < 'a' || c > 'f' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // ModuleInspector dereferences a SAL module reference to the ontology the module

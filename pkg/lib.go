@@ -152,6 +152,19 @@ func SalImportsDir() (string, error) {
 	return filepath.Join(dataDir, "imports"), nil
 }
 
+// SalBlobsDir returns the directory the vocabulary and imported ontology
+// documents a project pins are stored under, named by the SHA-256 or git
+// commit hash version.PinnedVocabularies pins them at. It sits under
+// .sal/data because its contents are cached rather than authored, but it is
+// not part of the built data product.
+func SalBlobsDir() (string, error) {
+	dataDir, err := SalDataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dataDir, "blobs"), nil
+}
+
 // Return the path to the build iceberg data product in the .sal/data directory
 func SalBuiltDataProductPath() (string, error) {
 	salDataDir, err := SalDataDir()

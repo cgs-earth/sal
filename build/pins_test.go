@@ -103,7 +103,7 @@ func TestBuildPinsEveryVocabularyItResolved(t *testing.T) {
 	})
 	require.Equal(t, 1, versionIRIs)
 
-	pins, err := validate.LoadPinnedVocabularies(filepath.Join(project, ".sal", "config.jsonld"), filepath.Join(project, ".sal", "data"))
+	pins, err := validate.LoadPinnedVocabularies(filepath.Join(project, ".sal", "config.jsonld"), filepath.Join(project, ".sal", "data", "blobs"))
 	require.NoError(t, err)
 	documents := pins.Documents()
 	require.Len(t, documents, 1)

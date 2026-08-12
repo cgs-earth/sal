@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cgs-earth/sal/pkg"
 	salsparql "github.com/cgs-earth/sal/query/sparql"
 )
 
@@ -24,5 +25,9 @@ func (cmd *ServeCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	return Serve(ctx, ":8080", runner, cmd.WithUI)
+	blobDir, err := pkg.SalBlobsDir()
+	if err != nil {
+		return err
+	}
+	return Serve(ctx, ":8080", runner, blobDir, cmd.WithUI)
 }

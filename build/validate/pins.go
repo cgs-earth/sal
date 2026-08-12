@@ -44,7 +44,7 @@ type PinnedVersion struct {
 // in .sal/config.jsonld, which record a prefix's namespace against the SHA-256
 // of the document behind it -- or, for a salmodule:// vocabulary, the git
 // commit hash of the module repository it was built from; the document itself
-// is stored under .sal/data named by that same version, so the data product
+// is stored under .sal/data/blobs named by that same version, so the data product
 // carries the vocabularies it was validated against and a later build
 // validates against the same versions the first one did. The project ontology
 // node .sal/config.jsonld also carries is a different package's concern;

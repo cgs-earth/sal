@@ -254,22 +254,22 @@ func wipe() error {
 		return err
 	}
 
-	dataDir, err := pkg.SalDataDir()
+	blobsDir, err := pkg.SalBlobsDir()
 	if err != nil {
 		return err
 	}
 
-	return removeProjectConfig(configPath, dataDir)
+	return removeProjectConfig(configPath, blobsDir)
 }
 
 // removeProjectConfig deletes .sal/config.jsonld -- the project ontology and
 // the pinned vocabulary versions together -- along with the vocabulary
-// documents the pins name. Those documents live directly under .sal/data
-// rather than inside the table, so removing the data product leaves them
-// behind; the config file describes what a build would produce, so it goes
-// with the data product rather than outliving it.
-func removeProjectConfig(path string, dataDir string) error {
-	pins, err := validate.LoadPinnedVocabularies(path, dataDir)
+// documents the pins name. Those documents live directly under
+// .sal/data/blobs rather than inside the table, so removing the data product
+// leaves them behind; the config file describes what a build would produce,
+// so it goes with the data product rather than outliving it.
+func removeProjectConfig(path string, blobsDir string) error {
+	pins, err := validate.LoadPinnedVocabularies(path, blobsDir)
 	if err != nil {
 		// a wipe is how a project in a bad state is recovered, so a config file
 		// SAL cannot read is still removed; only the documents it named are left
