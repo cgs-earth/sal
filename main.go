@@ -14,6 +14,7 @@ import (
 	"github.com/cgs-earth/sal/clone"
 	"github.com/cgs-earth/sal/describe"
 	"github.com/cgs-earth/sal/edit"
+	"github.com/cgs-earth/sal/export"
 	"github.com/cgs-earth/sal/get"
 	"github.com/cgs-earth/sal/importation"
 	"github.com/cgs-earth/sal/initialization"
@@ -38,6 +39,7 @@ type args struct {
 	Query     *query.QueryCmd                `arg:"subcommand:query" help:"Open a SQL shell over a built SAL data product"`
 	Get       *get.GetCmd                    `arg:"subcommand:get" help:"Look up RDF resources inside a built SAL data product"`
 	Describe  *describe.DescribeCmd          `arg:"subcommand:describe" help:"Show every statement a built SAL data product makes about a subject IRI"`
+	Export    *export.ExportCmd              `arg:"subcommand:export" help:"Stream the built triples table to standard out as N-Triples"`
 	Serve     *serve.ServeCmd                `arg:"subcommand:serve" help:"Serve the built triples table as a read-only SPARQL endpoint on port 8080"`
 	Clean     *clean.CleanCmd                `arg:"subcommand:clean" help:"Remove build artifacts produced by a SAL project"`
 	Push      *push.PushCmd                  `arg:"subcommand:push" help:"Push a built SAL data product to a remote OCI registry"`
@@ -98,6 +100,8 @@ func main() {
 		err = cli.Get.Run()
 	case cli.Describe != nil:
 		err = cli.Describe.Run()
+	case cli.Export != nil:
+		err = cli.Export.Run()
 	case cli.Serve != nil:
 		err = cli.Serve.Run()
 	case cli.Clean != nil:
