@@ -32,7 +32,7 @@ type UIRunner interface {
 }
 
 // Serve starts a read-only SPARQL Protocol HTTP endpoint backed by DuckDB, plus
-// the /blob endpoint serving the vocabulary and imported ontology documents
+// the /blobs endpoint serving the vocabulary and imported ontology documents
 // pinned under blobDir.
 func Serve(ctx context.Context, addr string, runner salsparql.DuckDBRunner, blobDir string, withUI bool) error {
 	handler := NewEndpoint(runner, blobDir)
@@ -66,19 +66,19 @@ func Serve(ctx context.Context, addr string, runner salsparql.DuckDBRunner, blob
 }
 
 // NewEndpoint returns an HTTP handler for the SPARQL Protocol query operation,
-// plus the /blob endpoint serving the vocabulary and imported ontology
+// plus the /blobs endpoint serving the vocabulary and imported ontology
 // documents pinned under blobDir.
 func NewEndpoint(runner salsparql.Runner, blobDir string) http.Handler {
 	mux := http.NewServeMux()
 	handler := sparqlHandler{runner: runner}
 	mux.Handle("/", handler)
 	mux.Handle("/sparql", handler)
-	mux.Handle("/blob/", blobHandler{dir: blobDir})
+	mux.Handle("/blobs/", blobHandler{dir: blobDir})
 	return mux
 }
 
 // NewEndpointWithUI returns an HTTP handler serving the embedded SAL UI at / along
-// with the SPARQL endpoint, the JSON APIs the UI reads, and the /blob endpoint
+// with the SPARQL endpoint, the JSON APIs the UI reads, and the /blobs endpoint
 // serving the vocabulary and imported ontology documents pinned under blobDir.
 func NewEndpointWithUI(runner UIRunner, blobDir string) (http.Handler, error) {
 	ui, err := uiHandler()
@@ -91,7 +91,7 @@ func NewEndpointWithUI(runner UIRunner, blobDir string) (http.Handler, error) {
 	mux.Handle("/api/sql", sqlHandler{runner: runner})
 	mux.Handle("/api/stats", statsHandler{runner: runner})
 	mux.Handle("/api/salmodule", salmoduleHandler{inspect: salmodule.Inspect})
-	mux.Handle("/blob/", blobHandler{dir: blobDir})
+	mux.Handle("/blobs/", blobHandler{dir: blobDir})
 	mux.Handle("/", ui)
 	return mux, nil
 }
@@ -113,7 +113,7 @@ func (h blobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	digest := strings.TrimPrefix(r.URL.Path, "/blob/")
+	digest := strings.TrimPrefix(r.URL.Path, "/blobs/")
 	digest = strings.TrimPrefix(digest, "urn:sha256:")
 	if !isSHA256Hex(digest) {
 		http.NotFound(w, r)

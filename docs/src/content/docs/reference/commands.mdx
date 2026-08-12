@@ -400,7 +400,7 @@ sal serve
 The endpoint implements the SPARQL Protocol query operation at `/sparql`.
 It accepts `GET` requests with a `query` parameter and `POST` requests using either `application/sparql-query` or `application/x-www-form-urlencoded`, and it answers with `application/sparql-results+json`.
 
-It also serves the vocabulary and imported ontology documents the project has pinned at `GET /blob/{sha256}`, where `{sha256}` is the SHA-256 digest a document is named by under `.sal/data/blobs` (a `urn:sha256:` prefix is accepted and stripped). A digest with no matching document answers `404`. The endpoint supports HTTP range requests, so a client can fetch part of a document without downloading the whole thing. This route is available with or without `--with-ui`; there is no UI for it yet.
+It also serves the vocabulary and imported ontology documents the project has pinned at `GET /blobs/{sha256}`, where `{sha256}` is the SHA-256 digest a document is named by under `.sal/data/blobs` (a `urn:sha256:` prefix is accepted and stripped). A digest with no matching document answers `404`. The endpoint supports HTTP range requests, so a client can fetch part of a document without downloading the whole thing. This route is available with or without `--with-ui`; the UI's own Blobs tab, described below, is a thin form over it.
 
 ### `--with-ui`
 
@@ -417,7 +417,7 @@ It has six tabs:
 - **SQL**: a DuckDB editor over the same `triples` view `sal query` opens, with sample queries and `Ctrl`/`Cmd` + `Enter` to run.
 - **SPARQL**: a [YASGUI](https://github.com/zazuko/Yasgui) editor pointed at the local `/sparql` endpoint.
 - **Modules**: the browser form of [`sal salmodule inspect`](#sal-salmodule). Enter a module reference and the JSON-LD ontology it publishes is shown as formatted JSON. Every module the build downloaded is offered as a chip and as an autocompletion in the input, read from the `sal.salmodules` table property.
-- **Blobs**: the browser form of the `/blob` endpoint. Enter the SHA-256 digest a vocabulary or imported ontology document is pinned at and it downloads through the browser's normal save flow.
+- **Blobs**: the browser form of the `/blobs` endpoint. Enter the SHA-256 digest a vocabulary or imported ontology document is pinned at and it downloads through the browser's normal save flow.
 - **Map**: reserved for rendering the `object_geometry` column. Not implemented yet.
 
 Enabling the UI also exposes the JSON endpoints it reads:

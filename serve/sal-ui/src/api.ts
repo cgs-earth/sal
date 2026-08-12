@@ -107,7 +107,7 @@ export async function inspectModule(module: string, signal?: AbortSignal): Promi
 export async function resolveBlob(hash: string, signal?: AbortSignal): Promise<BlobResult> {
   const digest = hash.trim().replace(/^urn:sha256:/i, '')
   if (!digest) throw new Error('Enter a blob hash')
-  const response = await fetch(`/blob/${encodeURIComponent(digest)}`, { signal })
+  const response = await fetch(`/blobs/${encodeURIComponent(digest)}`, { signal })
   if (!response.ok) throw await failure(response)
   const blob = await response.blob()
   return { digest, blob, contentType: response.headers.get('Content-Type') }

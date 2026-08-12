@@ -444,7 +444,7 @@ func TestBlobEndpointServesAPinnedDocumentByDigest(t *testing.T) {
 	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/blob/" + digest)
+	resp, err := http.Get(server.URL + "/blobs/" + digest)
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, resp.Body.Close())
@@ -465,7 +465,7 @@ func TestBlobEndpointStripsUrnSha256Prefix(t *testing.T) {
 	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/blob/urn:sha256:" + digest)
+	resp, err := http.Get(server.URL + "/blobs/urn:sha256:" + digest)
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, resp.Body.Close())
@@ -482,7 +482,7 @@ func TestBlobEndpointReturnsNotFoundForUnknownDigest(t *testing.T) {
 	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/blob/" + strings.Repeat("0", 64))
+	resp, err := http.Get(server.URL + "/blobs/" + strings.Repeat("0", 64))
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, resp.Body.Close())
@@ -496,7 +496,7 @@ func TestBlobEndpointReturnsNotFoundForMalformedDigest(t *testing.T) {
 	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/blob/not-a-valid-digest")
+	resp, err := http.Get(server.URL + "/blobs/not-a-valid-digest")
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, resp.Body.Close())
@@ -513,7 +513,7 @@ func TestBlobEndpointSupportsRangeRequests(t *testing.T) {
 	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
 	defer server.Close()
 
-	req, err := http.NewRequest(http.MethodGet, server.URL+"/blob/"+digest, nil)
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/blobs/"+digest, nil)
 	require.NoError(t, err)
 	req.Header.Set("Range", "bytes=2-5")
 	resp, err := http.DefaultClient.Do(req)
@@ -536,7 +536,7 @@ func TestBlobEndpointRejectsUnsupportedMethod(t *testing.T) {
 	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
 	defer server.Close()
 
-	req, err := http.NewRequest(http.MethodPost, server.URL+"/blob/"+digest, nil)
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/blobs/"+digest, nil)
 	require.NoError(t, err)
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
