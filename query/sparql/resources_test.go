@@ -72,6 +72,56 @@ func TestDatatypesSQLReadsTypedObjectColumns(t *testing.T) {
 	require.NotContains(t, sql, "datatypes.object =")
 }
 
+func TestShapesSQLSelectsSubjectsTypedAsASHACLShape(t *testing.T) {
+	sql := ShapesSQL(SimpleObjects)
+	require.Contains(t, sql, "shapes.subject AS shape")
+	require.Contains(t, sql, `shapes.object AS "rdf:type"`)
+	require.Contains(t, sql, "WHERE shapes.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'")
+	require.Contains(t, sql, "AND shapes.object IN ("+
+		"'http://www.w3.org/ns/shacl#NodeShape', "+
+		"'http://www.w3.org/ns/shacl#PropertyShape')")
+}
+
+func TestShapesSQLLeftJoinsTheAnnotationsAndTheTargetClass(t *testing.T) {
+	sql := ShapesSQL(SimpleObjects)
+	require.Contains(t, sql, "LEFT JOIN triples AS labels")
+	require.Contains(t, sql, `MIN(labels.object) AS "rdfs:label"`)
+	require.Contains(t, sql, "LEFT JOIN triples AS comments")
+	require.Contains(t, sql, `MIN(comments.object) AS "rdfs:comment"`)
+	require.Contains(t, sql, "LEFT JOIN triples AS targets")
+	require.Contains(t, sql, "AND targets.predicate = 'http://www.w3.org/ns/shacl#targetClass'")
+	require.Contains(t, sql, `targets.object AS "sh:targetClass"`)
+}
+
+// Every column but the shape itself is named with the prefixed form of the
+// predicate it reports, so the table says which term each value was read from.
+func TestShapesSQLNamesEachPredicateColumnWithItsPrefixedTerm(t *testing.T) {
+	sql := ShapesSQL(SimpleObjects)
+	require.Contains(t, sql, `AS "rdfs:label"`)
+	require.Contains(t, sql, `AS "rdfs:comment"`)
+	require.Contains(t, sql, `AS "rdf:type"`)
+	require.Contains(t, sql, `AS "sh:targetClass"`)
+	require.NotContains(t, sql, "AS label,")
+	require.NotContains(t, sql, "AS comment,")
+	require.NotContains(t, sql, "AS type,")
+	require.NotContains(t, sql, `AS "targetClass"`)
+}
+
+// A shape can state more than one sh:targetClass, so the target is grouped by
+// rather than aggregated and the shape is listed once per class it targets.
+func TestShapesSQLGroupsByTheTargetClassRatherThanAggregatingIt(t *testing.T) {
+	sql := ShapesSQL(SimpleObjects)
+	require.Contains(t, sql, `GROUP BY shape, "rdf:type", "sh:targetClass"`)
+	require.NotContains(t, sql, `MIN(targets.object)`)
+}
+
+func TestShapesSQLReadsTypedObjectColumns(t *testing.T) {
+	sql := ShapesSQL(TypedObjects)
+	require.Contains(t, sql, `COALESCE(shapes.object_iri, CAST(shapes.object_float AS VARCHAR), shapes.object_string) AS "rdf:type"`)
+	require.Contains(t, sql, `COALESCE(targets.object_iri, CAST(targets.object_float AS VARCHAR), targets.object_string) AS "sh:targetClass"`)
+	require.NotContains(t, sql, "shapes.object IN (")
+}
+
 func TestDescribeSQLFiltersOnTheSubjectForSimpleObjects(t *testing.T) {
 	sql := DescribeSQL("https://geoconnex.us/ontologies/method/pastor", SimpleObjects)
 	require.Contains(t, sql, "WHERE triples.subject = 'https://geoconnex.us/ontologies/method/pastor'")

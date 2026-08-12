@@ -277,6 +277,33 @@ A resource typed with several classes is listed once per class.
 The class is not required to be declared an `rdfs:Class` or an `owl:Class` in the data product, since a data product commonly types its resources with a vocabulary it does not itself carry.
 What is left out is the other direction: a subject that is itself an `rdfs:Class`, `owl:Class`, `rdf:Property`, `owl:ObjectProperty`, `owl:DatatypeProperty`, `owl:AnnotationProperty`, `rdfs:Datatype`, or `owl:Ontology` describes the schema rather than instantiating it, so it is not reported as an instance.
 
+### `sal get shapes`
+
+Lists every SHACL shape the data product declares, with the annotations it carries and the class it targets:
+
+```sh
+sal get shapes
+```
+
+```
+shape                                          rdfs:label    rdfs:comment                              rdf:type                                  sh:targetClass
+https://github.com/cgs-earth/sal/PersonShape   Person Shape  Every person described here is named.     http://www.w3.org/ns/shacl#NodeShape      https://schema.org/Person
+https://github.com/cgs-earth/sal/PlaceShape    Place Shape   A place is named and carries a geometry.  http://www.w3.org/ns/shacl#NodeShape      https://schema.org/Place
+https://github.com/cgs-earth/sal/PersonName    Person Name   A person is named exactly once.           http://www.w3.org/ns/shacl#PropertyShape
+```
+
+Every column but `shape` reports the object of a predicate, and is named with the prefixed form of that predicate, so the table says which term each value was read from rather than leaving `label` to stand for whichever of the several labelling predicates a vocabulary offers.
+`shape` is the subject the other columns are read from, so it is not named this way.
+
+A shape is a subject typed `sh:NodeShape` or `sh:PropertyShape`, so `rdf:type` is what the shape was declared to be rather than something inferred from its properties.
+A shape declared to be both is listed once per type, and a property shape written inline as a blank node is listed under the blank node identifier it was given.
+
+A shape the project defines itself is named under the project base, which comes from the Git remote, the same way `sal build` resolves any other relative term the project writes.
+A shape that arrives from an imported ontology keeps the namespace that ontology gave it.
+
+`rdfs:label`, `rdfs:comment`, and `sh:targetClass` are all optional; a column that no shape states is left out of the table entirely.
+`sh:targetClass` is the one a shape can state more than once, and a shape targeting several classes is listed once per class, the way `sal get instances` lists a resource once per class it is typed with.
+
 ### `sal get imports`
 
 Lists the `owl:imports` recorded in `.sal/ontology.jsonld`, the file `sal import` writes:
