@@ -362,7 +362,11 @@ Streams every triple in the built data product to standard out as N-Triples, `<s
 sal export > data.nt
 ```
 
-This is meant for feeding a data product into another RDF-aware program rather than for reading directly; pipe it into anything that accepts N-Triples or N-Quads:
+This is meant for feeding a data product into another RDF-aware program rather than for reading directly; pipe it into anything that accepts N-Triples or N-Quads. For instance, you can use rdflib with sal like the following to convert triples to CSV.
+
+```
+sal export |  uv run --with rdflib python -c 'import sys, rdflib; g=rdflib.Graph(); g.parse(sys.stdin, format="nt"); print(g.query("SELECT * WHERE { ?s ?p ?o } LIMIT 10").serialize(format="csv").decode())'
+```
 
 `triple_hash` is left out, since it identifies a row rather than being part of the triple it names.
 
