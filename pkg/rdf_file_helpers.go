@@ -29,7 +29,7 @@ func FindRdfDataInPaths(paths []string) ([]string, error) {
 				return err
 			}
 			// .sal holds generated data and SAL's own project files, not the
-			// project's RDF sources; its ontology.jsonld is read by build directly
+			// project's RDF sources; its config.jsonld is read by build directly
 			if d.IsDir() && d.Name() == ".sal" && p != path {
 				return filepath.SkipDir
 			}
@@ -52,6 +52,15 @@ func isRdfData(path string) bool {
 }
 
 func HashAllFiles(paths []string) (string, error) {
+	return HashFilesAndContent(paths, nil)
+}
+
+// HashFilesAndContent hashes every path's bytes, in order, followed by extra
+// in-memory content. build uses it to fold the project ontology's content
+// into the same hash HashAllFiles produces for the RDF source files, even
+// though the ontology no longer has a file of its own to pass a path for; it
+// is read out of .sal/config.jsonld instead.
+func HashFilesAndContent(paths []string, extra []byte) (string, error) {
 	h := sha256.New()
 
 	for _, path := range paths {
@@ -68,6 +77,9 @@ func HashAllFiles(paths []string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+	}
+	if len(extra) > 0 {
+		h.Write(extra)
 	}
 
 	return hex.EncodeToString(h.Sum(nil)), nil

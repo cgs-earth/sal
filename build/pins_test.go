@@ -84,7 +84,7 @@ func TestBuildPinsEveryVocabularyItResolved(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, 1, *fetches)
-	content, err := os.ReadFile(filepath.Join(project, ".sal", "ns-prefix-versions.jsonld"))
+	content, err := os.ReadFile(filepath.Join(project, ".sal", "config.jsonld"))
 	require.NoError(t, err)
 	require.Contains(t, string(content), `"@id": "https://vocab.test/things#"`)
 	require.Contains(t, string(content), "urn:sha256:")
@@ -103,7 +103,7 @@ func TestBuildPinsEveryVocabularyItResolved(t *testing.T) {
 	})
 	require.Equal(t, 1, versionIRIs)
 
-	pins, err := validate.LoadPinnedVocabularies(filepath.Join(project, ".sal", "ns-prefix-versions.jsonld"), filepath.Join(project, ".sal", "data"))
+	pins, err := validate.LoadPinnedVocabularies(filepath.Join(project, ".sal", "config.jsonld"), filepath.Join(project, ".sal", "data"))
 	require.NoError(t, err)
 	documents := pins.Documents()
 	require.Len(t, documents, 1)
@@ -121,7 +121,7 @@ func TestASecondBuildResolvesFromThePinsAndRewritesNothing(t *testing.T) {
 	_, err := (&BuildCmd{Format: GraphExportFormatNQuads}).Run()
 	require.NoError(t, err)
 
-	lockfile := filepath.Join(project, ".sal", "ns-prefix-versions.jsonld")
+	lockfile := filepath.Join(project, ".sal", "config.jsonld")
 	before, err := os.Stat(lockfile)
 	require.NoError(t, err)
 
@@ -160,5 +160,5 @@ func TestBuildFailsWhenADeclaredPrefixCannotBeResolved(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "https://vocab.test/unused#")
 	require.Contains(t, err.Error(), "404")
-	require.NoFileExists(t, filepath.Join(project, ".sal", "ns-prefix-versions.jsonld"))
+	require.NoFileExists(t, filepath.Join(project, ".sal", "config.jsonld"))
 }

@@ -189,29 +189,19 @@ func (cmd *CleanCmd) GetArtifactReference() (pkg.ArtifactReference, error) {
 }
 
 func wipe() error {
-	ontologyPath, err := pkg.SalOntologyPath()
-	if err != nil {
-		return err
-	}
-	pinsPath, err := pkg.SalNsPrefixVersionsPath()
+	configPath, err := pkg.SalConfigPath()
 	if err != nil {
 		return err
 	}
 
-	// the ontology and the pinned vocabulary versions are files a project keeps
-	// in git rather than build artifacts, so the prompt names whichever of them
-	// a wipe would take with the data product
+	// the config file is something a project keeps in git rather than a build
+	// artifact, so the prompt names it when a wipe would take it with the data
+	// product
 	prompt := "This will permanently delete the entire data product. Continue?"
-	var projectFiles []string
-	for _, path := range []string{ontologyPath, pinsPath} {
-		if _, err := os.Stat(path); err == nil {
-			projectFiles = append(projectFiles, path)
-		} else if !os.IsNotExist(err) {
-			return err
-		}
-	}
-	if len(projectFiles) > 0 {
-		prompt = "This will permanently delete the entire data product and " + strings.Join(projectFiles, " and ") + ". Continue?"
+	if _, err := os.Stat(configPath); err == nil {
+		prompt = "This will permanently delete the entire data product and " + configPath + ". Continue?"
+	} else if !os.IsNotExist(err) {
+		return err
 	}
 
 	if !pkg.Confirm(prompt) {
@@ -269,23 +259,20 @@ func wipe() error {
 		return err
 	}
 
-	if err := removePinnedVocabularies(pinsPath, dataDir); err != nil {
-		return err
-	}
-
-	return removeProjectOntology(ontologyPath)
+	return removeProjectConfig(configPath, dataDir)
 }
 
-// removePinnedVocabularies deletes the vocabulary versions the project pinned
-// along with the documents they name. The documents live directly under
-// .sal/data rather than inside the table, so removing the data product leaves
-// them behind; the pins record what a build resolved against, so like the
-// project ontology they go with it.
-func removePinnedVocabularies(path string, dataDir string) error {
+// removeProjectConfig deletes .sal/config.jsonld -- the project ontology and
+// the pinned vocabulary versions together -- along with the vocabulary
+// documents the pins name. Those documents live directly under .sal/data
+// rather than inside the table, so removing the data product leaves them
+// behind; the config file describes what a build would produce, so it goes
+// with the data product rather than outliving it.
+func removeProjectConfig(path string, dataDir string) error {
 	pins, err := validate.LoadPinnedVocabularies(path, dataDir)
 	if err != nil {
-		// a wipe is how a project in a bad state is recovered, so a lockfile SAL
-		// cannot read is still removed; only the documents it named are left
+		// a wipe is how a project in a bad state is recovered, so a config file
+		// SAL cannot read is still removed; only the documents it named are left
 		slog.Warn("Could not read " + path + ", so the vocabulary documents it names are being left in place: " + err.Error())
 	}
 
@@ -302,22 +289,7 @@ func removePinnedVocabularies(path string, dataDir string) error {
 		}
 		return err
 	}
-	slog.Info("Removed the pinned vocabulary versions at " + path)
-	return nil
-}
-
-// removeProjectOntology deletes the ontology `sal import` maintains. A wipe puts
-// the project back to the state it was in before anything was built, and the
-// ontology only describes what a build would produce, so it goes with the data
-// product rather than outliving it.
-func removeProjectOntology(path string) error {
-	if err := os.Remove(path); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	slog.Info("Removed the project ontology at " + path)
+	slog.Info("Removed the project config at " + path)
 	return nil
 }
 

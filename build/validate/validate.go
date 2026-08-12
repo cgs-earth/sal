@@ -73,7 +73,22 @@ func (v *Validator) ValidateFile(path string) (*rdflibgo.Graph, error) {
 	if err != nil {
 		return nil, err
 	}
+	return v.validateDocument(path, doc)
+}
 
+// ValidateContent checks in-memory JSON-LD content the same way ValidateFile
+// checks a JSON-LD file on disk, reporting term errors against displayPath.
+// build uses it for the project ontology node .sal/config.jsonld carries,
+// which is not a file of its own to pass ValidateFile.
+func (v *Validator) ValidateContent(content []byte, displayPath string) (*rdflibgo.Graph, error) {
+	doc, err := parseJSONLDContent(content, displayPath, v.vocabs.base)
+	if err != nil {
+		return nil, err
+	}
+	return v.validateDocument(displayPath, doc)
+}
+
+func (v *Validator) validateDocument(path string, doc *rdfDocument) (*rdflibgo.Graph, error) {
 	if doc.ctx.Vocab != "" {
 		v.declared[doc.ctx.Vocab] = true
 	}

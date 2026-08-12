@@ -5,7 +5,7 @@ import (
 )
 
 // GetCmd groups the lookups that read the RDF resources inside a built data
-// product, plus `imports`, which reads the project's .sal/ontology.jsonld
+// product, plus `imports`, which reads the project's ontology node in .sal/config.jsonld
 // instead of the data product. Anything about the Iceberg table that holds a
 // built data product belongs in `sal query` instead.
 type GetCmd struct {

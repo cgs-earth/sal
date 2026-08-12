@@ -261,7 +261,7 @@ func extractVocabularyTermsFromGraph(g *rdflibgo.Graph) map[string]bool {
 
 // PinnedGraph parses the version a project pins of an ontology document into a
 // graph, dereferencing and pinning it when the project has no pin for it yet.
-// It is how build merges the ontologies a project's .sal/ontology.jsonld imports,
+// It is how build merges the ontologies a project's .sal/config.jsonld ontology node imports,
 // so that an import is carried at the exact version the project recorded. Terms
 // in the document that are written relative resolve against the document's own
 // IRI, not against the SAL project being built.

@@ -17,7 +17,7 @@ import (
 type ValidateCmd struct {
 	Paths      []string `arg:"positional" help:"RDF files to validate"`
 	PrefixMaps []string `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
-	NoCache    bool     `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources instead of the versions pinned in .sal/ns-prefix-versions.jsonld"`
+	NoCache    bool     `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources instead of the versions pinned in .sal/config.jsonld"`
 }
 
 func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
@@ -37,7 +37,7 @@ type BuildCmd struct {
 	Format       GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
 	Force        bool              `arg:"--force" help:"force build even if there are uncommitted changes in the git repository"`
 	DataTypeCols bool              `arg:"--typed" help:"Split distinct data types into separate columns" default:"false"`
-	NoCache      bool              `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources and re-pin them in .sal/ns-prefix-versions.jsonld"`
+	NoCache      bool              `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources and re-pin them in .sal/config.jsonld"`
 
 	// skip committing the built data to iceberg
 	skipCommit bool
@@ -83,16 +83,6 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no JSON-LD or TTL files found in %s", strings.Join(paths, ", "))
 	}
-	if !cfg.skipProjectChecks {
-		if files, err = appendProjectOntology(files); err != nil {
-			return nil, err
-		}
-	}
-
-	hash, err := pkg.HashAllFiles(files)
-	if err != nil {
-		return nil, err
-	}
 
 	vocabsToReplace, err := parsePrefixMaps(cfg.PrefixMaps)
 	if err != nil {
@@ -111,6 +101,21 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		base = ""
 	}
 
+	// the project ontology node in .sal/config.jsonld is validated and hashed
+	// like any other source file, even though it has no file of its own to
+	// pass to FindRdfDataInPaths, which skips .sal entirely
+	var ontologyContent []byte
+	if !cfg.skipProjectChecks {
+		if ontologyContent, err = projectOntologyContent(base); err != nil {
+			return nil, err
+		}
+	}
+
+	hash, err := pkg.HashFilesAndContent(files, ontologyContent)
+	if err != nil {
+		return nil, err
+	}
+
 	finalGraph := rdflibgo.NewGraph(rdflibgo.WithBase(base))
 	validator := validate.NewValidator(pins, base, vocabsToReplace)
 	var errs validate.MultiError
@@ -127,6 +132,24 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		}
 		mergeGraph(finalGraph, graph)
 	}
+	validatedCount := len(files)
+	if ontologyContent != nil {
+		configPath, err := pkg.SalConfigPath()
+		if err != nil {
+			return nil, err
+		}
+		graph, err := validator.ValidateContent(ontologyContent, configPath)
+		if err != nil {
+			if nested, ok := err.(validate.MultiError); ok {
+				errs = append(errs, nested...)
+			} else {
+				errs = append(errs, err)
+			}
+		} else {
+			mergeGraph(finalGraph, graph)
+			validatedCount++
+		}
+	}
 	if len(errs) > 0 {
 		return nil, errs
 	}
@@ -135,10 +158,10 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 	if err := validator.PinDeclaredPrefixes(); err != nil {
 		return nil, err
 	}
-	if len(files) == 1 {
+	if validatedCount == 1 {
 		slog.Info("Validated 1 file")
 	} else {
-		slog.Info("Validated " + fmt.Sprint(len(files)) + " files")
+		slog.Info("Validated " + fmt.Sprint(validatedCount) + " files")
 	}
 
 	if !cfg.skipProjectChecks {
@@ -178,7 +201,7 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 
 	// every vocabulary the project pins becomes provenance in the graph itself,
 	// so which exact version a build validated against is queryable alongside
-	// the data rather than only recorded in .sal/ns-prefix-versions.jsonld
+	// the data rather than only recorded in .sal/config.jsonld
 	pins.AppendProvenance(finalGraph)
 
 	resolver := salmodule.Default()
@@ -199,7 +222,7 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 // has pinned. RDF validated outside a SAL project has no project to pin
 // anything for, so it resolves its vocabularies without recording them.
 var projectVocabularies = func(refresh bool) (*validate.PinnedVocabularies, error) {
-	path, err := pkg.SalNsPrefixVersionsPath()
+	path, err := pkg.SalConfigPath()
 	if errors.Is(err, pkg.ErrSalDirNotFound) || errors.Is(err, pkg.ErrCantMakeSalDirInHome) {
 		return validate.EphemeralVocabularies(), nil
 	}

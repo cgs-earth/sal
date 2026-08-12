@@ -1,7 +1,7 @@
 // Package importation implements `sal import` and owns the project ontology
-// file it maintains, .sal/ontology.jsonld. `import` is a Go keyword, so the
-// package cannot be named after its subcommand, the same reason `init` lives in
-// initialization.
+// node it maintains in .sal/config.jsonld, the graph node with no
+// owl:versionIRI. `import` is a Go keyword, so the package cannot be named
+// after its subcommand, the same reason `init` lives in initialization.
 package importation
 
 import (
@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -24,17 +22,19 @@ import (
 )
 
 const (
-	owlNamespace = "http://www.w3.org/2002/07/owl#"
-	dcNamespace  = "http://purl.org/dc/elements/1.1/"
+	owlNamespace  = "http://www.w3.org/2002/07/owl#"
+	dcNamespace   = "http://purl.org/dc/elements/1.1/"
+	rdfsNamespace = "http://www.w3.org/2000/01/rdf-schema#"
 )
 
 var (
 	owlOntology = rdflibgo.NewURIRefUnsafe(owlNamespace + "Ontology")
 	owlImports  = rdflibgo.NewURIRefUnsafe(owlNamespace + "imports")
 	dcTitle     = rdflibgo.NewURIRefUnsafe(dcNamespace + "title")
+	rdfsComment = rdflibgo.NewURIRefUnsafe(rdfsNamespace + "comment")
 )
 
-// ImportCmd records what a project imports in its .sal/ontology.jsonld. An http or
+// ImportCmd records what a project imports in its .sal/config.jsonld. An http or
 // https URL is an ontology document that `sal build` merges into the data
 // product, as is a salmodule:// reference, whose document is obtained by
 // building the module rather than over HTTP; an oci:// reference is an artifact
@@ -55,7 +55,7 @@ func (cmd *ImportCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	path, err := pkg.SalOntologyPath()
+	path, err := pkg.SalConfigPath()
 	if err != nil {
 		return err
 	}
@@ -79,6 +79,15 @@ func (cmd *ImportCmd) Run() error {
 	} else if cmd.Title != "" {
 		ontology.Title = cmd.Title
 	}
+
+	projectName, err := pkg.GitProjectName()
+	if err != nil {
+		return err
+	}
+	ontology.Comment = fmt.Sprintf(
+		"Represents the ontology for the %s project overall and any vocabularies that are directly materialized into the graph.",
+		projectName,
+	)
 
 	for _, reference := range cmd.References {
 		imported, err := importIRI(reference)
@@ -109,7 +118,8 @@ func (cmd *ImportCmd) Run() error {
 	return nil
 }
 
-// Ontology is the parsed contents of a project's .sal/ontology.jsonld.
+// Ontology is the parsed contents of a project's ontology node in
+// .sal/config.jsonld.
 type Ontology struct {
 	// IRI is the subject the file declares as an owl:Ontology, which is the
 	// project base unless the file names something else.
@@ -120,24 +130,39 @@ type Ontology struct {
 	// Imports are the IRIs the ontology lists with owl:imports, sorted so that
 	// a rewrite of the file is stable.
 	Imports []string
-	// Graph is every statement the file makes.
+	// Comment describes the ontology node for a human reading the graph; `sal
+	// import` always sets it to the same generated text.
+	Comment string
+	// Graph is every statement the ontology's own node makes, isolated from
+	// the pinned vocabulary nodes the rest of .sal/config.jsonld's @graph
+	// carries.
 	Graph *rdflibgo.Graph
 }
 
-// ReadOntology parses the project ontology that `sal import` maintains. It
-// returns nil when the file does not exist, since a project is not required to
-// declare one.
+// ReadOntology parses the project ontology node that `sal import` maintains
+// out of .sal/config.jsonld. It returns nil when the file does not exist, or
+// exists but declares no ontology node yet, since a project is not required
+// to declare one.
 func ReadOntology(path string, base string) (*Ontology, error) {
-	content, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	doc, err := pkg.ReadConfigDocument(path)
+	if err != nil {
+		return nil, fmt.Errorf("%s: invalid JSON-LD: %w", path, err)
+	}
+	node, _, err := pkg.PartitionConfigGraph(doc.Graph)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if node == nil {
 		return nil, nil
 	}
+
+	standalone, err := pkg.JoinJSONLDDocument(doc.Context, node)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase(base))
-	if err := jsonld.Parse(graph, bytes.NewReader(content), jsonld.WithBase(base)); err != nil {
+	if err := jsonld.Parse(graph, bytes.NewReader(standalone), jsonld.WithBase(base)); err != nil {
 		return nil, fmt.Errorf("%s: invalid JSON-LD: %w", path, err)
 	}
 
@@ -168,29 +193,55 @@ func ReadOntology(path string, base string) (*Ontology, error) {
 		return true
 	})
 	sort.Strings(ontology.Imports)
+	graph.Triples(subject, &rdfsComment, nil)(func(triple rdflibgo.Triple) bool {
+		literal, ok := triple.Object.(rdflibgo.Literal)
+		if !ok {
+			return true
+		}
+		ontology.Comment = literal.Lexical()
+		return false
+	})
 
 	return ontology, nil
 }
 
+// writeOntology writes the ontology node into .sal/config.jsonld, preserving
+// whatever pinned vocabulary nodes are already there byte for byte, since
+// `sal import` never inspects them.
 func writeOntology(path string, ontology *Ontology) error {
-	content, err := serializeOntology(ontology)
+	standalone, err := SerializeOntology(ontology)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	_, node, err := pkg.SplitJSONLDDocument(standalone)
+	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, content, 0644)
+
+	doc, err := pkg.ReadConfigDocument(path)
+	if err != nil {
+		return err
+	}
+	_, pinned, err := pkg.PartitionConfigGraph(doc.Graph)
+	if err != nil {
+		return err
+	}
+	if doc.Graph, err = pkg.AssembleConfigGraph(node, pinned); err != nil {
+		return err
+	}
+	doc.Context = pkg.SalConfigContext
+
+	return pkg.WriteConfigDocument(path, doc)
 }
 
-// serializeOntology renders the ontology in the shape `sal import` maintains. A
-// file a user has added other statements to is serialized from its own graph
+// SerializeOntology renders the ontology node as a standalone JSON-LD
+// document, with its own @context, in the shape `sal import` maintains. A
+// node a user has added other statements to is serialized from its own graph
 // instead, so that hand written triples survive an import at the cost of the
-// generated file's formatting. The file carries no autogenerated banner the way
-// the Turtle it used to be written as did, since JSON has no comment syntax to
-// carry one in; a hand edit still only survives when it is a statement, exactly
-// as before.
-func serializeOntology(ontology *Ontology) ([]byte, error) {
+// generated file's formatting. This is also what build validates the
+// project's own ontology statements against and folds into its source hash,
+// since the node has no file of its own to do either against directly.
+func SerializeOntology(ontology *Ontology) ([]byte, error) {
 	if ontology.Graph == nil || !ontology.hasExtraStatements() {
 		return renderOntology(ontology)
 	}
@@ -206,6 +257,10 @@ func serializeOntology(ontology *Ontology) ([]byte, error) {
 	}
 	for _, iri := range ontology.Imports {
 		graph.Add(subject, owlImports, rdflibgo.NewURIRefUnsafe(iri))
+	}
+	if ontology.Comment != "" {
+		graph.Bind("rdfs", rdflibgo.NewURIRefUnsafe(rdfsNamespace))
+		graph.Set(subject, rdfsComment, rdflibgo.NewLiteral(ontology.Comment))
 	}
 
 	var buf bytes.Buffer
@@ -229,6 +284,7 @@ func (ontology *Ontology) hasExtraStatements() bool {
 		case triple.Predicate.Equal(rdflibgo.RDF.Type) && triple.Object.Equal(owlOntology):
 		case triple.Predicate.Equal(dcTitle):
 		case triple.Predicate.Equal(owlImports):
+		case triple.Predicate.Equal(rdfsComment):
 		default:
 			extra = true
 			return false
@@ -248,6 +304,7 @@ type ontologyDocument struct {
 	Type    string              `json:"@type"`
 	Title   string              `json:"dc:title,omitempty"`
 	Imports []ontologyImportRef `json:"owl:imports,omitempty"`
+	Comment string              `json:"rdfs:comment,omitempty"`
 }
 
 type ontologyImportRef struct {
@@ -262,11 +319,16 @@ func renderOntology(ontology *Ontology) ([]byte, error) {
 		id = "."
 	}
 
+	context := map[string]string{"dc": dcNamespace, "owl": owlNamespace}
+	if ontology.Comment != "" {
+		context["rdfs"] = rdfsNamespace
+	}
 	doc := ontologyDocument{
-		Context: map[string]string{"dc": dcNamespace, "owl": owlNamespace},
+		Context: context,
 		ID:      id,
 		Type:    "owl:Ontology",
 		Title:   ontology.Title,
+		Comment: ontology.Comment,
 	}
 	for _, iri := range ontology.Imports {
 		doc.Imports = append(doc.Imports, ontologyImportRef{ID: iri})

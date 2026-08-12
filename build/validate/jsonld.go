@@ -39,7 +39,15 @@ func parseJSONLDFile(path string, base string) (*rdfDocument, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build: read %s: %w", path, err)
 	}
+	return parseJSONLDContent(content, path, base)
+}
 
+// parseJSONLDContent is parseJSONLDFile without the disk read, so content that
+// is not a file of its own -- the project ontology node embedded in
+// .sal/config.jsonld -- can go through the same parsing and term collection.
+// displayPath is what term errors are reported against.
+func parseJSONLDContent(content []byte, displayPath string, base string) (*rdfDocument, error) {
+	path := displayPath
 	var doc any
 	if err := json.Unmarshal(content, &doc); err != nil {
 		return nil, fmt.Errorf("%s:%d: invalid JSON-LD: %w", path, jsonErrorLine(content, err), err)

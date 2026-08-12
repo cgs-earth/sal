@@ -8,9 +8,9 @@ import (
 	salsparql "github.com/cgs-earth/sal/query/sparql"
 )
 
-// importsCmd lists the owl:imports a project records in .sal/ontology.jsonld,
-// the file `sal import` writes and `sal build` reads to merge imported
-// ontologies into the data product.
+// importsCmd lists the owl:imports a project records on the ontology node in
+// .sal/config.jsonld, which `sal import` writes and `sal build` reads to
+// merge imported ontologies into the data product.
 type importsCmd struct{}
 
 func (cmd *importsCmd) Run() error {
@@ -18,7 +18,7 @@ func (cmd *importsCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	path, err := pkg.SalOntologyPath()
+	path, err := pkg.SalConfigPath()
 	if err != nil {
 		return err
 	}

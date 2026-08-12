@@ -1,31 +1,50 @@
 package importation
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
 const testBase = "https://github.com/cgs-earth/sal/"
 
+// writeTestOntology writes content verbatim as .sal/config.jsonld, for tests
+// that exercise how a raw file on disk is handled.
 func writeTestOntology(t *testing.T, content string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "ontology.jsonld")
+	path := filepath.Join(t.TempDir(), "config.jsonld")
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
 	return path
 }
 
+// writeTestOntologyNode wraps content, a standalone ontology document the way
+// SerializeOntology renders one, as the sole node of a fresh
+// .sal/config.jsonld's @graph -- the shape ReadOntology expects on disk.
+func writeTestOntologyNode(t *testing.T, content string) string {
+	t.Helper()
+	context, node, err := pkg.SplitJSONLDDocument([]byte(content))
+	require.NoError(t, err)
+	doc := pkg.ConfigDocument{Context: context, Graph: []json.RawMessage{node}}
+	raw, err := json.Marshal(doc)
+	require.NoError(t, err)
+	path := filepath.Join(t.TempDir(), "config.jsonld")
+	require.NoError(t, os.WriteFile(path, raw, 0644))
+	return path
+}
+
 func TestReadOntologyReturnsNilWhenTheFileIsMissing(t *testing.T) {
-	ontology, err := ReadOntology(filepath.Join(t.TempDir(), "ontology.jsonld"), testBase)
+	ontology, err := ReadOntology(filepath.Join(t.TempDir(), "config.jsonld"), testBase)
 	require.NoError(t, err)
 	require.Nil(t, ontology)
 }
 
 func TestReadOntologyResolvesTheRelativeOntologyIRIAgainstTheProjectBase(t *testing.T) {
-	path := writeTestOntology(t, `{
+	path := writeTestOntologyNode(t, `{
   "@context": {
     "dc": "http://purl.org/dc/elements/1.1/",
     "owl": "http://www.w3.org/2002/07/owl#"
@@ -54,7 +73,7 @@ func TestReadOntologyReportsInvalidJSONLD(t *testing.T) {
 }
 
 func TestWriteOntologyRendersTheProjectAsARelativeIRI(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "ontology.jsonld")
+	path := filepath.Join(t.TempDir(), "config.jsonld")
 
 	require.NoError(t, writeOntology(path, &Ontology{
 		IRI:     testBase,
@@ -68,20 +87,27 @@ func TestWriteOntologyRendersTheProjectAsARelativeIRI(t *testing.T) {
 	require.JSONEq(t, `{
   "@context": {
     "dc": "http://purl.org/dc/elements/1.1/",
-    "owl": "http://www.w3.org/2002/07/owl#"
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "dcterms": "http://purl.org/dc/terms/",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
   },
-  "@id": ".",
-  "@type": "owl:Ontology",
-  "dc:title": "My Ontology",
-  "owl:imports": [
-    { "@id": "https://example.com/onto1" },
-    { "@id": "https://example.com/onto2" }
+  "@graph": [
+    {
+      "@id": ".",
+      "@type": "owl:Ontology",
+      "dc:title": "My Ontology",
+      "owl:imports": [
+        { "@id": "https://example.com/onto1" },
+        { "@id": "https://example.com/onto2" }
+      ]
+    }
   ]
 }`, string(content))
 }
 
 func TestWriteOntologyOmitsAnEmptyImportsClause(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "ontology.jsonld")
+	path := filepath.Join(t.TempDir(), "config.jsonld")
 
 	require.NoError(t, writeOntology(path, &Ontology{IRI: testBase, Base: testBase, Title: "sal"}))
 
@@ -90,16 +116,19 @@ func TestWriteOntologyOmitsAnEmptyImportsClause(t *testing.T) {
 	require.JSONEq(t, `{
   "@context": {
     "dc": "http://purl.org/dc/elements/1.1/",
-    "owl": "http://www.w3.org/2002/07/owl#"
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "dcterms": "http://purl.org/dc/terms/",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
   },
-  "@id": ".",
-  "@type": "owl:Ontology",
-  "dc:title": "sal"
+  "@graph": [
+    { "@id": ".", "@type": "owl:Ontology", "dc:title": "sal" }
+  ]
 }`, string(content))
 }
 
 func TestWrittenOntologyReadsBackWithTheSameImports(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "ontology.jsonld")
+	path := filepath.Join(t.TempDir(), "config.jsonld")
 	imports := []string{"https://example.com/onto1", "https://example.com/onto2"}
 	require.NoError(t, writeOntology(path, &Ontology{IRI: testBase, Base: testBase, Title: `a "quoted" title`, Imports: imports}))
 
@@ -111,7 +140,7 @@ func TestWrittenOntologyReadsBackWithTheSameImports(t *testing.T) {
 }
 
 func TestWrittenOntologyReadsBackASalModuleImport(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "ontology.jsonld")
+	path := filepath.Join(t.TempDir(), "config.jsonld")
 	module := "salmodule://github.com/adplincinst/sample-salmodule-1"
 	require.NoError(t, writeOntology(path, &Ontology{IRI: testBase, Base: testBase, Title: "sal", Imports: []string{module}}))
 
@@ -120,8 +149,28 @@ func TestWrittenOntologyReadsBackASalModuleImport(t *testing.T) {
 	require.Equal(t, []string{module}, ontology.Imports)
 }
 
+// Writing the ontology node preserves a pinned vocabulary node already in
+// .sal/config.jsonld byte for byte, since sal import never inspects it.
+func TestWriteOntologyPreservesAnExistingPinnedVocabularyNode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.jsonld")
+	pinned := json.RawMessage(`{"@id":"https://schema.org/","@type":"owl:Ontology","owl:versionIRI":{"@id":"urn:sha256:abc"}}`)
+	require.NoError(t, pkg.WriteConfigDocument(path, &pkg.ConfigDocument{
+		Context: map[string]string{"owl": "http://www.w3.org/2002/07/owl#"},
+		Graph:   []json.RawMessage{pinned},
+	}))
+
+	require.NoError(t, writeOntology(path, &Ontology{IRI: testBase, Base: testBase, Title: "sal"}))
+
+	doc, err := pkg.ReadConfigDocument(path)
+	require.NoError(t, err)
+	_, pins, err := pkg.PartitionConfigGraph(doc.Graph)
+	require.NoError(t, err)
+	require.Len(t, pins, 1)
+	require.JSONEq(t, string(pinned), string(pins[0]))
+}
+
 func TestWriteOntologyKeepsStatementsTheTemplateDoesNotCover(t *testing.T) {
-	path := writeTestOntology(t, `{
+	path := writeTestOntologyNode(t, `{
   "@context": {
     "dc": "http://purl.org/dc/elements/1.1/",
     "owl": "http://www.w3.org/2002/07/owl#"
@@ -146,7 +195,7 @@ func TestWriteOntologyKeepsStatementsTheTemplateDoesNotCover(t *testing.T) {
 }
 
 func TestWriteOntologyReplacesAnExistingTitleInAFileWithExtraStatements(t *testing.T) {
-	path := writeTestOntology(t, `{
+	path := writeTestOntologyNode(t, `{
   "@context": {
     "dc": "http://purl.org/dc/elements/1.1/",
     "owl": "http://www.w3.org/2002/07/owl#"

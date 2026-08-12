@@ -8,9 +8,25 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
+
+// readPinnedVocabularyNode reads the sole pinned vocabulary node a config
+// document is expected to carry, for tests that check the exact shape
+// .sal/config.jsonld was written in.
+func readPinnedVocabularyNode(t *testing.T, path string) (*pkg.ConfigDocument, pinnedVocabularyNode) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var doc pkg.ConfigDocument
+	require.NoError(t, json.Unmarshal(content, &doc))
+	require.Len(t, doc.Graph, 1)
+	var node pinnedVocabularyNode
+	require.NoError(t, json.Unmarshal(doc.Graph[0], &node))
+	return &doc, node
+}
 
 const testVocabularyNamespace = "https://vocab.test/things#"
 
@@ -23,7 +39,7 @@ const testVocabularyDocument = `@prefix owl: <http://www.w3.org/2002/07/owl#> .
 func newTestPins(t *testing.T, projectDir string, body string, fetches *int) *PinnedVocabularies {
 	t.Helper()
 
-	pins, err := LoadPinnedVocabularies(filepath.Join(projectDir, "ns-prefix-versions.jsonld"), filepath.Join(projectDir, "data"))
+	pins, err := LoadPinnedVocabularies(filepath.Join(projectDir, "config.jsonld"), filepath.Join(projectDir, "data"))
 	require.NoError(t, err)
 	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
 		if fetches != nil {
@@ -50,17 +66,14 @@ func TestSaveWritesTheDocumentUnderItsHashAndPinsThatVersion(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, testVocabularyDocument, string(document))
 
-	content, err := os.ReadFile(filepath.Join(projectDir, "ns-prefix-versions.jsonld"))
-	require.NoError(t, err)
-	var doc pinnedVocabulariesDocument
-	require.NoError(t, json.Unmarshal(content, &doc))
+	doc, node := readPinnedVocabularyNode(t, filepath.Join(projectDir, "config.jsonld"))
 	require.Equal(t, owlNamespaceIRI, doc.Context["owl"])
-	require.Len(t, doc.Graph, 1)
-	require.Equal(t, testVocabularyNamespace, doc.Graph[0].ID)
-	require.Equal(t, "owl:Ontology", doc.Graph[0].Type)
-	require.Equal(t, "urn:sha256:"+digest, doc.Graph[0].VersionIRI.ID)
-	require.Equal(t, "text/turtle", doc.Graph[0].Format)
-	require.NotNil(t, doc.Graph[0].Modified)
+	require.Equal(t, testVocabularyNamespace, node.ID)
+	require.Equal(t, "owl:Ontology", node.Type)
+	require.Equal(t, "urn:sha256:"+digest, node.VersionIRI.ID)
+	require.Equal(t, "text/turtle", node.Format)
+	require.NotNil(t, node.Modified)
+	require.Contains(t, node.Comment, testVocabularyNamespace)
 }
 
 // A salmodule:// vocabulary's Fetch reports the git commit hash of the module
@@ -68,7 +81,7 @@ func TestSaveWritesTheDocumentUnderItsHashAndPinsThatVersion(t *testing.T) {
 // since code the module runs can change without its ontology document changing.
 func TestADocumentPinnedByFetchIsRecordedAtTheCommitHashRatherThanItsDigest(t *testing.T) {
 	projectDir := t.TempDir()
-	pins, err := LoadPinnedVocabularies(filepath.Join(projectDir, "ns-prefix-versions.jsonld"), filepath.Join(projectDir, "data"))
+	pins, err := LoadPinnedVocabularies(filepath.Join(projectDir, "config.jsonld"), filepath.Join(projectDir, "data"))
 	require.NoError(t, err)
 	const commitHash = "abc123def456abc123def456abc123def456abc"
 	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
@@ -84,15 +97,11 @@ func TestADocumentPinnedByFetchIsRecordedAtTheCommitHashRatherThanItsDigest(t *t
 	require.NoError(t, err)
 	require.Equal(t, testVocabularyDocument, string(document))
 
-	content, err := os.ReadFile(filepath.Join(projectDir, "ns-prefix-versions.jsonld"))
-	require.NoError(t, err)
-	var doc pinnedVocabulariesDocument
-	require.NoError(t, json.Unmarshal(content, &doc))
-	require.Len(t, doc.Graph, 1)
-	require.Equal(t, "urn:git-commit-hash:"+commitHash, doc.Graph[0].VersionIRI.ID)
+	_, node := readPinnedVocabularyNode(t, filepath.Join(projectDir, "config.jsonld"))
+	require.Equal(t, "urn:git-commit-hash:"+commitHash, node.VersionIRI.ID)
 
 	// reopening resolves the pin from disk rather than fetching it again
-	reopened, err := LoadPinnedVocabularies(filepath.Join(projectDir, "ns-prefix-versions.jsonld"), filepath.Join(projectDir, "data"))
+	reopened, err := LoadPinnedVocabularies(filepath.Join(projectDir, "config.jsonld"), filepath.Join(projectDir, "data"))
 	require.NoError(t, err)
 	reopened.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
 		t.Fatal("should not have been fetched again")
@@ -141,7 +150,7 @@ func TestRefreshFetchesAndRepinsAVocabularyThatIsAlreadyPinned(t *testing.T) {
 	require.NoError(t, refreshed.Save())
 
 	sum := sha256.Sum256([]byte(updated))
-	content, err := os.ReadFile(filepath.Join(projectDir, "ns-prefix-versions.jsonld"))
+	content, err := os.ReadFile(filepath.Join(projectDir, "config.jsonld"))
 	require.NoError(t, err)
 	require.Contains(t, string(content), "urn:sha256:"+hex.EncodeToString(sum[:]))
 }
@@ -156,7 +165,7 @@ func TestSaveLeavesTheLockfileAloneWhenNothingChanged(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, pins.Save())
 
-	path := filepath.Join(projectDir, "ns-prefix-versions.jsonld")
+	path := filepath.Join(projectDir, "config.jsonld")
 	before, err := os.Stat(path)
 	require.NoError(t, err)
 
@@ -282,7 +291,7 @@ func TestAppendProvenanceAddsNothingForAnEmptyStore(t *testing.T) {
 
 func TestLoadingAVersionThatIsNotAHashIsAnError(t *testing.T) {
 	projectDir := t.TempDir()
-	path := filepath.Join(projectDir, "ns-prefix-versions.jsonld")
+	path := filepath.Join(projectDir, "config.jsonld")
 	require.NoError(t, os.WriteFile(path, []byte(`{
 		"@context": {"owl": "http://www.w3.org/2002/07/owl#"},
 		"@graph": [{"@id": "https://vocab.test/things#", "@type": "owl:Ontology", "owl:versionIRI": {"@id": "https://vocab.test/things/1.0"}}]

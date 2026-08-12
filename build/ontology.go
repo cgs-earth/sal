@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"slices"
 
 	"github.com/cgs-earth/sal/build/validate"
 	"github.com/cgs-earth/sal/importation"
@@ -13,40 +11,39 @@ import (
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
-// appendProjectOntology adds .sal/ontology.jsonld to the files being built. The
-// project ontology is a source file like any other, so it is validated and its
-// own statements land in the data product; only the ontologies it imports are
-// resolved later, once the build is known to be committable. The walk that
-// collects source files skips .sal, so the ontology is named here rather than
-// found there.
-func appendProjectOntology(files []string) ([]string, error) {
-	path, err := pkg.SalOntologyPath()
+// projectOntologyContent renders the project ontology node .sal/config.jsonld
+// carries as a standalone JSON-LD document, so it can be validated and hashed
+// like a source file even though it is a node in a shared file rather than a
+// file of its own. It returns nil when the project has not declared an
+// ontology yet.
+func projectOntologyContent(base string) ([]byte, error) {
+	path, err := pkg.SalConfigPath()
 	if err != nil {
 		return nil, err
 	}
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return files, nil
-	} else if err != nil {
-		return nil, err
+	ontology, err := importation.ReadOntology(path, base)
+	if err != nil {
+		return nil, fmt.Errorf("build: %w", err)
 	}
-	if slices.Contains(files, path) {
-		return files, nil
+	if ontology == nil {
+		return nil, nil
 	}
-	return append(files, path), nil
+	return importation.SerializeOntology(ontology)
 }
 
-// ImportOntologies resolves everything the project's .sal/ontology.jsonld lists
-// with owl:imports, at the version the project pins for it. An ontology
-// document is merged into the graph being built, so that an ontology a project
-// depends on is carried by the data product rather than only referenced from
-// it; a vocabulary the project pins but does not import stays out of the graph.
-// A salmodule:// import is such a document too; validate.FetchGraph obtains it
-// by cloning and building the module rather than over HTTP. An OCI artifact is
-// pulled to disk instead and kept out of the table entirely. The statements the
-// file makes about the project itself arrive with it as a source file; see
-// appendProjectOntology.
+// ImportOntologies resolves everything the project's ontology node in
+// .sal/config.jsonld lists with owl:imports, at the version the project pins
+// for it. An ontology document is merged into the graph being built, so that
+// an ontology a project depends on is carried by the data product rather than
+// only referenced from it; a vocabulary the project pins but does not import
+// stays out of the graph. A salmodule:// import is such a document too;
+// validate.FetchGraph obtains it by cloning and building the module rather
+// than over HTTP. An OCI artifact is pulled to disk instead and kept out of
+// the table entirely. The statements the ontology node makes about the
+// project itself arrive separately, validated directly from
+// projectOntologyContent rather than through this function.
 func ImportOntologies(graph *rdflibgo.Graph, pins *validate.PinnedVocabularies) error {
-	path, err := pkg.SalOntologyPath()
+	path, err := pkg.SalConfigPath()
 	if err != nil {
 		return err
 	}
@@ -105,7 +102,7 @@ func importOntologies(graph *rdflibgo.Graph, path string, base string, fetch fun
 // dropImportStatement removes the owl:imports statement naming an OCI artifact
 // from the graph. The artifact is a file the project pulls rather than an
 // ontology it merges, so nothing about it belongs in the triples table; the
-// project's .sal/ontology.jsonld stays the record of what was imported.
+// project's ontology node in .sal/config.jsonld stays the record of what was imported.
 func dropImportStatement(graph *rdflibgo.Graph, iri string) {
 	imports := rdflibgo.NewURIRefUnsafe(owlImportsIRI)
 	graph.Remove(nil, &imports, rdflibgo.NewURIRefUnsafe(iri))

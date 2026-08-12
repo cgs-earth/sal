@@ -1,6 +1,7 @@
 package build
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,10 +14,18 @@ import (
 
 const ontologyTestBase = "https://github.com/cgs-earth/sal/"
 
+// writeProjectOntology writes content, a standalone JSON-LD ontology document
+// the way importation.SerializeOntology renders one, as the ontology node of
+// a fresh .sal/config.jsonld, the shape ReadOntology expects on disk.
 func writeProjectOntology(t *testing.T, content string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "ontology.jsonld")
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+	context, node, err := pkg.SplitJSONLDDocument([]byte(content))
+	require.NoError(t, err)
+	doc := pkg.ConfigDocument{Context: context, Graph: []json.RawMessage{node}}
+	raw, err := json.Marshal(doc)
+	require.NoError(t, err)
+	path := filepath.Join(t.TempDir(), "config.jsonld")
+	require.NoError(t, os.WriteFile(path, raw, 0644))
 	return path
 }
 
@@ -41,7 +50,7 @@ func graphTripleCount(graph *rdflibgo.Graph) int {
 
 func TestImportOntologiesDoesNothingWithoutAProjectOntology(t *testing.T) {
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase(ontologyTestBase))
-	path := filepath.Join(t.TempDir(), "ontology.jsonld")
+	path := filepath.Join(t.TempDir(), "config.jsonld")
 
 	fetched := false
 	err := importOntologies(graph, path, ontologyTestBase, func(string) (*rdflibgo.Graph, error) {
@@ -95,37 +104,36 @@ func TestImportOntologiesMergesEveryImport(t *testing.T) {
 	))
 }
 
-func TestAppendProjectOntologyAddsTheOntologyToTheFilesBeingBuilt(t *testing.T) {
+func TestProjectOntologyContentReturnsTheOntologyNode(t *testing.T) {
 	project := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(project, ".sal"), 0755))
-	ontology := filepath.Join(project, ".sal", "ontology.jsonld")
-	require.NoError(t, os.WriteFile(ontology, []byte(`{"@id": "."}`), 0644))
+	config := filepath.Join(project, ".sal", "config.jsonld")
+	require.NoError(t, os.WriteFile(config, []byte(`{
+  "@context": { "dc": "http://purl.org/dc/elements/1.1/", "owl": "http://www.w3.org/2002/07/owl#" },
+  "@graph": [
+    { "@id": ".", "@type": "owl:Ontology", "dc:title": "My Ontology" }
+  ]
+}`), 0644))
 	t.Chdir(project)
 
-	files, err := appendProjectOntology([]string{filepath.Join(project, "data.ttl")})
+	content, err := projectOntologyContent(ontologyTestBase)
 
 	require.NoError(t, err)
-	// t.Chdir resolves through symlinks on macOS, so compare against the path
-	// the project reports for itself rather than the temp directory's name
-	resolved, err := pkg.SalOntologyPath()
-	require.NoError(t, err)
-	require.Equal(t, []string{filepath.Join(project, "data.ttl"), resolved}, files)
-
-	// a project ontology already in the list is not added twice
-	unchanged, err := appendProjectOntology(files)
-	require.NoError(t, err)
-	require.Equal(t, files, unchanged)
+	require.NotNil(t, content)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(content, &doc))
+	require.Equal(t, "My Ontology", doc["dc:title"])
 }
 
-func TestAppendProjectOntologyLeavesTheFilesAloneWithoutOne(t *testing.T) {
+func TestProjectOntologyContentReturnsNilWithoutAnOntologyNode(t *testing.T) {
 	project := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(project, ".sal"), 0755))
 	t.Chdir(project)
 
-	files, err := appendProjectOntology([]string{"data.ttl"})
+	content, err := projectOntologyContent(ontologyTestBase)
 
 	require.NoError(t, err)
-	require.Equal(t, []string{"data.ttl"}, files)
+	require.Nil(t, content)
 }
 
 func TestImportOntologiesReportsWhichImportCouldNotBeFetched(t *testing.T) {

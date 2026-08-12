@@ -20,7 +20,7 @@ For the main triples table, SAL writes an Apache Iceberg table under the project
 
 ```text
 .sal/
-  ns-prefix-versions.jsonld
+  config.jsonld
   data/
     <sha256-of-a-vocabulary-document>
     <git-project-name>/
@@ -57,32 +57,59 @@ For example, a misspelled term such as `schema:nameee` should fail validation ra
 
 Use [`sal validate`](/sal/reference/commands/#sal-validate) to run these checks without writing a new build.
 
+## The project config file
+
+`.sal/config.jsonld` is a single JSON-LD document with one `@graph` that condenses everything a project records about itself and the vocabularies it resolves against: the project's own ontology (what [`sal import`](/sal/reference/commands/#sal-import) writes) and the pinned vocabulary versions (what `sal build` writes). Both used to be separate files, `.sal/ontology.jsonld` and `.sal/ns-prefix-versions.jsonld`; they are now nodes in the same `@graph`, so a project has a single file describing everything it resolves and materializes against.
+
+The first node in the graph, if the project has run `sal import` at least once, is the project's own ontology:
+
+```json
+{
+  "@id": ".",
+  "@type": "owl:Ontology",
+  "dc:title": "my-project",
+  "owl:imports": [{ "@id": "http://www.w3.org/2002/07/owl#" }],
+  "rdfs:comment": "Represents the ontology for the my-project project overall and all the vocabularies that are directly materialized into the graph, not just referenced."
+}
+```
+
+`dc:title` defaults to the Git project name and `--title` overrides it; `rdfs:comment` is always generated. Ontologies listed with `owl:imports` are merged at the version pinned for them; pinning a vocabulary does not import it, so a vocabulary the project validates against but does not import stays out of the triples table.
+
 ## Pinned vocabularies
 
 Vocabularies are resolved per project rather than from a shared cache on the machine.
-`sal build` records the exact version of every vocabulary the project resolves against in `.sal/ns-prefix-versions.jsonld`:
+`sal build` records the exact version of every vocabulary the project resolves against as the rest of `.sal/config.jsonld`'s `@graph`, one node per vocabulary, distinguished from the project ontology node by carrying `owl:versionIRI`:
 
 ```json
 {
   "@context": {
+    "dc": "http://purl.org/dc/elements/1.1/",
     "owl": "http://www.w3.org/2002/07/owl#",
     "dcterms": "http://purl.org/dc/terms/",
-    "xsd": "http://www.w3.org/2001/XMLSchema#"
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
   },
   "@graph": [
+    {
+      "@id": ".",
+      "@type": "owl:Ontology",
+      "dc:title": "my-project",
+      "rdfs:comment": "Represents the ontology for the my-project project overall and all the vocabularies that are directly materialized into the graph, not just referenced."
+    },
     {
       "@id": "https://schema.org/",
       "@type": "owl:Ontology",
       "owl:versionIRI": { "@id": "urn:sha256:c3a1…" },
       "dcterms:format": "application/ld+json",
-      "dcterms:modified": { "@value": "2026-08-11T17:21:12Z", "@type": "xsd:dateTime" }
+      "dcterms:modified": { "@value": "2026-08-11T17:21:12Z", "@type": "xsd:dateTime" },
+      "rdfs:comment": "Represents the cached version of the https://schema.org/ vocabularies as of 2026-08-11T17:21:12Z"
     }
   ]
 }
 ```
 
 The document behind each pin is stored under `.sal/data` named by that same SHA-256.
-`ns-prefix-versions.jsonld` belongs in Git; the documents it names do not, since `sal init` adds `.sal/data` to `.gitignore` and they travel with the data product instead.
+`config.jsonld` belongs in Git; the documents it names do not, since `sal init` adds `.sal/data` to `.gitignore` and they travel with the data product instead.
 
 On each build, SAL:
 
@@ -94,14 +121,11 @@ Validation therefore checks terms against the exact version of a vocabulary the 
 A prefix that is declared but never used is pinned too, so adding a term from it later does not silently change which version the project validates against.
 A pin whose document is missing locally — as in a fresh clone that has not pulled the data product — is fetched again rather than failing the build.
 
-Ontologies listed with `owl:imports` in `.sal/ontology.jsonld` are merged at the version pinned for them.
-Pinning a vocabulary does not merge it: a vocabulary the project validates against but does not import stays out of the triples table.
-
 Use `--no-cache` on `sal build` to resolve every prefix from its source again and re-pin it, which is how a project moves to newer vocabulary versions.
 
 ### Querying pinned vocabularies
 
-Every entry `sal build` writes to `.sal/ns-prefix-versions.jsonld` is also written into the triples table itself, as an `owl:Ontology` node carrying the same `owl:versionIRI`, `dcterms:format`, and `dcterms:modified` the lockfile records.
+Every pinned vocabulary node `sal build` writes to `.sal/config.jsonld` is also written into the triples table itself, as an `owl:Ontology` node carrying the same `owl:versionIRI`, `dcterms:format`, `dcterms:modified`, and `rdfs:comment` the config file records.
 This is provenance: it says which exact version of each vocabulary the data next to it was validated against, and it is queryable like any other triple, through `sal query --sparql`, `sal serve`'s `/sparql` endpoint, or the **Ontology versions** sample in the SPARQL tab of `sal serve --with-ui`.
 
 `/sparql` translates SPARQL to DuckDB SQL and only understands basic triple patterns, `FILTER` comparisons, `DISTINCT`, and `LIMIT` — no `OPTIONAL` and no `ORDER BY` — so the query stays inside that subset:

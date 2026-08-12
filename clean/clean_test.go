@@ -130,27 +130,29 @@ func graphForSnapshot(i int) *rdflibgo.Graph {
 	return graph
 }
 
-func TestRemoveProjectOntologyDeletesTheFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "ontology.jsonld")
-	require.NoError(t, os.WriteFile(path, []byte("# managed by sal import\n"), 0644))
+func TestRemoveProjectConfigDeletesTheFile(t *testing.T) {
+	project := t.TempDir()
+	path := filepath.Join(project, "config.jsonld")
+	require.NoError(t, os.WriteFile(path, []byte(`{"@context":{},"@graph":[]}`), 0644))
 
-	require.NoError(t, removeProjectOntology(path))
+	require.NoError(t, removeProjectConfig(path, filepath.Join(project, "data")))
 	require.NoFileExists(t, path)
 }
 
-func TestRemoveProjectOntologySucceedsWhenThereIsNoOntology(t *testing.T) {
-	require.NoError(t, removeProjectOntology(filepath.Join(t.TempDir(), "ontology.jsonld")))
+func TestRemoveProjectConfigSucceedsWhenThereIsNoConfig(t *testing.T) {
+	project := t.TempDir()
+	require.NoError(t, removeProjectConfig(filepath.Join(project, "config.jsonld"), filepath.Join(project, "data")))
 }
 
 // The pinned documents sit directly under .sal/data rather than inside the
 // table, so removing the data product leaves them behind unless the wipe reads
 // the pins and takes them too.
-func TestRemovePinnedVocabulariesDeletesTheDocumentsItNames(t *testing.T) {
+func TestRemoveProjectConfigDeletesTheDocumentsThePinsName(t *testing.T) {
 	project := t.TempDir()
 	dataDir := filepath.Join(project, "data")
-	pinsPath := filepath.Join(project, "ns-prefix-versions.jsonld")
+	configPath := filepath.Join(project, "config.jsonld")
 
-	pins, err := validate.LoadPinnedVocabularies(pinsPath, dataDir)
+	pins, err := validate.LoadPinnedVocabularies(configPath, dataDir)
 	require.NoError(t, err)
 	pins.Pin("https://vocab.test/things#", []byte("@prefix owl: <http://www.w3.org/2002/07/owl#> .\n"), "text/turtle", validate.PinnedVersion{})
 	require.NoError(t, pins.Save())
@@ -158,14 +160,8 @@ func TestRemovePinnedVocabulariesDeletesTheDocumentsItNames(t *testing.T) {
 	require.Len(t, documents, 1)
 	require.FileExists(t, documents[0])
 
-	require.NoError(t, removePinnedVocabularies(pinsPath, dataDir))
+	require.NoError(t, removeProjectConfig(configPath, dataDir))
 
 	require.NoFileExists(t, documents[0])
-	require.NoFileExists(t, pinsPath)
-}
-
-func TestRemovePinnedVocabulariesSucceedsWhenNothingIsPinned(t *testing.T) {
-	project := t.TempDir()
-
-	require.NoError(t, removePinnedVocabularies(filepath.Join(project, "ns-prefix-versions.jsonld"), filepath.Join(project, "data")))
+	require.NoFileExists(t, configPath)
 }
