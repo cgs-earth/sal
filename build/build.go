@@ -186,10 +186,6 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		return nil, err
 	}
 
-	if err := AddAdditionalDataFileMetadata(finalGraph); err != nil {
-		return nil, err
-	}
-
 	// every module downloaded so far, both the ones validation dereferenced for
 	// their vocabulary and the ones materialization ran, is recorded in the table
 	if err := ExportGraph(finalGraph, cfg.Format, hash, cfg.DataTypeCols, resolver.Downloaded()); err != nil {
