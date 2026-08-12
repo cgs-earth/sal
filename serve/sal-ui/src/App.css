@@ -659,3 +659,144 @@ kbd {
   min-height: 0;
   overflow: auto;
 }
+
+/* ---------- sparql: graph tab ---------- */
+
+.graph-plugin-root {
+  padding: 12px;
+}
+
+.graph-plugin-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* This wrapper is measured by ResizeObserver (see useElementSize in GraphView) and
+   its literal pixel size is handed to SigmaContainer, rather than trusting percentage
+   CSS to resolve through Yasr's + the app shell's flex/grid ancestors. It needs a real
+   height of its own for that measurement to have anything to report. */
+.graph-sigma-container {
+  position: relative;
+  height: 640px;
+  width: 100%;
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  border-radius: 10px;
+  overflow: hidden;
+  /* @react-sigma's own stylesheet reads these as CSS custom properties (its `div.react-sigma`
+     fills this wrapper exactly, so its default white background/controls are what's actually
+     visible, not the background set above) — :root defines them at #fff/#000, so they're
+     redefined here to inherit down into that child instead. */
+  --sigma-background-color: var(--mantle);
+  --sigma-controls-background-color: var(--surface0);
+  --sigma-controls-background-color-hover: var(--surface1);
+  --sigma-controls-border-color: var(--surface2);
+  --sigma-controls-color: var(--lavender);
+}
+
+.graph-loading {
+  height: 640px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--subtext0);
+  font-size: 13px;
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  border-radius: 10px;
+}
+
+.graph-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--surface1);
+  border-top-color: var(--lavender);
+  border-radius: 50%;
+  animation: graph-spin 0.7s linear infinite;
+}
+
+@keyframes graph-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.graph-empty-state {
+  padding: 28px 20px;
+  border: 1px dashed var(--surface2);
+  border-radius: var(--radius-sm);
+  color: var(--subtext0);
+  text-align: center;
+}
+
+.graph-empty-state p {
+  margin: 0;
+}
+
+.graph-empty-reason {
+  margin-top: 8px !important;
+  color: var(--overlay1);
+  font-size: 13px;
+}
+
+.graph-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--subtext0);
+}
+
+.graph-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.graph-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.graph-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.graph-stats {
+  color: var(--overlay1);
+}
+
+.graph-tooltip {
+  position: absolute;
+  pointer-events: none;
+  z-index: 10;
+  max-width: 320px;
+  padding: 5px 9px;
+  background: var(--surface0);
+  border: 1px solid var(--surface2);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  word-break: break-all;
+  transform: translate(12px, 12px);
+}
+
+.graph-tooltip-kind {
+  display: block;
+  color: var(--overlay1);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
