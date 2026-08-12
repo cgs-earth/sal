@@ -10,9 +10,6 @@ type StatsTabProps = {
 
 const formatCount = (value: number) => new Intl.NumberFormat().format(value)
 
-/** Says what a build does with an import: an oci:// reference is pulled to disk, everything else is merged. */
-const importKind = (iri: string) => (iri.startsWith('oci://') ? 'OCI artifact' : 'ontology')
-
 export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
   return (
     <div className="tab-body stats">
@@ -48,24 +45,13 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
           </Section>
 
           <Section
-            title="Imports"
-            caption="The ontologies and OCI artifacts this project imports in .sal/ontology.ttl."
+            title="Ontologies"
+            caption="Every vocabulary sal build/validate has pinned, unioned with what sal import has recorded — the same listing sal get ontologies prints."
           >
             <ResultTable
-              header={['owl:imports', 'kind']}
-              rows={(stats.imports ?? []).map((iri) => [iri, importKind(iri)])}
-              empty="Nothing imported; record one with sal import <url>"
-            />
-          </Section>
-
-          <Section
-            title="Imported data products"
-            caption="Each imported OCI artifact is queryable in the SQL tab as the view named here."
-          >
-            <ResultTable
-              header={['view', 'artifact', 'table']}
-              rows={(stats.importedTables ?? []).map((table) => [table.view, table.artifact, table.path])}
-              empty="No imported data products; pull one with sal import oci://<reference>"
+              header={stats.ontologies.header}
+              rows={stats.ontologies.rows}
+              empty="No ontologies found; run sal import to import one, or sal build/validate to pin the vocabularies a project resolves against"
             />
           </Section>
 

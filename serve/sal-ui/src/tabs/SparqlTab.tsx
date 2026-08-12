@@ -3,6 +3,7 @@ import Yasgui from '@zazuko/yasgui'
 import '@zazuko/yasgui/build/yasgui.min.css'
 import '../yasgui-catppuccin.css'
 import { registerGraphPlugin } from './sparql/GraphPlugin'
+import { setQueryRunner, setQueryTextGetter } from './sparql/sparqlBridge'
 
 registerGraphPlugin(Yasgui)
 
@@ -131,7 +132,18 @@ export function SparqlTab() {
       tab.setName(SAMPLES[0].name)
     }
 
+    setQueryRunner((query) => {
+      const activeTab = instance.getTab()
+      if (!activeTab) return
+      activeTab.setQuery(query)
+      activeTab.setName('From graph')
+      void activeTab.query()
+    })
+    setQueryTextGetter(() => instance.getTab()?.getQuery() ?? '')
+
     return () => {
+      setQueryRunner(null)
+      setQueryTextGetter(null)
       yasgui.current = null
       instance.destroy()
       parent.replaceChildren()
