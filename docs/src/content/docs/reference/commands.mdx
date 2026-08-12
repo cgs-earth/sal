@@ -225,7 +225,7 @@ sal query --snapshot-diff latest
 
 Looks up the RDF resources inside a built data product.
 Where `sal query` is about the Iceberg table that stores the triples, `sal get` is about the RDF the table describes.
-`sal get imports` is the exception: it reads the project's ontology node in `.sal/config.jsonld` rather than the built data product.
+`sal get ontologies` is the exception: it reads the pinned vocabulary and project ontology nodes in `.sal/config.jsonld` rather than the built data product.
 
 ### `sal get classes`
 
@@ -312,20 +312,23 @@ A shape that arrives from an imported ontology keeps the namespace that ontology
 `rdfs:label`, `rdfs:comment`, and `sh:targetClass` are all optional; a column that no shape states is left out of the table entirely.
 `sh:targetClass` is the one a shape can state more than once, and a shape targeting several classes is listed once per class, the way `sal get instances` lists a resource once per class it is typed with.
 
-### `sal get imports`
+### `sal get ontologies`
 
-Lists the `owl:imports` recorded on the ontology node in `.sal/config.jsonld`, which `sal import` writes:
+Lists every ontology the project knows about from `.sal/config.jsonld`: the vocabularies `sal build` and `sal validate` have pinned, unioned with what `sal import` has recorded with `owl:imports` on the project ontology node, with whether each one is imported:
 
 ```sh
-sal get imports
+sal get ontologies
 ```
 
 ```
-import
-https://schema.org/version/latest/schemaorg-current-https.jsonld
-oci://ghcr.io/cgs-earth/example:latest
-salmodule://github.com/cgs-earth/example
+ontology                                            version                             format               imported
+https://schema.org/                                 urn:sha256:2c8...                   application/ld+json  yes
+https://www.w3.org/ns/dcat#                         urn:sha256:9f1...                   text/turtle          no
+oci://ghcr.io/cgs-earth/example:latest                                                                        yes
+salmodule://github.com/cgs-earth/example            urn:git-commit-hash:9a1...          application/ld+json  yes
 ```
+
+`version` and `format` come from the pin a build or validation records the first time it resolves a prefix or an import against a vocabulary. An `oci://` import is never dereferenced as a document to pin, since the artifact it names is not an ontology document, so it is still listed as an ontology here but with no version or format. A `salmodule://` import is dereferenced by building the module and pinned by the module repository's git commit hash rather than a document digest, the same as a `salmodule://` vocabulary.
 
 ## `sal describe`
 
