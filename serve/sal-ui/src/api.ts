@@ -43,6 +43,13 @@ export type ModuleOntology = {
   ontology: unknown
 }
 
+export type BlobResult = {
+  /** The SHA-256 digest the blob was resolved by, with any urn:sha256: prefix stripped. */
+  digest: string
+  blob: Blob
+  contentType: string | null
+}
+
 export type GeoJSONFeatureCollection = {
   type: 'FeatureCollection'
   features: {
@@ -89,6 +96,21 @@ export async function inspectModule(module: string, signal?: AbortSignal): Promi
   const response = await fetch(`/api/salmodule?module=${encodeURIComponent(module)}`, { signal })
   if (!response.ok) throw await failure(response)
   return (await response.json()) as ModuleOntology
+}
+
+/**
+ * Fetches the vocabulary or imported ontology document a project pinned by its
+ * SHA-256 digest. The server accepts the digest with or without a urn:sha256:
+ * prefix, so it is stripped client side too, both to normalize what is sent
+ * and to name the downloaded file by the bare digest.
+ */
+export async function resolveBlob(hash: string, signal?: AbortSignal): Promise<BlobResult> {
+  const digest = hash.trim().replace(/^urn:sha256:/i, '')
+  if (!digest) throw new Error('Enter a blob hash')
+  const response = await fetch(`/blobs/${encodeURIComponent(digest)}`, { signal })
+  if (!response.ok) throw await failure(response)
+  const blob = await response.blob()
+  return { digest, blob, contentType: response.headers.get('Content-Type') }
 }
 
 export async function fetchGeometries(

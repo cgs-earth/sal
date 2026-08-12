@@ -22,7 +22,8 @@ For the main triples table, SAL writes an Apache Iceberg table under the project
 .sal/
   config.jsonld
   data/
-    <sha256-of-a-vocabulary-document>
+    blobs/
+      <sha256-of-a-vocabulary-document>
     <git-project-name>/
       triples/
         data/
@@ -32,8 +33,8 @@ For the main triples table, SAL writes an Apache Iceberg table under the project
 The `metadata` directory contains Iceberg table metadata, manifest lists, manifests, and `version-hint.text`.
 The `data` directory contains the table's data files.
 
-The files named by a hash directly under `.sal/data` are the vocabulary documents the project pins.
-They are described in [Pinned vocabularies](#pinned-vocabularies) below.
+The files named by a hash under `.sal/data/blobs` are the vocabulary documents the project pins.
+They are described in [Pinned vocabularies](#pinned-vocabularies) below. [`sal serve`](/sal/reference/commands/#sal-serve) serves them over HTTP at `/blobs/{sha256}`.
 
 ## RDF triples
 
@@ -108,13 +109,13 @@ Vocabularies are resolved per project rather than from a shared cache on the mac
 }
 ```
 
-The document behind each pin is stored under `.sal/data` named by that same SHA-256.
+The document behind each pin is stored under `.sal/data/blobs` named by that same SHA-256.
 `config.jsonld` belongs in Git; the documents it names do not, since `sal init` adds `.sal/data` to `.gitignore` and they travel with the data product instead.
 
 On each build, SAL:
 
 1. Collects every prefix the project's source files declare, building any SAL module it references so the module's own ontology counts as one of them.
-2. Resolves each prefix that is not already pinned, hashes the document it received, writes it under `.sal/data`, and records the mapping.
+2. Resolves each prefix that is not already pinned, hashes the document it received, writes it under `.sal/data/blobs`, and records the mapping.
 3. Resolves every prefix that is already pinned from the stored document rather than from the network.
 
 Validation therefore checks terms against the exact version of a vocabulary the project pinned, not against whatever its publisher is serving today.

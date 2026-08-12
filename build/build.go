@@ -229,12 +229,12 @@ var projectVocabularies = func(refresh bool) (*validate.PinnedVocabularies, erro
 	if err != nil {
 		return nil, err
 	}
-	dataDir, err := pkg.SalDataDir()
+	blobsDir, err := pkg.SalBlobsDir()
 	if err != nil {
 		return nil, err
 	}
 
-	pins, err := validate.LoadPinnedVocabularies(path, dataDir)
+	pins, err := validate.LoadPinnedVocabularies(path, blobsDir)
 	if err != nil {
 		return nil, fmt.Errorf("build: read pinned vocabularies: %w", err)
 	}

@@ -2,12 +2,16 @@ package serve
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -56,7 +60,7 @@ func (r *endpointUIRunner) Stats(_ context.Context) (salsparql.TableStats, error
 
 func newUIServer(t *testing.T, runner *endpointUIRunner) *httptest.Server {
 	t.Helper()
-	handler, err := NewEndpointWithUI(runner)
+	handler, err := NewEndpointWithUI(runner, "")
 	require.NoError(t, err)
 	return httptest.NewServer(handler)
 }
@@ -68,7 +72,7 @@ func TestEndpointAcceptsGETQueryAndReturnsSPARQLJSON(t *testing.T) {
 			{"https://example.org/alice", "Alice"},
 		},
 	}}
-	server := httptest.NewServer(NewEndpoint(runner))
+	server := httptest.NewServer(NewEndpoint(runner, ""))
 	defer server.Close()
 
 	req, err := http.NewRequest(http.MethodGet, server.URL+"/sparql?query=SELECT+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+%7D", nil)
@@ -331,7 +335,7 @@ func TestEndpointWithUIReturnsGeometryFeatureCollection(t *testing.T) {
 
 func TestEndpointAcceptsFormPOSTQuery(t *testing.T) {
 	runner := &endpointRunner{result: salsparql.Result{Header: []string{"s"}}}
-	server := httptest.NewServer(NewEndpoint(runner))
+	server := httptest.NewServer(NewEndpoint(runner, ""))
 	defer server.Close()
 
 	resp, err := http.Post(
@@ -350,7 +354,7 @@ func TestEndpointAcceptsFormPOSTQuery(t *testing.T) {
 
 func TestEndpointAcceptsSPARQLQueryPOSTBody(t *testing.T) {
 	runner := &endpointRunner{result: salsparql.Result{Header: []string{"s"}}}
-	server := httptest.NewServer(NewEndpoint(runner))
+	server := httptest.NewServer(NewEndpoint(runner, ""))
 	defer server.Close()
 
 	req, err := http.NewRequest(http.MethodPost, server.URL+"/sparql", strings.NewReader("SELECT ?s WHERE { ?s ?p ?o }"))
@@ -367,7 +371,7 @@ func TestEndpointAcceptsSPARQLQueryPOSTBody(t *testing.T) {
 }
 
 func TestEndpointRejectsUnsupportedAcceptHeader(t *testing.T) {
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{}))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, ""))
 	defer server.Close()
 
 	req, err := http.NewRequest(http.MethodGet, server.URL+"/sparql?query=SELECT+%3Fs+WHERE+%7B%7D", nil)
@@ -383,7 +387,7 @@ func TestEndpointRejectsUnsupportedAcceptHeader(t *testing.T) {
 }
 
 func TestEndpointRejectsMissingQuery(t *testing.T) {
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{}))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, ""))
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/sparql")
@@ -396,7 +400,7 @@ func TestEndpointRejectsMissingQuery(t *testing.T) {
 }
 
 func TestEndpointRejectsUnsupportedPOSTMediaType(t *testing.T) {
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{}))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, ""))
 	defer server.Close()
 
 	resp, err := http.Post(server.URL+"/sparql", "application/json", strings.NewReader(`{"query":"SELECT ?s WHERE {}"}`))
@@ -409,7 +413,7 @@ func TestEndpointRejectsUnsupportedPOSTMediaType(t *testing.T) {
 }
 
 func TestEndpointReturnsBadRequestForSPARQLError(t *testing.T) {
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{err: fmt.Errorf("parse SPARQL query")}))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{err: fmt.Errorf("parse SPARQL query")}, ""))
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/sparql?query=ASK+%7B%7D")
@@ -419,4 +423,126 @@ func TestEndpointReturnsBadRequestForSPARQLError(t *testing.T) {
 	}()
 
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+// writeBlob writes body to dir named by its SHA-256 digest, the shape
+// PinnedVocabularies stores a pinned document under, and returns the digest.
+func writeBlob(t *testing.T, dir string, body []byte) string {
+	t.Helper()
+	sum := sha256.Sum256(body)
+	digest := hex.EncodeToString(sum[:])
+	require.NoError(t, os.MkdirAll(dir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, digest), body, 0644))
+	return digest
+}
+
+func TestBlobEndpointServesAPinnedDocumentByDigest(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte("@prefix ex: <https://example.org/> .")
+	digest := writeBlob(t, dir, body)
+
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/blobs/" + digest)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "application/octet-stream", resp.Header.Get("Content-Type"))
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, body, got)
+}
+
+func TestBlobEndpointStripsUrnSha256Prefix(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte("some vocabulary bytes")
+	digest := writeBlob(t, dir, body)
+
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/blobs/urn:sha256:" + digest)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, body, got)
+}
+
+func TestBlobEndpointReturnsNotFoundForUnknownDigest(t *testing.T) {
+	dir := t.TempDir()
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/blobs/" + strings.Repeat("0", 64))
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestBlobEndpointReturnsNotFoundForMalformedDigest(t *testing.T) {
+	dir := t.TempDir()
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/blobs/not-a-valid-digest")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestBlobEndpointSupportsRangeRequests(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte("0123456789abcdef")
+	digest := writeBlob(t, dir, body)
+
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/blobs/"+digest, nil)
+	require.NoError(t, err)
+	req.Header.Set("Range", "bytes=2-5")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusPartialContent, resp.StatusCode)
+	require.Equal(t, "bytes 2-5/16", resp.Header.Get("Content-Range"))
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, "2345", string(got))
+}
+
+func TestBlobEndpointRejectsUnsupportedMethod(t *testing.T) {
+	dir := t.TempDir()
+	digest := writeBlob(t, dir, []byte("body"))
+
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/blobs/"+digest, nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 }

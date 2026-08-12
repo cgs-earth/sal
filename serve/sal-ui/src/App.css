@@ -143,15 +143,19 @@
 }
 
 /* The SQL tab scrolls as one page rather than dividing the viewport between the
-   editor and the results: each keeps its own size and the page grows instead. */
-.tab-body.split {
+   editor and the results: each keeps its own size and the page grows instead.
+   The blob tab is a single panel sized to its content, so it uses the same
+   flow rather than stretching to fill the tab. */
+.tab-body.split,
+.tab-body.blob {
   display: flex;
   flex-direction: column;
   gap: 18px;
   overflow-y: auto;
 }
 
-.tab-body.split > .panel {
+.tab-body.split > .panel,
+.tab-body.blob > .panel {
   flex: none;
 }
 
