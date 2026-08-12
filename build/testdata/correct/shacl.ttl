@@ -1,0 +1,41 @@
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix schema: <https://schema.org/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<PersonShape>
+    a sh:NodeShape ;
+    rdfs:label "Person Shape" ;
+    rdfs:comment "Every person this project describes is named, and has at most one email address." ;
+    sh:targetClass schema:Person ;
+    sh:property <PersonNameShape>, <PersonEmailShape> .
+
+<PersonNameShape>
+    a sh:PropertyShape ;
+    rdfs:label "Person Name" ;
+    rdfs:comment "A person is named exactly once, with a string." ;
+    sh:path schema:name ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 .
+
+<PersonEmailShape>
+    a sh:PropertyShape ;
+    rdfs:label "Person Email" ;
+    sh:path schema:email ;
+    sh:nodeKind sh:IRI ;
+    sh:maxCount 1 .
+
+<PlaceShape>
+    a sh:NodeShape ;
+    rdfs:label "Place Shape" ;
+    rdfs:comment "A place is named, and carries the geometry it is located at." ;
+    sh:targetClass schema:Place, schema:AdministrativeArea ;
+    sh:property <PlaceNameShape> .
+
+<PlaceNameShape>
+    a sh:PropertyShape ;
+    rdfs:label "Place Name" ;
+    sh:path schema:name ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 .
