@@ -428,6 +428,15 @@
   color: var(--crust);
 }
 
+/* Yasr's own disabled handling is CSS-class-only — the click listener that switches
+   plugins doesn't check it, so pointer-events is what actually blocks the click; the rest
+   is what makes that state visible (e.g. the Graph tab before any query has run yet). */
+.yasgui .yasr .yasr_btn.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .yasgui .yasr .yasr_btn svg {
   fill: currentcolor;
 }
