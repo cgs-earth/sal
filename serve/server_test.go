@@ -277,7 +277,13 @@ func TestEndpointWithUIReturnsTableStats(t *testing.T) {
 			Header: []string{"snapshot_id"},
 			Rows:   [][]string{{"123"}},
 		},
-		Imports: []string{"https://schema.org/", "oci://ghcr.io/cgs-earth/sal:abc123"},
+		Ontologies: salsparql.Result{
+			Header: []string{"ontology", "version", "format", "imported"},
+			Rows: [][]string{
+				{"https://schema.org/", "", "", "yes"},
+				{"oci://ghcr.io/cgs-earth/sal:abc123", "", "", "yes"},
+			},
+		},
 	}}
 	server := newUIServer(t, runner)
 	defer server.Close()
@@ -295,7 +301,10 @@ func TestEndpointWithUIReturnsTableStats(t *testing.T) {
 	require.Equal(t, int64(9), body.Objects)
 	require.Equal(t, "/tmp/warehouse/sal/triples", body.TablePath)
 	require.Equal(t, [][]string{{"123"}}, body.Snapshots.Rows)
-	require.Equal(t, []string{"https://schema.org/", "oci://ghcr.io/cgs-earth/sal:abc123"}, body.Imports)
+	require.Equal(t, [][]string{
+		{"https://schema.org/", "", "", "yes"},
+		{"oci://ghcr.io/cgs-earth/sal:abc123", "", "", "yes"},
+	}, body.Ontologies.Rows)
 }
 
 func TestEndpointWithUIReturnsGeometryFeatureCollection(t *testing.T) {

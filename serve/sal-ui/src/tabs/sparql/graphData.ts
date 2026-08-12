@@ -12,6 +12,10 @@ export type GraphNodeAttributes = {
   label: string
   fullLabel: string
   kind: NodeKind
+  /** Set only for literal nodes with an explicit datatype, e.g. xsd:date. */
+  datatype?: string
+  /** Set only for literal nodes with a language tag. */
+  lang?: string
 }
 
 export type GraphEdgeAttributes = {
@@ -118,12 +122,64 @@ function nodeId(value: Parser.BindingValue): string {
   return `${value.type}:${value.value}`
 }
 
+/** Datatype/language metadata carried on a literal node, for reconstructing it in a query later. */
+function literalMeta(value: Parser.BindingValue): { datatype?: string; lang?: string } {
+  return { datatype: value.datatype, lang: value['xml:lang'] }
+}
+
 function shorten(value: string, kind: NodeKind): string {
   if (kind === 'literal') return value.length > 42 ? `${value.slice(0, 39)}…` : value
   const cleaned = value.replace(/[/#]+$/, '')
   const cut = Math.max(cleaned.lastIndexOf('#'), cleaned.lastIndexOf('/'))
   const tail = cut === -1 ? cleaned : cleaned.slice(cut + 1)
   return tail || value
+}
+
+// Matches the single RDF term SPARQL allows in a triple pattern position: an
+// IRI in angle brackets, a single- or double-quoted literal (with an optional
+// datatype or language tag), or a prefixed name.
+const TERM_PATTERN = String.raw`(<[^>]*>|"(?:[^"\\]|\\.)*"(?:\^\^[^\s.,;]+|@[\w-]+)?|'(?:[^'\\]|\\.)*'(?:\^\^[^\s.,;]+|@[\w-]+)?|[\w-]+:[\w-]+)`
+
+/**
+ * Best-effort extraction of the RDF term a query fixed in a triple pattern's
+ * subject or object position, so a synthetic root node can show what was
+ * actually queried instead of a placeholder. Only handles the one shape
+ * buildGraph itself falls back to a root node for: the other two positions
+ * bound to the exact variable names the query's SELECT reported, since the
+ * /sparql endpoint only understands basic triple patterns to begin with.
+ * Returns null rather than guess if the query text doesn't match — a stale
+ * generic label is safer than a wrong specific one.
+ */
+function extractFixedTerm(queryText: string, before: string[], after: string[]): string | null {
+  const varPattern = (name: string) => `\\?${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`
+  const tokens = [...before.map(varPattern), TERM_PATTERN, ...after.map(varPattern)]
+  const re = new RegExp(`${tokens.join('\\s+')}\\s*[.;]`)
+  return re.exec(queryText)?.[1] ?? null
+}
+
+/** Renders a raw term extracted from query text (still angle-bracketed/quoted) as a node label. */
+function describeFixedTerm(raw: string): { label: string; fullLabel: string } {
+  if (raw.startsWith('<') && raw.endsWith('>')) {
+    const value = raw.slice(1, -1)
+    return { label: shorten(value, 'uri'), fullLabel: value }
+  }
+  if ((raw.startsWith('"') || raw.startsWith("'")) && raw.length > 1) {
+    return { label: shorten(raw, 'literal'), fullLabel: raw }
+  }
+  return { label: raw, fullLabel: raw }
+}
+
+/**
+ * Labels a synthetic root node: the query text's own term when it can be
+ * found there, otherwise a generic placeholder naming which side was fixed.
+ */
+function rootNodeLabel(queryText: string | undefined, before: string[], after: string[], side: 'subject' | 'object') {
+  const term = queryText ? extractFixedTerm(queryText, before, after) : null
+  if (term) return describeFixedTerm(term)
+  return {
+    label: '(fixed in query)',
+    fullLabel: `The ${side} was fixed in the query text, not a selected column, so its exact term couldn't be read back out of it.`,
+  }
 }
 
 /** Deterministic starting layout: force-directed refinement runs on top of this. */
@@ -137,7 +193,20 @@ function seedCircular(graph: TripleGraph) {
   })
 }
 
-/** A compact Fruchterman-Reingold pass so connected nodes cluster instead of sitting on a ring. */
+/**
+ * A compact Fruchterman-Reingold pass so connected nodes cluster instead of
+ * sitting on a ring.
+ *
+ * k is deliberately not a tunable "spacing" knob: Sigma normalizes every
+ * graph's node coordinate bounding box to fill the camera's frame on every
+ * render (see createNormalizationFunction in its source), so uniformly
+ * scaling every position here — which is all multiplying k does — has no
+ * visible effect at all once rendered, and for a graph with only a couple of
+ * nodes there's no relative shape left for it to affect either. The
+ * "Node spacing" control in GraphView instead drives Sigma's own
+ * stagePadding setting, which is applied after that normalization step and
+ * so actually changes how much of the canvas the graph fills.
+ */
 function layout(graph: TripleGraph) {
   seedCircular(graph)
   const nodes = graph.nodes()
@@ -208,7 +277,12 @@ function layout(graph: TripleGraph) {
   }
 }
 
-export function buildGraph(vars: string[], bindings: Parser.Binding[]): GraphBuildSuccess | GraphBuildFailure {
+export interface GraphBuildOptions {
+  /** The raw SPARQL query text, used to recover a fixed subject/object's exact term for a root node's label. */
+  queryText?: string
+}
+
+export function buildGraph(vars: string[], bindings: Parser.Binding[], options: GraphBuildOptions = {}): GraphBuildSuccess | GraphBuildFailure {
   if (bindings.length === 0) {
     return { reason: 'The query returned no rows to plot.' }
   }
@@ -232,9 +306,9 @@ export function buildGraph(vars: string[], bindings: Parser.Binding[]): GraphBui
   const graph: TripleGraph = new Graph({ multi: true, type: 'directed' })
   let rowsUsed = 0
 
-  const addRootNode = (id: string, label: string, fullLabel: string) => {
+  const addRootNode = (id: string, described: { label: string; fullLabel: string }) => {
     if (graph.hasNode(id)) return
-    graph.addNode(id, { x: 0, y: 0, size: NODE_SIZE.root, color: NODE_COLOR.root, label, fullLabel, kind: 'root' })
+    graph.addNode(id, { x: 0, y: 0, size: NODE_SIZE.root, color: NODE_COLOR.root, ...described, kind: 'root' })
   }
 
   for (const binding of rows) {
@@ -262,10 +336,11 @@ export function buildGraph(vars: string[], bindings: Parser.Binding[]): GraphBui
           label: shorten(subject.value, kind),
           fullLabel: subject.value,
           kind,
+          ...(kind === 'literal' ? literalMeta(subject) : {}),
         })
       }
     } else {
-      addRootNode(SYNTHETIC_SUBJECT_ID, '(queried resource)', 'The subject was fixed in the query text, not a selected column, so it has no value to show.')
+      addRootNode(SYNTHETIC_SUBJECT_ID, rootNodeLabel(options.queryText, [], [predicateVar!, objectVar!], 'subject'))
     }
 
     if (object) {
@@ -279,10 +354,11 @@ export function buildGraph(vars: string[], bindings: Parser.Binding[]): GraphBui
           label: shorten(object.value, kind),
           fullLabel: object.value,
           kind,
+          ...(kind === 'literal' ? literalMeta(object) : {}),
         })
       }
     } else {
-      addRootNode(SYNTHETIC_OBJECT_ID, '(queried resource)', 'The object was fixed in the query text, not a selected column, so it has no value to show.')
+      addRootNode(SYNTHETIC_OBJECT_ID, rootNodeLabel(options.queryText, [subjectVar!, predicateVar!], [], 'object'))
     }
 
     const edgeLabel = predicate ? shorten(predicate.value, 'uri') : ''
