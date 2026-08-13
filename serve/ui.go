@@ -69,6 +69,55 @@ func uiHandler() (http.Handler, error) {
 	}), nil
 }
 
+// browserRoute serves the SAL UI to a browser that navigated to a path the API
+// also owns, and hands every other request to that API. The UI gives each tab a
+// URL of its own so a tab can be linked to, and two of those names -- /sparql
+// and /blobs -- are endpoints as well, so the two readings have to be told
+// apart rather than one of them given up.
+type browserRoute struct {
+	api http.Handler
+	ui  http.Handler
+}
+
+func (h browserRoute) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if isBrowserNavigation(r) {
+		h.ui.ServeHTTP(w, r)
+		return
+	}
+	h.api.ServeHTTP(w, r)
+}
+
+// isBrowserNavigation reports whether r is a browser following a link to a UI
+// tab rather than a client calling the API at the same path. A request carrying
+// a SPARQL Protocol `query` parameter is the API whatever asked for it, which is
+// also why the UI's own share links use `q` instead. Past that, a browser marks
+// a top level navigation with Sec-Fetch-Mode: navigate, a value the UI's own
+// fetch() calls never carry -- they are same-origin or cors -- so the header
+// separates the two whenever it is sent at all. A client that sends no Sec-Fetch
+// headers, such as curl or a SPARQL library, is judged by whether it asked for
+// HTML instead.
+func isBrowserNavigation(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	if r.URL.Query().Get("query") != "" {
+		return false
+	}
+	if mode := r.Header.Get("Sec-Fetch-Mode"); mode != "" {
+		return strings.EqualFold(mode, "navigate")
+	}
+	return acceptsHTML(r.Header.Get("Accept"))
+}
+
+func acceptsHTML(accept string) bool {
+	for _, part := range strings.Split(accept, ",") {
+		if strings.EqualFold(strings.TrimSpace(strings.Split(part, ";")[0]), "text/html") {
+			return true
+		}
+	}
+	return false
+}
+
 // minCompressibleSize is the size below which gzip's framing costs more than it saves.
 const minCompressibleSize = 1024
 

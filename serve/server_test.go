@@ -129,6 +129,151 @@ func TestEndpointWithUIFallsBackToIndexForUnknownPaths(t *testing.T) {
 	require.Contains(t, resp.Header.Get("Content-Type"), "text/html")
 }
 
+// browserGet issues a GET carrying the headers a browser sends when it navigates to a
+// URL, which is what tells a link to a UI tab apart from a call to the endpoint
+// living at the same path.
+func browserGet(t *testing.T, url string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	return resp
+}
+
+func TestEndpointWithUIServesTheAppForABrowserNavigationToSparql(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
+	defer server.Close()
+
+	resp := browserGet(t, server.URL+"/sparql")
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Contains(t, resp.Header.Get("Content-Type"), "text/html")
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(body), `<div id="root">`)
+}
+
+func TestEndpointWithUIStillAnswersSPARQLRequestsAtSparql(t *testing.T) {
+	runner := &endpointUIRunner{endpointRunner: endpointRunner{result: salsparql.Result{Header: []string{"s"}}}}
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/sparql?query=SELECT+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+%7D", nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept", sparqlResultsJSON)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, sparqlResultsJSON, resp.Header.Get("Content-Type"))
+	require.Equal(t, "SELECT ?s WHERE { ?s ?p ?o }", runner.query)
+}
+
+// A browser opening a SPARQL Protocol URL by hand still means the endpoint: the
+// query parameter says so no matter what asked for it.
+func TestEndpointWithUIAnswersSPARQLProtocolGETEvenFromABrowser(t *testing.T) {
+	runner := &endpointUIRunner{endpointRunner: endpointRunner{result: salsparql.Result{Header: []string{"s"}}}}
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp := browserGet(t, server.URL+"/sparql?query=SELECT+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+%7D")
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, sparqlResultsJSON, resp.Header.Get("Content-Type"))
+	require.Equal(t, "SELECT ?s WHERE { ?s ?p ?o }", runner.query)
+}
+
+// The share link a tab copies carries its query in `q`, which is the UI's own
+// parameter and must not divert the request to the endpoint.
+func TestEndpointWithUIServesTheAppForASharedQueryLink(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
+	defer server.Close()
+
+	resp := browserGet(t, server.URL+"/sparql?q=SELECT+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+%7D")
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Contains(t, resp.Header.Get("Content-Type"), "text/html")
+}
+
+func TestEndpointWithUIServesTheAppForABrowserNavigationToBlobs(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
+	defer server.Close()
+
+	resp := browserGet(t, server.URL+"/blobs")
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Contains(t, resp.Header.Get("Content-Type"), "text/html")
+}
+
+func TestEndpointWithUIStillServesBlobsToANonBrowser(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte("@prefix ex: <https://example.org/> .")
+	digest := writeBlob(t, dir, body)
+
+	handler, err := NewEndpointWithUI(&endpointUIRunner{}, dir)
+	require.NoError(t, err)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/blobs/" + digest)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "application/octet-stream", resp.Header.Get("Content-Type"))
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, body, got)
+}
+
+// The UI's own Blobs tab downloads through fetch(), which a browser marks as a
+// same-origin request rather than a navigation, so it must reach the endpoint.
+func TestEndpointWithUIServesBlobsToTheUIsOwnFetch(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte("some vocabulary bytes")
+	digest := writeBlob(t, dir, body)
+
+	handler, err := NewEndpointWithUI(&endpointUIRunner{}, dir)
+	require.NoError(t, err)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/blobs/"+digest, nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Sec-Fetch-Mode", "same-origin")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, body, got)
+}
+
 func TestEndpointWithUIRunsSQL(t *testing.T) {
 	runner := &endpointUIRunner{sqlResult: salsparql.Result{
 		Header: []string{"count"},

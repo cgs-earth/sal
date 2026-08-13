@@ -129,7 +129,7 @@ Use `--no-cache` on `sal build` to resolve every prefix from its source again an
 Every pinned vocabulary node `sal build` writes to `.sal/config.jsonld` is also written into the triples table itself, as an `owl:Ontology` node carrying the same `owl:versionIRI`, `dcterms:format`, `dcterms:modified`, and `rdfs:comment` the config file records.
 This is provenance: it says which exact version of each vocabulary the data next to it was validated against, and it is queryable like any other triple, through `sal query --sparql`, `sal serve`'s `/sparql` endpoint, or the **Ontology versions** sample in the SPARQL tab of `sal serve --with-ui`.
 
-`/sparql` translates SPARQL to DuckDB SQL and only understands basic triple patterns, `FILTER` comparisons, `DISTINCT`, and `LIMIT` — no `OPTIONAL` and no `ORDER BY` — so the query stays inside that subset:
+`/sparql` translates SPARQL to DuckDB SQL and only understands basic triple patterns, `FILTER` comparisons, `DISTINCT`, and `LIMIT` — no `OPTIONAL` and no `ORDER BY` — so the query stays inside that subset (see [SPARQL Query Engine](/sal/reference/sparql-engine/)):
 
 ```sparql
 PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>

@@ -272,6 +272,12 @@
   cursor: not-allowed;
 }
 
+.button.copied,
+.button.copied:hover:not(:disabled) {
+  border-color: var(--green);
+  color: var(--green);
+}
+
 .button.primary {
   background: var(--lavender);
   border-color: var(--lavender);
