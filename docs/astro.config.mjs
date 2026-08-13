@@ -64,10 +64,6 @@ export default defineConfig({
     starlight({
       plugins: [starlightSiteGraph()],
       title: "SAL Docs",
-      logo: {
-        src: "./src/assets/cgs/cgs-mark.png",
-        alt: "Center for Geospatial Solutions",
-      },
       customCss: ["./src/styles/cgs.css"],
       components: {
         Footer: "./src/components/Footer.astro",
