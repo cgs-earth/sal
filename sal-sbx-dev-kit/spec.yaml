@@ -51,6 +51,14 @@ permissions:
       # primes that cache and every query path depends on it.
       - extensions.duckdb.org
 
+      # Headless Chromium, for screenshotting the docs site and the `sal serve`
+      # UI. cdn.playwright.dev is what `playwright install` resolves first; it
+      # redirects to the prss.microsoft.com CDN that serves the actual build,
+      # and falls back to azureedge.net on older releases.
+      - cdn.playwright.dev
+      - playwright.download.prss.microsoft.com
+      - playwright.azureedge.net
+
 setup:
   install:
     - command: "sudo apt-get install -y gcc libc6-dev g++ ripgrep"
