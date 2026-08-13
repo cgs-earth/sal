@@ -1,0 +1,21 @@
+---
+/**
+ * Wraps Starlight's default page footer with a CGS attribution lockup.
+ * The horizontal logo ships in two versions; cgs.css shows whichever one
+ * reads against the active theme's background.
+ */
+import Default from '@astrojs/starlight/components/Footer.astro';
+import { Image } from 'astro:assets';
+import logoColor from '../assets/cgs/cgs-horizontal-color.png';
+import logoWhite from '../assets/cgs/cgs-horizontal-white.png';
+---
+
+<Default><slot /></Default>
+
+<div class="cgs-credit not-content">
+	<span>Developed by</span>
+	<a href="https://cgsearth.org/" rel="noopener">
+		<Image class="cgs-credit-light" src={logoColor} alt="Center for Geospatial Solutions" height={80} />
+		<Image class="cgs-credit-dark" src={logoWhite} alt="Center for Geospatial Solutions" height={80} />
+	</a>
+</div>

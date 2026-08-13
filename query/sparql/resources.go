@@ -2,6 +2,7 @@ package sparql
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -24,19 +25,29 @@ const (
 	SHTargetClassIRI   = "http://www.w3.org/ns/shacl#targetClass"
 )
 
-// vocabularyClassIRIs are the classes a resource is typed with to declare that
-// it is part of a vocabulary. A subject carrying one of them describes the
-// schema rather than instantiating it, so an instance lookup leaves it out.
-var vocabularyClassIRIs = []string{
-	"http://www.w3.org/2000/01/rdf-schema#Class",
-	"http://www.w3.org/2002/07/owl#Class",
-	RDFSDatatypeIRI,
+// propertyClassIRIs are the classes a resource is typed with to declare that it
+// is a property. RDF states a plain property with rdf:Property, and OWL
+// distinguishes the three kinds of property it defines, so a property lookup
+// reports which of them a property was declared to be.
+var propertyClassIRIs = []string{
 	"http://www.w3.org/1999/02/22-rdf-syntax-ns#Property",
 	"http://www.w3.org/2002/07/owl#ObjectProperty",
 	"http://www.w3.org/2002/07/owl#DatatypeProperty",
 	"http://www.w3.org/2002/07/owl#AnnotationProperty",
-	"http://www.w3.org/2002/07/owl#Ontology",
 }
+
+// vocabularyClassIRIs are the classes a resource is typed with to declare that
+// it is part of a vocabulary. A subject carrying one of them describes the
+// schema rather than instantiating it, so an instance lookup leaves it out.
+var vocabularyClassIRIs = slices.Concat(
+	[]string{
+		"http://www.w3.org/2000/01/rdf-schema#Class",
+		"http://www.w3.org/2002/07/owl#Class",
+		RDFSDatatypeIRI,
+	},
+	propertyClassIRIs,
+	[]string{"http://www.w3.org/2002/07/owl#Ontology"},
+)
 
 // ClassesSQL lists every RDF class the data product types a resource with,
 // most instantiated first. A class is the object of an rdf:type statement, so
@@ -103,10 +114,6 @@ ORDER BY predicate, object`, bindingExpr("triples", "object", layout), sqlString
 // class, property, datatype, or ontology describes the schema and is not an
 // instance of it.
 func InstancesSQL(layout ObjectLayout) string {
-	quoted := make([]string, 0, len(vocabularyClassIRIs))
-	for _, iri := range vocabularyClassIRIs {
-		quoted = append(quoted, fmt.Sprintf("'%s'", iri))
-	}
 	return fmt.Sprintf(`
 SELECT DISTINCT
 	instances.subject AS instance,
@@ -124,7 +131,38 @@ ORDER BY class, instance`,
 		RDFTypeIRI,
 		RDFTypeIRI,
 		bindingExpr("vocabulary", "object", layout),
-		strings.Join(quoted, ", "))
+		quotedIRIList(vocabularyClassIRIs))
+}
+
+// PropertiesSQL lists every resource the data product declares to be a
+// property, with the class it was declared with. A property is a subject typed
+// with one of rdf:Property, owl:ObjectProperty, owl:DatatypeProperty, or
+// owl:AnnotationProperty, so the type it is reported with is the object of that
+// statement; a property declared to be more than one of them is listed once per
+// type, the way `sal get instances` lists a resource once per class.
+func PropertiesSQL(layout ObjectLayout) string {
+	return fmt.Sprintf(`
+SELECT DISTINCT
+	properties.subject AS property,
+	%s AS type
+FROM triples AS properties
+WHERE properties.predicate = '%s'
+	AND %s IN (%s)
+ORDER BY property, type`,
+		bindingExpr("properties", "object", layout),
+		RDFTypeIRI,
+		bindingExpr("properties", "object", layout),
+		quotedIRIList(propertyClassIRIs))
+}
+
+// quotedIRIList renders IRIs as the comma separated SQL string literals a
+// lookup's IN clause is built from.
+func quotedIRIList(iris []string) string {
+	quoted := make([]string, 0, len(iris))
+	for _, iri := range iris {
+		quoted = append(quoted, sqlString(iri))
+	}
+	return strings.Join(quoted, ", ")
 }
 
 // ShapesSQL lists every SHACL shape the data product declares, with the

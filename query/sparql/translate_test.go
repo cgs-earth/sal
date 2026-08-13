@@ -163,3 +163,29 @@ WHERE {
 
 	require.ErrorContains(t, err, "projected variable ?missing is not bound")
 }
+
+// The Properties starter query in the web UI. It is the one sample that
+// filters a variable against several IRIs, so it is the one that pins down
+// that the translator keeps the alternatives together.
+func TestToSQLTranslatesTheUIPropertiesSample(t *testing.T) {
+	query, err := ToSQL(`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+
+SELECT ?property ?type
+WHERE {
+  ?property rdf:type ?type .
+
+  FILTER (
+    ?type = rdf:Property ||
+    ?type = owl:ObjectProperty ||
+    ?type = owl:DatatypeProperty ||
+    ?type = owl:AnnotationProperty
+  )
+}`, SimpleObjects)
+
+	require.NoError(t, err)
+	require.Contains(t, query, `SELECT t0.subject AS "property", t0.object AS "type"`)
+	require.Contains(t, query, `t0.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'`)
+	require.Contains(t, query, `t0.object = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#Property'`)
+	require.Contains(t, query, `t0.object = 'http://www.w3.org/2002/07/owl#AnnotationProperty'`)
+}

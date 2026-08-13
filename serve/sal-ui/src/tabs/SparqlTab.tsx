@@ -47,10 +47,19 @@ WHERE {
   },
   {
     name: 'Properties',
-    query: `${PREFIXES}
-SELECT DISTINCT ?property
+    query: `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+
+SELECT ?property ?type
 WHERE {
-  ?property rdf:type rdf:Property .
+  ?property rdf:type ?type .
+
+  FILTER (
+    ?type = rdf:Property ||
+    ?type = owl:ObjectProperty ||
+    ?type = owl:DatatypeProperty ||
+    ?type = owl:AnnotationProperty
+  )
 }`,
   },
   {

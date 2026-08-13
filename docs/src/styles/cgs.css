@@ -1,0 +1,319 @@
+/*
+ * CGS brand theme for the SAL documentation site.
+ *
+ * Palette, gradients, and typefaces follow the Center for Geospatial Solutions
+ * brand guidelines. Brand values are declared once as --cgs-* tokens and every
+ * Starlight, mermaid, and site-graph variable below is derived from them.
+ */
+
+:root,
+::backdrop {
+	/* Primary palette */
+	--cgs-continental-green: #46ab9d;
+	--cgs-fluvial-blue: #2c84b9;
+	--cgs-rayleigh-blue: #86c1e2;
+	--cgs-cumulus-gray: #c9dee8;
+
+	/* Secondary palette */
+	--cgs-prairie-yellow: #f9c609;
+	--cgs-cream: #fefcf5;
+	--cgs-slate-gray: #82848b;
+	--cgs-pavement-gray: #48535b;
+
+	/* Brand gradients, in the order the guidelines pair their stops */
+	--cgs-gradient-primary: linear-gradient(135deg, #2c84b9, #46ab9d);
+	--cgs-gradient-mist: linear-gradient(135deg, #46ab9d, #c9dee8);
+	--cgs-gradient-sun: linear-gradient(135deg, #f9c609, #86c1e2);
+	--cgs-gradient-sky: linear-gradient(135deg, #2c84b9, #86c1e2);
+
+	/* Typography: District Pro for display, Aptos for body copy, with clean
+	   sans-serif fallbacks for environments where neither is installed. */
+	--cgs-font-display: 'District Pro', 'DistrictPro', 'Aptos Display', 'Aptos',
+		'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
+	--cgs-font-body: 'Aptos', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system,
+		'Helvetica Neue', Arial, sans-serif;
+
+	--sl-font: var(--cgs-font-body);
+}
+
+/* Dark theme: Pavement Gray hue carried down into the neutral scale. */
+:root,
+::backdrop,
+:root[data-theme='dark'],
+[data-theme='dark'] ::backdrop {
+	--sl-color-white: var(--cgs-cream);
+	--sl-color-gray-1: #e3ecf1;
+	--sl-color-gray-2: var(--cgs-cumulus-gray);
+	--sl-color-gray-3: #93a6b1;
+	--sl-color-gray-4: #62727c;
+	--sl-color-gray-5: #3b464e;
+	--sl-color-gray-6: #232c32;
+	--sl-color-gray-7: #1b2227;
+	--sl-color-black: #161c21;
+
+	--sl-color-accent-low: #12384f;
+	--sl-color-accent: var(--cgs-fluvial-blue);
+	--sl-color-accent-high: var(--cgs-rayleigh-blue);
+
+	--sl-color-text-accent: var(--cgs-rayleigh-blue);
+	--sl-color-bg-accent: var(--cgs-rayleigh-blue);
+
+	/* Brand hues for asides and other semantic callouts */
+	--sl-color-green-low: #123c36;
+	--sl-color-green: var(--cgs-continental-green);
+	--sl-color-green-high: #a8ded6;
+	--sl-color-blue-low: #12384f;
+	--sl-color-blue: var(--cgs-fluvial-blue);
+	--sl-color-blue-high: var(--cgs-rayleigh-blue);
+	--sl-color-orange-low: #4a3a02;
+	--sl-color-orange: var(--cgs-prairie-yellow);
+	--sl-color-orange-high: #fbe08a;
+
+	--cgs-surface: var(--sl-color-gray-6);
+	--cgs-diagram-bg: var(--cgs-cream);
+	--cgs-hero-veil: 0.16;
+}
+
+/* Light theme: Cream page, Pavement Gray text, Cumulus Gray structure. */
+:root[data-theme='light'],
+[data-theme='light'] ::backdrop {
+	--sl-color-white: #1b2227;
+	--sl-color-gray-1: #2f383e;
+	--sl-color-gray-2: var(--cgs-pavement-gray);
+	--sl-color-gray-3: #67717a;
+	--sl-color-gray-4: var(--cgs-slate-gray);
+	--sl-color-gray-5: var(--cgs-cumulus-gray);
+	--sl-color-gray-6: #dfeaf1;
+	--sl-color-gray-7: #f1f6f9;
+	--sl-color-black: var(--cgs-cream);
+
+	--sl-color-accent-low: #d9eaf5;
+	--sl-color-accent: var(--cgs-fluvial-blue);
+	--sl-color-accent-high: #1b5b83;
+
+	--sl-color-text-accent: #1b5b83;
+	--sl-color-bg-accent: var(--cgs-fluvial-blue);
+
+	--sl-color-green-high: #1f5e55;
+	--sl-color-green: var(--cgs-continental-green);
+	--sl-color-green-low: #d7eeea;
+	--sl-color-blue-high: #1b5b83;
+	--sl-color-blue: var(--cgs-fluvial-blue);
+	--sl-color-blue-low: #d9eaf5;
+	--sl-color-orange-high: #6b5303;
+	--sl-color-orange: var(--cgs-prairie-yellow);
+	--sl-color-orange-low: #fdefc0;
+
+	--cgs-surface: #f2f7fa;
+	--cgs-diagram-bg: var(--cgs-cream);
+	--cgs-hero-veil: 0.1;
+}
+
+/* Headings and other display text use the brand display face. */
+:where(h1, h2, h3, h4, h5, h6),
+.site-title,
+.hero h1,
+.hero .tagline,
+.card .title {
+	font-family: var(--cgs-font-display);
+	letter-spacing: -0.01em;
+}
+
+/* Site header: a thin brand gradient rule under the nav. Scoped to the page
+   frame's own <header>, since Expressive Code names its code block captions
+   `.header` too. */
+header.header {
+	background: linear-gradient(var(--sl-color-bg-nav), var(--sl-color-bg-nav)) padding-box,
+		var(--cgs-gradient-primary) border-box;
+	border-bottom: 3px solid transparent;
+}
+
+.site-title {
+	font-weight: 700;
+}
+
+/* The CGS mark keeps its own colors; give it breathing room from the title. */
+.site-title img {
+	margin-inline-end: 0.25rem;
+}
+
+/* Splash hero: brand gradient wash behind the page title and actions. */
+[data-has-hero] .hero {
+	position: relative;
+	padding: clamp(2rem, 5vw, 3.5rem) clamp(1.25rem, 4vw, 3rem);
+	border-radius: 1rem;
+	overflow: hidden;
+	isolation: isolate;
+}
+
+[data-has-hero] .hero::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	background: var(--cgs-gradient-primary);
+	opacity: var(--cgs-hero-veil);
+}
+
+[data-has-hero] .hero::after {
+	content: '';
+	position: absolute;
+	inset: auto 0 0 0;
+	height: 3px;
+	background: var(--cgs-gradient-sky);
+}
+
+/* The gradient headline is dark-theme only: on the Cream page the brand
+   gradient's stops fall below the 3:1 large-text ratio, so the light theme
+   carries the gradient in the wash and rule behind a solid heading instead. */
+:root[data-theme='dark'] [data-has-hero] .hero h1 {
+	background: var(--cgs-gradient-mist);
+	background-clip: text;
+	-webkit-background-clip: text;
+	color: transparent;
+}
+
+/* Primary hero action reads as the strongest brand moment on the page. */
+[data-has-hero] .hero .sl-link-button.primary {
+	background: var(--cgs-gradient-primary);
+	border-color: transparent;
+	color: var(--cgs-cream);
+}
+
+[data-has-hero] .hero .sl-link-button.primary:hover {
+	background: var(--cgs-gradient-sky);
+	color: var(--cgs-cream);
+}
+
+[data-has-hero] .hero .sl-link-button.minimal {
+	color: var(--sl-color-text-accent);
+}
+
+/* Cards pick up a Continental Green rule and a soft surface. */
+.card {
+	background-color: var(--cgs-surface);
+	border-color: var(--sl-color-hairline-light);
+	border-inline-start: 3px solid var(--cgs-continental-green);
+}
+
+.card .icon {
+	color: var(--cgs-fluvial-blue);
+	border-color: var(--sl-color-hairline-light);
+}
+
+:root[data-theme='dark'] .card .icon {
+	color: var(--cgs-rayleigh-blue);
+}
+
+/* Sidebar: current page marked in brand blue rather than the default hue. The
+   pill is the deep shade of Fluvial Blue so Cream label text clears 7:1. */
+#starlight__sidebar a[aria-current='page'],
+#starlight__sidebar a[aria-current='page']:hover {
+	color: var(--cgs-cream);
+	background-color: #1b5b83;
+}
+
+/* Table of contents current entry. */
+starlight-toc a[aria-current='true'],
+mobile-starlight-toc a[aria-current='true'] {
+	color: var(--sl-color-text-accent);
+	border-inline-start-color: var(--cgs-continental-green);
+}
+
+/* Inline code and tables sit on the brand surface. */
+:where(.sl-markdown-content) code:not(:where(pre code)) {
+	color: var(--sl-color-text);
+	border: 1px solid var(--sl-color-hairline-light);
+}
+
+:where(.sl-markdown-content) th {
+	font-family: var(--cgs-font-display);
+	color: var(--sl-color-white);
+	border-bottom-color: var(--cgs-continental-green);
+}
+
+:where(.sl-markdown-content) blockquote {
+	border-inline-start-color: var(--cgs-continental-green);
+}
+
+:where(.sl-markdown-content) a:not(:where(.not-content *)) {
+	text-underline-offset: 0.2em;
+}
+
+/* Mermaid diagrams render once in brand colors on a Cream card, so the same
+   render reads on both the Cream and the dark page background. */
+pre.mermaid,
+:root[data-theme='dark'] pre.mermaid[data-processed],
+:root[data-theme='light'] pre.mermaid[data-processed] {
+	background-color: var(--cgs-diagram-bg);
+	border: 1px solid var(--sl-color-hairline-light);
+	border-radius: 0.5rem;
+	padding: 1rem;
+}
+
+/* starlight-site-graph, themed off the same palette. */
+:root {
+	--slsg-color-accent: var(--cgs-fluvial-blue);
+	--slsg-color-muted: var(--cgs-slate-gray);
+	--slsg-graph-bg-color: var(--cgs-surface);
+	--slsg-graph-outline-color: var(--sl-color-hairline-light);
+	--slsg-graph-minimized-bg-color: var(--cgs-surface);
+	--slsg-graph-maximized-bg-color: var(--sl-color-bg);
+	--slsg-node-color: var(--cgs-rayleigh-blue);
+	--slsg-node-color-current: var(--cgs-prairie-yellow);
+	--slsg-node-color-adjacent: var(--cgs-continental-green);
+	--slsg-node-color-visited: var(--cgs-fluvial-blue);
+	--slsg-node-color-hover: var(--cgs-continental-green);
+	--slsg-node-color-muted: var(--cgs-slate-gray);
+	--slsg-node-color-external: var(--cgs-cumulus-gray);
+	--slsg-node-color-tag: var(--cgs-prairie-yellow);
+	--slsg-node-color-unresolved: var(--cgs-slate-gray);
+	--slsg-link-color: var(--sl-color-gray-4);
+	--slsg-link-color-hover: var(--cgs-continental-green);
+	--slsg-link-color-muted: var(--sl-color-gray-5);
+	--slsg-label-color: var(--sl-color-gray-2);
+	--slsg-label-color-hover: var(--sl-color-white);
+	--slsg-label-color-muted: var(--sl-color-gray-4);
+	--slsg-text-color: var(--sl-color-text);
+	--slsg-text-color-accent: var(--sl-color-text-accent);
+	--slsg-text-color-muted: var(--sl-color-gray-3);
+	--slsg-context-menu-bg-color: var(--cgs-surface);
+	--slsg-context-menu-bg-color-hover: var(--sl-color-gray-5);
+	--slsg-context-menu-border-color: var(--sl-color-hairline-light);
+}
+
+/* CGS attribution in the page footer. */
+.cgs-credit {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.6rem;
+	margin: 2.5rem auto 0;
+	padding-top: 1.5rem;
+	border-top: 1px solid var(--sl-color-hairline-light);
+	text-align: center;
+}
+
+.cgs-credit span {
+	font-size: var(--sl-text-xs);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--sl-color-gray-3);
+}
+
+.cgs-credit img {
+	width: auto;
+	height: 2.5rem;
+}
+
+.cgs-credit .cgs-credit-dark {
+	display: none;
+}
+
+:root[data-theme='dark'] .cgs-credit .cgs-credit-dark {
+	display: block;
+}
+
+:root[data-theme='dark'] .cgs-credit .cgs-credit-light {
+	display: none;
+}

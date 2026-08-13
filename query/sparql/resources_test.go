@@ -139,3 +139,21 @@ func TestDescribeSQLEscapesQuotesInTheSubject(t *testing.T) {
 	sql := DescribeSQL("https://example.org/o'brien", SimpleObjects)
 	require.Contains(t, sql, "WHERE triples.subject = 'https://example.org/o''brien'")
 }
+
+func TestPropertiesSQLSelectsSubjectsTypedAsAProperty(t *testing.T) {
+	sql := PropertiesSQL(SimpleObjects)
+	require.Contains(t, sql, "properties.subject AS property")
+	require.Contains(t, sql, "properties.object AS type")
+	require.Contains(t, sql, "WHERE properties.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'")
+	require.Contains(t, sql, "AND properties.object IN ("+
+		"'http://www.w3.org/1999/02/22-rdf-syntax-ns#Property', "+
+		"'http://www.w3.org/2002/07/owl#ObjectProperty', "+
+		"'http://www.w3.org/2002/07/owl#DatatypeProperty', "+
+		"'http://www.w3.org/2002/07/owl#AnnotationProperty')")
+}
+
+func TestPropertiesSQLReadsTypedObjectColumns(t *testing.T) {
+	sql := PropertiesSQL(TypedObjects)
+	require.Contains(t, sql, "COALESCE(properties.object_iri, CAST(properties.object_float AS VARCHAR), properties.object_string) AS type")
+	require.NotContains(t, sql, "properties.object AS type")
+}
