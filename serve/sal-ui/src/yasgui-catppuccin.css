@@ -246,6 +246,13 @@
   line-height: 1.6;
 }
 
+/* Yasqe frames the editor in a `1px solid #d1d1d1` box, which against the dark
+   chrome reads as a white outline. Restated in the palette's own separator
+   color, so the editor is still marked off from the results below it. */
+.yasgui .yasqe .CodeMirror {
+  border: 1px solid var(--surface0);
+}
+
 .yasgui .yasqe .CodeMirror-gutters {
   background: var(--mantle);
   border-right: 1px solid var(--surface0);
@@ -472,6 +479,48 @@
   color: var(--text);
 }
 
+/* Yasr's row number column is the first one and sits almost flush against the
+   first binding, so the count reads as part of the data. The gap goes on the
+   first binding's own left padding rather than on the row number's right: Yasr
+   gives the number column an inline width of 8px per digit, which padding on
+   that side would be squeezed into rather than added to (DataTables sets
+   box-sizing: border-box on every cell).
+
+   The body cells need !important because colResizable, which Yasr runs the
+   results table through, marks the table `grip-padding` and both it and Yasr's
+   own stylesheet set `padding-left` on `.grip-padding > tbody > tr > td` with
+   !important. Only another !important can beat those; specificity alone cannot,
+   which is why this rule took effect on the header row and nowhere else. The
+   header is left alone since those rules match `tbody` only. */
+.yasgui .yasr table.dataTable thead th:nth-child(2) {
+  padding-left: 26px;
+}
+
+.yasgui .yasr table.dataTable tbody td:nth-child(2) {
+  padding-left: 26px !important;
+}
+
+.yasgui .yasr table.dataTable .rowNumber {
+  color: var(--overlay0);
+  text-align: right;
+  user-select: none;
+}
+
+/* Yasr's header is a flex row with a spacer that grows, so appending the share
+   button's host leaves it right aligned past the plugin buttons. */
+.yasgui .yasr .yasr_header .yasr-share-host {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  margin: 4px 6px 4px 10px;
+}
+
+.yasgui .yasr .yasr_header .yasr-share {
+  padding: 3px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .yasgui .yasr .dataTables_wrapper,
 .yasgui .yasr .dataTables_paginate,
 .yasgui .yasr .dt-input,
@@ -524,6 +573,10 @@
   color: var(--overlay1);
 }
 
-.yasgui .yasr .yasr_external_ref_btn svg {
-  fill: var(--overlay1);
+/* Yasr's header ends with a question mark button linking to the selected
+   plugin's `helpReference`, which points at https://docs.triply.cc/yasgui/ —
+   a dead host. The button is built unconditionally by Yasr's own header code,
+   so it is hidden here rather than removed from the DOM. */
+.yasgui .yasr .yasr_external_ref_btn {
+  display: none;
 }

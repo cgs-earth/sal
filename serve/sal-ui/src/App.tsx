@@ -5,17 +5,15 @@ import { SqlTab } from './tabs/SqlTab'
 import { MapTab } from './tabs/MapTab'
 import { ModulesTab } from './tabs/ModulesTab'
 import { BlobsTab } from './tabs/BlobsTab'
+import { TABS, useRoute } from './routing'
 import './App.css'
 
 // YASGUI and its CodeMirror 5 bundle dominate the build, so keep them out of the
 // initial chunk and load them the first time the SPARQL tab is opened.
 const SparqlTab = lazy(() => import('./tabs/SparqlTab').then((module) => ({ default: module.SparqlTab })))
 
-const TABS = ['Stats', 'SQL', 'SPARQL', 'Modules', 'Blobs', 'Map'] as const
-type TabName = (typeof TABS)[number]
-
 export function App() {
-  const [active, setActive] = useState<TabName>('Stats')
+  const { tab: active, sharedQuery, navigate } = useRoute()
   const [stats, setStats] = useState<TableStats | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -64,7 +62,7 @@ export function App() {
             role="tab"
             aria-selected={active === name}
             className={active === name ? 'tab active' : 'tab'}
-            onClick={() => setActive(name)}
+            onClick={() => navigate(name)}
           >
             {name}
           </button>
@@ -80,12 +78,13 @@ export function App() {
             tablePath={stats?.tablePath ?? null}
             sampleQueries={stats?.sampleQueries ?? null}
             importedTables={stats?.importedTables ?? null}
+            sharedQuery={sharedQuery}
           />
         )}
         {/* YASGUI restores its own query state from localStorage, so remounting is safe. */}
         {active === 'SPARQL' && (
           <Suspense fallback={<p className="empty">Loading the SPARQL editor…</p>}>
-            <SparqlTab />
+            <SparqlTab sharedQuery={sharedQuery} />
           </Suspense>
         )}
         {active === 'Modules' && <ModulesTab modules={stats?.modules ?? null} />}

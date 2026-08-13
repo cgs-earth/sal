@@ -108,6 +108,46 @@ func TestAcceptsGzipReadsTheHeader(t *testing.T) {
 	require.False(t, acceptsGzip("gzip;q=0"), "a client can refuse gzip outright")
 }
 
+func TestAcceptsHTMLReadsTheHeader(t *testing.T) {
+	require.True(t, acceptsHTML("text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"))
+	require.True(t, acceptsHTML("TEXT/HTML"))
+	require.False(t, acceptsHTML(""), "a client that names no type is not asking for a page")
+	require.False(t, acceptsHTML("*/*"))
+	require.False(t, acceptsHTML("application/sparql-results+json"))
+}
+
+func TestIsBrowserNavigationTellsATabApartFromTheAPI(t *testing.T) {
+	navigation := httptest.NewRequest(http.MethodGet, "/sparql", nil)
+	navigation.Header.Set("Sec-Fetch-Mode", "navigate")
+	navigation.Header.Set("Accept", "text/html,*/*;q=0.8")
+	require.True(t, isBrowserNavigation(navigation))
+
+	// The UI's own fetch() runs in the same browser and sends the same Accept
+	// header defaults, so Sec-Fetch-Mode is what separates the two.
+	sameOrigin := httptest.NewRequest(http.MethodGet, "/blobs/abc", nil)
+	sameOrigin.Header.Set("Sec-Fetch-Mode", "same-origin")
+	sameOrigin.Header.Set("Accept", "text/html,*/*;q=0.8")
+	require.False(t, isBrowserNavigation(sameOrigin))
+
+	curl := httptest.NewRequest(http.MethodGet, "/sparql", nil)
+	curl.Header.Set("Accept", "*/*")
+	require.False(t, isBrowserNavigation(curl))
+
+	protocol := httptest.NewRequest(http.MethodGet, "/sparql?query=SELECT+*", nil)
+	protocol.Header.Set("Sec-Fetch-Mode", "navigate")
+	protocol.Header.Set("Accept", "text/html")
+	require.False(t, isBrowserNavigation(protocol), "a query parameter always means the endpoint")
+
+	shared := httptest.NewRequest(http.MethodGet, "/sparql?q=SELECT+*", nil)
+	shared.Header.Set("Sec-Fetch-Mode", "navigate")
+	shared.Header.Set("Accept", "text/html")
+	require.True(t, isBrowserNavigation(shared), "the UI's own share parameter is not a SPARQL request")
+
+	post := httptest.NewRequest(http.MethodPost, "/sparql", nil)
+	post.Header.Set("Accept", "text/html")
+	require.False(t, isBrowserNavigation(post))
+}
+
 func TestCompressUIAssetsSkipsIncompressibleAndTinyFiles(t *testing.T) {
 	dist, err := fs.Sub(uiAssets, "sal-ui/dist")
 	require.NoError(t, err)

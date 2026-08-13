@@ -5,6 +5,7 @@ import { keymap } from '@codemirror/view'
 import { Prec } from '@codemirror/state'
 import { runSQL, type ImportedTable, type NamedQuery, type QueryResult } from '../api'
 import { ResultTable } from '../components/ResultTable'
+import { ShareLinkButton } from '../components/ShareLinkButton'
 import { toCSV } from '../csv'
 import { catppuccin } from '../theme'
 
@@ -62,12 +63,15 @@ export function SqlTab({
   tablePath,
   sampleQueries,
   importedTables,
+  sharedQuery,
 }: {
   tablePath: string | null
   sampleQueries: NamedQuery[] | null
   importedTables: ImportedTable[] | null
+  /** The statement a `/sql?q=` share link opened this tab with, if any. */
+  sharedQuery: string | null
 }) {
-  const [statement, setStatement] = useState(DEFAULT_SQL)
+  const [statement, setStatement] = useState(sharedQuery ?? DEFAULT_SQL)
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
@@ -187,6 +191,9 @@ export function SqlTab({
           </button>
           <span className="hint">
             <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Enter</kbd>
+          </span>
+          <span className="toolbar-actions">
+            <ShareLinkButton tab="SQL" query={() => statementRef.current} />
           </span>
         </div>
       </section>

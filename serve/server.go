@@ -85,13 +85,19 @@ func NewEndpointWithUI(runner UIRunner, blobDir string) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	blobs := blobHandler{dir: blobDir}
 	mux := http.NewServeMux()
-	mux.Handle("/sparql", sparqlHandler{runner: runner})
+	// /sparql and /blobs name both an endpoint and a UI tab; browserRoute is what
+	// decides which of the two a request meant.
+	mux.Handle("/sparql", browserRoute{api: sparqlHandler{runner: runner}, ui: ui})
 	mux.Handle("/geometries", geometryHandler{runner: runner})
 	mux.Handle("/api/sql", sqlHandler{runner: runner})
 	mux.Handle("/api/stats", statsHandler{runner: runner})
 	mux.Handle("/api/salmodule", salmoduleHandler{inspect: salmodule.Inspect})
-	mux.Handle("/blobs/", blobHandler{dir: blobDir})
+	mux.Handle("/blobs/", browserRoute{api: blobs, ui: ui})
+	// Registered so that ServeMux answers the tab's own URL rather than redirecting
+	// it to /blobs/, which is the endpoint's prefix and not a tab.
+	mux.Handle("/blobs", browserRoute{api: blobs, ui: ui})
 	mux.Handle("/", ui)
 	return mux, nil
 }
