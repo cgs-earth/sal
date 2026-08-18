@@ -35,6 +35,7 @@ type args struct {
 	Init      *initialization.InitCmd        `arg:"subcommand:init" help:"Initialize a SAL project in the current directory"`
 	Import    *importation.ImportCmd         `arg:"subcommand:import" help:"Import an external ontology so builds merge it into the data product"`
 	Build     *build.BuildCmd                `arg:"subcommand:build" help:"Build RDF data into a SAL data product in the iceberg table format"`
+	RunTasks  *build.RunCmd                  `arg:"subcommand:run" help:"Run the SAL module tasks the project declares and commit their output to the data product"`
 	Validate  *build.ValidateCmd             `arg:"subcommand:validate" help:"Validate all RDF data is properly defined and structured"`
 	Query     *query.QueryCmd                `arg:"subcommand:query" help:"Open a SQL shell over a built SAL data product"`
 	Get       *get.GetCmd                    `arg:"subcommand:get" help:"Look up RDF resources inside a built SAL data product"`
@@ -87,6 +88,14 @@ func main() {
 		// Special errors like UncommittedChangesErr should be handled normally
 		// since they belong in the log
 		if err != nil && !errors.Is(err, build.ErrUncommittedChanges) {
+			fmt.Println(err.Error())
+			os.Exit(1)
+		}
+	case cli.RunTasks != nil:
+		_, err = cli.RunTasks.Run()
+		// like build, validation errors are printed directly while the state
+		// errors that tell the user to build again belong in the log
+		if err != nil && !errors.Is(err, build.ErrRunUncommittedChanges) && !errors.Is(err, build.ErrStaleDataProduct) {
 			fmt.Println(err.Error())
 			os.Exit(1)
 		}

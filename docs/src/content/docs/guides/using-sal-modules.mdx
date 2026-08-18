@@ -1,11 +1,11 @@
 ---
 title: Using SAL Modules
-description: Reference a SAL Module from your project's RDF so that sal build materializes the triples it produces.
+description: Reference a SAL Module from your project's RDF so that sal run materializes the triples it produces.
 ---
 
 A [SAL Module](/sal/reference/salmodule-description/) is a git repository with a `Dockerfile` in its root whose
 container implements the SAL Module command line interface.
-Referencing one from your project's RDF lets `sal build` run it and fold the RDF it produces into your data product.
+Referencing one from your project's RDF lets `sal run` run it and fold the RDF it produces into your data product.
 
 ## Reference a module
 
@@ -101,21 +101,24 @@ A typo in a module term is reported the same way a typo in a `schema:` term is:
 data/module.ttl:5: undefined term states:GeoconnexReferenceFeatureStatess
 ```
 
-`sal build` then runs each task instance with `docker run -e SALMODULE_TASK_INSTANCE=... IMAGE salmodule run`.
+`sal build` commits the task's configuration into the data product without running anything.
+[`sal run`](/sal/reference/commands/#sal-run) then runs each task instance with
+`docker run -e SALMODULE_TASK_INSTANCE=... IMAGE salmodule run`, once the worktree is fully committed and the
+table's latest snapshot was built from the commit `HEAD` points at.
 An instance is only run when it is typed as a SAL Module task, either because the project's RDF types it as a
 `salmodule:NodeProcessor`, `salmodule:NodeProducer`, `salmodule:NodeConsumer`, or `salmodule:Task`, or because
 the module's own ontology declares its class as a subclass of one of those.
 
 A task writes newline delimited JSON to stdout.
 SAL injects the module ontology's `@context` into each node so that its keys resolve to the module's vocabulary,
-converts the result to RDF, and merges it into the graph being built.
+converts the result to RDF, and commits it on top of the last build as a new snapshot.
 Those triples land in the Iceberg table alongside the triples from your source files.
 
-If a task emits `salmodule:Error` nodes instead of data, the build fails with the messages the module reported.
+If a task emits `salmodule:Error` nodes instead of data, the run fails with the messages the module reported.
 
 ## Importing a module's ontology
 
-Referencing a module checks its terms and runs its tasks, but the vocabulary itself stays outside the data
+Referencing a module checks its terms and lets `sal run` run its tasks, but the vocabulary itself stays outside the data
 product. Import the module to carry it too:
 
 ```sh
@@ -138,7 +141,7 @@ the Iceberg table metadata as a JSON list under the `sal.salmodules` property:
 ["salmodule://github.com/cgs-earth/python-geoconnex"]
 ```
 
-The list is rewritten on every build, so dropping a module from your RDF drops it from the table too.
+The list is rewritten on every build and run, so dropping a module from your RDF drops it from the table too.
 `sal query --info properties` prints it, and the **Modules** tab of `sal serve --with-ui` offers each entry as
 a chip and as an autocompletion so a module the table was built from can be inspected without typing its URI.
 
@@ -147,7 +150,7 @@ a chip and as an autocompletion so a module the table was built from can be insp
 - A reachable docker daemon. SAL talks to whatever `DOCKER_HOST` points at, defaulting to the local socket.
 - `git` on `PATH`, used to clone the module repository.
 
-Each module is cloned and built once per `sal build` invocation.
+Each module is cloned and built once per `sal` invocation.
 
 A dereferenced module ontology is pinned like any other vocabulary the project resolves against: its JSON-LD is
 stored under `.sal/data` and recorded in `.sal/config.jsonld`, so a later build validates against the
@@ -155,4 +158,4 @@ same version of the module's vocabulary without rebuilding the module to ask for
 every referenced module again and re-pins the ontology each one reports. See
 [Pinned vocabularies](/sal/reference/data-layout/#pinned-vocabularies).
 
-Materialization is not pinned: `sal build` still runs each task, since a task's output is data rather than vocabulary.
+Materialization is not pinned: `sal run` runs each task every time it is invoked, since a task's output is data rather than vocabulary.

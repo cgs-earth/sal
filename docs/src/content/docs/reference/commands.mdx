@@ -147,7 +147,7 @@ An undefined term is reported with the file and the line number it appears on:
 ![sal validate passing on one directory and reporting an undefined term in another](/sal/demos/sal-validate.gif)
 
 Validating a file that references a SAL module clones and builds that module so its vocabulary can be checked.
-`sal validate` does not run module tasks; only `sal build` does.
+`sal validate` does not run module tasks; only `sal run` does.
 
 ## `sal build`
 
@@ -183,12 +183,37 @@ A `salmodule://` import is dereferenced by cloning and building the module and a
 An import that cannot be fetched fails the build, naming the ontology that could not be resolved.
 `sal validate` does not fetch imports; only `sal build` does.
 
-`sal build` also materializes any SAL module the source files reference.
-It clones each referenced module, builds the `Dockerfile` in its repository root, runs the task instance
-declared in the RDF, and merges the triples the module produced into the data product.
-See [Using SAL Modules](/sal/guides/using-sal-modules/).
+`sal build` does not run the SAL modules the source files reference; that is what [`sal run`](#sal-run) does.
+A build still validates each task's configuration against the module's own ontology, the same way any other term
+is checked against its vocabulary, and commits that configuration RDF into the data product like any other statement.
 
 See [Data Layout](/sal/reference/data-layout/) for the generated table structure.
+
+## `sal run`
+
+Runs every SAL module task the project's RDF declares and commits the triples the modules produced as a new
+snapshot of the data product:
+
+```sh
+sal run
+```
+
+For each task instance, `sal run` clones the module's repository, builds the `Dockerfile` in its repository root,
+and invokes the module's run command with the task instance serialized from the instance's RDF properties.
+The newline delimited JSON the module writes to stdout is converted to triples and committed on top of the
+last build. See [Using SAL Modules](/sal/guides/using-sal-modules/).
+
+`sal run` refuses to run anything unless the data product matches the sources as they stand:
+
+- The Git working tree must be fully committed.
+- The table's latest snapshot must be the one `sal build` tagged with the commit `HEAD` points at.
+
+If either check fails, run `sal build` again (committing anything it wrote, such as newly pinned
+vocabularies in `.sal/config.jsonld`) and then `sal run`. A project that declares no module tasks
+is an error, since there is nothing to run.
+
+Like `sal build --force`, `sal run --force` skips both checks and should only be used for test or
+debugging runs.
 
 ## `sal query`
 

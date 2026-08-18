@@ -116,7 +116,8 @@ func (s *SalModuleSuite) git(dir string, args ...string) {
 }
 
 // newSalProject creates an initialized SAL project holding source, and makes it
-// the working directory for the rest of the test.
+// the working directory for the rest of the test. Everything sal init wrote is
+// committed, so the project starts from the clean worktree sal run requires.
 func (s *SalModuleSuite) newSalProject(source string) string {
 	project := s.T().TempDir()
 	s.git(project, "init")
@@ -127,7 +128,22 @@ func (s *SalModuleSuite) newSalProject(source string) string {
 
 	s.Require().NoError(os.Chdir(project))
 	s.Require().NoError((&initialization.InitCmd{}).Run())
+	s.git(project, "add", "-A")
+	s.git(project, "-c", "user.email=sal@example.test", "-c", "user.name=SAL", "commit", "-m", "sal init")
 	return project
+}
+
+// buildForRun puts a project in the state sal run requires: the first build
+// pins the module's vocabulary into .sal/config.jsonld, committing that moves
+// HEAD, and the second build tags the table with the commit the worktree now
+// sits at.
+func (s *SalModuleSuite) buildForRun(project string) {
+	_, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg}).Run()
+	s.Require().NoError(err)
+	s.git(project, "add", "-A")
+	s.git(project, "-c", "user.email=sal@example.test", "-c", "user.name=SAL", "commit", "-m", "pin vocabularies")
+	_, err = (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg}).Run()
+	s.Require().NoError(err)
 }
 
 // projectReferencing is the RDF of a SAL project that declares one task
@@ -181,13 +197,18 @@ func (s *SalModuleSuite) TestModuleImplementsSalModuleCli() {
 	s.NotEmpty(ontology.Graph)
 }
 
-// TestBuildMaterializesModuleTriples is the round trip: a project referencing
-// the module is built, and the triples the module produced are read back out of
-// the Iceberg table SAL wrote.
-func (s *SalModuleSuite) TestBuildMaterializesModuleTriples() {
-	s.newSalProject(projectReferencing())
+// TestRunMaterializesModuleTriples is the round trip: a project referencing
+// the module is built, which commits the task's configuration without running
+// it, and sal run then invokes the module and commits the triples it produced,
+// which are read back out of the Iceberg table SAL wrote.
+func (s *SalModuleSuite) TestRunMaterializesModuleTriples() {
+	project := s.newSalProject(projectReferencing())
+	s.buildForRun(project)
 
-	graph, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, Force: true}).Run()
+	// the builds committed the configuration but ran nothing
+	s.Empty(s.builtObjectsForPredicate("https://schema.org/name"))
+
+	graph, err := (&build.RunCmd{Paths: []string{"module.ttl"}}).Run()
 
 	s.Require().NoError(err)
 	s.Require().NotNil(graph)
@@ -197,14 +218,15 @@ func (s *SalModuleSuite) TestBuildMaterializesModuleTriples() {
 	s.Contains(objects, "Lake Erie")
 }
 
-// TestBuildConfiguresTheTaskWithItsRDFProperties is what makes the module's
+// TestRunConfiguresTheTaskWithItsRDFProperties is what makes the module's
 // configuration RDF rather than an embedded JSON-LD literal: fixture:region is a
-// property of the instance, and the places the build ends up with are only the
+// property of the instance, and the places the run ends up with are only the
 // ones the module emits for the region it was given.
-func (s *SalModuleSuite) TestBuildConfiguresTheTaskWithItsRDFProperties() {
-	s.newSalProject(projectReferencing(`fixture:region "west"`))
+func (s *SalModuleSuite) TestRunConfiguresTheTaskWithItsRDFProperties() {
+	project := s.newSalProject(projectReferencing(`fixture:region "west"`))
+	s.buildForRun(project)
 
-	graph, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, Force: true}).Run()
+	graph, err := (&build.RunCmd{Paths: []string{"module.ttl"}}).Run()
 
 	s.Require().NoError(err)
 	s.Require().NotNil(graph)
@@ -214,13 +236,14 @@ func (s *SalModuleSuite) TestBuildConfiguresTheTaskWithItsRDFProperties() {
 	s.NotContains(objects, "Lake Erie")
 }
 
-// TestBuildConfiguresTheTaskWithTypedLiterals checks the same path for a
+// TestRunConfiguresTheTaskWithTypedLiterals checks the same path for a
 // property whose literal carries a datatype, which reaches the module as a
 // JSON-LD value object rather than as a bare JSON value.
-func (s *SalModuleSuite) TestBuildConfiguresTheTaskWithTypedLiterals() {
-	s.newSalProject(projectReferencing(`fixture:region "east"`, `fixture:labelled "true"^^xsd:boolean`))
+func (s *SalModuleSuite) TestRunConfiguresTheTaskWithTypedLiterals() {
+	project := s.newSalProject(projectReferencing(`fixture:region "east"`, `fixture:labelled "true"^^xsd:boolean`))
+	s.buildForRun(project)
 
-	graph, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, Force: true}).Run()
+	graph, err := (&build.RunCmd{Paths: []string{"module.ttl"}}).Run()
 
 	s.Require().NoError(err)
 	s.Require().NotNil(graph)
@@ -241,33 +264,35 @@ func (s *SalModuleSuite) TestBuildRejectsConfigurationTheModuleDoesNotDefine() {
 	s.Contains(err.Error(), "regionn")
 }
 
-// TestBuildReportsModuleErrors checks that a task which reports a
-// salmodule:Error and exits non-zero fails the build with its own message
+// TestRunReportsModuleErrors checks that a task which reports a
+// salmodule:Error and exits non-zero fails the run with its own message
 // rather than with the container's exit status.
-func (s *SalModuleSuite) TestBuildReportsModuleErrors() {
-	s.newSalProject(projectReferencing(`fixture:fail "true"^^xsd:boolean`))
+func (s *SalModuleSuite) TestRunReportsModuleErrors() {
+	project := s.newSalProject(projectReferencing(`fixture:fail "true"^^xsd:boolean`))
+	s.buildForRun(project)
 
-	_, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, Force: true}).Run()
+	_, err := (&build.RunCmd{Paths: []string{"module.ttl"}}).Run()
 
 	s.Require().Error(err)
 	s.Contains(err.Error(), "the task instance asked this module to fail")
 }
 
-// TestBuildSkipsClassesThatAreNotTasks checks that referencing a module term
-// which is not a task leaves the module's run command uninvoked, so that the
-// build carries no place of the module's making.
-func (s *SalModuleSuite) TestBuildSkipsClassesThatAreNotTasks() {
-	s.newSalProject(fmt.Sprintf(`
+// TestRunHasNothingToDoForClassesThatAreNotTasks checks that referencing a
+// module term which is not a task builds cleanly without invoking the module's
+// run command, and leaves sal run with nothing to run.
+func (s *SalModuleSuite) TestRunHasNothingToDoForClassesThatAreNotTasks() {
+	project := s.newSalProject(fmt.Sprintf(`
 @prefix fixture: <%s> .
 
 <Reference> a fixture:NotATask .
 `, moduleNamespace))
+	s.buildForRun(project)
 
-	graph, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, Force: true}).Run()
-
-	s.Require().NoError(err)
-	s.Require().NotNil(graph)
 	s.Empty(s.builtObjectsForPredicate("https://schema.org/name"))
+
+	_, err := (&build.RunCmd{Paths: []string{"module.ttl"}}).Run()
+
+	s.Require().ErrorIs(err, build.ErrNoModuleTasks)
 }
 
 // builtObjectsForPredicate reads the built Iceberg table and returns every
