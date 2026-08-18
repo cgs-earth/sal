@@ -3,10 +3,14 @@ package pkg
 import (
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 )
 
 var ErrSalDirNotFound = errors.New("sal directory not found. Have you initialized your project with `sal init`?")
@@ -23,7 +27,7 @@ func DefaultGitRemote() (string, error) {
 	if err == nil {
 		remote := strings.TrimSpace(string(out))
 		if remote != "" {
-			return remote, nil
+			return normalizeGitRemote(remote)
 		}
 	}
 
@@ -47,7 +51,46 @@ func DefaultGitRemote() (string, error) {
 		return "", fmt.Errorf("git remote %q has empty URL", remotes[0])
 	}
 
-	return remoteURL, nil
+	return normalizeGitRemote(remoteURL)
+}
+
+// scpLikeRemote matches git's scp-like ssh remote syntax, e.g.
+// git@github.com:bob/foo.git.
+var scpLikeRemote = regexp.MustCompile(`^[A-Za-z0-9._~-]+@([A-Za-z0-9._-]+):(.+)$`)
+
+// sshRemoteWarning keeps the ssh remote warning from repeating every time a
+// command re-reads the remote, which build does several times per run.
+var sshRemoteWarning sync.Once
+
+// normalizeGitRemote maps an ssh git remote to the https URL serving the same
+// repository, so that everything SAL derives from the remote, above all the
+// base URL that project-relative terms resolve against, stays an absolute
+// http(s) IRI. An ssh remote that cannot be mapped is an error; anything that
+// is not an ssh remote is returned unchanged.
+func normalizeGitRemote(remote string) (string, error) {
+	var host, path string
+	switch {
+	case strings.HasPrefix(remote, "ssh://"):
+		u, err := url.Parse(remote)
+		if err != nil || u.Hostname() == "" || strings.Trim(u.Path, "/") == "" {
+			return "", fmt.Errorf("git remote %q is an ssh remote that cannot be mapped to an https URL; set an http(s) remote instead", remote)
+		}
+		host, path = u.Hostname(), strings.Trim(u.Path, "/")
+	case scpLikeRemote.MatchString(remote):
+		m := scpLikeRemote.FindStringSubmatch(remote)
+		host, path = m[1], strings.Trim(m[2], "/")
+		if path == "" {
+			return "", fmt.Errorf("git remote %q is an ssh remote that cannot be mapped to an https URL; set an http(s) remote instead", remote)
+		}
+	default:
+		return remote, nil
+	}
+
+	mapped := "https://" + host + "/" + path
+	sshRemoteWarning.Do(func() {
+		slog.Warn(fmt.Sprintf("git remote %s is an ssh remote; heuristically mapping it to %s for the project base URL", remote, mapped))
+	})
+	return mapped, nil
 }
 
 func DefaultSalBase() (string, error) {

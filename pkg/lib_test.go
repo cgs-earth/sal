@@ -75,6 +75,47 @@ func chdir(t *testing.T, dir string) {
 	})
 }
 
+func TestNormalizeGitRemoteMapsScpLikeSshRemoteToHttps(t *testing.T) {
+	got, err := normalizeGitRemote("git@github.com:bob/foo.git")
+
+	require.NoError(t, err)
+	require.Equal(t, "https://github.com/bob/foo.git", got)
+}
+
+func TestNormalizeGitRemoteMapsSshSchemeRemoteToHttps(t *testing.T) {
+	got, err := normalizeGitRemote("ssh://git@github.com/bob/foo.git")
+
+	require.NoError(t, err)
+	require.Equal(t, "https://github.com/bob/foo.git", got)
+}
+
+func TestNormalizeGitRemoteDropsSshPortWhenMapping(t *testing.T) {
+	got, err := normalizeGitRemote("ssh://git@github.com:22/bob/foo.git")
+
+	require.NoError(t, err)
+	require.Equal(t, "https://github.com/bob/foo.git", got)
+}
+
+func TestNormalizeGitRemoteLeavesHttpsRemoteUnchanged(t *testing.T) {
+	got, err := normalizeGitRemote("https://github.com/bob/foo.git")
+
+	require.NoError(t, err)
+	require.Equal(t, "https://github.com/bob/foo.git", got)
+}
+
+func TestNormalizeGitRemoteLeavesNonSshRemoteUnchanged(t *testing.T) {
+	got, err := normalizeGitRemote("/srv/git/foo.git")
+
+	require.NoError(t, err)
+	require.Equal(t, "/srv/git/foo.git", got)
+}
+
+func TestNormalizeGitRemoteErrorsOnUnmappableSshRemote(t *testing.T) {
+	_, err := normalizeGitRemote("ssh://git@github.com")
+
+	require.ErrorContains(t, err, "cannot be mapped to an https URL")
+}
+
 func TestFormatUploadedSizeUsesKBForSmallUploads(t *testing.T) {
 	got := BytesToHumanReadable(512 * 1024)
 
