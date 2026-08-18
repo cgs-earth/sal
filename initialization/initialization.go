@@ -61,6 +61,16 @@ func (cmd *InitCmd) Run() error {
 		return fmt.Errorf("git repository has no remotes configured; you must specify a remote before running init")
 	}
 
+	// DefaultGitRemote maps an ssh remote to https and errors when it cannot;
+	// anything else left over is a scheme SAL does not support as a base URL
+	remote, err := pkg.DefaultGitRemote()
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(remote, "https://") && !strings.HasPrefix(remote, "http://") {
+		return fmt.Errorf("git remote %q uses an unsupported scheme; SAL requires an https remote or an ssh remote that can be mapped to https", remote)
+	}
+
 	cwd, err = os.Getwd()
 	if err != nil {
 		return err
