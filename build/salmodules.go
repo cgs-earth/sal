@@ -81,17 +81,19 @@ func findSalModuleTasks(graph *rdflibgo.Graph) ([]salModuleTask, error) {
 }
 
 // MaterializeSalModules runs every SAL module task instance the graph declares
-// and merges the RDF each module produced back into the graph.
-func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver *salmodule.Resolver) error {
+// and merges the RDF each module produced back into the graph, reporting how
+// many tasks it ran.
+func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver *salmodule.Resolver) (int, error) {
 	tasks, err := findSalModuleTasks(graph)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
+	tasksRun := 0
 	for _, task := range tasks {
 		ontology, err := resolver.Ontology(ctx, task.ref)
 		if err != nil {
-			return fmt.Errorf("build: %w", err)
+			return tasksRun, fmt.Errorf("run: %w", err)
 		}
 		if !task.declaredTask && !ontology.IsTaskClass(task.classIRI) {
 			slog.Debug("Skipping " + task.subject.String() + "; " + task.classIRI + " is not a SAL module task class")
@@ -100,7 +102,7 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 
 		taskInstance, err := ontology.TaskInstance(graph, task.subject, task.classIRI)
 		if err != nil {
-			return fmt.Errorf("build: %w", err)
+			return tasksRun, fmt.Errorf("run: %w", err)
 		}
 
 		slog.Info("Running SAL module task " + task.classIRI)
@@ -111,11 +113,11 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 		var taskErr salmodule.TaskError
 		switch {
 		case errors.As(err, &taskErr):
-			return fmt.Errorf("build: %w", taskErr)
+			return tasksRun, fmt.Errorf("run: %w", taskErr)
 		case runErr != nil:
-			return fmt.Errorf("build: %w", runErr)
+			return tasksRun, fmt.Errorf("run: %w", runErr)
 		case err != nil:
-			return fmt.Errorf("build: %w", err)
+			return tasksRun, fmt.Errorf("run: %w", err)
 		}
 
 		var materialized int
@@ -124,7 +126,8 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 			return true
 		})
 		mergeGraph(graph, moduleGraph)
+		tasksRun++
 		slog.Info(fmt.Sprintf("Materialized %d triples from %s", materialized, task.classIRI))
 	}
-	return nil
+	return tasksRun, nil
 }

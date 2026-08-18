@@ -44,6 +44,11 @@ type BuildCmd struct {
 
 	// skip validating that the command is called from within a valid sal project / git repo
 	skipProjectChecks bool
+
+	// runModules materializes the SAL module tasks the project declares before
+	// committing. Only `sal run` sets this; `sal build` commits the task
+	// configuration without running anything.
+	runModules bool
 }
 
 var findSALProjectDir = pkg.SALProjectDir
@@ -204,9 +209,18 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 	// the data rather than only recorded in .sal/config.jsonld
 	pins.AppendProvenance(finalGraph)
 
+	// a build validates the task configuration of every referenced module
+	// against the module's ontology, but only `sal run` invokes their run
+	// commands; the configuration itself is committed like any other RDF
 	resolver := salmodule.Default()
-	if err := MaterializeSalModules(context.Background(), finalGraph, resolver); err != nil {
-		return nil, err
+	if cfg.runModules {
+		tasksRun, err := MaterializeSalModules(context.Background(), finalGraph, resolver)
+		if err != nil {
+			return nil, err
+		}
+		if tasksRun == 0 {
+			return nil, ErrNoModuleTasks
+		}
 	}
 
 	// every module downloaded so far, both the ones validation dereferenced for

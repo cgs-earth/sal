@@ -125,9 +125,10 @@ func TestMaterializeSalModulesMergesTaskOutput(t *testing.T) {
 		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
 	}
 
-	err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
+	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
 
 	require.NoError(t, err)
+	require.Equal(t, 1, tasksRun)
 	require.Equal(t, 1, runner.runs)
 	require.True(t, graphHasTriple(graph, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
 }
@@ -138,7 +139,7 @@ func TestMaterializeSalModulesMergesTaskOutput(t *testing.T) {
 func TestMaterializeSalModulesPassesTheInstanceConfiguredInRDF(t *testing.T) {
 	runner := &testContainerRunner{ontology: testModuleOntology}
 
-	err := MaterializeSalModules(context.Background(), parseTestProject(t, testProject), testResolver(runner))
+	_, err := MaterializeSalModules(context.Background(), parseTestProject(t, testProject), testResolver(runner))
 
 	require.NoError(t, err)
 	require.Len(t, runner.runEnv, 1)
@@ -161,9 +162,10 @@ func TestMaterializeSalModulesSkipsClassesThatAreNotTasks(t *testing.T) {
 	`)
 	runner := &testContainerRunner{ontology: testModuleOntology}
 
-	err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
+	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
 
 	require.NoError(t, err)
+	require.Equal(t, 0, tasksRun)
 	require.Equal(t, 0, runner.runs)
 }
 
@@ -174,7 +176,7 @@ func TestMaterializeSalModulesFailsWhenTheModuleReportsAnError(t *testing.T) {
 		runOutput: `{"@type":"salmodule:Error","rdfs:comment":"reference feature server is unreachable"}`,
 	}
 
-	err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
+	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reference feature server is unreachable")
@@ -189,7 +191,7 @@ func TestMaterializeSalModulesPrefersTheModuleErrorOverTheContainerExitStatus(t 
 		runErr:    fmt.Errorf("container exited with status 1"),
 	}
 
-	err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
+	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reference feature server is unreachable")
@@ -202,7 +204,7 @@ func TestMaterializeSalModulesReportsContainerFailuresWithoutModuleErrors(t *tes
 		runErr:   fmt.Errorf("container exited with status 137"),
 	}
 
-	err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
+	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "container exited with status 137")
