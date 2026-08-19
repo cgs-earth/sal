@@ -561,6 +561,16 @@
   color: var(--sky);
 }
 
+/* Yasr's table renders every uri binding as an anchor, but a salmodule://,
+   urn:, or oci:// IRI has nowhere to navigate to. These keep the IRI color
+   and angle brackets while pointer-events strips all link behavior: click,
+   middle-click, and the context menu's open-link actions. */
+.yasgui .yasr a.iri:not([href^="http://"]):not([href^="https://"]) {
+  pointer-events: none;
+  cursor: text;
+  text-decoration: none;
+}
+
 .yasgui .yasr pre {
   background: var(--mantle);
   border: 1px solid var(--surface0);
