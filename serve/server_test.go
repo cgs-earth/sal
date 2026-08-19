@@ -97,6 +97,18 @@ func TestEndpointAcceptsGETQueryAndReturnsSPARQLJSON(t *testing.T) {
 	require.Equal(t, "Alice", body.Results.Bindings[0]["name"].Value)
 }
 
+func TestSparqlBindingTypeRecognizesNonHTTPIRIs(t *testing.T) {
+	require.Equal(t, "uri", sparqlBindingType("http://schema.org/name"))
+	require.Equal(t, "uri", sparqlBindingType("https://example.org/alice"))
+	require.Equal(t, "uri", sparqlBindingType("salmodule://github.com/cgs-earth/python-geoconnex/salmodule#Task"))
+	require.Equal(t, "uri", sparqlBindingType("oci://ghcr.io/cgs-earth/sal:latest"))
+	require.Equal(t, "uri", sparqlBindingType("urn:sha256:deadbeef"))
+	require.Equal(t, "bnode", sparqlBindingType("_:b0"))
+	require.Equal(t, "literal", sparqlBindingType("Alice"))
+	require.Equal(t, "literal", sparqlBindingType("note: see http://example.org"))
+	require.Equal(t, "literal", sparqlBindingType("12:30:00"))
+}
+
 func TestEndpointWithUIServesTheAppAtRoot(t *testing.T) {
 	server := newUIServer(t, &endpointUIRunner{})
 	defer server.Close()

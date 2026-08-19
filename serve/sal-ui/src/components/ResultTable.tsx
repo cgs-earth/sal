@@ -59,5 +59,10 @@ function Cell({ value }: { value: string }) {
       </a>
     )
   }
+  // salmodule://, oci://, and urn: IRIs have nowhere to link to, but should
+  // still read as IRIs rather than literals.
+  if (value.startsWith('urn:') || /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(value)) {
+    return <span className="iri">{value}</span>
+  }
   return <>{value}</>
 }

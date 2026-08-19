@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -474,12 +475,18 @@ func sparqlJSONResult(result salsparql.Result) sparqlJSONResponse {
 	}
 }
 
+// iriScheme matches a URI scheme followed by an authority, e.g. "salmodule://"
+// or "oci://". The rows DuckDB returns are plain strings, so IRIs can only be
+// told apart from literals by shape; requiring the "//" (or the urn: scheme,
+// which never has one) keeps prose literals like "note: see below" out.
+var iriScheme = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
+
 func sparqlBindingType(value string) string {
-	if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
-		return "uri"
-	}
 	if strings.HasPrefix(value, "_:") {
 		return "bnode"
+	}
+	if strings.HasPrefix(value, "urn:") || iriScheme.MatchString(value) {
+		return "uri"
 	}
 	return "literal"
 }
