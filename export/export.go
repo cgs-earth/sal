@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 
 	salsparql "github.com/cgs-earth/sal/query/sparql"
 	rdflibgo "github.com/tggo/goRDFlib"
@@ -72,15 +73,11 @@ func (cmd *ExportCmd) Run() error {
 	return out.Flush()
 }
 
-// blankNodeID matches the exact shape stabilizeBlankNodes gives every blank
-// node before a graph is written to the triples table: "sal_" followed by 24
-// hex characters, optionally suffixed with a 4-digit disambiguator. This ID
-// shape is a fixed encoding SAL always applies to every blank node before
-// writing it (see build/load/blank_nodes.go), so decoding it back to N-Triples
-// "_:" syntax does not change the value, only its term-kind syntax; deciding
-// this any other way (e.g. "no scheme means blank node") is unsound, since SAL
-// also writes relative IRIs with no scheme as ordinary subjects.
-var blankNodeID = regexp.MustCompile(`^sal_[0-9a-f]{24}(_[0-9]{4})?$`)
+// blankNodePrefix is the N-Triples "_:" syntax build stores every blank node
+// with (see build/load's storedSubject and graphTripleObject). "_" cannot
+// start an RFC 3986 scheme, so a stored IRI, even a relative one, can never
+// begin with it; the prefix alone identifies a blank node.
+const blankNodePrefix = "_:"
 
 // hasIRIScheme matches a leading RFC 3986 scheme. It is only a good signal
 // for the simple layout's single object column, where a literal, an IRI, and
@@ -90,12 +87,10 @@ var hasIRIScheme = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+\-.]*:`)
 // subjectTerm rebuilds the subject column as the IRI or blank node it names,
 // writing the stored value exactly as-is (no base resolution): a relative IRI
 // in the table is exported as a relative IRI, since export mirrors what build
-// wrote rather than rewriting it. A subject is always an IRI or a blank node,
-// and unlike a plain string literal it is never mistaken for the blank node ID
-// shape by accident.
+// wrote rather than rewriting it.
 func subjectTerm(value string) rdflibgo.Subject {
-	if blankNodeID.MatchString(value) {
-		return rdflibgo.NewBNode(value)
+	if id, ok := strings.CutPrefix(value, blankNodePrefix); ok {
+		return rdflibgo.NewBNode(id)
 	}
 	return rdflibgo.NewURIRefUnsafe(value)
 }
@@ -103,18 +98,17 @@ func subjectTerm(value string) rdflibgo.Subject {
 // objectTerm rebuilds the RDF term an object column (or columns) held,
 // writing the stored value exactly as-is. The typed layout stores which union
 // member is populated, so restoring an IRI, a numeric literal's xsd:double
-// datatype, and a geometry literal's geosparql:wktLiteral datatype is exact;
-// a blank node object is not, since it and a plain string literal both land
-// in object_string with nothing left to tell them apart, so it comes back as
-// a string literal. The simple layout has no such columns at all, so only
-// IRI-shaped text is recovered as an IRI there; everything else, including a
-// blank node object, comes back as a string literal.
+// datatype, and a geometry literal's geosparql:wktLiteral datatype is exact.
+// A blank node object lands in object_string (the simple layout's single
+// object column) carrying the "_:" prefix build stored it with, which is what
+// tells it apart from a plain string literal there; only a literal whose own
+// text starts with "_:" would be misread, and nothing SAL builds writes one.
 func objectTerm(cols []sql.NullString, layout salsparql.ObjectLayout) rdflibgo.Term {
 	if layout == salsparql.SimpleObjects {
 		value := cols[0]
 		switch {
-		case blankNodeID.MatchString(value.String):
-			return rdflibgo.NewBNode(value.String)
+		case strings.HasPrefix(value.String, blankNodePrefix):
+			return rdflibgo.NewBNode(strings.TrimPrefix(value.String, blankNodePrefix))
 		case hasIRIScheme.MatchString(value.String):
 			return rdflibgo.NewURIRefUnsafe(value.String)
 		default:
@@ -130,6 +124,8 @@ func objectTerm(cols []sql.NullString, layout salsparql.ObjectLayout) rdflibgo.T
 		return rdflibgo.NewLiteral(wkt.String, rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(wktLiteralDatatype)))
 	case float.Valid:
 		return rdflibgo.NewLiteral(float.String, rdflibgo.WithDatatype(rdflibgo.XSDDouble))
+	case strings.HasPrefix(str.String, blankNodePrefix):
+		return rdflibgo.NewBNode(strings.TrimPrefix(str.String, blankNodePrefix))
 	default:
 		return rdflibgo.NewLiteral(str.String)
 	}

@@ -52,7 +52,7 @@ func TestGraphRecordReaderStreamsGraphTriples(t *testing.T) {
 	require.Equal(t, int64(3), rdr.RowsRead())
 	require.ElementsMatch(t, [][4]string{
 		{"http://example.com/s1", "http://example.com/p", "one", tripleHash("http://example.com/s1", "http://example.com/p", "one")},
-		{"subject", "http://example.com/p", "http://example.com/o2", tripleHash("subject", "http://example.com/p", "http://example.com/o2")},
+		{"_:subject", "http://example.com/p", "http://example.com/o2", tripleHash("_:subject", "http://example.com/p", "http://example.com/o2")},
 		{"http://example.com/s3", "http://example.com/p", "three", tripleHash("http://example.com/s3", "http://example.com/p", "three")},
 	}, rows)
 }
@@ -154,6 +154,14 @@ func TestTripleHashUsesTermsWithoutTypeMarkers(t *testing.T) {
 
 	require.Equal(t, hashFromTerms, hashFromTriple)
 	require.Len(t, hashFromTriple, 64)
+}
+
+func TestBlankNodeTermsAreStoredWithNTriplesPrefix(t *testing.T) {
+	require.Equal(t, "_:b1", storedSubject(rdflibgo.NewBNode("b1")))
+
+	object := graphTripleObject(rdflibgo.NewBNode("b1"))
+	require.Equal(t, "_:b1", object.o)
+	require.Equal(t, objectKindBNode, object.oKind)
 }
 
 func TestStabilizeBlankNodesStabilizesBlankNodeHashes(t *testing.T) {

@@ -2,8 +2,10 @@ package load
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/iceberg-go/catalog/hadoop"
 	"github.com/apache/iceberg-go/table"
 	"github.com/stretchr/testify/require"
@@ -157,4 +159,50 @@ func TestWriteGraphToIcebergDoesNotRewriteEquivalentBlankNodeGraph(t *testing.T)
 
 	require.Equal(t, firstHashes, secondHashes)
 	require.Len(t, secondHashes, 3)
+}
+
+// TestWriteGraphToIcebergStoresBlankNodesWithNTriplesPrefix scans the written
+// table and checks a blank node landed in the subject and object columns as
+// "_:sal_..." rather than as a bare label, since the "_:" prefix is what lets
+// readers tell a blank node apart from an IRI or a plain string.
+func TestWriteGraphToIcebergStoresBlankNodesWithNTriplesPrefix(t *testing.T) {
+	ctx := context.Background()
+	cfg := &LoadConfig{
+		BatchSize:          10,
+		ParquetCompression: "snappy",
+		MetricsMode:        "truncate(16)",
+		Warehouse:          t.TempDir(),
+		Namespace:          "default",
+	}
+
+	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("b1"), cfg, map[string]string{"sal.hash": "h"}))
+	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
+	require.NoError(t, err)
+	tbl, err := cat.LoadTable(ctx, table.Identifier{"default", "triples"})
+	require.NoError(t, err)
+
+	var subjects, objects []string
+	_, records, err := tbl.Scan(table.WithSelectedFields("subject", "object")).ToArrowRecords(ctx)
+	require.NoError(t, err)
+	for rec, err := range records {
+		require.NoError(t, err)
+		subjectColumn := rec.Column(0).(*array.String)
+		objectColumn := rec.Column(1).(*array.String)
+		for i := 0; i < int(rec.NumRows()); i++ {
+			subjects = append(subjects, subjectColumn.Value(i))
+			objects = append(objects, objectColumn.Value(i))
+		}
+		rec.Release()
+	}
+
+	require.Len(t, subjects, 3)
+	blankID := ""
+	for _, object := range objects {
+		if strings.HasPrefix(object, "_:sal_") {
+			blankID = object
+		}
+	}
+	require.NotEmpty(t, blankID, "expected the hasGeometry object to be stored as a _:sal_ blank node, got objects %v", objects)
+	require.Contains(t, subjects, blankID)
+	require.NotContains(t, subjects, strings.TrimPrefix(blankID, "_:"))
 }

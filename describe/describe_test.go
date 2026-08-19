@@ -62,6 +62,12 @@ func TestSubjectIRIKeepsAPrefixedNameAsWritten(t *testing.T) {
 	require.Equal(t, "schema:Bob", subject)
 }
 
+func TestSubjectIRIKeepsABlankNodeLabelAsStored(t *testing.T) {
+	subject, err := subjectIRI("_:sal_0123456789abcdef01234567", testBase)
+	require.NoError(t, err)
+	require.Equal(t, "_:sal_0123456789abcdef01234567", subject)
+}
+
 func TestSubjectIRIKeepsASalModuleIRI(t *testing.T) {
 	subject, err := subjectIRI("salmodule://geoconnex/Pid", testBase)
 	require.NoError(t, err)

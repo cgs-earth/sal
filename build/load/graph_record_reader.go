@@ -108,7 +108,7 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 		triple := r.triples[r.index]
 		r.index++
 
-		subject := triple.Subject.String()
+		subject := storedSubject(triple.Subject)
 		predicate := triple.Predicate.String()
 		object := graphTripleObject(triple.Object)
 		hashValue := tripleHash(subject, predicate, object.o)
@@ -151,7 +151,19 @@ func tripleHash(subject string, predicate string, object string) string {
 }
 
 func tripleHashForTriple(triple rdflibgo.Triple) string {
-	return tripleHash(triple.Subject.String(), triple.Predicate.String(), graphTripleObject(triple.Object).o)
+	return tripleHash(storedSubject(triple.Subject), triple.Predicate.String(), graphTripleObject(triple.Object).o)
+}
+
+// storedSubject renders a subject the way the triples table stores it: a blank
+// node keeps N-Triples "_:" syntax so readers can tell it apart from an IRI,
+// which SAL may store schemeless (relative) and therefore cannot distinguish
+// by shape alone. The in-memory BNode keeps its bare label, since RDF
+// serializers add the "_:" themselves.
+func storedSubject(subject rdflibgo.Subject) string {
+	if blank, ok := subject.(rdflibgo.BNode); ok {
+		return "_:" + blank.Value()
+	}
+	return subject.String()
 }
 
 func graphTripleObject(object rdflibgo.Term) rdfObject {
@@ -159,7 +171,7 @@ func graphTripleObject(object rdflibgo.Term) rdfObject {
 	case rdflibgo.URIRef:
 		return rdfObject{o: o.Value(), oKind: objectKindIRI}
 	case rdflibgo.BNode:
-		return rdfObject{o: o.Value(), oKind: objectKindBNode}
+		return rdfObject{o: "_:" + o.Value(), oKind: objectKindBNode}
 	case rdflibgo.Literal:
 		return rdfObject{o: o.String(), oKind: objectKindLiteral, oDatatype: o.Datatype().Value()}
 	default:
