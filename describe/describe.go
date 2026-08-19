@@ -53,6 +53,12 @@ func subjectIRI(raw string, salBase func() (string, error)) (string, error) {
 	if subject == "" {
 		return "", fmt.Errorf("describe: a subject IRI is required")
 	}
+	// A "_:" subject is a blank node label exactly as build stores it in the
+	// subject column, so it is looked up as-is rather than resolved against
+	// the project base.
+	if strings.HasPrefix(subject, "_:") {
+		return subject, nil
+	}
 	if absoluteIRI.MatchString(subject) {
 		return subject, nil
 	}

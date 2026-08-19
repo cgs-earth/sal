@@ -16,11 +16,11 @@ func TestSubjectTermKeepsAnAbsoluteIRI(t *testing.T) {
 	require.Equal(t, "<http://example.org/s>", subject.N3())
 }
 
-func TestSubjectTermTreatsTheStableBlankNodeIDShapeAsABlankNode(t *testing.T) {
-	subject := subjectTerm("sal_0123456789abcdef01234567")
+func TestSubjectTermReadsTheStoredBlankNodePrefixAsABlankNode(t *testing.T) {
+	subject := subjectTerm("_:sal_0123456789abcdef01234567")
 	require.Equal(t, "_:sal_0123456789abcdef01234567", subject.N3())
 
-	suffixed := subjectTerm("sal_0123456789abcdef01234567_0002")
+	suffixed := subjectTerm("_:sal_0123456789abcdef01234567_0002")
 	require.Equal(t, "_:sal_0123456789abcdef01234567_0002", suffixed.N3())
 }
 
@@ -50,8 +50,8 @@ func TestObjectTermForSimpleObjectsFallsBackToAStringLiteral(t *testing.T) {
 	require.Equal(t, `"hello world"`, object.N3())
 }
 
-func TestObjectTermForSimpleObjectsReadsTheStableBlankNodeIDShapeAsABlankNode(t *testing.T) {
-	object := objectTerm([]sql.NullString{valid("sal_0123456789abcdef01234567")}, salsparql.SimpleObjects)
+func TestObjectTermForSimpleObjectsReadsTheStoredBlankNodePrefixAsABlankNode(t *testing.T) {
+	object := objectTerm([]sql.NullString{valid("_:sal_0123456789abcdef01234567")}, salsparql.SimpleObjects)
 	require.Equal(t, "_:sal_0123456789abcdef01234567", object.N3())
 }
 
@@ -95,6 +95,15 @@ func TestObjectTermForTypedObjectsRestoresAGeometryLiteralAsGeoSPARQLWKT(t *test
 func TestObjectTermForTypedObjectsFallsBackToAPlainStringLiteral(t *testing.T) {
 	object := objectTerm([]sql.NullString{invalid, invalid, invalid, valid("hello")}, salsparql.TypedObjects)
 	require.Equal(t, `"hello"`, object.N3())
+}
+
+// TestObjectTermForTypedObjectsReadsTheStoredBlankNodePrefixAsABlankNode
+// covers the typed layout's object_string column, which is where build lands
+// a blank node object; the stored "_:" prefix is what tells it apart from a
+// plain string literal sharing that column.
+func TestObjectTermForTypedObjectsReadsTheStoredBlankNodePrefixAsABlankNode(t *testing.T) {
+	object := objectTerm([]sql.NullString{invalid, invalid, invalid, valid("_:sal_0123456789abcdef01234567")}, salsparql.TypedObjects)
+	require.Equal(t, "_:sal_0123456789abcdef01234567", object.N3())
 }
 
 // TestExportedTriplesSerializeAsValidNTriples checks the terms this package
