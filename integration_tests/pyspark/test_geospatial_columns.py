@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from shapely import wkb
 from pyspark.sql import SparkSession
+from pyspark.sql.types import Geometry, GeometryType
 
 
 @pytest.fixture(scope="module")
@@ -64,21 +65,38 @@ def test_build_writes_queryable_geospatial_objects(spark, built_table):
     triples = spark.read.parquet(str(built_table / "data"))
     assert "object_geometry" in triples.columns
 
+    # build writes object_geometry with the Parquet GEOMETRY logical type, so
+    # Spark must read it as its native GEOMETRY type rather than as raw bytes.
+    geometry_type = triples.schema["object_geometry"].dataType
+    assert isinstance(geometry_type, GeometryType), geometry_type
+    assert geometry_type.srid == GeometryType.DEFAULT_SRID
+
     triples.createOrReplaceTempView("triples")
     rows = spark.sql(
         """
-        SELECT subject, predicate, object_geometry
+        SELECT
+            subject,
+            predicate,
+            object_geometry,
+            ST_SRID(object_geometry) AS srid,
+            ST_AsBinary(object_geometry) AS geometry_wkb
         FROM triples
         WHERE object_geometry IS NOT NULL
         LIMIT 5
         """
     ).collect()
 
-    print("First 5 object_geometry values as WKT:")
-    for geometry in [row.object_geometry for row in rows]:
-        print(wkb.loads(bytes(geometry)).wkt)
-
     assert len(rows) > 0
     assert any(
         row.predicate == "http://www.opengis.net/ont/geosparql#asWKT" for row in rows
     )
+
+    print("First 5 object_geometry values as WKT:")
+    for row in rows:
+        assert isinstance(row.object_geometry, Geometry), row.object_geometry
+        assert row.srid == GeometryType.DEFAULT_SRID
+        assert row.object_geometry.getSrid() == row.srid
+        assert row.object_geometry.getBytes() == bytes(row.geometry_wkb)
+        geometry = wkb.loads(bytes(row.geometry_wkb))
+        assert not geometry.is_empty
+        print(geometry.wkt)
