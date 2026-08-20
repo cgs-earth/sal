@@ -119,17 +119,6 @@ WHERE {
 LIMIT 500`,
   },
   {
-    name: 'Geometries',
-    query: `PREFIX geo: <http://www.opengis.net/ont/geosparql#>
-PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
-
-SELECT ?feature ?wkt
-WHERE {
-  ?feature geo:hasGeometry ?geometry .
-  ?geometry geo:asWKT ?wkt .
-}`,
-  },
-  {
     name: 'Ontology versions',
     query: `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX owl: <http://www.w3.org/2002/07/owl#>
