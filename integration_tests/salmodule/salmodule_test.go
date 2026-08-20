@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -309,8 +310,10 @@ func (s *SalModuleSuite) builtObjectsForPredicate(predicate string) []string {
 		return nil
 	}
 
+	// An object is stored in exactly one typed column. What a module produces
+	// here is IRIs, strings, and numbers, so the geometry column is not read.
 	_, records, err := tbl.Scan(
-		table.WithSelectedFields("subject", "predicate", "object"),
+		table.WithSelectedFields("subject", "predicate", "object_iri", "object_float", "object_string"),
 		table.WithCaseSensitive(true),
 	).ToArrowRecords(context.Background())
 	s.Require().NoError(err)
@@ -323,10 +326,20 @@ func (s *SalModuleSuite) builtObjectsForPredicate(predicate string) []string {
 		}
 		subjects := record.Column(0).(*array.String)
 		predicates := record.Column(1).(*array.String)
-		values := record.Column(2).(*array.String)
+		iris := record.Column(2).(*array.String)
+		floats := record.Column(3).(*array.Float64)
+		strs := record.Column(4).(*array.String)
 		for i := range int(record.NumRows()) {
-			if strings.HasPrefix(subjects.Value(i), placeNamespace) && predicates.Value(i) == predicate {
-				objects = append(objects, values.Value(i))
+			if !strings.HasPrefix(subjects.Value(i), placeNamespace) || predicates.Value(i) != predicate {
+				continue
+			}
+			switch {
+			case iris.IsValid(i):
+				objects = append(objects, iris.Value(i))
+			case floats.IsValid(i):
+				objects = append(objects, strconv.FormatFloat(floats.Value(i), 'f', -1, 64))
+			default:
+				objects = append(objects, strs.Value(i))
 			}
 		}
 		record.Release()
