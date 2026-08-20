@@ -28,7 +28,7 @@ func TestGraphRecordReaderStreamsGraphTriples(t *testing.T) {
 		rdflibgo.NewLiteral("three", rdflibgo.WithLang("en")),
 	)
 
-	arrowSchema, _, err := GetSchemas(false)
+	arrowSchema, _, err := GetSchemas()
 	require.NoError(t, err)
 	rdr := newGraphRecordReader(graph, arrowSchema, 2)
 	defer rdr.Release()
@@ -40,10 +40,17 @@ func TestGraphRecordReaderStreamsGraphTriples(t *testing.T) {
 		rec := rdr.RecordBatch()
 		subjects := rec.Column(0).(*array.String)
 		predicates := rec.Column(1).(*array.String)
-		objects := rec.Column(2).(*array.String)
-		hashes := rec.Column(3).(*array.String)
+		objectIRIs := rec.Column(2).(*array.String)
+		objectStrings := rec.Column(4).(*array.String)
+		hashes := rec.Column(6).(*array.String)
 		for i := 0; i < int(rec.NumRows()); i++ {
-			rows = append(rows, [4]string{subjects.Value(i), predicates.Value(i), objects.Value(i), hashes.Value(i)})
+			// an object lands in exactly one typed column; these triples only
+			// hold IRIs and strings
+			object := objectStrings.Value(i)
+			if objectIRIs.IsValid(i) {
+				object = objectIRIs.Value(i)
+			}
+			rows = append(rows, [4]string{subjects.Value(i), predicates.Value(i), object, hashes.Value(i)})
 		}
 	}
 
@@ -81,7 +88,7 @@ func TestGraphRecordReaderSerializesObjectColumns(t *testing.T) {
 		rdflibgo.NewLiteral("POINT (1 2)", rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(geoSPARQLWKTLiteral))),
 	)
 
-	arrowSchema, _, err := GetSchemas(true)
+	arrowSchema, _, err := GetSchemas()
 	require.NoError(t, err)
 	rdr := newGraphRecordReader(graph, arrowSchema, 10)
 	defer rdr.Release()

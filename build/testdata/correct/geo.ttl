@@ -2,7 +2,47 @@
 @prefix gsp: <http://www.opengis.net/ont/geosparql#> .
 @prefix sf: <http://www.opengis.net/ont/sf#> .
 
-<MyState>
+<MyPoint>
+    a schema:Place ;
+    schema:name "Demo Point" ;
+    gsp:hasGeometry [
+        a sf:Point ;
+        gsp:asWKT "POINT(-89.5 40.5)"^^gsp:wktLiteral
+    ] .
+
+<MyLineString>
+    a schema:Place ;
+    schema:name "Demo LineString" ;
+    gsp:hasGeometry [
+        a sf:LineString ;
+        gsp:asWKT "LINESTRING(-90 40, -89.5 40.5, -89 41)"^^gsp:wktLiteral
+    ] .
+
+<MyPolygon>
+    a schema:Place ;
+    schema:name "Demo Polygon" ;
+    gsp:hasGeometry [
+        a sf:Polygon ;
+        gsp:asWKT "POLYGON((-90 40, -89 40, -89 41, -90 41, -90 40))"^^gsp:wktLiteral
+    ] .
+
+<MyMultiPoint>
+    a schema:Place ;
+    schema:name "Demo MultiPoint" ;
+    gsp:hasGeometry [
+        a sf:MultiPoint ;
+        gsp:asWKT "MULTIPOINT((-89.8 40.2), (-89.5 40.5), (-89.2 40.8))"^^gsp:wktLiteral
+    ] .
+
+<MyMultiLineString>
+    a schema:Place ;
+    schema:name "Demo MultiLineString" ;
+    gsp:hasGeometry [
+        a sf:MultiLineString ;
+        gsp:asWKT "MULTILINESTRING((-90 40, -89.5 40.5), (-89.5 40.5, -89 41))"^^gsp:wktLiteral
+    ] .
+
+<MyMultiPolygon>
     a schema:Place,
       schema:AdministrativeArea,
       schema:State ;

@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 
 	salsparql "github.com/cgs-earth/sal/query/sparql"
@@ -53,10 +52,9 @@ func (cmd *ExportCmd) Run() error {
 		return nil
 	}
 
-	statement := salsparql.ExportSQL(runner.Layout)
-	withSpatial := runner.Layout == salsparql.TypedObjects
-	err = runner.StreamSQL(ctx, statement, withSpatial, func(row []sql.NullString) error {
-		object := objectTerm(row[2:], runner.Layout)
+	// object_geometry is rendered to WKT by ST_AsText, which needs spatial loaded.
+	err = runner.StreamSQL(ctx, salsparql.ExportSQL, true, func(row []sql.NullString) error {
+		object := objectTerm(row[2:])
 		batch.Add(subjectTerm(row[0].String), rdflibgo.NewURIRefUnsafe(row[1].String), object)
 		pending++
 		if pending >= exportBatchSize {
@@ -79,11 +77,6 @@ func (cmd *ExportCmd) Run() error {
 // begin with it; the prefix alone identifies a blank node.
 const blankNodePrefix = "_:"
 
-// hasIRIScheme matches a leading RFC 3986 scheme. It is only a good signal
-// for the simple layout's single object column, where a literal, an IRI, and
-// (rarely) a blank node all land in the same text with nothing else to go on.
-var hasIRIScheme = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+\-.]*:`)
-
 // subjectTerm rebuilds the subject column as the IRI or blank node it names,
 // writing the stored value exactly as-is (no base resolution): a relative IRI
 // in the table is exported as a relative IRI, since export mirrors what build
@@ -95,27 +88,14 @@ func subjectTerm(value string) rdflibgo.Subject {
 	return rdflibgo.NewURIRefUnsafe(value)
 }
 
-// objectTerm rebuilds the RDF term an object column (or columns) held,
-// writing the stored value exactly as-is. The typed layout stores which union
-// member is populated, so restoring an IRI, a numeric literal's xsd:double
-// datatype, and a geometry literal's geosparql:wktLiteral datatype is exact.
-// A blank node object lands in object_string (the simple layout's single
-// object column) carrying the "_:" prefix build stored it with, which is what
+// objectTerm rebuilds the RDF term the object columns held, writing the stored
+// value exactly as-is. The table stores which union member is populated, so
+// restoring an IRI, a numeric literal's xsd:double datatype, and a geometry
+// literal's geosparql:wktLiteral datatype is exact. A blank node object lands
+// in object_string carrying the "_:" prefix build stored it with, which is what
 // tells it apart from a plain string literal there; only a literal whose own
 // text starts with "_:" would be misread, and nothing SAL builds writes one.
-func objectTerm(cols []sql.NullString, layout salsparql.ObjectLayout) rdflibgo.Term {
-	if layout == salsparql.SimpleObjects {
-		value := cols[0]
-		switch {
-		case strings.HasPrefix(value.String, blankNodePrefix):
-			return rdflibgo.NewBNode(strings.TrimPrefix(value.String, blankNodePrefix))
-		case hasIRIScheme.MatchString(value.String):
-			return rdflibgo.NewURIRefUnsafe(value.String)
-		default:
-			return rdflibgo.NewLiteral(value.String)
-		}
-	}
-
+func objectTerm(cols []sql.NullString) rdflibgo.Term {
 	iri, float, wkt, str := cols[0], cols[1], cols[2], cols[3]
 	switch {
 	case iri.Valid:

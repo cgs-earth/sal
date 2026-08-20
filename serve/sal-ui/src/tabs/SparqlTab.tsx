@@ -6,6 +6,7 @@ import '../yasgui-catppuccin.css'
 import { ShareLinkButton } from '../components/ShareLinkButton'
 import { registerGraphPlugin } from './sparql/GraphPlugin'
 import { setQueryRunner, setQueryTextGetter } from './sparql/sparqlBridge'
+import { publishResult } from '../results'
 
 registerGraphPlugin(Yasgui)
 
@@ -107,6 +108,28 @@ WHERE {
 LIMIT 50`,
   },
   {
+    name: 'Geometries',
+    query: `PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+
+SELECT ?feature ?wkt
+WHERE {
+  ?feature geo:hasGeometry ?geometry .
+  ?geometry geo:asWKT ?wkt .
+}
+LIMIT 500`,
+  },
+  {
+    name: 'Geometries',
+    query: `PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+
+SELECT ?feature ?wkt
+WHERE {
+  ?feature geo:hasGeometry ?geometry .
+  ?geometry geo:asWKT ?wkt .
+}`,
+  },
+  {
     name: 'Ontology versions',
     query: `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX owl: <http://www.w3.org/2002/07/owl#>
@@ -169,6 +192,20 @@ export function SparqlTab({ sharedQuery }: { sharedQuery: string | null }) {
     instance.on('tabSelect', syncShareHost)
     instance.on('tabAdd', syncShareHost)
     instance.on('tabClose', syncShareHost)
+
+    // The Map tab draws whatever geometry the last result held. Yasgui emits
+    // queryResponse before Yasr has stored the result, so it is read a
+    // microtask later.
+    instance.on('queryResponse', (_, tab) => {
+      queueMicrotask(() => {
+        if (disposed) return
+        const results = tab.getYasr()?.results
+        if (!results || results.hasError()) return
+        const vars = results.getVariables()
+        const rows = results.getBindings().map((binding) => vars.map((name) => binding[name]?.value ?? ''))
+        publishResult({ source: 'SPARQL', query: tab.getQuery(), header: vars, rows })
+      })
+    })
 
     setQueryRunner((query) => {
       const activeTab = instance.getTab()

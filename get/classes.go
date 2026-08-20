@@ -9,7 +9,7 @@ import (
 type classesCmd struct{}
 
 func (cmd *classesCmd) Run() error {
-	result, err := salsparql.RunLookup(salsparql.ClassesSQL)
+	result, err := salsparql.RunLookup(salsparql.ClassesSQL())
 	if err != nil {
 		return err
 	}

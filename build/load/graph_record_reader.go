@@ -120,7 +120,7 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 
 		builder.Field(0).(*array.StringBuilder).Append(subject)
 		builder.Field(1).(*array.StringBuilder).Append(predicate)
-		if err := appendObjectColumns(builder, object); err != nil {
+		if err := appendObjectFields(builder, object); err != nil {
 			return nil, fmt.Errorf("serialize object for %s %s: %w", triple.Subject.String(), triple.Predicate.String(), err)
 		}
 		// triple_hash is the final schema field. It is generated from subject, predicate,

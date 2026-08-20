@@ -15,11 +15,8 @@ The test expects to run from a SAL git project that already has a `.sal`
 directory. It invokes SAL through:
 
 ```sh
-go run . build --typed --force build/testdata/correct/geo.ttl
+go run . build --force build/testdata/correct/geo.ttl
 ```
-
-The `--typed` flag is required because the geospatial schema writes
-`object_geometry`.
 
 ## Run
 

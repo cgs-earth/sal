@@ -31,27 +31,6 @@ func (r *fakeRunner) Run(_ context.Context, query string) (Result, error) {
 	return r.result, r.err
 }
 
-func TestGeometrySQLForTypedObjectsUsesTypedObjectColumns(t *testing.T) {
-	sql := geometrySQL(TypedObjects, 100, 12)
-
-	require.Contains(t, sql, "COALESCE(triples.object_iri, CAST(triples.object_float AS VARCHAR), triples.object_string) AS object")
-	require.Contains(t, sql, "ST_AsGeoJSON(ST_GeomFromWKB(triples.object_geometry)) AS geometry")
-	require.Contains(t, sql, "WHERE triples.object_geometry IS NOT NULL")
-	require.Contains(t, sql, "LIMIT 100")
-	require.Contains(t, sql, "OFFSET 12")
-	require.NotContains(t, sql, "\n\ttriples.object,\n")
-}
-
-func TestGeometrySQLForSimpleObjectsUsesObjectColumn(t *testing.T) {
-	sql := geometrySQL(SimpleObjects, 50, 0)
-
-	require.Contains(t, sql, "\n\ttriples.object AS object,\n")
-	require.Contains(t, sql, "ST_AsGeoJSON(ST_GeomFromWKB(triples.object_geometry)) AS geometry")
-	require.Contains(t, sql, "LIMIT 50")
-	require.Contains(t, sql, "OFFSET 0")
-	require.NotContains(t, sql, "object_iri")
-}
-
 func TestRenderTableShowsHeadersAndRows(t *testing.T) {
 	table := renderTable(
 		[]string{"subject", "name"},

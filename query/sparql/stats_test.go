@@ -108,7 +108,6 @@ func TestInfoSQLEscapesSingleQuotesInTablePath(t *testing.T) {
 	require.Contains(t, query, "iceberg_column_stats('/tmp/o''brien/triples')")
 }
 
-func TestCountsSQLUsesTypedObjectColumnsForTypedLayout(t *testing.T) {
-	require.Contains(t, countsSQL(TypedObjects), "COUNT(DISTINCT COALESCE(triples.object_iri, CAST(triples.object_float AS VARCHAR), triples.object_string))")
-	require.Contains(t, countsSQL(SimpleObjects), "COUNT(DISTINCT triples.object)")
+func TestCountsSQLCountsDistinctObjectsAcrossTheTypedColumns(t *testing.T) {
+	require.Contains(t, countsSQL(), "COUNT(DISTINCT COALESCE(triples.object_iri, CAST(triples.object_float AS VARCHAR), triples.object_string))")
 }

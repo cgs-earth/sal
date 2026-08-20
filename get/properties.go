@@ -9,7 +9,7 @@ import (
 type propertiesCmd struct{}
 
 func (cmd *propertiesCmd) Run() error {
-	result, err := salsparql.RunLookup(salsparql.PropertiesSQL)
+	result, err := salsparql.RunLookup(salsparql.PropertiesSQL())
 	if err != nil {
 		return err
 	}

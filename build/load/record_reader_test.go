@@ -13,7 +13,7 @@ import (
 )
 
 func TestGetSchemasUseNativeIcebergGeometry(t *testing.T) {
-	arrowSchema, icebergSchema, err := GetSchemas(true)
+	arrowSchema, icebergSchema, err := GetSchemas()
 	require.NoError(t, err)
 
 	convertedType, err := table.ArrowTypeToIceberg(arrowSchema.Field(5).Type, false)
@@ -22,20 +22,8 @@ func TestGetSchemasUseNativeIcebergGeometry(t *testing.T) {
 	require.Equal(t, "geometry", icebergSchema.Field(5).Type.String())
 }
 
-func TestGetSchemasUsesLegacyObjectColumnByDefault(t *testing.T) {
-	arrowSchema, icebergSchema, err := GetSchemas(false)
-	require.NoError(t, err)
-
-	require.Equal(t, 4, arrowSchema.NumFields())
-	require.Equal(t, "object", arrowSchema.Field(2).Name)
-	require.Equal(t, "triple_hash", arrowSchema.Field(3).Name)
-	require.Equal(t, "object", icebergSchema.Field(2).Name)
-	require.Equal(t, "triple_hash", icebergSchema.Field(3).Name)
-	require.Equal(t, []int{4}, icebergSchema.IdentifierFieldIDs)
-}
-
-func TestGetSchemasUsesDataTypeColumnsWhenEnabled(t *testing.T) {
-	arrowSchema, icebergSchema, err := GetSchemas(true)
+func TestGetSchemasSplitsObjectsByDatatype(t *testing.T) {
+	arrowSchema, icebergSchema, err := GetSchemas()
 	require.NoError(t, err)
 
 	require.Equal(t, 7, arrowSchema.NumFields())
@@ -52,16 +40,13 @@ func TestGetSchemasUsesDataTypeColumnsWhenEnabled(t *testing.T) {
 func TestAppendGraphIngestsSimpleWKTGeometry(t *testing.T) {
 	ctx := context.Background()
 	cfg := &LoadConfig{
-		BatchSize:           10,
-		ParquetCompression:  "snappy",
-		MetricsMode:         "truncate(16)",
-		TargetFileSizeBytes: 0,
-		Warehouse:           t.TempDir(),
-		Namespace:           "default",
-		DataTypeCols:        true,
+		BatchSize:          10,
+		ParquetCompression: "snappy",
+		Warehouse:          t.TempDir(),
+		Namespace:          "default",
 	}
 
-	arrowSchema, icebergSchema, err := GetSchemas(true)
+	arrowSchema, icebergSchema, err := GetSchemas()
 	require.NoError(t, err)
 	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
@@ -88,15 +73,13 @@ func TestAppendGraphIngestsSimpleWKTGeometry(t *testing.T) {
 func TestProcessGraphDiffAddsAndRemovesByTripleHash(t *testing.T) {
 	ctx := context.Background()
 	cfg := &LoadConfig{
-		BatchSize:           10,
-		ParquetCompression:  "snappy",
-		MetricsMode:         "truncate(16)",
-		TargetFileSizeBytes: 0,
-		Warehouse:           t.TempDir(),
-		Namespace:           "default",
+		BatchSize:          10,
+		ParquetCompression: "snappy",
+		Warehouse:          t.TempDir(),
+		Namespace:          "default",
 	}
 
-	arrowSchema, icebergSchema, err := GetSchemas(false)
+	arrowSchema, icebergSchema, err := GetSchemas()
 	require.NoError(t, err)
 	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
@@ -107,7 +90,7 @@ func TestProcessGraphDiffAddsAndRemovesByTripleHash(t *testing.T) {
 	first := rdflibgo.NewGraph()
 	first.Add(rdflibgo.NewURIRefUnsafe("http://example.com/keep"), predicate, rdflibgo.NewLiteral("same"))
 	first.Add(rdflibgo.NewURIRefUnsafe("http://example.com/drop"), predicate, rdflibgo.NewLiteral("old"))
-	require.NoError(t, processGraph(ctx, first, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, cfg.DataTypeCols))
+	require.NoError(t, processGraph(ctx, first, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize))
 	loaded, err := cat.LoadTable(ctx, tbl.Identifier())
 	require.NoError(t, err)
 	firstSnapshotID := loaded.CurrentSnapshot().SnapshotID
@@ -115,7 +98,7 @@ func TestProcessGraphDiffAddsAndRemovesByTripleHash(t *testing.T) {
 	second := rdflibgo.NewGraph()
 	second.Add(rdflibgo.NewURIRefUnsafe("http://example.com/keep"), predicate, rdflibgo.NewLiteral("same"))
 	second.Add(rdflibgo.NewURIRefUnsafe("http://example.com/add"), predicate, rdflibgo.NewLiteral("new"))
-	require.NoError(t, processGraph(ctx, second, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, cfg.DataTypeCols))
+	require.NoError(t, processGraph(ctx, second, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize))
 
 	loaded, err = cat.LoadTable(ctx, tbl.Identifier())
 	require.NoError(t, err)
@@ -134,13 +117,10 @@ func TestProcessGraphDiffAddsAndRemovesByTripleHash(t *testing.T) {
 func TestWriteGraphToIcebergDoesNotRewriteEquivalentBlankNodeGraph(t *testing.T) {
 	ctx := context.Background()
 	cfg := &LoadConfig{
-		BatchSize:           10,
-		ParquetCompression:  "snappy",
-		MetricsMode:         "truncate(16)",
-		TargetFileSizeBytes: 0,
-		Warehouse:           t.TempDir(),
-		Namespace:           "default",
-		DataTypeCols:        true,
+		BatchSize:          10,
+		ParquetCompression: "snappy",
+		Warehouse:          t.TempDir(),
+		Namespace:          "default",
 	}
 
 	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("first"), cfg, map[string]string{"sal.hash": "first"}))
@@ -170,7 +150,6 @@ func TestWriteGraphToIcebergStoresBlankNodesWithNTriplesPrefix(t *testing.T) {
 	cfg := &LoadConfig{
 		BatchSize:          10,
 		ParquetCompression: "snappy",
-		MetricsMode:        "truncate(16)",
 		Warehouse:          t.TempDir(),
 		Namespace:          "default",
 	}
@@ -182,7 +161,8 @@ func TestWriteGraphToIcebergStoresBlankNodesWithNTriplesPrefix(t *testing.T) {
 	require.NoError(t, err)
 
 	var subjects, objects []string
-	_, records, err := tbl.Scan(table.WithSelectedFields("subject", "object")).ToArrowRecords(ctx)
+	// a blank node object is stored in object_string with its _: prefix
+	_, records, err := tbl.Scan(table.WithSelectedFields("subject", "object_string")).ToArrowRecords(ctx)
 	require.NoError(t, err)
 	for rec, err := range records {
 		require.NoError(t, err)

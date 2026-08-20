@@ -2,7 +2,6 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { fetchStats, type TableStats } from './api'
 import { StatsTab } from './tabs/StatsTab'
 import { SqlTab } from './tabs/SqlTab'
-import { MapTab } from './tabs/MapTab'
 import { ModulesTab } from './tabs/ModulesTab'
 import { BlobsTab } from './tabs/BlobsTab'
 import { TABS, useRoute } from './routing'
@@ -11,6 +10,8 @@ import './App.css'
 // YASGUI and its CodeMirror 5 bundle dominate the build, so keep them out of the
 // initial chunk and load them the first time the SPARQL tab is opened.
 const SparqlTab = lazy(() => import('./tabs/SparqlTab').then((module) => ({ default: module.SparqlTab })))
+// MapLibre is nearly as large, and only the Map tab needs it.
+const MapTab = lazy(() => import('./tabs/MapTab').then((module) => ({ default: module.MapTab })))
 
 export function App() {
   const { tab: active, sharedQuery, navigate } = useRoute()
@@ -89,7 +90,11 @@ export function App() {
         )}
         {active === 'Modules' && <ModulesTab modules={stats?.modules ?? null} />}
         {active === 'Blobs' && <BlobsTab />}
-        {active === 'Map' && <MapTab />}
+        {active === 'Map' && (
+          <Suspense fallback={<p className="empty">Loading the map…</p>}>
+            <MapTab />
+          </Suspense>
+        )}
       </main>
     </div>
   )

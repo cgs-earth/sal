@@ -52,7 +52,7 @@ var vocabularyClassIRIs = slices.Concat(
 // ClassesSQL lists every RDF class the data product types a resource with,
 // most instantiated first. A class is the object of an rdf:type statement, so
 // this is a filter on the predicate column rather than a schema lookup.
-func ClassesSQL(layout ObjectLayout) string {
+func ClassesSQL() string {
 	return fmt.Sprintf(`
 SELECT
 	%s AS class,
@@ -60,14 +60,14 @@ SELECT
 FROM triples
 WHERE triples.predicate = '%s'
 GROUP BY class
-ORDER BY instances DESC, class`, bindingExpr("triples", "object", layout), RDFTypeIRI)
+ORDER BY instances DESC, class`, bindingExpr("triples", "object"), RDFTypeIRI)
 }
 
 // DatatypesSQL lists every resource the data product declares to be an
 // rdfs:Datatype, with the label and comment it is annotated with. Both
 // annotations are optional, so they are left joined and come back empty for a
 // datatype that does not state them.
-func DatatypesSQL(layout ObjectLayout) string {
+func DatatypesSQL() string {
 	return fmt.Sprintf(`
 SELECT
 	datatypes.subject AS datatype,
@@ -84,26 +84,26 @@ WHERE datatypes.predicate = '%s'
 	AND %s = '%s'
 GROUP BY datatype
 ORDER BY datatype`,
-		bindingExpr("labels", "object", layout),
-		bindingExpr("comments", "object", layout),
+		bindingExpr("labels", "object"),
+		bindingExpr("comments", "object"),
 		RDFSLabelIRI,
 		RDFSCommentIRI,
 		RDFTypeIRI,
-		bindingExpr("datatypes", "object", layout),
+		bindingExpr("datatypes", "object"),
 		RDFSDatatypeIRI)
 }
 
 // DescribeSQL lists every statement the data product makes about one subject.
 // It is the `<subject> ?p ?o` pattern, and since the subject is bound it stays a
 // filter on the subject column rather than going through SPARQL translation.
-func DescribeSQL(subject string, layout ObjectLayout) string {
+func DescribeSQL(subject string) string {
 	return fmt.Sprintf(`
 SELECT
 	triples.predicate AS predicate,
 	%s AS object
 FROM triples
 WHERE triples.subject = %s
-ORDER BY predicate, object`, bindingExpr("triples", "object", layout), sqlString(subject))
+ORDER BY predicate, object`, bindingExpr("triples", "object"), sqlString(subject))
 }
 
 // InstancesSQL pairs every resource the data product instantiates with the
@@ -113,7 +113,7 @@ ORDER BY predicate, object`, bindingExpr("triples", "object", layout), sqlString
 // filtered out instead is the other direction: a subject that is itself a
 // class, property, datatype, or ontology describes the schema and is not an
 // instance of it.
-func InstancesSQL(layout ObjectLayout) string {
+func InstancesSQL() string {
 	return fmt.Sprintf(`
 SELECT DISTINCT
 	instances.subject AS instance,
@@ -127,10 +127,10 @@ WHERE instances.predicate = '%s'
 			AND %s IN (%s)
 	)
 ORDER BY class, instance`,
-		bindingExpr("instances", "object", layout),
+		bindingExpr("instances", "object"),
 		RDFTypeIRI,
 		RDFTypeIRI,
-		bindingExpr("vocabulary", "object", layout),
+		bindingExpr("vocabulary", "object"),
 		quotedIRIList(vocabularyClassIRIs))
 }
 
@@ -140,7 +140,7 @@ ORDER BY class, instance`,
 // owl:AnnotationProperty, so the type it is reported with is the object of that
 // statement; a property declared to be more than one of them is listed once per
 // type, the way `sal get instances` lists a resource once per class.
-func PropertiesSQL(layout ObjectLayout) string {
+func PropertiesSQL() string {
 	return fmt.Sprintf(`
 SELECT DISTINCT
 	properties.subject AS property,
@@ -149,9 +149,9 @@ FROM triples AS properties
 WHERE properties.predicate = '%s'
 	AND %s IN (%s)
 ORDER BY property, type`,
-		bindingExpr("properties", "object", layout),
+		bindingExpr("properties", "object"),
 		RDFTypeIRI,
-		bindingExpr("properties", "object", layout),
+		bindingExpr("properties", "object"),
 		quotedIRIList(propertyClassIRIs))
 }
 
@@ -181,7 +181,7 @@ func quotedIRIList(iris []string) string {
 // named with the prefixed form of that predicate, so the table says which term
 // each value was read from rather than leaving `label` to stand for whichever
 // of the several labelling predicates a vocabulary offers.
-func ShapesSQL(layout ObjectLayout) string {
+func ShapesSQL() string {
 	return fmt.Sprintf(`
 SELECT
 	shapes.subject AS shape,
@@ -203,15 +203,15 @@ WHERE shapes.predicate = '%s'
 	AND %s IN ('%s', '%s')
 GROUP BY shape, "rdf:type", "sh:targetClass"
 ORDER BY shape, "rdf:type", "sh:targetClass"`,
-		bindingExpr("labels", "object", layout),
-		bindingExpr("comments", "object", layout),
-		bindingExpr("shapes", "object", layout),
-		bindingExpr("targets", "object", layout),
+		bindingExpr("labels", "object"),
+		bindingExpr("comments", "object"),
+		bindingExpr("shapes", "object"),
+		bindingExpr("targets", "object"),
 		RDFSLabelIRI,
 		RDFSCommentIRI,
 		SHTargetClassIRI,
 		RDFTypeIRI,
-		bindingExpr("shapes", "object", layout),
+		bindingExpr("shapes", "object"),
 		SHNodeShapeIRI,
 		SHPropertyShapeIRI)
 }

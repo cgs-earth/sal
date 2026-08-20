@@ -141,7 +141,7 @@ FROM iceberg_scan('%s', allow_moved_paths = true)`, quoteIdentifier(table.View),
 
 // RunSQL executes a DuckDB statement with the Iceberg triples table registered as the `triples` view.
 func (r DuckDBRunner) RunSQL(ctx context.Context, statement string) (Result, error) {
-	withSpatial := needsSpatial(statement, r.Layout)
+	withSpatial := needsSpatial(statement)
 	header, rows, err := r.runSQL(ctx, statement, withSpatial)
 	// A statement can need spatial in a way needsSpatial does not recognize.
 	// Loading it and running again beats failing a query that would have worked.
@@ -228,18 +228,14 @@ var countStar = regexp.MustCompile(`count\s*\(\s*\*\s*\)`)
 //
 // The extension is around 60 MB and DuckDB cannot autoload it, so loading it
 // unconditionally costs more than any query against a triples table costs to
-// actually run. Two things need it: the ST_ functions, and the typed layout's
-// object_geometry column, which DuckDB exposes as GEOMETRY and cannot read at
-// all without spatial.
-func needsSpatial(sql string, layout ObjectLayout) bool {
+// actually run. Two things need it: the ST_ functions, and the object_geometry
+// column, which DuckDB exposes as GEOMETRY and cannot read at all without
+// spatial.
+func needsSpatial(sql string) bool {
 	lowered := strings.ToLower(sql)
 	// Every DuckDB spatial function is named ST_*.
 	if strings.Contains(lowered, "st_") {
 		return true
-	}
-	// The simple layout has no geometry column for a projection to reach.
-	if layout != TypedObjects {
-		return false
 	}
 	projected := countStar.ReplaceAllString(lowered, "")
 	return strings.Contains(projected, "object_geometry") || strings.Contains(projected, "*")

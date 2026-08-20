@@ -38,12 +38,17 @@ They are described in [Pinned vocabularies](#pinned-vocabularies) below. [`sal s
 
 ## RDF triples
 
-SAL builds RDF into rows representing triples:
+SAL builds RDF into rows representing triples, with the object split across one column per kind of term so that each can be compared and read natively:
 
 - `subject`
 - `predicate`
-- `object`
+- `object_iri`: an IRI object
+- `object_float`: a numeric literal, stored as a `DOUBLE`
+- `object_string`: any other literal, or a blank node with its `_:` prefix
+- `object_geometry`: a GeoSPARQL `wktLiteral`, stored as an Iceberg `geometry`
 - `triple_hash`
+
+Exactly one of the four object columns is set on each row. The geometry column is what makes the table an Iceberg format version 3 table.
 
 The hash identifies a triple from its subject, predicate, and object.
 SAL uses this identity to avoid writing duplicate triples when the table already contains the same data.

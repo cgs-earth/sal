@@ -22,26 +22,22 @@ func localDB(t *testing.T) *sql.DB {
 }
 
 func TestNeedsSpatialDetectsSTFunctions(t *testing.T) {
-	require.True(t, needsSpatial(geometrySQL(SimpleObjects, 10, 0), SimpleObjects))
-	require.True(t, needsSpatial("SELECT ST_AsText(geom) FROM shapes", SimpleObjects))
+	require.True(t, needsSpatial(geometrySQL(GeometryQuery{Limit: 10})))
+	require.True(t, needsSpatial("SELECT ST_AsText(geom) FROM shapes"))
 }
 
-func TestNeedsSpatialSkipsTheStatsQueriesOnTheSimpleLayout(t *testing.T) {
-	require.False(t, needsSpatial(countsSQL(SimpleObjects), SimpleObjects))
-	require.False(t, needsSpatial("SELECT * FROM triples LIMIT 20", SimpleObjects))
-}
-
-func TestNeedsSpatialSkipsTheCountsQueryOnTheTypedLayout(t *testing.T) {
+func TestNeedsSpatialSkipsTheCountsQuery(t *testing.T) {
 	// The counts query names the object columns individually, so COUNT(*) is the
 	// only star in it and nothing projects the geometry column.
-	require.False(t, needsSpatial(countsSQL(TypedObjects), TypedObjects))
+	require.False(t, needsSpatial(countsSQL()))
+	require.False(t, needsSpatial("SELECT subject FROM triples LIMIT 20"))
 }
 
-func TestNeedsSpatialCoversStarProjectionsOnTheTypedLayout(t *testing.T) {
+func TestNeedsSpatialCoversStarProjections(t *testing.T) {
 	// DuckDB reads object_geometry as GEOMETRY and cannot cast it without spatial,
 	// so a bare star has to load the extension even with no ST_ call in sight.
-	require.True(t, needsSpatial("SELECT * FROM triples LIMIT 20", TypedObjects))
-	require.True(t, needsSpatial("SELECT object_geometry FROM triples", TypedObjects))
+	require.True(t, needsSpatial("SELECT * FROM triples LIMIT 20"))
+	require.True(t, needsSpatial("SELECT object_geometry FROM triples"))
 }
 
 func TestMissingSpatialExtensionRecognizesBothDuckDBReports(t *testing.T) {

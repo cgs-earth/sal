@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/csv"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,10 +30,6 @@ type Runner interface {
 	Run(ctx context.Context, query string) (Result, error)
 }
 
-type GeometryRunner interface {
-	Geometries(ctx context.Context, limit int, offset int) (FeatureCollection, error)
-}
-
 type SQLRunner interface {
 	RunSQL(ctx context.Context, sql string) (Result, error)
 }
@@ -45,7 +40,6 @@ type StatsRunner interface {
 
 type DuckDBRunner struct {
 	TablePath string
-	Layout    ObjectLayout
 	Limit     int
 	// Imports are the imported data products registered as views of their own
 	// beside the project's `triples` view.
@@ -78,7 +72,7 @@ func (r sqlRunner) Run(ctx context.Context, query string) (Result, error) {
 
 // Run translates SPARQL to SQL and executes it through DuckDB.
 func (r DuckDBRunner) Run(ctx context.Context, query string) (Result, error) {
-	sql, err := ToSQL(query, r.Layout)
+	sql, err := ToSQL(query)
 	if err != nil {
 		return Result{}, err
 	}
@@ -88,54 +82,6 @@ func (r DuckDBRunner) Run(ctx context.Context, query string) (Result, error) {
 	}
 
 	return r.RunSQL(ctx, sql)
-}
-
-// Geometries reads a bounded page of WKB object geometries and converts them to GeoJSON features.
-func (r DuckDBRunner) Geometries(ctx context.Context, limit int, offset int) (FeatureCollection, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 100
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	sql := geometrySQL(r.Layout, limit, offset)
-	result, err := r.RunSQL(ctx, sql)
-	if err != nil {
-		return FeatureCollection{}, err
-	}
-	features := make([]Feature, 0, len(result.Rows))
-	for _, row := range result.Rows {
-		if len(row) < 4 || strings.TrimSpace(row[3]) == "" {
-			continue
-		}
-		features = append(features, Feature{
-			Type:     "Feature",
-			Geometry: json.RawMessage(row[3]),
-			Properties: map[string]string{
-				"subject":   row[0],
-				"predicate": row[1],
-				"object":    row[2],
-			},
-		})
-	}
-	return FeatureCollection{
-		Type:     "FeatureCollection",
-		Features: features,
-	}, nil
-}
-
-// geometrySQL builds the map data query for both legacy and typed object column layouts.
-func geometrySQL(layout ObjectLayout, limit int, offset int) string {
-	return fmt.Sprintf(`
-SELECT
-	triples.subject,
-	triples.predicate,
-	%s AS object,
-	ST_AsGeoJSON(ST_GeomFromWKB(triples.object_geometry)) AS geometry
-FROM triples
-WHERE triples.object_geometry IS NOT NULL
-LIMIT %d
-OFFSET %d`, bindingExpr("triples", "object", layout), limit, offset)
 }
 
 func hasLimit(sql string) bool {

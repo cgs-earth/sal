@@ -50,15 +50,15 @@ type tableHead interface {
 // module materializes always lands on top of a build of the sources as they
 // stand.
 func (cfg *RunCmd) Run() (*rdflibgo.Graph, error) {
-	var head tableHead
 	var err error
 	if cfg.Force {
 		// a dirty worktree means the sources match no commit at all, so checking
-		// the table against HEAD would assure nothing; force skips both checks
+		// the table against HEAD would assure nothing; force skips both checks,
+		// and only asks that there is a built table to run on top of
 		slog.Warn("Running SAL modules with a modified source tree. This should only be done for testing purposes.")
-		head, err = loadTableHead()
+		_, err = loadTableHead()
 	} else {
-		head, err = verifyBuildMatchesWorktree()
+		_, err = verifyBuildMatchesWorktree()
 	}
 	if err != nil {
 		return nil, err
@@ -67,13 +67,11 @@ func (cfg *RunCmd) Run() (*rdflibgo.Graph, error) {
 	// the graph the modules' output is committed alongside is rebuilt through
 	// the same pipeline `sal build` committed it with, so the only change the
 	// snapshot ends up carrying is what the modules produced
-	_, typed := head.CurrentSchema().FindFieldByName("object_geometry")
 	buildCfg := &BuildCmd{
-		Paths:        cfg.Paths,
-		Format:       GraphExportFormatIceberg,
-		DataTypeCols: typed,
-		Force:        cfg.Force,
-		runModules:   true,
+		Paths:      cfg.Paths,
+		Format:     GraphExportFormatIceberg,
+		Force:      cfg.Force,
+		runModules: true,
 	}
 	return buildCfg.Run()
 }

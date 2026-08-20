@@ -14,18 +14,10 @@ import (
 
 const geoSPARQLWKTLiteral = "http://www.opengis.net/ont/geosparql#wktLiteral"
 
-func appendObjectColumns(builder *array.RecordBuilder, t rdfObject) error {
-	// if we are using the simple s,p,o,hash schema and have 4 columns
-	// we can just append the object column directly
-	if builder.Schema().NumFields() == 4 {
-		builder.Field(2).(*array.StringBuilder).Append(t.o)
-		return nil
-	}
-	// otherwise we map the object to the proper iceberg type and
-	return appendObjectFields(builder, t)
-}
-
-// appendObjectFields serializes an RDF object into the Iceberg object union columns.
+// appendObjectFields serializes an RDF object into the Iceberg object union
+// columns: an IRI into object_iri, a WKT literal into object_geometry, a numeric
+// literal into object_float, and everything else, blank nodes included, into
+// object_string. Exactly one of the four is set on each row.
 func appendObjectFields(builder *array.RecordBuilder, t rdfObject) error {
 	objectIRI := builder.Field(2).(*array.StringBuilder)
 	objectFloat := builder.Field(3).(*array.Float64Builder)

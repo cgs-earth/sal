@@ -81,23 +81,16 @@ Press `F2` in `sal query --sparql` to see the SQL generated for whatever is in t
 
 ### Object columns
 
-Which column an object binds to depends on how the table was built.
-
-A table built **without** `--typed` has a single `object` column, and every object term — IRI or literal — is compared and projected as text.
-
-A table built with [`sal build --typed`](/sal/reference/commands/#sal-build) splits objects across `object_iri`, `object_float`, `object_string`, and `object_geometry`. The translator picks the column from the term it is being compared against:
+The table splits objects across `object_iri`, `object_float`, `object_string`, and `object_geometry`, and the translator picks the column from the term an object is being compared against:
 
 | Term in the query | Column used |
 | --- | --- |
 | An IRI or prefixed name | `object_iri` |
 | A number, or a literal whose lexical form parses as one | `object_float` |
 | Any other literal | `object_string` |
+| A geometry, in a [GeoSPARQL function](#geosparql) | `object_geometry` |
 
-A projected object variable is read back as `COALESCE(object_iri, CAST(object_float AS VARCHAR), object_string)`, so a result row shows the object whichever column holds it.
-
-:::caution
-`object_geometry` is not part of that coalesce. A triple whose object is a GeoSPARQL WKT literal stores its geometry there and leaves the other object columns null, so binding such an object in SPARQL yields an empty value. Read geometries through SQL and the `ST_` functions instead — `sal query`, `POST /api/sql`, or `GET /geometries` — or restore them as WKT literals with [`sal export`](/sal/reference/commands/#sal-export).
-:::
+A projected object variable is read back as `COALESCE(object_iri, CAST(object_float AS VARCHAR), object_string, ST_AsText(object_geometry))`, so a result row shows the object whichever column holds it. A triple whose object is a GeoSPARQL WKT literal stores its geometry in `object_geometry` and leaves the other object columns null; projecting it renders the geometry back to WKT, such as `POINT (-89.5 40.5)`. The `ST_AsText` is what makes projecting an object load DuckDB's spatial extension the first time; a join or a comparison on an object variable never renders the geometry and so never needs it.
 
 In a `FILTER`, the same rule applies to whichever side the variable is compared against, so `FILTER(?age > 21)` compares `object_float` while `FILTER(?name = "bob")` compares `object_string`.
 
@@ -143,12 +136,13 @@ A datatype is used only to decide which object column to compare against, never 
 
 `FILTER` supports comparisons between a variable and a constant, or between two constants, combined with `&&` and `||`:
 
-| Operator | Supported |
-| --- | --- |
-| `=`, `!=`, `<`, `>`, `<=`, `>=` | Yes |
-| `&&`, `\|\|` | Yes |
-| `!`, arithmetic, `IN`, `EXISTS` | No |
-| Functions such as `REGEX`, `STR`, `LANG`, `BOUND`, `ST_*` | No |
+| Operator | Supported | Notes |
+| --- | --- | --- |
+| `=`, `!=`, `<`, `>`, `<=`, `>=` | Yes | |
+| `&&`, `\|\|`, `!` | Yes | |
+| GeoSPARQL `geof:` functions | Partly | The Simple Features relations, `geof:distance`, and the geometry constructors; see [GeoSPARQL](#geosparql). |
+| Arithmetic, `IN`, `EXISTS` | No | |
+| Functions such as `REGEX`, `STR`, `LANG`, `BOUND` | No | |
 
 Several `FILTER`s in one group are all applied, as if joined by `&&`.
 A `FILTER` over a variable no triple pattern binds is an error rather than a query that matches nothing.
@@ -169,6 +163,198 @@ FROM triples AS t0
 WHERE t0.predicate = 'https://schema.org/age'
   AND (t0.object_float >= 21 AND t0.object_float < 65)
 ```
+
+## GeoSPARQL
+
+[GeoSPARQL](https://www.ogc.org/standards/geosparql/) is the OGC standard for geospatial RDF. It has two halves, and SAL supports a subset of each:
+
+- The **vocabulary**, `geo:` (`http://www.opengis.net/ont/geosparql#`), is how geometry is written into the data: a feature has a `geo:hasGeometry`, and that geometry carries its shape as a `geo:asWKT` literal typed `geo:wktLiteral`. This is plain RDF, and `sal build` handles it like any other data.
+- The **functions**, `geof:` (`http://www.opengis.net/def/function/geosparql/`), are how geometry is queried: topological relations such as `geof:sfIntersects`, `geof:distance`, and geometry constructors such as `geof:envelope`. These are what the translator maps to DuckDB's [spatial extension](https://duckdb.org/docs/stable/core_extensions/spatial/overview).
+
+The mapping is deliberately mechanical. Each supported `geof:` function becomes the `ST_` function of the same meaning, and there is no geometry logic in SAL itself: what DuckDB's spatial extension computes is what the query answers. A function with no direct analog is an error rather than an approximation.
+
+### How geometry is stored
+
+A `geo:wktLiteral` object is parsed at build time and stored in the table's `object_geometry` column as a native Iceberg `geometry`, leaving the other object columns null for that row (see [Data Layout](/sal/reference/data-layout/#rdf-triples)). DuckDB reads that column as `GEOMETRY`, so a `geof:` function applies to it directly with no parsing at query time.
+
+Coordinates are stored as written, in longitude/latitude order, and the table declares them as CRS84. Any CRS IRI that led a literal, such as `<http://www.opengis.net/def/crs/OGC/1.3/CRS84> POINT(-89.5 40.5)`, is dropped on the way in, and a literal in a query is treated the same way; everything is assumed to be in the same coordinate system, and nothing is reprojected.
+
+```turtle
+@prefix schema: <https://schema.org/> .
+@prefix geo: <http://www.opengis.net/ont/geosparql#> .
+@prefix sf: <http://www.opengis.net/ont/sf#> .
+
+<MyPoint>
+    a schema:Place ;
+    schema:name "Demo Point" ;
+    geo:hasGeometry [
+        a sf:Point ;
+        geo:asWKT "POINT(-89.5 40.5)"^^geo:wktLiteral
+    ] .
+```
+
+That data becomes three kinds of row: `<MyPoint> geo:hasGeometry _:b` with the blank node in `object_string`, `_:b rdf:type sf:Point` in `object_iri`, and `_:b geo:asWKT ...` with the point in `object_geometry`.
+
+### Function mapping
+
+`geof:` functions are accepted inside `FILTER`. The supported ones and what each becomes:
+
+| GeoSPARQL | DuckDB spatial | Result | Notes |
+| --- | --- | --- | --- |
+| `geof:sfEquals(a, b)` | `ST_Equals(a, b)` | boolean | |
+| `geof:sfDisjoint(a, b)` | `ST_Disjoint(a, b)` | boolean | |
+| `geof:sfIntersects(a, b)` | `ST_Intersects(a, b)` | boolean | |
+| `geof:sfTouches(a, b)` | `ST_Touches(a, b)` | boolean | |
+| `geof:sfCrosses(a, b)` | `ST_Crosses(a, b)` | boolean | |
+| `geof:sfWithin(a, b)` | `ST_Within(a, b)` | boolean | |
+| `geof:sfContains(a, b)` | `ST_Contains(a, b)` | boolean | |
+| `geof:sfOverlaps(a, b)` | `ST_Overlaps(a, b)` | boolean | |
+| `geof:distance(a, b)` | `ST_Distance(a, b)` | number | In the units of the coordinates, which is degrees. |
+| `geof:distance(a, b, uom:degree)` | `ST_Distance(a, b)` | number | Same as above; `uom:` is `http://www.opengis.net/def/uom/OGC/1.0/`. |
+| `geof:distance(a, b, uom:metre)` | `ST_Distance_Sphere(a, b)` | number | Great-circle metres. DuckDB computes this between points only. |
+| `geof:envelope(a)` | `ST_Envelope(a)` | geometry | |
+| `geof:boundary(a)` | `ST_Boundary(a)` | geometry | |
+| `geof:convexHull(a)` | `ST_ConvexHull(a)` | geometry | |
+| `geof:intersection(a, b)` | `ST_Intersection(a, b)` | geometry | |
+| `geof:union(a, b)` | `ST_Union(a, b)` | geometry | |
+| `geof:difference(a, b)` | `ST_Difference(a, b)` | geometry | |
+| `geof:symDifference(a, b)` | `ST_SymDifference(a, b)` | geometry | |
+
+Not supported: `geof:buffer` (it takes a unit SAL would have to convert), `geof:getSRID`, `geof:relate`, and the Egenhofer `geof:eh*` and RCC8 `geof:rcc8*` relation families. Calling one reports `GeoSPARQL function geof:... is not supported yet`.
+
+How a function may be used follows from what it returns:
+
+- A **boolean** function stands on its own in the `FILTER`, and can be negated with `!` or combined with `&&` and `||` like any other condition.
+- A **number**, which is only `geof:distance`, must be compared against a number with `<`, `<=`, `>`, `>=`, `=`, or `!=`.
+- A **geometry** function cannot be projected or compared, since projection expressions are not supported; it is only useful nested as the argument of a boolean or numeric one, such as `geof:sfContains(geof:envelope(?g), ...)`.
+
+Each geometry argument of a function is one of:
+
+| Argument | Becomes |
+| --- | --- |
+| A variable bound in **object position**, e.g. the `?wkt` of `?g geo:asWKT ?wkt` | `tN.object_geometry` |
+| A `geo:wktLiteral`, e.g. `"POINT(-89.5 40.5)"^^geo:wktLiteral` | `ST_GeomFromText('POINT(-89.5 40.5)')` |
+| A nested geometry-valued `geof:` call | The nested `ST_` call |
+
+A plain string literal is accepted as WKT too, since the datatype is only used to reject what is certainly not WKT. A variable bound as a subject or predicate, a `geo:gmlLiteral`, or a boolean function where a geometry is expected is an error that names the problem.
+
+### Examples with their SQL
+
+Everything intersecting a bounding box, with the name of each feature. The `?wkt` variable is bound in object position by the `geo:asWKT` pattern, so it reads the geometry column directly; the literal becomes `ST_GeomFromText`:
+
+```sparql
+PREFIX schema: <https://schema.org/>
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+
+SELECT ?place ?name ?wkt
+WHERE {
+  ?place schema:name ?name .
+  ?place geo:hasGeometry ?geometry .
+  ?geometry geo:asWKT ?wkt .
+  FILTER(geof:sfIntersects(?wkt, "POLYGON((-91 39, -88 39, -88 42, -91 42, -91 39))"^^geo:wktLiteral))
+}
+```
+
+```sql
+SELECT t0.subject AS "place",
+  COALESCE(t0.object_iri, CAST(t0.object_float AS VARCHAR), t0.object_string, ST_AsText(t0.object_geometry)) AS "name",
+  COALESCE(t2.object_iri, CAST(t2.object_float AS VARCHAR), t2.object_string, ST_AsText(t2.object_geometry)) AS "wkt"
+FROM triples AS t0
+CROSS JOIN triples AS t1
+CROSS JOIN triples AS t2
+WHERE t0.predicate = 'https://schema.org/name'
+  AND t0.subject = t1.subject
+  AND t1.predicate = 'http://www.opengis.net/ont/geosparql#hasGeometry'
+  AND COALESCE(t1.object_iri, CAST(t1.object_float AS VARCHAR), t1.object_string) = t2.subject
+  AND t2.predicate = 'http://www.opengis.net/ont/geosparql#asWKT'
+  AND ST_Intersects(t2.object_geometry, ST_GeomFromText('POLYGON((-91 39, -88 39, -88 42, -91 42, -91 39))'))
+```
+
+Everything within 25 km of a point. The `uom:metre` unit selects the spherical distance:
+
+```sparql
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+PREFIX uom: <http://www.opengis.net/def/uom/OGC/1.0/>
+
+SELECT ?place ?wkt
+WHERE {
+  ?place geo:hasGeometry ?geometry .
+  ?geometry geo:asWKT ?wkt .
+  FILTER(geof:distance(?wkt, "POINT(-89.5 40.5)"^^geo:wktLiteral, uom:metre) < 25000)
+}
+```
+
+```sql
+SELECT t0.subject AS "place",
+  COALESCE(t1.object_iri, CAST(t1.object_float AS VARCHAR), t1.object_string, ST_AsText(t1.object_geometry)) AS "wkt"
+FROM triples AS t0
+CROSS JOIN triples AS t1
+WHERE t0.predicate = 'http://www.opengis.net/ont/geosparql#hasGeometry'
+  AND COALESCE(t0.object_iri, CAST(t0.object_float AS VARCHAR), t0.object_string) = t1.subject
+  AND t1.predicate = 'http://www.opengis.net/ont/geosparql#asWKT'
+  AND ST_Distance_Sphere(t1.object_geometry, ST_GeomFromText('POINT(-89.5 40.5)')) < 25000
+```
+
+Relations between two geometries in the data, rather than against a literal. Each `geo:asWKT` pattern scans the table once, so this is a self-join, and the `FILTER` compares the two geometry columns:
+
+```sparql
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+
+SELECT ?a ?b
+WHERE {
+  ?a geo:asWKT ?ga .
+  ?b geo:asWKT ?gb .
+  FILTER(geof:sfWithin(?ga, ?gb) && !geof:sfEquals(?ga, ?gb))
+}
+```
+
+```sql
+SELECT t0.subject AS "a", t1.subject AS "b"
+FROM triples AS t0
+CROSS JOIN triples AS t1
+WHERE t0.predicate = 'http://www.opengis.net/ont/geosparql#asWKT'
+  AND t1.predicate = 'http://www.opengis.net/ont/geosparql#asWKT'
+  AND (ST_Within(t0.object_geometry, t1.object_geometry) AND NOT (ST_Equals(t0.object_geometry, t1.object_geometry)))
+```
+
+A geometry constructor nested inside a relation, asking which geometries have a bounding box that contains a point:
+
+```sparql
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+
+SELECT ?geometry
+WHERE {
+  ?geometry geo:asWKT ?wkt .
+  FILTER(geof:sfContains(geof:envelope(?wkt), "POINT(-89.5 40.5)"^^geo:wktLiteral))
+}
+```
+
+```sql
+SELECT t0.subject AS "geometry"
+FROM triples AS t0
+WHERE t0.predicate = 'http://www.opengis.net/ont/geosparql#asWKT'
+  AND ST_Contains(ST_Envelope(t0.object_geometry), ST_GeomFromText('POINT(-89.5 40.5)'))
+```
+
+Press `F2` in `sal query --sparql` to see the translation of whatever is in the editor.
+
+### Geometry in results
+
+A projected object variable is rendered with `ST_AsText`, so a geometry comes back as WKT, such as `POINT (-89.5 40.5)`, the same way it went in minus any CRS prefix. Over the HTTP endpoint such a binding is a `literal` with `"datatype": "http://www.opengis.net/ont/geosparql#wktLiteral"`, the one datatype [the endpoint reports](#the-http-endpoint). The **Map** tab of `sal serve --with-ui` recognizes those WKT values in the last SPARQL result and draws them, with the other columns of the row as each feature's properties; see [`--with-ui`](/sal/reference/commands/#--with-ui).
+
+### Limitations
+
+- **One coordinate system.** CRS IRIs are dropped, not honored. All geometries are taken to share the CRS84 longitude/latitude frame the table declares, and `geof:distance` in degrees is a planar distance in that frame.
+- **Metres between points only.** `uom:metre` is answered with `ST_Distance_Sphere`, which DuckDB defines for points; between lines or polygons it is an error. Use degrees, or a bounding box, for those.
+- **No geometry output.** Because projection expressions are not supported, a query cannot `SELECT (geof:envelope(?g) AS ?box)`; geometry-valued functions only appear nested in a `FILTER`.
+- **No spatial index.** A relation against a literal evaluates the `ST_` function on every geometry row. That is quick for the sizes a data product usually holds, but it is a scan, not an R-tree lookup.
+- **First use loads the extension.** DuckDB's spatial extension is loaded on the first query that needs it, which adds a moment to that query and nothing to the ones after it in the same process.
+
+For spatial work beyond this subset, the same `object_geometry` column is available to the full set of DuckDB `ST_` functions through [`sal query`](/sal/reference/commands/#sal-query) and `POST /api/sql`, and `GET /geometries?bbox=` answers a bounding box directly as GeoJSON; see [When the subset is not enough](#when-the-subset-is-not-enough).
 
 ## Examples
 
@@ -252,11 +438,11 @@ curl -s 'http://localhost:8080/sparql' \
 }
 ```
 
-Because results come back from SQL as text, a binding's `type` is inferred from its value rather than carried from the table: a value starting with `http://` or `https://` is reported as a `uri`, one starting with `_:` as a `bnode`, and everything else as a `literal`. Datatypes and language tags are not reported.
+Because results come back from SQL as text, a binding's `type` is inferred from its value rather than carried from the table: a value starting with `http://` or `https://` is reported as a `uri`, one starting with `_:` as a `bnode`, and everything else as a `literal`. Language tags are not reported, and the only datatype that is is `geo:wktLiteral`, on a literal that reads as WKT — the one datatype a value gives away on its own.
 
 ## When the subset is not enough
 
 Two ways around it, depending on what you need:
 
-- **Query the table as SQL.** [`sal query`](/sal/reference/commands/#sal-query) opens the same `triples` view in a DuckDB shell, and `sal serve --with-ui` exposes `POST /api/sql`. Aggregation, ordering, window functions, geometry via the `ST_` functions, and joins against imported data products are all available there. A project that imported a data product with `sal import oci://...` gets a view per imported table plus an `imports` view stacking them, none of which SPARQL can reach — SPARQL only ever queries the project's own `triples` view.
+- **Query the table as SQL.** [`sal query`](/sal/reference/commands/#sal-query) opens the same `triples` view in a DuckDB shell, and `sal serve --with-ui` exposes `POST /api/sql`. Aggregation, ordering, window functions, the full set of `ST_` geometry functions, and joins against imported data products are all available there. A project that imported a data product with `sal import oci://...` gets a view per imported table plus an `imports` view stacking them, none of which SPARQL can reach — SPARQL only ever queries the project's own `triples` view.
 - **Take the graph elsewhere.** [`sal export`](/sal/reference/commands/#sal-export) writes the data product as N-Triples, which any full SPARQL engine can load.

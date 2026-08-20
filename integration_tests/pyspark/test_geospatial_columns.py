@@ -28,7 +28,6 @@ def built_table(repo_root, warehouse):
             "run",
             ".",
             "build",
-            "--typed",
             "--force",
             "build/testdata/correct/geo.ttl",
         ],

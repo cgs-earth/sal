@@ -127,6 +127,18 @@ func SquashSnapshots(tbl *table.Table, cat catalog.Catalog, localOnlySnapshotIDs
 	newSnapshot.ParentSnapshotID = parentSnapshotID
 	newSnapshot.SequenceNumber = tbl.Metadata().LastSequenceNumber() + 1
 	newSnapshot.TimestampMs = time.Now().UnixMilli()
+	// A format version 3 table tracks row lineage: every snapshot states the
+	// first row ID it assigns and how many rows it adds, and a snapshot may not
+	// start behind the table's cursor. The squashed snapshot reuses the latest
+	// snapshot's manifest list, whose rows already carry their IDs, so it
+	// assigns none: it starts at the cursor and adds zero rows, which leaves the
+	// cursor where it was.
+	if tbl.Metadata().Version() >= 3 {
+		firstRowID := tbl.Metadata().NextRowID()
+		addedRows := int64(0)
+		newSnapshot.FirstRowID = &firstRowID
+		newSnapshot.AddedRows = &addedRows
+	}
 
 	latestGitHash, err := pkg.GitCommitHash()
 	if err != nil {

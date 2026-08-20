@@ -625,43 +625,198 @@ kbd {
 
 /* ---------- map ---------- */
 
-.map-placeholder {
+.map-panel {
+  height: 100%;
+}
+
+.map-layout {
   display: flex;
   flex: 1;
+  min-height: 0;
+}
+
+.map-controls {
+  display: flex;
+  flex: none;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 40px;
-  text-align: center;
-  background: repeating-linear-gradient(
-    45deg,
-    var(--base),
-    var(--base) 12px,
-    var(--mantle) 12px,
-    var(--mantle) 24px
-  );
+  gap: 18px;
+  width: 300px;
+  padding: 14px 16px;
+  overflow-y: auto;
+  background: var(--mantle);
+  border-right: var(--border);
 }
 
-.map-glyph {
-  font-size: 46px;
-  line-height: 1;
-  color: var(--surface2);
+.map-control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.map-placeholder h4 {
-  color: var(--subtext0);
-  font-size: 15px;
+.map-control-group > .chips-label {
+  align-self: flex-start;
 }
 
-.map-placeholder p {
-  max-width: 52ch;
-  color: var(--overlay1);
-  font-size: 13px;
-}
-
-.map-placeholder code {
+.map-control-group .hint code {
   color: var(--teal);
+}
+
+.map-chips {
+  padding: 0;
+}
+
+.chip.active {
+  color: var(--crust);
+  background: var(--lavender);
+  border-color: var(--lavender);
+}
+
+.chip:disabled {
+  color: var(--overlay0);
+  cursor: not-allowed;
+}
+
+.chip:disabled:hover {
+  background: transparent;
+  border-color: var(--surface1);
+  color: var(--overlay0);
+}
+
+.map-bbox-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.map-bbox-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.map-bbox-field span {
+  color: var(--overlay1);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.map-bbox-field .module-input {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.map-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.map-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--subtext0);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.map-toggle input {
+  accent-color: var(--lavender);
+}
+
+.map-link {
+  align-self: flex-start;
+}
+
+.map-controls .error-banner {
+  margin: 0;
+}
+
+.map-canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  background: var(--crust);
+}
+
+/* MapLibre's own chrome is styled for a light page; recolor it to the theme. */
+.map-canvas .maplibregl-ctrl-group {
+  background: var(--surface0);
+  border: var(--border-strong);
+  box-shadow: none;
+}
+
+.map-canvas .maplibregl-ctrl-group button + button {
+  border-top-color: var(--surface1);
+}
+
+.map-canvas .maplibregl-ctrl button .maplibregl-ctrl-icon {
+  filter: invert(0.85);
+}
+
+.map-canvas .maplibregl-ctrl-attrib,
+.map-canvas .maplibregl-ctrl-scale {
+  background: color-mix(in srgb, var(--mantle) 80%, transparent);
+  color: var(--subtext0);
+  border-color: var(--surface2);
+  font-size: 11px;
+}
+
+.map-canvas .maplibregl-ctrl-attrib a {
+  color: var(--sky);
+}
+
+.map-popup .maplibregl-popup-content {
+  max-height: 320px;
+  padding: 10px 24px 10px 12px;
+  overflow: auto;
+  background: var(--surface0);
+  border: var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+
+.map-popup .maplibregl-popup-close-button {
+  color: var(--overlay2);
+  font-size: 18px;
+}
+
+.map-popup .maplibregl-popup-close-button:hover {
+  background: transparent;
+  color: var(--text);
+}
+
+.map-popup .maplibregl-popup-tip {
+  border-top-color: var(--surface0);
+  border-bottom-color: var(--surface0);
+}
+
+.map-popup-table {
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.map-popup-table th {
+  padding: 3px 10px 3px 0;
+  color: var(--lavender);
+  font-weight: 600;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.map-popup-table td {
+  padding: 3px 0;
+  color: var(--subtext1);
+  overflow-wrap: anywhere;
+}
+
+.map-popup-table a {
+  color: var(--sky);
 }
 
 /* ---------- sparql ---------- */

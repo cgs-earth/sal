@@ -52,21 +52,18 @@ func LocateTriplesTable() (TriplesTable, error) {
 	}, nil
 }
 
-// Runner opens a DuckDB runner over the table with the object column layout the
-// table was built with, so queries bind the object column the same way the
-// SPARQL shell and the serve endpoints do.
+// Runner opens a DuckDB runner over the table, after checking that the table
+// has the object columns every query in this package reads.
 func (t TriplesTable) Runner(ctx context.Context, limit int) (DuckDBRunner, error) {
-	layout, err := ObjectLayoutForTable(ctx, t.Warehouse, t.Namespace)
-	if err != nil {
+	if err := VerifyObjectColumns(ctx, t.Warehouse, t.Namespace); err != nil {
 		return DuckDBRunner{}, err
 	}
-	return DuckDBRunner{TablePath: t.Path, Layout: layout, Limit: limit, Imports: t.Imports}, nil
+	return DuckDBRunner{TablePath: t.Path, Limit: limit, Imports: t.Imports}, nil
 }
 
 // RunLookup opens the triples table of the SAL project in the current working
-// directory and runs the SQL the lookup builds for the object column layout the
-// table was built with.
-func RunLookup(sqlFor func(ObjectLayout) string) (Result, error) {
+// directory and runs a lookup's SQL against it.
+func RunLookup(sql string) (Result, error) {
 	ctx := context.Background()
 	table, err := LocateTriplesTable()
 	if err != nil {
@@ -76,7 +73,7 @@ func RunLookup(sqlFor func(ObjectLayout) string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return runner.RunSQL(ctx, sqlFor(runner.Layout))
+	return runner.RunSQL(ctx, sql)
 }
 
 // FormatTable renders a DuckDB result as aligned columns so that a lookup
