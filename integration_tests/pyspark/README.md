@@ -26,12 +26,17 @@ From this directory:
 uv run pytest -s
 ```
 
-Use `-s` so pytest does not capture stdout. The geospatial test uses Shapely to
-convert WKB values to WKT and prints the first five non-null `object_geometry`
-values from a Spark SQL query shaped like:
+Use `-s` so pytest does not capture stdout. SAL writes `object_geometry` with
+the Parquet `GEOMETRY` logical type, which Spark 4.1+ reads as its native
+`GEOMETRY` column type, so the test asserts the column arrives as a Spark
+`GeometryType` with the default `OGC:CRS84` SRID rather than as raw binary. It
+renders the first five non-null values through Spark's `ST_AsBinary`, decodes
+that WKB to WKT with Shapely, and prints them, from a Spark SQL query shaped
+like:
 
 ```sql
-SELECT subject, predicate, object_geometry
+SELECT subject, predicate, object_geometry,
+       ST_SRID(object_geometry), ST_AsBinary(object_geometry)
 FROM triples
 WHERE object_geometry IS NOT NULL
 ```
