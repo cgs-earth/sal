@@ -189,3 +189,191 @@ WHERE {
 	require.Contains(t, query, `t0.object = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#Property'`)
 	require.Contains(t, query, `t0.object = 'http://www.w3.org/2002/07/owl#AnnotationProperty'`)
 }
+
+func TestToSQLProjectsTypedObjectGeometriesAsWKT(t *testing.T) {
+	query, err := ToSQL(`
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+
+SELECT ?s ?wkt
+WHERE {
+  ?s geo:asWKT ?wkt .
+}`, TypedObjects)
+
+	require.NoError(t, err)
+	require.Contains(t, query, `COALESCE(t0.object_iri, CAST(t0.object_float AS VARCHAR), t0.object_string, ST_AsText(t0.object_geometry)) AS "wkt"`)
+}
+
+func TestToSQLJoinsObjectVariablesWithoutTheGeometryColumn(t *testing.T) {
+	// A join or a comparison never renders the geometry, so a query that only
+	// projects subjects does not need the spatial extension.
+	query, err := ToSQL(`
+PREFIX schema: <https://schema.org/>
+
+SELECT ?s
+WHERE {
+  ?s schema:knows ?o .
+  ?o schema:name "bob" .
+}`, TypedObjects)
+
+	require.NoError(t, err)
+	require.NotContains(t, query, "ST_AsText")
+	require.Contains(t, query, "COALESCE(t0.object_iri, CAST(t0.object_float AS VARCHAR), t0.object_string) = t1.subject")
+}
+
+func TestToSQLTranslatesGeoSPARQLIntersectsWithWKTLiteral(t *testing.T) {
+	query, err := ToSQL(`
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+
+SELECT ?feature
+WHERE {
+  ?feature geo:hasGeometry ?geometry .
+  ?geometry geo:asWKT ?wkt .
+  FILTER(geof:sfIntersects(?wkt, "POLYGON((-91 39, -88 39, -88 42, -91 42, -91 39))"^^geo:wktLiteral))
+}`, TypedObjects)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "ST_Intersects(t1.object_geometry, ST_GeomFromText('POLYGON((-91 39, -88 39, -88 42, -91 42, -91 39))'))")
+}
+
+func TestToSQLTranslatesGeoSPARQLRelationsBetweenTwoVariables(t *testing.T) {
+	query, err := ToSQL(`
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+
+SELECT ?a ?b
+WHERE {
+  ?a geo:asWKT ?ga .
+  ?b geo:asWKT ?gb .
+  FILTER(geof:sfWithin(?ga, ?gb) && !geof:sfEquals(?ga, ?gb))
+}`, TypedObjects)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "(ST_Within(t0.object_geometry, t1.object_geometry) AND NOT (ST_Equals(t0.object_geometry, t1.object_geometry)))")
+}
+
+func TestToSQLParsesWKTOnTheSimpleLayout(t *testing.T) {
+	query, err := ToSQL(`
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+
+SELECT ?g
+WHERE {
+  ?g geo:asWKT ?wkt .
+  FILTER(geof:sfContains("POINT(-89.5 40.5)"^^geo:wktLiteral, ?wkt))
+}`, SimpleObjects)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "ST_Contains(ST_GeomFromText('POINT(-89.5 40.5)'), ST_GeomFromText(t0.object))")
+}
+
+func TestToSQLDropsTheCRSFromAWKTLiteral(t *testing.T) {
+	query, err := ToSQL(`
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+
+SELECT ?g
+WHERE {
+  ?g geo:asWKT ?wkt .
+  FILTER(geof:sfDisjoint(?wkt, "<http://www.opengis.net/def/crs/OGC/1.3/CRS84> POINT(1 2)"^^geo:wktLiteral))
+}`, TypedObjects)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "ST_Disjoint(t0.object_geometry, ST_GeomFromText('POINT(1 2)'))")
+}
+
+func TestToSQLComparesGeoSPARQLDistance(t *testing.T) {
+	query, err := ToSQL(`
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+PREFIX uom: <http://www.opengis.net/def/uom/OGC/1.0/>
+
+SELECT ?g
+WHERE {
+  ?g geo:asWKT ?wkt .
+  FILTER(geof:distance(?wkt, "POINT(-89.5 40.5)"^^geo:wktLiteral, uom:metre) < 5000)
+}`, TypedObjects)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "ST_Distance_Sphere(t0.object_geometry, ST_GeomFromText('POINT(-89.5 40.5)')) < 5000")
+
+	query, err = ToSQL(`
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+
+SELECT ?g
+WHERE {
+  ?g geo:asWKT ?wkt .
+  FILTER(geof:distance(?wkt, "POINT(-89.5 40.5)"^^geo:wktLiteral) <= 0.5)
+}`, TypedObjects)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "ST_Distance(t0.object_geometry, ST_GeomFromText('POINT(-89.5 40.5)')) <= 0.5")
+}
+
+func TestToSQLNestsGeometryConstructors(t *testing.T) {
+	query, err := ToSQL(`
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+
+SELECT ?g
+WHERE {
+  ?g geo:asWKT ?wkt .
+  FILTER(geof:sfIntersects(geof:envelope(?wkt), "POINT(-89.5 40.5)"^^geo:wktLiteral))
+}`, TypedObjects)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "ST_Intersects(ST_Envelope(t0.object_geometry), ST_GeomFromText('POINT(-89.5 40.5)'))")
+}
+
+func TestToSQLRejectsGeoSPARQLOnNonGeometryVariables(t *testing.T) {
+	_, err := ToSQL(`
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+
+SELECT ?g
+WHERE {
+  ?g geo:asWKT ?wkt .
+  FILTER(geof:sfIntersects(?g, ?wkt))
+}`, TypedObjects)
+
+	require.ErrorContains(t, err, "?g is bound as a subject, not as a geometry literal")
+}
+
+func TestToSQLRejectsUnsupportedGeoSPARQLFunctions(t *testing.T) {
+	_, err := ToSQL(`
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+PREFIX uom: <http://www.opengis.net/def/uom/OGC/1.0/>
+
+SELECT ?g
+WHERE {
+  ?g geo:asWKT ?wkt .
+  FILTER(geof:sfIntersects(geof:buffer(?wkt, 1, uom:metre), ?wkt))
+}`, TypedObjects)
+
+	require.ErrorContains(t, err, "GeoSPARQL function geof:buffer is not supported yet")
+
+	_, err = ToSQL(`
+SELECT ?s
+WHERE {
+  ?s ?p ?o .
+  FILTER(REGEX(?o, "bob"))
+}`, TypedObjects)
+
+	require.ErrorContains(t, err, `SPARQL function "regex" is not supported yet`)
+}
+
+func TestToSQLRejectsNonWKTGeometryLiterals(t *testing.T) {
+	_, err := ToSQL(`
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+
+SELECT ?g
+WHERE {
+  ?g geo:asWKT ?wkt .
+  FILTER(geof:sfIntersects(?wkt, "<gml:Point/>"^^geo:gmlLiteral))
+}`, TypedObjects)
+
+	require.ErrorContains(t, err, "must be a geo:wktLiteral")
+}

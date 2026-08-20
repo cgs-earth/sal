@@ -22,7 +22,7 @@ func localDB(t *testing.T) *sql.DB {
 }
 
 func TestNeedsSpatialDetectsSTFunctions(t *testing.T) {
-	require.True(t, needsSpatial(geometrySQL(SimpleObjects, 10, 0), SimpleObjects))
+	require.True(t, needsSpatial(geometrySQL(SimpleObjects, GeometryQuery{Limit: 10}), SimpleObjects))
 	require.True(t, needsSpatial("SELECT ST_AsText(geom) FROM shapes", SimpleObjects))
 }
 

@@ -1,3 +1,5 @@
+import type { Geometry } from 'geojson'
+
 export type QueryResult = {
   sql: string
   header: string[] | null
@@ -50,13 +52,28 @@ export type BlobResult = {
   contentType: string | null
 }
 
+/** A longitude/latitude bounding box as [minX, minY, maxX, maxY]. */
+export type BBox = [number, number, number, number]
+
+/** The features `/geometries` serves: one per geometry-valued object, keyed by its triple. */
+export type GeoJSONFeature = {
+  type: 'Feature'
+  /** Set on the dataset extent only. */
+  bbox?: BBox
+  geometry: Geometry | null
+  properties: Record<string, string>
+}
+
 export type GeoJSONFeatureCollection = {
   type: 'FeatureCollection'
-  features: {
-    type: 'Feature'
-    geometry: unknown
-    properties: Record<string, string>
-  }[]
+  features: GeoJSONFeature[]
+}
+
+export type GeometryQuery = {
+  limit?: number
+  offset?: number
+  /** Only the geometries intersecting this box are returned when set. */
+  bbox?: BBox
 }
 
 /** Reads the `{"error": "..."}` body the Go handlers send, falling back to the status text. */
@@ -113,15 +130,25 @@ export async function resolveBlob(hash: string, signal?: AbortSignal): Promise<B
   return { digest, blob, contentType: response.headers.get('Content-Type') }
 }
 
-export async function fetchGeometries(
-  limit: number,
-  offset: number,
-  signal?: AbortSignal,
-): Promise<GeoJSONFeatureCollection> {
-  const response = await fetch(`/geometries?limit=${limit}&offset=${offset}`, {
+export async function fetchGeometries(query: GeometryQuery, signal?: AbortSignal): Promise<GeoJSONFeatureCollection> {
+  const params = new URLSearchParams()
+  if (query.limit !== undefined) params.set('limit', String(query.limit))
+  if (query.offset !== undefined) params.set('offset', String(query.offset))
+  if (query.bbox) params.set('bbox', query.bbox.join(','))
+  const response = await fetch(`/geometries?${params}`, {
     headers: { Accept: 'application/geo+json' },
     signal,
   })
   if (!response.ok) throw await failure(response)
   return (await response.json()) as GeoJSONFeatureCollection
+}
+
+/** The bounding box of every geometry in the table, as a feature whose geometry is the envelope. */
+export async function fetchExtent(signal?: AbortSignal): Promise<GeoJSONFeature> {
+  const response = await fetch('/geometries/extent', {
+    headers: { Accept: 'application/geo+json' },
+    signal,
+  })
+  if (!response.ok) throw await failure(response)
+  return (await response.json()) as GeoJSONFeature
 }

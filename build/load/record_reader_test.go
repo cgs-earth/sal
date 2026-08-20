@@ -52,13 +52,11 @@ func TestGetSchemasUsesDataTypeColumnsWhenEnabled(t *testing.T) {
 func TestAppendGraphIngestsSimpleWKTGeometry(t *testing.T) {
 	ctx := context.Background()
 	cfg := &LoadConfig{
-		BatchSize:           10,
-		ParquetCompression:  "snappy",
-		MetricsMode:         "truncate(16)",
-		TargetFileSizeBytes: 0,
-		Warehouse:           t.TempDir(),
-		Namespace:           "default",
-		DataTypeCols:        true,
+		BatchSize:          10,
+		ParquetCompression: "snappy",
+		Warehouse:          t.TempDir(),
+		Namespace:          "default",
+		DataTypeCols:       true,
 	}
 
 	arrowSchema, icebergSchema, err := GetSchemas(true)
@@ -88,12 +86,10 @@ func TestAppendGraphIngestsSimpleWKTGeometry(t *testing.T) {
 func TestProcessGraphDiffAddsAndRemovesByTripleHash(t *testing.T) {
 	ctx := context.Background()
 	cfg := &LoadConfig{
-		BatchSize:           10,
-		ParquetCompression:  "snappy",
-		MetricsMode:         "truncate(16)",
-		TargetFileSizeBytes: 0,
-		Warehouse:           t.TempDir(),
-		Namespace:           "default",
+		BatchSize:          10,
+		ParquetCompression: "snappy",
+		Warehouse:          t.TempDir(),
+		Namespace:          "default",
 	}
 
 	arrowSchema, icebergSchema, err := GetSchemas(false)
@@ -134,13 +130,11 @@ func TestProcessGraphDiffAddsAndRemovesByTripleHash(t *testing.T) {
 func TestWriteGraphToIcebergDoesNotRewriteEquivalentBlankNodeGraph(t *testing.T) {
 	ctx := context.Background()
 	cfg := &LoadConfig{
-		BatchSize:           10,
-		ParquetCompression:  "snappy",
-		MetricsMode:         "truncate(16)",
-		TargetFileSizeBytes: 0,
-		Warehouse:           t.TempDir(),
-		Namespace:           "default",
-		DataTypeCols:        true,
+		BatchSize:          10,
+		ParquetCompression: "snappy",
+		Warehouse:          t.TempDir(),
+		Namespace:          "default",
+		DataTypeCols:       true,
 	}
 
 	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("first"), cfg, map[string]string{"sal.hash": "first"}))
@@ -170,7 +164,6 @@ func TestWriteGraphToIcebergStoresBlankNodesWithNTriplesPrefix(t *testing.T) {
 	cfg := &LoadConfig{
 		BatchSize:          10,
 		ParquetCompression: "snappy",
-		MetricsMode:        "truncate(16)",
 		Warehouse:          t.TempDir(),
 		Namespace:          "default",
 	}

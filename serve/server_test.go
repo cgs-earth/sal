@@ -35,18 +35,21 @@ func (r *endpointRunner) Run(_ context.Context, query string) (salsparql.Result,
 type endpointUIRunner struct {
 	endpointRunner
 	collection salsparql.FeatureCollection
+	extent     salsparql.Feature
 	stats      salsparql.TableStats
 	sqlResult  salsparql.Result
 	sqlErr     error
 	sql        string
-	limit      int
-	offset     int
+	geometries salsparql.GeometryQuery
 }
 
-func (r *endpointUIRunner) Geometries(_ context.Context, limit int, offset int) (salsparql.FeatureCollection, error) {
-	r.limit = limit
-	r.offset = offset
+func (r *endpointUIRunner) Geometries(_ context.Context, query salsparql.GeometryQuery) (salsparql.FeatureCollection, error) {
+	r.geometries = query
 	return r.collection, r.err
+}
+
+func (r *endpointUIRunner) Extent(_ context.Context) (salsparql.Feature, error) {
+	return r.extent, r.err
 }
 
 func (r *endpointUIRunner) RunSQL(_ context.Context, sql string) (salsparql.Result, error) {
@@ -480,7 +483,7 @@ func TestEndpointWithUIReturnsGeometryFeatureCollection(t *testing.T) {
 	server := newUIServer(t, runner)
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/geometries?limit=500&offset=12")
+	resp, err := http.Get(server.URL + "/geometries?limit=5000&offset=12")
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, resp.Body.Close())
@@ -488,8 +491,7 @@ func TestEndpointWithUIReturnsGeometryFeatureCollection(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, "application/geo+json", resp.Header.Get("Content-Type"))
-	require.Equal(t, 100, runner.limit)
-	require.Equal(t, 12, runner.offset)
+	require.Equal(t, salsparql.GeometryQuery{Limit: salsparql.MaxGeometries, Offset: 12}, runner.geometries)
 
 	var body salsparql.FeatureCollection
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
@@ -497,6 +499,80 @@ func TestEndpointWithUIReturnsGeometryFeatureCollection(t *testing.T) {
 	require.Len(t, body.Features, 1)
 	require.JSONEq(t, `{"type":"Point","coordinates":[-77.0365,38.8977]}`, string(body.Features[0].Geometry))
 	require.Equal(t, "https://example.org/place", body.Features[0].Properties["subject"])
+}
+
+func TestEndpointWithUIFiltersGeometriesByBoundingBox(t *testing.T) {
+	runner := &endpointUIRunner{collection: salsparql.FeatureCollection{Type: "FeatureCollection"}}
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/geometries?bbox=-90.5,40,-89,41.25&limit=20")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, salsparql.GeometryQuery{
+		Limit: 20,
+		BBox:  &salsparql.BBox{MinX: -90.5, MinY: 40, MaxX: -89, MaxY: 41.25},
+	}, runner.geometries)
+}
+
+func TestEndpointWithUIRejectsMalformedBoundingBox(t *testing.T) {
+	runner := &endpointUIRunner{}
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/geometries?bbox=-90,40,-89")
+	require.NoError(t, err)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	require.Contains(t, string(body), "minX,minY,maxX,maxY")
+	require.Nil(t, runner.geometries.BBox)
+}
+
+func TestEndpointWithUIReturnsTheGeometryExtent(t *testing.T) {
+	runner := &endpointUIRunner{extent: salsparql.Feature{
+		Type:       "Feature",
+		BBox:       []float64{-90, 40, -89, 41},
+		Geometry:   json.RawMessage(`{"type":"Polygon","coordinates":[[[-90,40],[-89,40],[-89,41],[-90,41],[-90,40]]]}`),
+		Properties: map[string]string{"geometries": "6"},
+	}}
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/geometries/extent")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "application/geo+json", resp.Header.Get("Content-Type"))
+	var body salsparql.Feature
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, []float64{-90, 40, -89, 41}, body.BBox)
+	require.Equal(t, "6", body.Properties["geometries"])
+	require.JSONEq(t, `{"type":"Polygon","coordinates":[[[-90,40],[-89,40],[-89,41],[-90,41],[-90,40]]]}`, string(body.Geometry))
+}
+
+func TestSparqlJSONResultReportsWKTBindingsAsGeometryLiterals(t *testing.T) {
+	response := sparqlJSONResult(salsparql.Result{
+		Header: []string{"s", "wkt", "name"},
+		Rows:   [][]string{{"https://example.org/place", "POINT (-89.5 40.5)", "Point of interest"}},
+	})
+
+	require.Len(t, response.Results.Bindings, 1)
+	binding := response.Results.Bindings[0]
+	require.Equal(t, sparqlJSONBinding{Type: "uri", Value: "https://example.org/place"}, binding["s"])
+	require.Equal(t, sparqlJSONBinding{
+		Type:     "literal",
+		Value:    "POINT (-89.5 40.5)",
+		Datatype: "http://www.opengis.net/ont/geosparql#wktLiteral",
+	}, binding["wkt"])
+	require.Equal(t, sparqlJSONBinding{Type: "literal", Value: "Point of interest"}, binding["name"])
 }
 
 func TestEndpointAcceptsFormPOSTQuery(t *testing.T) {

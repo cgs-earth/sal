@@ -92,6 +92,7 @@ func NewEndpointWithUI(runner UIRunner, blobDir string) (http.Handler, error) {
 	// decides which of the two a request meant.
 	mux.Handle("/sparql", browserRoute{api: sparqlHandler{runner: runner}, ui: ui})
 	mux.Handle("/geometries", geometryHandler{runner: runner})
+	mux.Handle("/geometries/extent", extentHandler{runner: runner})
 	mux.Handle("/api/sql", sqlHandler{runner: runner})
 	mux.Handle("/api/stats", statsHandler{runner: runner})
 	mux.Handle("/api/salmodule", salmoduleHandler{inspect: salmodule.Inspect})
@@ -327,36 +328,80 @@ type geometryHandler struct {
 	runner salsparql.GeometryRunner
 }
 
+// ServeHTTP answers a page of the table's geometries as GeoJSON, narrowed to the
+// ones intersecting the bbox parameter when one is given.
 func (h geometryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !allowGeoJSONRequest(w, r) {
+		return
+	}
+	query := salsparql.GeometryQuery{
+		Limit:  intQueryParam(r, "limit", salsparql.MaxGeometries),
+		Offset: intQueryParam(r, "offset", 0),
+	}
+	if query.Limit <= 0 || query.Limit > salsparql.MaxGeometries {
+		query.Limit = salsparql.MaxGeometries
+	}
+	if query.Offset < 0 {
+		query.Offset = 0
+	}
+	if bbox := strings.TrimSpace(r.URL.Query().Get("bbox")); bbox != "" {
+		box, err := salsparql.ParseBBox(bbox)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		query.BBox = &box
+	}
+
+	collection, err := h.runner.Geometries(r.Context(), query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeGeoJSON(w, collection)
+}
+
+type extentHandler struct {
+	runner salsparql.GeometryRunner
+}
+
+// ServeHTTP answers the bounding box of every geometry in the table as a GeoJSON
+// feature, so the map can show and fit to the dataset's spatial extent.
+func (h extentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !allowGeoJSONRequest(w, r) {
+		return
+	}
+	extent, err := h.runner.Extent(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeGeoJSON(w, extent)
+}
+
+// allowGeoJSONRequest sets the CORS headers of the geometry endpoints and
+// answers a preflight or a non-GET request itself, reporting whether the
+// handler should go on to answer the request.
+func allowGeoJSONRequest(w http.ResponseWriter, r *http.Request) bool {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Accept")
 
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
-		return
+		return false
 	}
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET, OPTIONS")
 		http.Error(w, "geometry endpoint only supports GET requests", http.StatusMethodNotAllowed)
-		return
+		return false
 	}
-	limit := intQueryParam(r, "limit", 100)
-	if limit <= 0 || limit > 100 {
-		limit = 100
-	}
-	offset := intQueryParam(r, "offset", 0)
-	if offset < 0 {
-		offset = 0
-	}
+	return true
+}
 
-	collection, err := h.runner.Geometries(r.Context(), limit, offset)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
+func writeGeoJSON(w http.ResponseWriter, body any) {
 	w.Header().Set("Content-Type", "application/geo+json")
-	if err := json.NewEncoder(w).Encode(collection); err != nil {
+	if err := json.NewEncoder(w).Encode(body); err != nil {
 		slog.Error("failed to write GeoJSON result", "error", err)
 	}
 }
@@ -443,6 +488,9 @@ type sparqlJSONHead struct {
 type sparqlJSONBinding struct {
 	Type  string `json:"type"`
 	Value string `json:"value"`
+	// Datatype is reported for the one literal shape that can be told apart by
+	// its value alone: a geometry, which the table renders as WKT.
+	Datatype string `json:"datatype,omitempty"`
 }
 
 type sparqlJSONResults struct {
@@ -463,8 +511,9 @@ func sparqlJSONResult(result salsparql.Result) sparqlJSONResponse {
 				continue
 			}
 			binding[name] = sparqlJSONBinding{
-				Type:  sparqlBindingType(row[i]),
-				Value: row[i],
+				Type:     sparqlBindingType(row[i]),
+				Value:    row[i],
+				Datatype: sparqlBindingDatatype(row[i]),
 			}
 		}
 		bindings = append(bindings, binding)
@@ -480,6 +529,19 @@ func sparqlJSONResult(result salsparql.Result) sparqlJSONResponse {
 // told apart from literals by shape; requiring the "//" (or the urn: scheme,
 // which never has one) keeps prose literals like "note: see below" out.
 var iriScheme = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
+
+// wktLiteral matches the WKT DuckDB's ST_AsText writes, so that a client such as
+// the bundled map can recognize a geometry binding without parsing every value.
+var wktLiteral = regexp.MustCompile(`(?i)^(POINT|LINESTRING|POLYGON|MULTIPOINT|MULTILINESTRING|MULTIPOLYGON|GEOMETRYCOLLECTION)\s*(Z|M|ZM)?\s*(\(|EMPTY)`)
+
+const wktLiteralDatatype = "http://www.opengis.net/ont/geosparql#wktLiteral"
+
+func sparqlBindingDatatype(value string) string {
+	if wktLiteral.MatchString(value) {
+		return wktLiteralDatatype
+	}
+	return ""
+}
 
 func sparqlBindingType(value string) string {
 	if strings.HasPrefix(value, "_:") {

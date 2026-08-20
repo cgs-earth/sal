@@ -472,7 +472,7 @@ It has six tabs:
 - **SPARQL**: a [YASGUI](https://github.com/zazuko/Yasgui) editor pointed at the local `/sparql` endpoint.
 - **Modules**: the browser form of [`sal salmodule inspect`](#sal-salmodule). Enter a module reference and the JSON-LD ontology it publishes is shown as formatted JSON. Every module the build downloaded is offered as a chip and as an autocompletion in the input, read from the `sal.salmodules` table property.
 - **Blobs**: the browser form of the `/blobs` endpoint. Enter the SHA-256 digest a vocabulary or imported ontology document is pinned at and it downloads through the browser's normal save flow.
-- **Map**: reserved for rendering the `object_geometry` column. Not implemented yet.
+- **Map**: a [MapLibre](https://maplibre.org/) map of the `object_geometry` column, as one of two things. It draws the geometry the last SQL or SPARQL query returned — any column holding WKT or GeoJSON becomes a feature, and the other columns of its row become the properties shown when the feature is clicked — or everything inside a bounding box. Clicking the map queries the box around that point; the box's corners can also be typed in, doubled and halved, outlined on the map, and opened as a GeoSPARQL query in the SPARQL tab. A toggle shows the spatial extent of the whole table. The basemap is fetched from CARTO, so it is blank offline; the features still draw.
 
 Each tab has a URL of its own — `/stats`, `/sql`, `/sparql`, `/modules`, `/blobs`, and `/map` — so a tab can be linked to rather than only clicked to, and the browser's back button moves between them.
 
@@ -488,7 +488,8 @@ Enabling the UI also exposes the JSON endpoints it reads:
 
 - `POST /api/sql` with a `{"sql": "..."}` body runs a DuckDB statement and returns its header and rows. Results are capped at 1000 rows, and the response message reports the full count when it truncates.
 - `GET /api/stats` returns the counts and Iceberg metadata shown on the Stats tab, including the `modules` list the Modules tab suggests from.
-- `GET /geometries?limit=&offset=` returns up to 100 `object_geometry` values at a time as GeoJSON.
+- `GET /geometries?limit=&offset=&bbox=` returns up to 1000 `object_geometry` values at a time as GeoJSON, each feature carrying the `subject`, `predicate`, and WKT `object` of its triple. `bbox=minX,minY,maxX,maxY` keeps only the geometries intersecting that box.
+- `GET /geometries/extent` returns the bounding box of every geometry in the table as a GeoJSON feature: its `geometry` is the envelope, its `bbox` the four corners, and its `properties.geometries` how many geometries it covers. A table with no geometries answers a `null` geometry.
 - `GET /api/salmodule?module=` clones, builds, and runs a SAL module, returning `{"module": ..., "ontology": ...}`. The first request for a module has to build its image, so it can take minutes.
 
 `/api/sql` runs arbitrary DuckDB statements against your machine, and `/api/salmodule` builds and runs container images from repositories a caller names, so only enable `--with-ui` on a network you trust.

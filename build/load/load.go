@@ -30,13 +30,6 @@ type LoadConfig struct {
 	// (snappy, zstd, gzip, brotli, lz4, or uncompressed).
 	ParquetCompression string
 
-	// MetricsMode is the Iceberg metrics mode
-	// (none, counts, truncate(N), or full).
-	MetricsMode string
-
-	// TargetFileSizeBytes is the target Iceberg data file size in bytes.
-	TargetFileSizeBytes int64
-
 	// InputDir is the path to a directory containing .nq.gz files.
 	InputDir string
 

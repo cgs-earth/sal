@@ -8,6 +8,7 @@ import { ResultTable } from '../components/ResultTable'
 import { ShareLinkButton } from '../components/ShareLinkButton'
 import { toCSV } from '../csv'
 import { catppuccin } from '../theme'
+import { publishResult } from '../results'
 
 const DEFAULT_SQL = 'SELECT *\nFROM triples\nLIMIT 20'
 
@@ -44,6 +45,10 @@ function samplesFor(tablePath: string | null, sampleQueries: NamedQuery[] | null
     {
       name: 'Typed resources',
       sql: "SELECT *\nFROM triples\nWHERE predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'\nLIMIT 50",
+    },
+    {
+      name: 'Geometries',
+      sql: 'SELECT\n\tsubject,\n\tST_AsText(object_geometry) AS wkt,\n\tST_GeometryType(object_geometry) AS type\nFROM triples\nWHERE object_geometry IS NOT NULL\nLIMIT 500',
     },
   ]
   if (tablePath) {
@@ -85,7 +90,10 @@ export function SqlTab({
     setRunning(true)
     setError(null)
     try {
-      setResult(await runSQL(text))
+      const next = await runSQL(text)
+      setResult(next)
+      // The Map tab draws whatever geometry the last result held.
+      publishResult({ source: 'SQL', query: text, header: next.header ?? [], rows: next.rows ?? [] })
     } catch (caught) {
       setResult(null)
       setError(caught instanceof Error ? caught.message : String(caught))

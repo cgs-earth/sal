@@ -120,10 +120,11 @@ func NewIcebergTableFromCfg(ctx context.Context, tableSchema *iceberg.Schema, ca
 		table.ManifestMergeEnabledKey:             "true",
 		table.ManifestMinMergeCountKey:            strconv.Itoa(1),
 		"write.parquet.compression-codec":         cfg.ParquetCompression,
-		"write.metadata.metrics.default":          cfg.MetricsMode,
-		table.WriteTargetFileSizeBytesKey:         strconv.FormatInt(cfg.TargetFileSizeBytes, 10),
+		"write.metadata.metrics.default":          "full",
 		table.WriteDeleteModeKey:                  table.WriteModeMergeOnRead,
 		table.PropertyFormatVersion:               formatVersion(cfg.DataTypeCols),
+		// (per-column toggle, prefix-matched; overrides the global switch)
+		"write.parquet.dict-encoding-enabled.column.predicate": "true",
 	}
 	for k, v := range geometryMetricsProperty(cfg.DataTypeCols) {
 		properties[k] = v
@@ -139,8 +140,6 @@ func NewIcebergTableFromCfg(ctx context.Context, tableSchema *iceberg.Schema, ca
 func applyWriteProperties(ctx context.Context, tbl *table.Table, cfg *LoadConfig) error {
 	writeProps := iceberg.Properties{
 		"write.parquet.compression-codec": cfg.ParquetCompression,
-		"write.metadata.metrics.default":  cfg.MetricsMode,
-		table.WriteTargetFileSizeBytesKey: strconv.FormatInt(cfg.TargetFileSizeBytes, 10),
 	}
 	for k, v := range geometryMetricsProperty(cfg.DataTypeCols) {
 		writeProps[k] = v
@@ -161,7 +160,7 @@ func geometryMetricsProperty(dataTypeCols bool) iceberg.Properties {
 		return nil
 	}
 	// Geometry metrics are disabled while upstream Iceberg geometry support is still experimental.
-	return iceberg.Properties{table.MetricsModeColumnConfPrefix + ".object_geometry": "none"}
+	return iceberg.Properties{table.MetricsModeColumnConfPrefix + ".object_geometry": "full"}
 }
 
 func formatVersion(dataTypeCols bool) string {

@@ -93,12 +93,10 @@ func createTableWithSnapshots(t *testing.T, count int) (*hadoop.Catalog, *table.
 
 	ctx := context.Background()
 	cfg := &load.LoadConfig{
-		BatchSize:           10,
-		ParquetCompression:  "snappy",
-		MetricsMode:         "truncate(16)",
-		TargetFileSizeBytes: 0,
-		Warehouse:           t.TempDir(),
-		Namespace:           "default",
+		BatchSize:          10,
+		ParquetCompression: "snappy",
+		Warehouse:          t.TempDir(),
+		Namespace:          "default",
 	}
 
 	for i := 0; i < count; i++ {

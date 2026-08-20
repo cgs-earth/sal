@@ -97,7 +97,7 @@ func ToSQL(input string, layout ObjectLayout) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("projected variable ?%s is not bound by a supported triple pattern", name)
 		}
-		selects = append(selects, binding.expr(layout)+" AS "+quoteIdent(name))
+		selects = append(selects, binding.projection(layout)+" AS "+quoteIdent(name))
 	}
 
 	sql := "SELECT " + strings.Join(selects, ", ") + "\nFROM " + strings.Join(from, "\nCROSS JOIN ")
@@ -115,6 +115,23 @@ func ToSQL(input string, layout ObjectLayout) (string, error) {
 
 func (b sqlBinding) expr(layout ObjectLayout) string {
 	return bindingExpr(b.alias, b.column, layout)
+}
+
+// projection is the expression a bound variable is read back through. It
+// differs from expr only for an object in the typed layout, where a geometry is
+// rendered as WKT so that a geometry-valued object is not projected as empty.
+// Joins and filters keep using expr, so a query that never projects an object
+// never pulls in the spatial extension.
+func (b sqlBinding) projection(layout ObjectLayout) string {
+	if b.column != "object" || layout == SimpleObjects {
+		return b.expr(layout)
+	}
+	return objectTextExpr(b.alias)
+}
+
+// objectTextExpr renders the typed layout's object union, geometry included, as text.
+func objectTextExpr(alias string) string {
+	return "COALESCE(" + alias + ".object_iri, CAST(" + alias + ".object_float AS VARCHAR), " + alias + ".object_string, ST_AsText(" + alias + ".object_geometry))"
 }
 
 func bindingExpr(alias string, column string, layout ObjectLayout) string {
@@ -184,6 +201,24 @@ func filterSQL(expr rdflibsparql.Expr, bindings map[string]sqlBinding, layout Ob
 			return "", err
 		}
 		return left + " " + e.Op + " " + right, nil
+	case *rdflibsparql.UnaryExpr:
+		if e.Op != "!" {
+			return "", fmt.Errorf("SPARQL FILTER operator %q is not supported yet", e.Op)
+		}
+		inner, err := filterSQL(e.Arg, bindings, layout)
+		if err != nil {
+			return "", err
+		}
+		return "NOT (" + inner + ")", nil
+	case *rdflibsparql.FuncExpr:
+		sql, boolean, err := geoFunctionSQL(e, bindings, layout)
+		if err != nil {
+			return "", err
+		}
+		if !boolean {
+			return "", fmt.Errorf("a FILTER on %s must compare it against something", sql)
+		}
+		return sql, nil
 	default:
 		return "", fmt.Errorf("only binary SPARQL FILTER expressions are supported yet")
 	}
@@ -212,6 +247,10 @@ func filterOperandSQL(expr rdflibsparql.Expr, other rdflibsparql.Expr, bindings 
 			if _, ok := other.(*rdflibsparql.IRIExpr); ok {
 				return binding.alias + ".object_iri", nil
 			}
+			// The only function a variable can be compared against is geof:distance.
+			if _, ok := other.(*rdflibsparql.FuncExpr); ok {
+				return binding.alias + ".object_float", nil
+			}
 			return binding.alias + ".object_string", nil
 		}
 		return binding.expr(layout), nil
@@ -219,6 +258,15 @@ func filterOperandSQL(expr rdflibsparql.Expr, other rdflibsparql.Expr, bindings 
 		return termSQL(e.Value), nil
 	case *rdflibsparql.IRIExpr:
 		return sqlString(e.Value), nil
+	case *rdflibsparql.FuncExpr:
+		sql, boolean, err := geoFunctionSQL(e, bindings, layout)
+		if err != nil {
+			return "", err
+		}
+		if boolean {
+			return "", fmt.Errorf("%s is a boolean; use it in the FILTER directly rather than comparing it", sql)
+		}
+		return sql, nil
 	default:
 		return "", fmt.Errorf("unsupported SPARQL FILTER operand %T", expr)
 	}
