@@ -65,19 +65,11 @@ build_demo_data() {
 	# A second build on top of the first, so the demo has more than one snapshot
 	# and the table shows what an edit to an existing triple looks like: the old
 	# name triple stays in the history and the new one is added on top.
-	#
-	# iceberg-go cannot yet read a geometry column back, and diffing against the
-	# existing table reads every column, so this build fails on a typed table
-	# for now. The first snapshot is already on disk and is what the demo needs,
-	# so the failure is logged rather than allowed to stop the container; the
-	# second snapshot comes back on its own once iceberg-go can read it.
 	log "renaming Example Organization 001 and rebuilding for a second snapshot"
 	sed -i 's/schema:name "Example Organization 001"/schema:name "Test Change"/' data/large.ttl
 	git add -A
 	git commit -qm "Rename Example Organization 001 to Test Change"
-	if ! /app/sal build --typed data/; then
-		log "warning: the second build failed, serving the first snapshot only"
-	fi
+	/app/sal build --typed data/
 }
 
 case "$DEMO_DATA" in
