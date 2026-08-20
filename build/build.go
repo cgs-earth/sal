@@ -32,12 +32,11 @@ func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
 }
 
 type BuildCmd struct {
-	Paths        []string          `arg:"positional" help:"RDF files to validate"`
-	PrefixMaps   []string          `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
-	Format       GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
-	Force        bool              `arg:"--force" help:"force build even if there are uncommitted changes in the git repository"`
-	DataTypeCols bool              `arg:"--typed" help:"Split distinct data types into separate columns" default:"false"`
-	NoCache      bool              `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources and re-pin them in .sal/config.jsonld"`
+	Paths      []string          `arg:"positional" help:"RDF files to validate"`
+	PrefixMaps []string          `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
+	Format     GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
+	Force      bool              `arg:"--force" help:"force build even if there are uncommitted changes in the git repository"`
+	NoCache    bool              `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources and re-pin them in .sal/config.jsonld"`
 
 	// skip committing the built data to iceberg
 	skipCommit bool
@@ -225,7 +224,7 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 
 	// every module downloaded so far, both the ones validation dereferenced for
 	// their vocabulary and the ones materialization ran, is recorded in the table
-	if err := ExportGraph(finalGraph, cfg.Format, hash, cfg.DataTypeCols, resolver.Downloaded()); err != nil {
+	if err := ExportGraph(finalGraph, cfg.Format, hash, resolver.Downloaded()); err != nil {
 		return nil, err
 	}
 

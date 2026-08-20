@@ -9,7 +9,7 @@ import (
 type datatypesCmd struct{}
 
 func (cmd *datatypesCmd) Run() error {
-	result, err := salsparql.RunLookup(salsparql.DatatypesSQL)
+	result, err := salsparql.RunLookup(salsparql.DatatypesSQL())
 	if err != nil {
 		return err
 	}

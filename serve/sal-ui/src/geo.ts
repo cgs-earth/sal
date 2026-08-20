@@ -5,7 +5,7 @@ import type { BBox } from './api'
 export type MapFeature = Feature<Geometry, Record<string, string>>
 
 /**
- * The geometry types a cell can hold, as WKT (what the typed layout's object
+ * The geometry types a cell can hold, as WKT (what the object
  * projection and ST_AsText render) or GeoJSON (what ST_AsGeoJSON renders). The
  * WKT check is a cheap prefix test so that every cell of a result can be tried;
  * an EWKT SRID or a GeoSPARQL CRS IRI may lead the string.

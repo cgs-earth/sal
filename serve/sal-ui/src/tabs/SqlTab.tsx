@@ -17,7 +17,6 @@ const TRIPLES_COLUMNS = [
   'triple_hash',
   'subject',
   'predicate',
-  'object',
   'object_iri',
   'object_string',
   'object_float',

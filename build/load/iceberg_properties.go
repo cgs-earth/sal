@@ -16,25 +16,11 @@ import (
 	"github.com/geoarrow/geoarrow-go"
 )
 
-func GetSchemas(dataTypeCols bool) (*arrow.Schema, *iceberg.Schema, error) {
-	if !dataTypeCols {
-		arrowSchema := arrow.NewSchema(
-			[]arrow.Field{
-				{Name: "subject", Type: arrow.BinaryTypes.String},
-				{Name: "predicate", Type: arrow.BinaryTypes.String},
-				{Name: "object", Type: arrow.BinaryTypes.String},
-				{Name: "triple_hash", Type: arrow.BinaryTypes.String},
-			},
-			nil,
-		)
-		icebergSchema := iceberg.NewSchemaWithIdentifiers(1, []int{4},
-			iceberg.NestedField{ID: 1, Name: "subject", Type: iceberg.PrimitiveTypes.String, Required: true},
-			iceberg.NestedField{ID: 2, Name: "predicate", Type: iceberg.PrimitiveTypes.String, Required: true},
-			iceberg.NestedField{ID: 3, Name: "object", Type: iceberg.PrimitiveTypes.String, Required: true},
-			iceberg.NestedField{ID: 4, Name: "triple_hash", Type: iceberg.PrimitiveTypes.String, Required: true},
-		)
-		return arrowSchema, icebergSchema, nil
-	}
+// GetSchemas is the schema of a triples table, in both its Arrow and Iceberg
+// forms. An object is split across one column per datatype -- IRI, number,
+// string, geometry -- so that a query compares and reads each kind natively
+// rather than parsing it out of a single text column.
+func GetSchemas() (*arrow.Schema, *iceberg.Schema, error) {
 	geoCRS, err := json.Marshal("OGC:CRS84")
 	if err != nil {
 		return nil, nil, err
@@ -122,11 +108,12 @@ func NewIcebergTableFromCfg(ctx context.Context, tableSchema *iceberg.Schema, ca
 		"write.parquet.compression-codec":         cfg.ParquetCompression,
 		"write.metadata.metrics.default":          "full",
 		table.WriteDeleteModeKey:                  table.WriteModeMergeOnRead,
-		table.PropertyFormatVersion:               formatVersion(cfg.DataTypeCols),
+		// format version 3 is what the geometry type needs
+		table.PropertyFormatVersion: "3",
 		// (per-column toggle, prefix-matched; overrides the global switch)
 		"write.parquet.dict-encoding-enabled.column.predicate": "true",
 	}
-	for k, v := range geometryMetricsProperty(cfg.DataTypeCols) {
+	for k, v := range geometryMetricsProperty() {
 		properties[k] = v
 	}
 
@@ -141,7 +128,7 @@ func applyWriteProperties(ctx context.Context, tbl *table.Table, cfg *LoadConfig
 	writeProps := iceberg.Properties{
 		"write.parquet.compression-codec": cfg.ParquetCompression,
 	}
-	for k, v := range geometryMetricsProperty(cfg.DataTypeCols) {
+	for k, v := range geometryMetricsProperty() {
 		writeProps[k] = v
 	}
 
@@ -155,17 +142,6 @@ func applyWriteProperties(ctx context.Context, tbl *table.Table, cfg *LoadConfig
 	return nil
 }
 
-func geometryMetricsProperty(dataTypeCols bool) iceberg.Properties {
-	if !dataTypeCols {
-		return nil
-	}
-	// Geometry metrics are disabled while upstream Iceberg geometry support is still experimental.
+func geometryMetricsProperty() iceberg.Properties {
 	return iceberg.Properties{table.MetricsModeColumnConfPrefix + ".object_geometry": "full"}
-}
-
-func formatVersion(dataTypeCols bool) string {
-	if dataTypeCols {
-		return "3"
-	}
-	return "2"
 }

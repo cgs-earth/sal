@@ -8,15 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestExportSQLForSimpleObjectsSelectsTheBareObjectColumn(t *testing.T) {
-	sql := ExportSQL(SimpleObjects)
-
-	require.Contains(t, sql, "SELECT subject, predicate, object FROM triples")
-	require.NotContains(t, sql, "triple_hash")
-}
-
-func TestExportSQLForTypedObjectsSelectsEveryUnionColumn(t *testing.T) {
-	sql := ExportSQL(TypedObjects)
+func TestExportSQLSelectsEveryUnionColumn(t *testing.T) {
+	sql := ExportSQL
 
 	require.Contains(t, sql, "subject")
 	require.Contains(t, sql, "predicate")

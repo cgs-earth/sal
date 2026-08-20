@@ -42,9 +42,6 @@ type LoadConfig struct {
 
 	// Namespace is the Iceberg namespace.
 	Namespace string
-
-	// DataTypeCols splits distinct RDF object data types into separate columns.
-	DataTypeCols bool
 }
 
 // WriteGraphToIceberg writes an RDF graph into the configured Iceberg triples table.
@@ -58,7 +55,7 @@ func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCo
 
 	graph = stabilizeBlankNodes(graph)
 
-	arrowSchema, tableSchema, err := GetSchemas(cfg.DataTypeCols)
+	arrowSchema, tableSchema, err := GetSchemas()
 	if err != nil {
 		return err
 	}
@@ -77,7 +74,7 @@ func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCo
 		return err
 	}
 
-	err = processGraph(ctx, graph, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, cfg.DataTypeCols)
+	err = processGraph(ctx, graph, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize)
 	if err != nil {
 		return err
 	}
@@ -108,7 +105,6 @@ func processGraph(
 	tableIdent table.Identifier,
 	arrowSchema *arrow.Schema,
 	batchSize int,
-	dataTypeCols bool,
 ) error {
 	tbl, err := cat.LoadTable(ctx, tableIdent)
 	if err != nil {

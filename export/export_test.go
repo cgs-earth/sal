@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"testing"
 
-	salsparql "github.com/cgs-earth/sal/query/sparql"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/nt"
@@ -40,69 +39,41 @@ func valid(value string) sql.NullString {
 
 var invalid = sql.NullString{}
 
-func TestObjectTermForSimpleObjectsKeepsAnAbsoluteIRI(t *testing.T) {
-	object := objectTerm([]sql.NullString{valid("http://example.org/o")}, salsparql.SimpleObjects)
+func TestObjectTermRestoresAnIRI(t *testing.T) {
+	object := objectTerm([]sql.NullString{valid("http://example.org/o"), invalid, invalid, invalid})
 	require.Equal(t, "<http://example.org/o>", object.N3())
 }
 
-func TestObjectTermForSimpleObjectsFallsBackToAStringLiteral(t *testing.T) {
-	object := objectTerm([]sql.NullString{valid("hello world")}, salsparql.SimpleObjects)
-	require.Equal(t, `"hello world"`, object.N3())
-}
-
-func TestObjectTermForSimpleObjectsReadsTheStoredBlankNodePrefixAsABlankNode(t *testing.T) {
-	object := objectTerm([]sql.NullString{valid("_:sal_0123456789abcdef01234567")}, salsparql.SimpleObjects)
-	require.Equal(t, "_:sal_0123456789abcdef01234567", object.N3())
-}
-
-// TestObjectTermForSimpleObjectsCannotTellARelativeIRIApartFromALiteral
-// documents a real, unavoidable limitation of the simple (untyped) layout: it
-// has only one text column for every object kind, so a relative IRI with no
-// scheme and a plain string literal are indistinguishable and both come back
-// as a string literal. This is why the same raw value can render as an IRI in
-// subject position and a literal in object position for a table built without
-// --typed — the table itself lost that distinction when it was written, and
-// export cannot invent it back without guessing.
-func TestObjectTermForSimpleObjectsCannotTellARelativeIRIApartFromALiteral(t *testing.T) {
-	object := objectTerm([]sql.NullString{valid("5a1269257241ad980dab13f371fb4b111706285a94127ec3a3f055da9378cef0")}, salsparql.SimpleObjects)
-	require.Equal(t, `"5a1269257241ad980dab13f371fb4b111706285a94127ec3a3f055da9378cef0"`, object.N3())
-}
-
-func TestObjectTermForTypedObjectsRestoresAnIRI(t *testing.T) {
-	object := objectTerm([]sql.NullString{valid("http://example.org/o"), invalid, invalid, invalid}, salsparql.TypedObjects)
-	require.Equal(t, "<http://example.org/o>", object.N3())
-}
-
-// TestObjectTermForTypedObjectsKeepsARelativeIRIExactlyAsStored is the typed
-// layout's counterpart to TestSubjectTermKeepsARelativeIRIExactlyAsStored: the
+// TestObjectTermKeepsARelativeIRIExactlyAsStored is the object position's
+// counterpart to TestSubjectTermKeepsARelativeIRIExactlyAsStored: the
 // object_iri column records this value as an IRI, and export writes it
 // unchanged, matching the raw table exactly (no base resolution).
-func TestObjectTermForTypedObjectsKeepsARelativeIRIExactlyAsStored(t *testing.T) {
-	object := objectTerm([]sql.NullString{valid("5a1269257241ad980dab13f371fb4b111706285a94127ec3a3f055da9378cef0"), invalid, invalid, invalid}, salsparql.TypedObjects)
+func TestObjectTermKeepsARelativeIRIExactlyAsStored(t *testing.T) {
+	object := objectTerm([]sql.NullString{valid("5a1269257241ad980dab13f371fb4b111706285a94127ec3a3f055da9378cef0"), invalid, invalid, invalid})
 	require.Equal(t, "<5a1269257241ad980dab13f371fb4b111706285a94127ec3a3f055da9378cef0>", object.N3())
 }
 
-func TestObjectTermForTypedObjectsRestoresANumericLiteralAsXSDDouble(t *testing.T) {
-	object := objectTerm([]sql.NullString{invalid, valid("42.0"), invalid, invalid}, salsparql.TypedObjects)
+func TestObjectTermRestoresANumericLiteralAsXSDDouble(t *testing.T) {
+	object := objectTerm([]sql.NullString{invalid, valid("42.0"), invalid, invalid})
 	require.Equal(t, `"42.0"^^<http://www.w3.org/2001/XMLSchema#double>`, object.N3())
 }
 
-func TestObjectTermForTypedObjectsRestoresAGeometryLiteralAsGeoSPARQLWKT(t *testing.T) {
-	object := objectTerm([]sql.NullString{invalid, invalid, valid("POINT (1 2)"), invalid}, salsparql.TypedObjects)
+func TestObjectTermRestoresAGeometryLiteralAsGeoSPARQLWKT(t *testing.T) {
+	object := objectTerm([]sql.NullString{invalid, invalid, valid("POINT (1 2)"), invalid})
 	require.Equal(t, `"POINT (1 2)"^^<http://www.opengis.net/ont/geosparql#wktLiteral>`, object.N3())
 }
 
-func TestObjectTermForTypedObjectsFallsBackToAPlainStringLiteral(t *testing.T) {
-	object := objectTerm([]sql.NullString{invalid, invalid, invalid, valid("hello")}, salsparql.TypedObjects)
+func TestObjectTermFallsBackToAPlainStringLiteral(t *testing.T) {
+	object := objectTerm([]sql.NullString{invalid, invalid, invalid, valid("hello")})
 	require.Equal(t, `"hello"`, object.N3())
 }
 
-// TestObjectTermForTypedObjectsReadsTheStoredBlankNodePrefixAsABlankNode
-// covers the typed layout's object_string column, which is where build lands
+// TestObjectTermReadsTheStoredBlankNodePrefixAsABlankNode
+// covers the object_string column, which is where build lands
 // a blank node object; the stored "_:" prefix is what tells it apart from a
 // plain string literal sharing that column.
-func TestObjectTermForTypedObjectsReadsTheStoredBlankNodePrefixAsABlankNode(t *testing.T) {
-	object := objectTerm([]sql.NullString{invalid, invalid, invalid, valid("_:sal_0123456789abcdef01234567")}, salsparql.TypedObjects)
+func TestObjectTermReadsTheStoredBlankNodePrefixAsABlankNode(t *testing.T) {
+	object := objectTerm([]sql.NullString{invalid, invalid, invalid, valid("_:sal_0123456789abcdef01234567")})
 	require.Equal(t, "_:sal_0123456789abcdef01234567", object.N3())
 }
 
@@ -115,7 +86,7 @@ func TestExportedTriplesSerializeAsValidNTriples(t *testing.T) {
 	graph.Add(
 		subjectTerm("http://example.org/s"),
 		rdflibgo.NewURIRefUnsafe("http://example.org/p"),
-		objectTerm([]sql.NullString{invalid, valid("3.5"), invalid, invalid}, salsparql.TypedObjects),
+		objectTerm([]sql.NullString{invalid, valid("3.5"), invalid, invalid}),
 	)
 
 	var out bytes.Buffer

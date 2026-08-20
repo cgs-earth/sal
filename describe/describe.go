@@ -22,9 +22,7 @@ func (cmd *DescribeCmd) Run() error {
 		return err
 	}
 
-	result, err := salsparql.RunLookup(func(layout salsparql.ObjectLayout) string {
-		return salsparql.DescribeSQL(subject, layout)
-	})
+	result, err := salsparql.RunLookup(salsparql.DescribeSQL(subject))
 	if err != nil {
 		return err
 	}

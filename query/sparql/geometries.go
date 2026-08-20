@@ -75,7 +75,7 @@ func (r DuckDBRunner) Geometries(ctx context.Context, query GeometryQuery) (Feat
 	if query.Offset < 0 {
 		query.Offset = 0
 	}
-	result, err := r.RunSQL(ctx, geometrySQL(r.Layout, query))
+	result, err := r.RunSQL(ctx, geometrySQL(query))
 	if err != nil {
 		return FeatureCollection{}, err
 	}
@@ -100,14 +100,10 @@ func (r DuckDBRunner) Geometries(ctx context.Context, query GeometryQuery) (Feat
 	}, nil
 }
 
-// geometrySQL builds the map data query for both object column layouts. The
-// typed layout's object_geometry column is read by DuckDB as GEOMETRY already,
-// so it goes straight into the ST_ functions without a WKB conversion.
-func geometrySQL(layout ObjectLayout, query GeometryQuery) string {
-	object := "triples.object"
-	if layout == TypedObjects {
-		object = objectTextExpr("triples")
-	}
+// geometrySQL builds the map data query. The object_geometry column is read by
+// DuckDB as GEOMETRY already, so it goes straight into the ST_ functions
+// without a WKB conversion.
+func geometrySQL(query GeometryQuery) string {
 	sql := fmt.Sprintf(`
 SELECT
 	triples.subject,
@@ -115,7 +111,7 @@ SELECT
 	%s AS object,
 	ST_AsGeoJSON(triples.object_geometry) AS geometry
 FROM triples
-WHERE triples.object_geometry IS NOT NULL`, object)
+WHERE triples.object_geometry IS NOT NULL`, objectTextExpr("triples"))
 	if query.BBox != nil {
 		sql += fmt.Sprintf("\n  AND ST_Intersects(triples.object_geometry, ST_MakeEnvelope(%s))", bboxArgs(*query.BBox))
 	}

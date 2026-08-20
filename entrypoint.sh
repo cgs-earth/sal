@@ -56,11 +56,7 @@ build_demo_data() {
 	git add -A
 	# build refuses to snapshot a tree with uncommitted changes.
 	git commit -qm "Add sample RDF data"
-	# --typed splits the object column by datatype, which is what stores the
-	# WKT literals in geo.ttl as geometries in object_geometry. That column is
-	# what the Map tab, /geometries, and the GeoSPARQL functions read; without
-	# it a WKT literal is text like any other object and there is nothing to map.
-	/app/sal build --typed data/
+	/app/sal build data/
 
 	# A second build on top of the first, so the demo has more than one snapshot
 	# and the table shows what an edit to an existing triple looks like: the old
@@ -69,7 +65,7 @@ build_demo_data() {
 	sed -i 's/schema:name "Example Organization 001"/schema:name "Test Change"/' data/large.ttl
 	git add -A
 	git commit -qm "Rename Example Organization 001 to Test Change"
-	/app/sal build --typed data/
+	/app/sal build data/
 }
 
 case "$DEMO_DATA" in

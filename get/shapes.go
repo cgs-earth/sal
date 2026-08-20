@@ -9,7 +9,7 @@ import (
 type shapesCmd struct{}
 
 func (cmd *shapesCmd) Run() error {
-	result, err := salsparql.RunLookup(salsparql.ShapesSQL)
+	result, err := salsparql.RunLookup(salsparql.ShapesSQL())
 	if err != nil {
 		return err
 	}

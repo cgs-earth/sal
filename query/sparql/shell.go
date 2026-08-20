@@ -40,7 +40,6 @@ type StatsRunner interface {
 
 type DuckDBRunner struct {
 	TablePath string
-	Layout    ObjectLayout
 	Limit     int
 	// Imports are the imported data products registered as views of their own
 	// beside the project's `triples` view.
@@ -73,7 +72,7 @@ func (r sqlRunner) Run(ctx context.Context, query string) (Result, error) {
 
 // Run translates SPARQL to SQL and executes it through DuckDB.
 func (r DuckDBRunner) Run(ctx context.Context, query string) (Result, error) {
-	sql, err := ToSQL(query, r.Layout)
+	sql, err := ToSQL(query)
 	if err != nil {
 		return Result{}, err
 	}

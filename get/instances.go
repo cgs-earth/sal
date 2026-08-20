@@ -9,7 +9,7 @@ import (
 type instancesCmd struct{}
 
 func (cmd *instancesCmd) Run() error {
-	result, err := salsparql.RunLookup(salsparql.InstancesSQL)
+	result, err := salsparql.RunLookup(salsparql.InstancesSQL())
 	if err != nil {
 		return err
 	}

@@ -52,7 +52,7 @@ var statsSections = []string{"snapshots", "properties", "column-stats"}
 // amortize.
 func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 	statements := make([]string, 0, len(statsSections)+1)
-	statements = append(statements, countsSQL(r.Layout))
+	statements = append(statements, countsSQL())
 	for _, section := range statsSections {
 		sql, err := InfoSQL(section, r.TablePath)
 		if err != nil {
@@ -186,14 +186,14 @@ func modulesFromProperties(properties Result) []string {
 	return nil
 }
 
-func countsSQL(layout ObjectLayout) string {
+func countsSQL() string {
 	return fmt.Sprintf(`
 SELECT
 	COUNT(*) AS triples,
 	COUNT(DISTINCT triples.subject) AS subjects,
 	COUNT(DISTINCT triples.predicate) AS predicates,
 	COUNT(DISTINCT %s) AS objects
-FROM triples`, bindingExpr("triples", "object", layout))
+FROM triples`, bindingExpr("triples", "object"))
 }
 
 func parseCount(value string) int64 {

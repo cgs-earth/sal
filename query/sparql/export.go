@@ -6,18 +6,13 @@ import (
 	"fmt"
 )
 
-// ExportSQL selects the columns an N-Triples export needs for the table's
-// object column layout, leaving out triple_hash since it identifies a row
-// rather than being part of the triple it names. The typed layout's object
-// union is read back as its four candidate columns; object_geometry comes
-// back as WKT text since the driver has no Go value for DuckDB's GEOMETRY,
-// and object_float is cast to text so its rendering matches what every other
-// numeric object lookup in this package already produces.
-func ExportSQL(layout ObjectLayout) string {
-	if layout == SimpleObjects {
-		return "SELECT subject, predicate, object FROM triples"
-	}
-	return `SELECT
+// ExportSQL selects the columns an N-Triples export needs, leaving out
+// triple_hash since it identifies a row rather than being part of the triple
+// it names. The object union is read back as its four candidate columns;
+// object_geometry comes back as WKT text since the driver has no Go value for
+// DuckDB's GEOMETRY, and object_float is cast to text so its rendering matches
+// what every other numeric object lookup in this package already produces.
+const ExportSQL = `SELECT
 	subject,
 	predicate,
 	object_iri,
@@ -25,14 +20,13 @@ func ExportSQL(layout ObjectLayout) string {
 	ST_AsText(object_geometry) AS object_wkt,
 	object_string
 FROM triples`
-}
 
 // StreamSQL runs a statement against the triples table and calls rowFn with
 // each row, without buffering the result set in memory the way RunSQL does,
 // so a table larger than memory can still be read in full. NULL is kept as
 // NULL through sql.NullString rather than collapsed to the empty string,
-// since a caller reading the typed object layout has to tell an absent union
-// member apart from one holding an actual empty string.
+// since a caller reading the object union has to tell an absent member apart
+// from one holding an actual empty string.
 //
 // The slice passed to rowFn is reused across rows, so a caller that needs to
 // keep a value beyond the call must copy it first.
