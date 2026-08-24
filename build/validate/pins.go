@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cgs-earth/sal/pkg"
+	"github.com/cgs-earth/sal/salmodule"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
@@ -188,6 +189,28 @@ func (p *PinnedVocabularies) Unpin(id string) {
 	}
 	delete(p.entries, id)
 	p.dirty = true
+}
+
+// PinnedModuleCommits returns the git commit each salmodule:// vocabulary is
+// pinned at, keyed by the module's vocabulary namespace. It is what lets a
+// build reuse the docker image a previous invocation built and tagged with
+// that commit instead of cloning and building the module again.
+func (p *PinnedVocabularies) PinnedModuleCommits() map[string]string {
+	commits := map[string]string{}
+	for id, entry := range p.entries {
+		if entry.Scheme != gitCommitVersionScheme || !salmodule.IsModuleIRI(id) {
+			continue
+		}
+		// a module may be pinned with or without the namespace's trailing slash
+		// depending on whether a prefix declaration or an import recorded it, so
+		// both forms normalize to the namespace the resolver keys by
+		ref, err := salmodule.ParseModuleIRI(id)
+		if err != nil {
+			continue
+		}
+		commits[ref.Namespace] = entry.Version
+	}
+	return commits
 }
 
 // Documents returns the path of every vocabulary document the pins name.

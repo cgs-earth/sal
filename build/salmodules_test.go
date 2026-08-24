@@ -64,6 +64,8 @@ type testContainerRunner struct {
 
 func (r *testContainerRunner) BuildImage(context.Context, string, string) error { return nil }
 
+func (r *testContainerRunner) ImageExists(context.Context, string) (bool, error) { return false, nil }
+
 func (r *testContainerRunner) RunContainer(_ context.Context, _ string, env []string, cmd []string) ([]byte, []byte, error) {
 	switch cmd[len(cmd)-1] {
 	case salmodule.OntologyCommand:

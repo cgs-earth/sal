@@ -29,6 +29,8 @@ type testModuleRunner struct{}
 
 func (testModuleRunner) BuildImage(context.Context, string, string) error { return nil }
 
+func (testModuleRunner) ImageExists(context.Context, string) (bool, error) { return false, nil }
+
 func (testModuleRunner) RunContainer(_ context.Context, _ string, _ []string, cmd []string) ([]byte, []byte, error) {
 	if cmd[len(cmd)-1] == salmodule.OntologyCommand {
 		return []byte(testModuleOntology), nil, nil

@@ -42,6 +42,10 @@ type Resolver struct {
 	images     map[string]string
 	commits    map[string]string
 	ontologies map[string]*ModuleOntology
+	// pinnedCommits holds the git commit a project has pinned each module at in
+	// .sal/config.jsonld. A pinned module whose image is still on the docker
+	// daemon is reused without being cloned or built again.
+	pinnedCommits map[string]string
 }
 
 var defaultResolver = &Resolver{}
@@ -58,11 +62,25 @@ func (r *Resolver) Reset() {
 	r.images = nil
 	r.commits = nil
 	r.ontologies = nil
+	r.pinnedCommits = nil
+}
+
+// UsePinnedCommit tells the resolver which git commit the project pins the
+// module at, so that the image a previous invocation built and tagged with
+// that commit can be reused instead of cloning and building the module again.
+func (r *Resolver) UsePinnedCommit(namespace string, commit string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pinnedCommits == nil {
+		r.pinnedCommits = map[string]string{}
+	}
+	r.pinnedCommits[namespace] = commit
 }
 
 // Downloaded returns the salmodule:// URI of every module the resolver has
-// cloned and built, whether it was dereferenced for its vocabulary or run as a
-// task. A build records these so that a table says which modules produced it.
+// resolved to an image, whether it cloned and built the module or reused a
+// prebuilt image, and whether it was dereferenced for its vocabulary or run as
+// a task. A build records these so that a table says which modules produced it.
 func (r *Resolver) Downloaded() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -136,10 +154,13 @@ func (r *Resolver) runModuleCommand(ctx context.Context, ref ModuleRef, env []st
 }
 
 // image clones and builds the module the first time it is referenced and
-// returns the local image tag it was built as.
+// returns the local image tag it was built as. A module whose image already
+// exists on the docker daemon under the tag of the commit the project pins is
+// reused without cloning or building anything.
 func (r *Resolver) image(ctx context.Context, ref ModuleRef) (string, error) {
 	r.mu.Lock()
 	image, ok := r.images[ref.Namespace]
+	pinnedCommit := r.pinnedCommits[ref.Namespace]
 	r.mu.Unlock()
 	if ok {
 		return image, nil
@@ -148,6 +169,21 @@ func (r *Resolver) image(ctx context.Context, ref ModuleRef) (string, error) {
 	runner, err := r.containerRunner()
 	if err != nil {
 		return "", err
+	}
+
+	// the commit pinned in .sal/config.jsonld names the exact image a previous
+	// invocation tagged, so finding it on the daemon makes a clone pointless
+	if pinnedCommit != "" {
+		tag := ref.ImageTagFor(pinnedCommit)
+		exists, err := runner.ImageExists(ctx, tag)
+		if err != nil {
+			return "", err
+		}
+		if exists {
+			slog.Debug("Cache hit for SAL module " + ref.Namespace + ": reusing prebuilt image " + tag + " instead of cloning and building")
+			r.remember(ref.Namespace, tag, pinnedCommit)
+			return tag, nil
+		}
 	}
 
 	repoDir, err := os.MkdirTemp("", "sal-module-")
@@ -177,11 +213,29 @@ func (r *Resolver) image(ctx context.Context, ref ModuleRef) (string, error) {
 	}
 	commit := strings.TrimSpace(string(commitOut))
 
-	slog.Info("Building SAL module image " + ref.ImageTag)
-	if err := runner.BuildImage(ctx, repoDir, ref.ImageTag); err != nil {
+	// the clone's HEAD may already have an image from an earlier invocation even
+	// when nothing pinned it, in which case only the docker build is skipped
+	tag := ref.ImageTagFor(commit)
+	exists, err := runner.ImageExists(ctx, tag)
+	if err != nil {
 		return "", err
 	}
+	if exists {
+		slog.Debug("Cache hit for SAL module " + ref.Namespace + ": reusing prebuilt image " + tag + " instead of building")
+	} else {
+		slog.Info("Building SAL module image " + tag)
+		if err := runner.BuildImage(ctx, repoDir, tag); err != nil {
+			return "", err
+		}
+	}
 
+	r.remember(ref.Namespace, tag, commit)
+	return tag, nil
+}
+
+// remember records the image a module resolved to and the commit it was built
+// from, so later references neither clone nor inspect anything.
+func (r *Resolver) remember(namespace string, image string, commit string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.images == nil {
@@ -190,9 +244,8 @@ func (r *Resolver) image(ctx context.Context, ref ModuleRef) (string, error) {
 	if r.commits == nil {
 		r.commits = map[string]string{}
 	}
-	r.images[ref.Namespace] = ref.ImageTag
-	r.commits[ref.Namespace] = commit
-	return ref.ImageTag, nil
+	r.images[namespace] = image
+	r.commits[namespace] = commit
 }
 
 // CommitHash returns the git commit hash of the HEAD of the module repository

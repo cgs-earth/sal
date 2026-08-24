@@ -12,7 +12,10 @@ func TestParseModuleIRIWithExplicitHost(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "salmodule://www.github.com/test/history-getter/", ref.Namespace)
 	require.Equal(t, "https://www.github.com/test/history-getter.git", ref.CloneURL)
-	require.Equal(t, "sal-module-www-github-com-test-history-getter:latest", ref.ImageTag)
+	require.Equal(t, "sal-module-www-github-com-test-history-getter", ref.ImageRepository)
+	// the image is tagged with the commit it was built from, so a later
+	// invocation can find the exact version a project pins
+	require.Equal(t, "sal-module-www-github-com-test-history-getter:abc123", ref.ImageTagFor("abc123"))
 }
 
 func TestParseModuleIRIDefaultsToGithub(t *testing.T) {

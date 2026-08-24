@@ -54,8 +54,18 @@ type ModuleRef struct {
 	Namespace string
 	// CloneURL is the git repository holding the module's Dockerfile.
 	CloneURL string
-	// ImageTag is the local docker tag SAL builds the module under.
-	ImageTag string
+	// ImageRepository is the local docker repository name SAL builds the module
+	// under. The image itself is tagged with the git commit hash of the module
+	// repository it was built from; see ImageTagFor.
+	ImageRepository string
+}
+
+// ImageTagFor returns the docker tag a module built from commit is stored
+// under. Tagging by commit is what lets a later invocation reuse the image a
+// previous one built: the commit a project pins in .sal/config.jsonld names
+// the exact tag to look for.
+func (r ModuleRef) ImageTagFor(commit string) string {
+	return r.ImageRepository + ":" + commit
 }
 
 // IsModuleIRI reports whether iri uses the salmodule protocol scheme.
@@ -94,21 +104,20 @@ func ParseModuleIRI(iri string) (ModuleRef, error) {
 	// segments past OWNER/REPO name a term inside the module vocabulary
 	segments = segments[:2]
 	return ModuleRef{
-		Namespace: fmt.Sprintf("%s://%s/%s/%s/", ProtocolScheme, host, owner, repo),
-		CloneURL:  fmt.Sprintf("https://%s/%s/%s.git", host, owner, repo),
-		ImageTag:  imageTag(host, owner, repo),
+		Namespace:       fmt.Sprintf("%s://%s/%s/%s/", ProtocolScheme, host, owner, repo),
+		CloneURL:        fmt.Sprintf("https://%s/%s/%s.git", host, owner, repo),
+		ImageRepository: imageRepository(host, owner, repo),
 	}, nil
 }
 
-// imageTag builds a docker repository name that is unique per module and only
-// contains characters a docker tag allows.
-func imageTag(host, owner, repo string) string {
+// imageRepository builds a docker repository name that is unique per module and
+// only contains characters a docker reference allows.
+func imageRepository(host, owner, repo string) string {
 	name := strings.ToLower(fmt.Sprintf("sal-module-%s-%s-%s", host, owner, repo))
-	sanitized := strings.Map(func(r rune) rune {
+	return strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
 			return r
 		}
 		return '-'
 	}, name)
-	return sanitized + ":latest"
 }

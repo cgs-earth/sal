@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -23,13 +24,19 @@ type recordedRun struct {
 type fakeRunner struct {
 	ontology  string
 	runOutput string
-	builds    []string
-	runs      []recordedRun
+	// existingImages are the tags ImageExists reports as already on the daemon.
+	existingImages []string
+	builds         []string
+	runs           []recordedRun
 }
 
 func (f *fakeRunner) BuildImage(_ context.Context, _ string, tag string) error {
 	f.builds = append(f.builds, tag)
 	return nil
+}
+
+func (f *fakeRunner) ImageExists(_ context.Context, tag string) (bool, error) {
+	return slices.Contains(f.existingImages, tag), nil
 }
 
 func (f *fakeRunner) RunContainer(_ context.Context, image string, env []string, cmd []string) ([]byte, []byte, error) {
@@ -67,7 +74,7 @@ func TestResolverBuildsModuleOntology(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, ontology.IsTaskClass(testModuleNamespace+"EducationalHistoryFinder"))
-	require.Equal(t, []string{ref.ImageTag}, runner.builds)
+	require.Equal(t, []string{ref.ImageTagFor(testModuleCommitHash)}, runner.builds)
 	require.Equal(t, []string{BaseCommand, OntologyCommand}, runner.runs[0].cmd)
 }
 
@@ -87,6 +94,69 @@ func TestResolverBuildsEachModuleOnlyOnce(t *testing.T) {
 	require.Len(t, runner.builds, 1)
 	// the cached ontology means only the ontology and run commands were invoked
 	require.Len(t, runner.runs, 2)
+}
+
+// A commit pinned in .sal/config.jsonld names the exact image tag a previous
+// invocation built, so finding it on the daemon skips the clone entirely.
+func TestResolverReusesThePinnedImageWithoutCloning(t *testing.T) {
+	ref, err := ParseModuleIRI(testModuleNamespace)
+	require.NoError(t, err)
+	runner := &fakeRunner{
+		ontology:       testOntology,
+		existingImages: []string{ref.ImageTagFor(testModuleCommitHash)},
+	}
+	resolver := &Resolver{
+		Runner: runner,
+		Command: func(context.Context, string, string, ...string) ([]byte, error) {
+			return nil, fmt.Errorf("git must not run when the pinned image exists")
+		},
+	}
+	resolver.UsePinnedCommit(ref.Namespace, testModuleCommitHash)
+
+	_, err = resolver.Ontology(context.Background(), ref)
+
+	require.NoError(t, err)
+	require.Empty(t, runner.builds)
+	require.Equal(t, ref.ImageTagFor(testModuleCommitHash), runner.runs[0].image)
+	// a reused module still counts as one this invocation resolved, so it is
+	// still recorded on the table it helps produce
+	require.Equal(t, []string{"salmodule://www.github.com/test/history-getter"}, resolver.Downloaded())
+
+	hash, err := resolver.CommitHash(context.Background(), ref)
+	require.NoError(t, err)
+	require.Equal(t, testModuleCommitHash, hash)
+}
+
+// A pinned commit whose image is no longer on the daemon falls back to the
+// normal clone and build, rather than failing or trusting the pin blindly.
+func TestResolverClonesAndBuildsWhenThePinnedImageIsMissing(t *testing.T) {
+	runner := &fakeRunner{ontology: testOntology}
+	resolver := newTestResolver(runner)
+	ref, err := ParseModuleIRI(testModuleNamespace)
+	require.NoError(t, err)
+	resolver.UsePinnedCommit(ref.Namespace, testModuleCommitHash)
+
+	_, err = resolver.Ontology(context.Background(), ref)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{ref.ImageTagFor(testModuleCommitHash)}, runner.builds)
+}
+
+// Even without a pin, a clone whose HEAD was already built and tagged by an
+// earlier invocation skips the docker build.
+func TestResolverSkipsTheBuildWhenTheClonedCommitsImageExists(t *testing.T) {
+	ref, err := ParseModuleIRI(testModuleNamespace)
+	require.NoError(t, err)
+	runner := &fakeRunner{
+		ontology:       testOntology,
+		existingImages: []string{ref.ImageTagFor(testModuleCommitHash)},
+	}
+
+	_, err = newTestResolver(runner).Ontology(context.Background(), ref)
+
+	require.NoError(t, err)
+	require.Empty(t, runner.builds)
+	require.Equal(t, ref.ImageTagFor(testModuleCommitHash), runner.runs[0].image)
 }
 
 func TestResolverCommitHashReturnsTheClonedRepositorysHead(t *testing.T) {
