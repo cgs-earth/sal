@@ -9,9 +9,12 @@ import (
 // RDFTypeIRI is the predicate that states the class of a resource.
 const RDFTypeIRI = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
 
-// The RDF Schema terms a datatype lookup reads: the class a resource is typed
-// with to declare it a datatype, and the two annotations it optionally carries.
+// The RDF Schema and OWL terms the class and datatype lookups read: the classes
+// a resource is typed with to declare it a class or a datatype, and the two
+// annotations it optionally carries.
 const (
+	RDFSClassIRI    = "http://www.w3.org/2000/01/rdf-schema#Class"
+	OWLClassIRI     = "http://www.w3.org/2002/07/owl#Class"
 	RDFSDatatypeIRI = "http://www.w3.org/2000/01/rdf-schema#Datatype"
 	RDFSLabelIRI    = "http://www.w3.org/2000/01/rdf-schema#label"
 	RDFSCommentIRI  = "http://www.w3.org/2000/01/rdf-schema#comment"
@@ -40,39 +43,60 @@ var propertyClassIRIs = []string{
 // it is part of a vocabulary. A subject carrying one of them describes the
 // schema rather than instantiating it, so an instance lookup leaves it out.
 var vocabularyClassIRIs = slices.Concat(
-	[]string{
-		"http://www.w3.org/2000/01/rdf-schema#Class",
-		"http://www.w3.org/2002/07/owl#Class",
-		RDFSDatatypeIRI,
-	},
+	[]string{RDFSClassIRI, OWLClassIRI, RDFSDatatypeIRI},
 	propertyClassIRIs,
 	[]string{"http://www.w3.org/2002/07/owl#Ontology"},
 )
 
-// ClassesSQL lists every RDF class the data product types a resource with,
-// most instantiated first. A class is the object of an rdf:type statement, so
-// this is a filter on the predicate column rather than a schema lookup.
+// ClassesSQL lists every resource the data product declares to be a class,
+// with the label and comment it is annotated with. A class is a subject typed
+// rdfs:Class or owl:Class, so a class the data product only types resources
+// with, without carrying its definition, is not listed; `sal get instances`
+// is the lookup that reports those. Both annotations are optional, so they are
+// left joined and come back empty for a class that does not state them, and a
+// class declared to be both rdfs:Class and owl:Class is listed once.
+//
+// The annotation columns are named with the prefixed form of the predicate
+// each one reports, the way `sal get shapes` names its columns.
 func ClassesSQL() string {
 	return fmt.Sprintf(`
 SELECT
-	%s AS class,
-	COUNT(DISTINCT triples.subject) AS instances
-FROM triples
-WHERE triples.predicate = '%s'
+	classes.subject AS class,
+	MIN(%s) AS "rdfs:label",
+	MIN(%s) AS "rdfs:comment"
+FROM triples AS classes
+LEFT JOIN triples AS labels
+	ON labels.subject = classes.subject
+	AND labels.predicate = '%s'
+LEFT JOIN triples AS comments
+	ON comments.subject = classes.subject
+	AND comments.predicate = '%s'
+WHERE classes.predicate = '%s'
+	AND %s IN ('%s', '%s')
 GROUP BY class
-ORDER BY instances DESC, class`, bindingExpr("triples", "object"), RDFTypeIRI)
+ORDER BY class`,
+		bindingExpr("labels", "object"),
+		bindingExpr("comments", "object"),
+		RDFSLabelIRI,
+		RDFSCommentIRI,
+		RDFTypeIRI,
+		bindingExpr("classes", "object"),
+		RDFSClassIRI,
+		OWLClassIRI)
 }
 
 // DatatypesSQL lists every resource the data product declares to be an
 // rdfs:Datatype, with the label and comment it is annotated with. Both
 // annotations are optional, so they are left joined and come back empty for a
-// datatype that does not state them.
+// datatype that does not state them. The annotation columns are named with the
+// prefixed form of the predicate each one reports, the way `sal get classes`
+// and `sal get shapes` name theirs.
 func DatatypesSQL() string {
 	return fmt.Sprintf(`
 SELECT
 	datatypes.subject AS datatype,
-	MIN(%s) AS label,
-	MIN(%s) AS comment
+	MIN(%s) AS "rdfs:label",
+	MIN(%s) AS "rdfs:comment"
 FROM triples AS datatypes
 LEFT JOIN triples AS labels
 	ON labels.subject = datatypes.subject

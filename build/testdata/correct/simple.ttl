@@ -1,3 +1,4 @@
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix schema: <https://schema.org/> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
@@ -7,3 +8,13 @@
     schema:birthDate "1995-01-15"^^xsd:date ;
     schema:email <mailto:alice@example.org> ;
     schema:worksFor <org/acme> .
+
+<MyClass> 
+    a rdfs:Class ; 
+    rdfs:label "My test class" ;
+    rdfs:comment "Test class for integration tests" .
+
+<MyDatatype>
+    a rdfs:Datatype ;
+    rdfs:label "My test datatype" ;
+    rdfs:comment "Test datatype for integration tests" .
