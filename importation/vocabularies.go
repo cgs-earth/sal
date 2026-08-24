@@ -7,11 +7,13 @@ import (
 	"github.com/cgs-earth/sal/pkg"
 )
 
-// OntologyRow is one row of the project's ontology listing: the union of the
-// vocabularies build/validate has pinned and the ontologies/artifacts sal
-// import has recorded, reported together the way `sal get ontologies` and the
-// serve --with-ui stats view both display it.
-type OntologyRow struct {
+// VocabularyRow is one row of the project's vocabulary listing: the union of
+// the vocabularies build/validate has pinned and the vocabularies/artifacts sal
+// import has recorded, reported together the way `sal get vocabularies` and
+// the serve --with-ui stats view both display it. Nothing here reads the
+// document behind a row, so a row is a vocabulary rather than an ontology:
+// whether it is an owl:Ontology is only known from the document itself.
+type VocabularyRow struct {
 	ID       string
 	Version  string
 	Format   string
@@ -30,11 +32,11 @@ type pinnedVocabularyNode struct {
 	Format string `json:"dcterms:format,omitempty"`
 }
 
-// ProjectOntologyRows reads .sal/config.jsonld at path and reports the union
-// of the vocabularies it has pinned and the ontologies its project ontology
+// ProjectVocabularyRows reads .sal/config.jsonld at path and reports the union
+// of the vocabularies it has pinned and the vocabularies its project ontology
 // node has imported, sorted by @id. A project with no config file yet simply
 // reports no rows.
-func ProjectOntologyRows(path string, base string) ([]OntologyRow, error) {
+func ProjectVocabularyRows(path string, base string) ([]VocabularyRow, error) {
 	doc, err := pkg.ReadConfigDocument(path)
 	if err != nil {
 		return nil, err
@@ -53,15 +55,15 @@ func ProjectOntologyRows(path string, base string) ([]OntologyRow, error) {
 		imports = ontology.Imports
 	}
 
-	return OntologyRows(pinnedNodes, imports)
+	return VocabularyRows(pinnedNodes, imports)
 }
 
-// OntologyRows renders the union of the pinned vocabulary nodes of
+// VocabularyRows renders the union of the pinned vocabulary nodes of
 // .sal/config.jsonld and the project ontology's owl:imports as rows, sorted
 // by @id. A pinned vocabulary that is also imported reports the version and
 // format it was pinned at; an import with no pin yet, such as an oci://
 // artifact, reports empty version and format instead.
-func OntologyRows(pinnedNodes []json.RawMessage, imports []string) ([]OntologyRow, error) {
+func VocabularyRows(pinnedNodes []json.RawMessage, imports []string) ([]VocabularyRow, error) {
 	type pin struct {
 		version string
 		format  string
@@ -90,20 +92,20 @@ func OntologyRows(pinnedNodes []json.RawMessage, imports []string) ([]OntologyRo
 	}
 	sort.Strings(ids)
 
-	rows := make([]OntologyRow, len(ids))
+	rows := make([]VocabularyRow, len(ids))
 	for i, id := range ids {
-		rows[i] = OntologyRow{ID: id, Version: pinned[id].version, Format: pinned[id].format, Imported: imported[id]}
+		rows[i] = VocabularyRow{ID: id, Version: pinned[id].version, Format: pinned[id].format, Imported: imported[id]}
 	}
 	return rows, nil
 }
 
-// OntologyTableHeader is the column header `sal get ontologies` and the serve
-// --with-ui stats view both use for OntologyRows rendered as a table.
-var OntologyTableHeader = []string{"ontology", "version", "format", "imported"}
+// VocabularyTableHeader is the column header `sal get vocabularies` and the
+// serve --with-ui stats view both use for VocabularyRows rendered as a table.
+var VocabularyTableHeader = []string{"vocabulary", "version", "format", "imported"}
 
-// OntologyTableRows renders rows as a table under OntologyTableHeader,
+// VocabularyTableRows renders rows as a table under VocabularyTableHeader,
 // spelling out Imported as "yes"/"no".
-func OntologyTableRows(rows []OntologyRow) [][]string {
+func VocabularyTableRows(rows []VocabularyRow) [][]string {
 	table := make([][]string, len(rows))
 	for i, row := range rows {
 		imported := "no"

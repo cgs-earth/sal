@@ -623,6 +623,34 @@ kbd {
   tab-size: 2;
 }
 
+/* ---------- blobs ---------- */
+
+.blob-toggle {
+  padding: 10px 16px 0;
+}
+
+.blob-toggle code {
+  color: var(--teal);
+}
+
+/* the digest is the heading, so it keeps its case and wraps rather than overflowing */
+.blob-view-header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.blob-view-header h3 {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.blob-view-header h3 code {
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
 /* ---------- map ---------- */
 
 .map-panel {
@@ -713,7 +741,7 @@ kbd {
   gap: 6px;
 }
 
-.map-toggle {
+.toggle {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -722,7 +750,7 @@ kbd {
   cursor: pointer;
 }
 
-.map-toggle input {
+.toggle input {
   accent-color: var(--lavender);
 }
 
@@ -826,6 +854,78 @@ kbd {
    .tab-body.sparql comment above for why. */
 .yasgui-host {
   flex: none;
+  min-width: 0;
+}
+
+/* The workspace holds Yasgui and, when asked for, the read-only pane showing
+   the SQL the query translates to. The pane goes beside the editor when the
+   workspace is wide enough for both to be read, and below it otherwise; the
+   decision is made on the workspace's own width rather than the viewport's, so
+   it holds whatever else the page is doing. */
+.sparql-workspace {
+  container-type: inline-size;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  flex: none;
+}
+
+@container (min-width: 1100px) {
+  .sparql-workspace.with-sql {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    align-items: start;
+  }
+
+  /* Yasgui's results grow the left column past the editor; sticking the pane
+     keeps it beside the editor it explains as the tab scrolls. */
+  .sparql-workspace.with-sql > .sql-preview {
+    position: sticky;
+    top: 0;
+  }
+}
+
+.sql-preview {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--mantle);
+  overflow: hidden;
+}
+
+.sql-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: var(--border);
+}
+
+.sql-preview-header h4 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--lavender);
+}
+
+.sql-preview-copy {
+  margin-left: auto;
+  padding: 3px 10px;
+  font-size: 11px;
+}
+
+/* Sized to the SPARQL editor by SqlPreview; this is the height before it has
+   been measured. */
+.sql-preview-editor {
+  flex: none;
+  height: 280px;
+}
+
+.sql-preview-editor .error-banner {
+  margin: 12px;
+  white-space: pre-wrap;
+  overflow: auto;
 }
 
 /* ---------- sparql: graph tab ---------- */

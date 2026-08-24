@@ -34,6 +34,12 @@ type SQLRunner interface {
 	RunSQL(ctx context.Context, sql string) (Result, error)
 }
 
+// SQLTranslator reports the SQL a SPARQL query would run as, without running
+// it. The SPARQL shell's SQL page and the web UI's SQL pane both show it.
+type SQLTranslator interface {
+	Translate(query string) (string, error)
+}
+
 type StatsRunner interface {
 	Stats(ctx context.Context) (TableStats, error)
 }
@@ -72,16 +78,25 @@ func (r sqlRunner) Run(ctx context.Context, query string) (Result, error) {
 
 // Run translates SPARQL to SQL and executes it through DuckDB.
 func (r DuckDBRunner) Run(ctx context.Context, query string) (Result, error) {
-	sql, err := ToSQL(query)
+	sql, err := r.Translate(query)
 	if err != nil {
 		return Result{}, err
+	}
+	return r.RunSQL(ctx, sql)
+}
+
+// Translate is the SQL Run executes for a SPARQL query: the translation with
+// the runner's own row limit appended when the query does not state one.
+func (r DuckDBRunner) Translate(query string) (string, error) {
+	sql, err := ToSQL(query)
+	if err != nil {
+		return "", err
 	}
 	sql = strings.TrimRight(strings.TrimSpace(sql), ";")
 	if r.Limit > 0 && !hasLimit(sql) {
 		sql += fmt.Sprintf("\nLIMIT %d", r.Limit)
 	}
-
-	return r.RunSQL(ctx, sql)
+	return sql, nil
 }
 
 func hasLimit(sql string) bool {

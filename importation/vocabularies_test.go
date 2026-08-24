@@ -22,67 +22,67 @@ func pinnedVocabularyRaw(t *testing.T, id string, format string) json.RawMessage
 	return raw
 }
 
-func TestOntologyRowsMarksAPinThatIsAlsoImported(t *testing.T) {
+func TestVocabularyRowsMarksAPinThatIsAlsoImported(t *testing.T) {
 	pinned := []json.RawMessage{pinnedVocabularyRaw(t, "https://schema.org/", "application/ld+json")}
-	rows, err := OntologyRows(pinned, []string{"https://schema.org/"})
+	rows, err := VocabularyRows(pinned, []string{"https://schema.org/"})
 	require.NoError(t, err)
-	require.Equal(t, []OntologyRow{
+	require.Equal(t, []VocabularyRow{
 		{ID: "https://schema.org/", Version: "urn:sha256:https://schema.org/", Format: "application/ld+json", Imported: true},
 	}, rows)
 }
 
-func TestOntologyRowsMarksAPinThatIsNotImported(t *testing.T) {
+func TestVocabularyRowsMarksAPinThatIsNotImported(t *testing.T) {
 	pinned := []json.RawMessage{pinnedVocabularyRaw(t, "https://schema.org/", "application/ld+json")}
-	rows, err := OntologyRows(pinned, nil)
+	rows, err := VocabularyRows(pinned, nil)
 	require.NoError(t, err)
 	require.False(t, rows[0].Imported)
 }
 
-func TestOntologyRowsSortsByID(t *testing.T) {
+func TestVocabularyRowsSortsByID(t *testing.T) {
 	pinned := []json.RawMessage{
 		pinnedVocabularyRaw(t, "https://vocab.test/z", ""),
 		pinnedVocabularyRaw(t, "https://vocab.test/a", ""),
 	}
-	rows, err := OntologyRows(pinned, nil)
+	rows, err := VocabularyRows(pinned, nil)
 	require.NoError(t, err)
 	require.Equal(t, "https://vocab.test/a", rows[0].ID)
 	require.Equal(t, "https://vocab.test/z", rows[1].ID)
 }
 
-func TestOntologyRowsRejectsInvalidJSON(t *testing.T) {
-	_, err := OntologyRows([]json.RawMessage{json.RawMessage(`{invalid`)}, nil)
+func TestVocabularyRowsRejectsInvalidJSON(t *testing.T) {
+	_, err := VocabularyRows([]json.RawMessage{json.RawMessage(`{invalid`)}, nil)
 	require.Error(t, err)
 }
 
-func TestOntologyRowsIncludesAnImportThatIsNotYetPinned(t *testing.T) {
-	rows, err := OntologyRows(nil, []string{"oci://ghcr.io/cgs-earth/example:latest"})
+func TestVocabularyRowsIncludesAnImportThatIsNotYetPinned(t *testing.T) {
+	rows, err := VocabularyRows(nil, []string{"oci://ghcr.io/cgs-earth/example:latest"})
 	require.NoError(t, err)
-	require.Equal(t, []OntologyRow{
+	require.Equal(t, []VocabularyRow{
 		{ID: "oci://ghcr.io/cgs-earth/example:latest", Imported: true},
 	}, rows)
 }
 
-func TestOntologyRowsDeduplicatesAPinThatIsAlsoAnImport(t *testing.T) {
+func TestVocabularyRowsDeduplicatesAPinThatIsAlsoAnImport(t *testing.T) {
 	pinned := []json.RawMessage{pinnedVocabularyRaw(t, "salmodule://github.com/cgs-earth/example", "application/ld+json")}
-	rows, err := OntologyRows(pinned, []string{"salmodule://github.com/cgs-earth/example"})
+	rows, err := VocabularyRows(pinned, []string{"salmodule://github.com/cgs-earth/example"})
 	require.NoError(t, err)
-	require.Equal(t, []OntologyRow{
+	require.Equal(t, []VocabularyRow{
 		{ID: "salmodule://github.com/cgs-earth/example", Version: "urn:sha256:salmodule://github.com/cgs-earth/example", Format: "application/ld+json", Imported: true},
 	}, rows)
 }
 
-func TestOntologyRowsUnionsPinsAndImportsSortedTogether(t *testing.T) {
+func TestVocabularyRowsUnionsPinsAndImportsSortedTogether(t *testing.T) {
 	pinned := []json.RawMessage{pinnedVocabularyRaw(t, "https://schema.org/", "application/ld+json")}
-	rows, err := OntologyRows(pinned, []string{"oci://ghcr.io/cgs-earth/example:latest"})
+	rows, err := VocabularyRows(pinned, []string{"oci://ghcr.io/cgs-earth/example:latest"})
 	require.NoError(t, err)
-	require.Equal(t, []OntologyRow{
+	require.Equal(t, []VocabularyRow{
 		{ID: "https://schema.org/", Version: "urn:sha256:https://schema.org/", Format: "application/ld+json", Imported: false},
 		{ID: "oci://ghcr.io/cgs-earth/example:latest", Imported: true},
 	}, rows)
 }
 
-func TestOntologyTableRowsSpellsOutImported(t *testing.T) {
-	rows := OntologyTableRows([]OntologyRow{
+func TestVocabularyTableRowsSpellsOutImported(t *testing.T) {
+	rows := VocabularyTableRows([]VocabularyRow{
 		{ID: "https://schema.org/", Version: "urn:sha256:abc", Format: "application/ld+json", Imported: true},
 		{ID: "oci://ghcr.io/cgs-earth/example:latest", Imported: false},
 	})
@@ -93,13 +93,13 @@ func TestOntologyTableRowsSpellsOutImported(t *testing.T) {
 	}, rows)
 }
 
-func TestProjectOntologyRowsReportsNoRowsWhenTheConfigFileIsMissing(t *testing.T) {
-	rows, err := ProjectOntologyRows(filepath.Join(t.TempDir(), "config.jsonld"), testBase)
+func TestProjectVocabularyRowsReportsNoRowsWhenTheConfigFileIsMissing(t *testing.T) {
+	rows, err := ProjectVocabularyRows(filepath.Join(t.TempDir(), "config.jsonld"), testBase)
 	require.NoError(t, err)
 	require.Empty(t, rows)
 }
 
-func TestProjectOntologyRowsUnionsPinnedNodesAndTheOntologyImports(t *testing.T) {
+func TestProjectVocabularyRowsUnionsPinnedNodesAndTheOntologyImports(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.jsonld")
 	raw, err := json.Marshal(map[string]any{
 		"@context": pkg.SalConfigContext,
@@ -121,9 +121,9 @@ func TestProjectOntologyRowsUnionsPinnedNodesAndTheOntologyImports(t *testing.T)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, raw, 0644))
 
-	rows, err := ProjectOntologyRows(path, testBase)
+	rows, err := ProjectVocabularyRows(path, testBase)
 	require.NoError(t, err)
-	require.Equal(t, []OntologyRow{
+	require.Equal(t, []VocabularyRow{
 		{ID: "https://schema.org/", Version: "urn:sha256:abc", Format: "application/ld+json", Imported: true},
 	}, rows)
 }

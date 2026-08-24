@@ -45,13 +45,13 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
           </Section>
 
           <Section
-            title="Ontologies"
-            caption="Every vocabulary sal build/validate has pinned, unioned with what sal import has recorded — the same listing sal get ontologies prints."
+            title="Vocabularies"
+            caption="Every vocabulary sal build/validate has pinned, unioned with what sal import has recorded — the same listing sal get vocabularies prints."
           >
             <ResultTable
-              header={stats.ontologies.header}
-              rows={stats.ontologies.rows}
-              empty="No ontologies found; run sal import to import one, or sal build/validate to pin the vocabularies a project resolves against"
+              header={stats.vocabularies.header}
+              rows={stats.vocabularies.rows}
+              empty="No vocabularies found; run sal import to import one, or sal build/validate to pin the vocabularies a project resolves against"
             />
           </Section>
 
