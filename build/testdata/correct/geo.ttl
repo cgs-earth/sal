@@ -2,52 +2,119 @@
 @prefix gsp: <http://www.opengis.net/ont/geosparql#> .
 @prefix sf: <http://www.opengis.net/ont/sf#> .
 
-<MyPoint>
-    a schema:Place ;
-    schema:name "Demo Point" ;
-    gsp:hasGeometry [
-        a sf:Point ;
-        gsp:asWKT "POINT(-89.5 40.5)"^^gsp:wktLiteral
-    ] .
+# A small dummy geo dataset for exercising geospatial queries
 
-<MyLineString>
-    a schema:Place ;
-    schema:name "Demo LineString" ;
-    gsp:hasGeometry [
-        a sf:LineString ;
-        gsp:asWKT "LINESTRING(-90 40, -89.5 40.5, -89 41)"^^gsp:wktLiteral
-    ] .
-
-<MyPolygon>
-    a schema:Place ;
-    schema:name "Demo Polygon" ;
-    gsp:hasGeometry [
-        a sf:Polygon ;
-        gsp:asWKT "POLYGON((-90 40, -89 40, -89 41, -90 41, -90 40))"^^gsp:wktLiteral
-    ] .
-
-<MyMultiPoint>
-    a schema:Place ;
-    schema:name "Demo MultiPoint" ;
-    gsp:hasGeometry [
-        a sf:MultiPoint ;
-        gsp:asWKT "MULTIPOINT((-89.8 40.2), (-89.5 40.5), (-89.2 40.8))"^^gsp:wktLiteral
-    ] .
-
-<MyMultiLineString>
-    a schema:Place ;
-    schema:name "Demo MultiLineString" ;
-    gsp:hasGeometry [
-        a sf:MultiLineString ;
-        gsp:asWKT "MULTILINESTRING((-90 40, -89.5 40.5), (-89.5 40.5, -89 41))"^^gsp:wktLiteral
-    ] .
-
-<MyMultiPolygon>
+<Colorado>
     a schema:Place,
       schema:AdministrativeArea,
       schema:State ;
-    schema:name "Demo State 1" ;
+    schema:name "Colorado" ;
+    schema:containsPlace <MesaCounty>, <Denver>, <GrandJunction> ;
     gsp:hasGeometry [
-        a sf:MultiPolygon ;
-        gsp:asWKT "MULTIPOLYGON(((-90 40, -89 40, -89 41, -90 41, -90 40)))"^^gsp:wktLiteral
+        a sf:Polygon ;
+        gsp:asWKT "POLYGON((-109.05 37.0, -102.05 37.0, -102.05 41.0, -109.05 41.0, -109.05 37.0))"^^gsp:wktLiteral
+    ] .
+
+<MesaCounty>
+    a schema:Place,
+      schema:AdministrativeArea ;
+    schema:name "Mesa County" ;
+    schema:containedInPlace <Colorado> ;
+    schema:containsPlace <GrandJunction> ;
+    gsp:hasGeometry [
+        a sf:Polygon ;
+        gsp:asWKT "POLYGON((-109.06 38.50, -107.38 38.50, -107.38 39.37, -109.06 39.37, -109.06 38.50))"^^gsp:wktLiteral
+    ] .
+
+<ColoradoRiver>
+    a schema:Place,
+      schema:BodyOfWater,
+      schema:RiverBodyOfWater ;
+    schema:name "Colorado River" ;
+    schema:description "Rough course from the headwaters near Grand Lake, Colorado, through Mesa County, to the Gulf of California." ;
+    gsp:hasGeometry [
+        a sf:LineString ;
+        gsp:asWKT "LINESTRING(-105.82 40.25, -106.39 40.06, -106.83 39.87, -107.32 39.55, -107.78 39.53, -108.22 39.33, -108.55 39.07, -108.72 39.16, -109.05 39.02, -109.55 38.57, -110.40 38.20, -111.49 36.94, -112.10 36.10, -113.40 36.00, -114.74 36.02, -114.60 35.20, -114.30 34.50, -114.62 33.60, -114.62 32.72, -114.80 31.80)"^^gsp:wktLiteral
+    ] .
+
+<NewYork>
+    a schema:Place, schema:City ;
+    schema:name "New York" ;
+    gsp:hasGeometry [
+        a sf:Point ;
+        gsp:asWKT "POINT(-74.0060 40.7128)"^^gsp:wktLiteral
+    ] .
+
+<LosAngeles>
+    a schema:Place, schema:City ;
+    schema:name "Los Angeles" ;
+    gsp:hasGeometry [
+        a sf:Point ;
+        gsp:asWKT "POINT(-118.2437 34.0522)"^^gsp:wktLiteral
+    ] .
+
+<Chicago>
+    a schema:Place, schema:City ;
+    schema:name "Chicago" ;
+    gsp:hasGeometry [
+        a sf:Point ;
+        gsp:asWKT "POINT(-87.6298 41.8781)"^^gsp:wktLiteral
+    ] .
+
+<Houston>
+    a schema:Place, schema:City ;
+    schema:name "Houston" ;
+    gsp:hasGeometry [
+        a sf:Point ;
+        gsp:asWKT "POINT(-95.3698 29.7604)"^^gsp:wktLiteral
+    ] .
+
+<Phoenix>
+    a schema:Place, schema:City ;
+    schema:name "Phoenix" ;
+    gsp:hasGeometry [
+        a sf:Point ;
+        gsp:asWKT "POINT(-112.0740 33.4484)"^^gsp:wktLiteral
+    ] .
+
+<Philadelphia>
+    a schema:Place, schema:City ;
+    schema:name "Philadelphia" ;
+    gsp:hasGeometry [
+        a sf:Point ;
+        gsp:asWKT "POINT(-75.1652 39.9526)"^^gsp:wktLiteral
+    ] .
+
+<SanFrancisco>
+    a schema:Place, schema:City ;
+    schema:name "San Francisco" ;
+    gsp:hasGeometry [
+        a sf:Point ;
+        gsp:asWKT "POINT(-122.4194 37.7749)"^^gsp:wktLiteral
+    ] .
+
+<Seattle>
+    a schema:Place, schema:City ;
+    schema:name "Seattle" ;
+    gsp:hasGeometry [
+        a sf:Point ;
+        gsp:asWKT "POINT(-122.3321 47.6062)"^^gsp:wktLiteral
+    ] .
+
+<Denver>
+    a schema:Place, schema:City ;
+    schema:name "Denver" ;
+    schema:containedInPlace <Colorado> ;
+    gsp:hasGeometry [
+        a sf:Point ;
+        gsp:asWKT "POINT(-104.9903 39.7392)"^^gsp:wktLiteral
+    ] .
+
+<GrandJunction>
+    a schema:Place, schema:City ;
+    schema:name "Grand Junction" ;
+    schema:containedInPlace <MesaCounty> ;
+    gsp:hasGeometry [
+        a sf:Point ;
+        gsp:asWKT "POINT(-108.5506 39.0639)"^^gsp:wktLiteral
     ] .
