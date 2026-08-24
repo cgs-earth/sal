@@ -150,12 +150,16 @@ a chip and as an autocompletion so a module the table was built from can be insp
 - A reachable docker daemon. SAL talks to whatever `DOCKER_HOST` points at, defaulting to the local socket.
 - `git` on `PATH`, used to clone the module repository.
 
-Each module is cloned and built once per `sal` invocation.
+Each module is cloned and built at most once per `sal` invocation, and its image is tagged with the git commit
+hash of the repository it was built from. A later invocation looks that tag up before doing anything: when the
+commit the project pins in `.sal/config.jsonld` still has its image on the docker daemon, the module is neither
+cloned nor built again, and its container runs from the existing image. Removing the image with `docker rmi`
+brings back the clone and build.
 
 A dereferenced module ontology is pinned like any other vocabulary the project resolves against: its JSON-LD is
 stored under `.sal/data` and recorded in `.sal/config.jsonld`, so a later build validates against the
-same version of the module's vocabulary without rebuilding the module to ask for it again. `--no-cache` builds
-every referenced module again and re-pins the ontology each one reports. See
+same version of the module's vocabulary without rebuilding the module to ask for it again. `--no-cache` clones
+every referenced module again, ignoring the pinned image, and re-pins the ontology each one reports. See
 [Pinned vocabularies](/sal/reference/data-layout/#pinned-vocabularies).
 
 Materialization is not pinned: `sal run` runs each task every time it is invoked, since a task's output is data rather than vocabulary.

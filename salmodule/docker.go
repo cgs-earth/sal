@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
@@ -22,6 +23,9 @@ import (
 // ContainerRunner builds and runs the container images that back SAL modules.
 type ContainerRunner interface {
 	BuildImage(ctx context.Context, contextDir string, tag string) error
+	// ImageExists reports whether the daemon already holds an image under tag,
+	// which is how a module built by a previous invocation is found and reused.
+	ImageExists(ctx context.Context, tag string) (bool, error)
 	RunContainer(ctx context.Context, image string, env []string, cmd []string) (stdout []byte, stderr []byte, err error)
 }
 
@@ -60,6 +64,18 @@ func (d *dockerRunner) BuildImage(ctx context.Context, contextDir string, tag st
 	}()
 
 	return reportBuildProgress(result.Body, tag)
+}
+
+// ImageExists asks the daemon whether an image is stored under tag.
+func (d *dockerRunner) ImageExists(ctx context.Context, tag string) (bool, error) {
+	_, err := d.client.ImageInspect(ctx, tag)
+	if cerrdefs.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect image %s: %w", tag, err)
+	}
+	return true, nil
 }
 
 // reportBuildProgress drains the daemon's JSON build stream, logging build

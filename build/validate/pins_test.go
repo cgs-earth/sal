@@ -113,6 +113,22 @@ func TestADocumentPinnedByFetchIsRecordedAtTheCommitHashRatherThanItsDigest(t *t
 	require.Equal(t, testVocabularyDocument, string(body))
 }
 
+// PinnedModuleCommits reports only the salmodule:// pins, keyed by the
+// module's vocabulary namespace whether the pin recorded the trailing slash a
+// prefix declaration carries or the slashless IRI an import records.
+func TestPinnedModuleCommitsReportsOnlySalModulePinsByNamespace(t *testing.T) {
+	pins := EphemeralVocabularies()
+	const commitHash = "abc123def456abc123def456abc123def456abc"
+	pins.Pin("salmodule://github.com/test/history-getter/", []byte("{}"), "application/ld+json", PinnedVersion{Scheme: gitCommitVersionScheme, Value: commitHash})
+	pins.Pin("salmodule://github.com/test/imported-module", []byte("{}"), "application/ld+json", PinnedVersion{Scheme: gitCommitVersionScheme, Value: commitHash})
+	pins.Pin(testVocabularyNamespace, []byte(testVocabularyDocument), "text/turtle", PinnedVersion{})
+
+	require.Equal(t, map[string]string{
+		"salmodule://github.com/test/history-getter/":  commitHash,
+		"salmodule://github.com/test/imported-module/": commitHash,
+	}, pins.PinnedModuleCommits())
+}
+
 func TestAPinnedVocabularyIsResolvedFromDiskRatherThanFetched(t *testing.T) {
 	projectDir := t.TempDir()
 	pins := newTestPins(t, projectDir, testVocabularyDocument, nil)

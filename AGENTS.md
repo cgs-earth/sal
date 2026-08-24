@@ -19,6 +19,7 @@ SAL, (semantic accessibility layer), is a CLI tool for creating RDF data and met
         - dereferencing, building, and running the sal modules that a project references. `salmodule.Resolver` clones the module repository, builds its Dockerfile, and invokes the SAL Module CLI inside the resulting image.
         - This lives in `salmodule/` rather than `build/` because both `build` and `build/validate` need it. Do not duplicate docker or module resolution logic into either of those packages.
         - `salmodule.Default()` is the process-wide resolver shared by validation and build so that a module referenced from several places is cloned and built only once per invocation. Tests inject fakes through its `Runner` and `Command` fields and call `Reset` afterwards.
+        - A module image is tagged with the git commit hash of the repository it was built from, and the resolver reuses images across invocations rather than only within one: `build` feeds the `urn:git-commit-hash:` pins from `.sal/config.jsonld` into the resolver through `UsePinnedCommit`, and a pinned commit whose image is still on the docker daemon is used without cloning or building anything (`--no-cache` skips this wiring so modules resolve from source again). Even without a pin, a clone whose HEAD already has an image skips just the docker build. A reused module still counts as resolved, so `Downloaded()` and `CommitHash` report it the same as a built one.
 
 ## Subcommands
 

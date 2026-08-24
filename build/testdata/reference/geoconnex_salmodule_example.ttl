@@ -7,6 +7,7 @@
 
 @prefix states: <salmodule://github.com/adplincinst/sample-salmodule-1/> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix schema: <https://schema.org/> .
 
 # The module's own ontology declares GeoconnexReferenceFeatureStates as a
 # subclass of salmodule:Task, which is how SAL knows this instance is runnable.
@@ -16,3 +17,9 @@
 # passes the module through its task instance environment variable.
 <GeoconnexStates> a states:GeoconnexReferenceFeatureStates ;
     states:maxRetries "5"^^xsd:integer .
+
+<Organization001> a schema:Organization ;
+    schema:name "Example Organization 001" ;
+    schema:description "A simple example organization used in a larger Turtle test file." ;
+    schema:address "105 Example Stredt, Example City" ;
+    schema:employee <Person001B> .

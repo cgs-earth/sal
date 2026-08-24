@@ -60,9 +60,30 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		return nil, fmt.Errorf("build: missing arguments")
 	}
 
+	hasChanges, err := pkg.UncommittedChangesInGit()
+	if err != nil {
+		return nil, err
+	}
+	if hasChanges && !cfg.Force {
+		return nil, ErrUncommittedChanges
+	}
+	if cfg.Force {
+		slog.Warn("Creating build with modified source tree. This should only be done for testing purposes.")
+	}
+
 	pins, err := projectVocabularies(cfg.NoCache)
 	if err != nil {
 		return nil, err
+	}
+
+	// a module pinned in .sal/config.jsonld whose image is still on the docker
+	// daemon is reused rather than cloned and built again; --no-cache resolves
+	// every module from source, the same way it refetches every vocabulary
+	resolver := salmodule.Default()
+	if !cfg.NoCache {
+		for namespace, commit := range pins.PinnedModuleCommits() {
+			resolver.UsePinnedCommit(namespace, commit)
+		}
 	}
 
 	var paths []string
@@ -181,17 +202,6 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		slog.Warn("Exporting as NQuads. Note this will create a larger and less efficient file than iceberg")
 	}
 
-	hasChanges, err := pkg.UncommittedChangesInGit()
-	if err != nil {
-		return nil, err
-	}
-	if hasChanges && !cfg.Force {
-		return finalGraph, ErrUncommittedChanges
-	}
-	if cfg.Force {
-		slog.Warn("Creating build with modified source tree. This should only be done for testing purposes.")
-	}
-
 	if err := ImportOntologies(finalGraph, pins); err != nil {
 		return nil, err
 	}
@@ -211,7 +221,6 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 	// a build validates the task configuration of every referenced module
 	// against the module's ontology, but only `sal run` invokes their run
 	// commands; the configuration itself is committed like any other RDF
-	resolver := salmodule.Default()
 	if cfg.runModules {
 		tasksRun, err := MaterializeSalModules(context.Background(), finalGraph, resolver)
 		if err != nil {
