@@ -14,7 +14,7 @@ const SparqlTab = lazy(() => import('./tabs/SparqlTab').then((module) => ({ defa
 const MapTab = lazy(() => import('./tabs/MapTab').then((module) => ({ default: module.MapTab })))
 
 export function App() {
-  const { tab: active, sharedQuery, navigate } = useRoute()
+  const { tab: active, sharedQuery, blobHash, renderBlob, navigate } = useRoute()
   const [stats, setStats] = useState<TableStats | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -89,7 +89,9 @@ export function App() {
           </Suspense>
         )}
         {active === 'Modules' && <ModulesTab modules={stats?.modules ?? null} />}
-        {active === 'Blobs' && <BlobsTab />}
+        {/* Keyed on the route so that moving between two blob links remounts the
+            tab on the new digest rather than leaving the old one in the form. */}
+        {active === 'Blobs' && <BlobsTab key={`${blobHash ?? ''}|${renderBlob}`} hash={blobHash} render={renderBlob} />}
         {active === 'Map' && (
           <Suspense fallback={<p className="empty">Loading the map…</p>}>
             <MapTab />

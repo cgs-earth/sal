@@ -1,3 +1,5 @@
+import { blobLink, visit } from '../routing'
+
 type ResultTableProps = {
   header: string[] | null
   rows: string[][] | null
@@ -59,8 +61,28 @@ function Cell({ value }: { value: string }) {
       </a>
     )
   }
-  // salmodule://, oci://, and urn: IRIs have nowhere to link to, but should
-  // still read as IRIs rather than literals.
+  // A urn:sha256: or urn:git-commit-hash: IRI is how a pinned document is
+  // named, both in the ontology listing's version column and in the
+  // owl:versionIRI provenance a build commits, so it opens the blob itself,
+  // rendered rather than downloaded since a pinned document is meant to be read.
+  if (/^urn:(sha256|git-commit-hash):/i.test(value)) {
+    const href = blobLink(value, true)
+    return (
+      <a
+        href={href}
+        className="iri"
+        title="Open this pinned document in the Blobs tab"
+        onClick={(event) => {
+          event.preventDefault()
+          visit(href)
+        }}
+      >
+        {value}
+      </a>
+    )
+  }
+  // salmodule://, oci://, and other urn: IRIs have nowhere to link to, but
+  // should still read as IRIs rather than literals.
   if (value.startsWith('urn:') || /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(value)) {
     return <span className="iri">{value}</span>
   }

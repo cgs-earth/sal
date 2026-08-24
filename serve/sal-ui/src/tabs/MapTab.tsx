@@ -5,6 +5,7 @@ import type { Feature, FeatureCollection } from 'geojson'
 import { fetchExtent, fetchGeometries, type BBox, type GeoJSONFeature } from '../api'
 import { boundsOf, boxAround, boxPolygon, featuresFromResult, type MapFeature } from '../geo'
 import { useResults, type ResultSource } from '../results'
+import { pathForTab, visit } from '../routing'
 
 /**
  * What the map draws: the last result of one of the editors, or a bounding box
@@ -348,8 +349,7 @@ export function MapTab() {
   // the URL and opens it in a SPARQL tab of its own.
   const toSparql = () => {
     if (!box) return
-    window.history.pushState(null, '', `/sparql?q=${encodeURIComponent(sparqlBoxQuery(box))}`)
-    window.dispatchEvent(new PopStateEvent('popstate'))
+    visit(`${pathForTab('SPARQL')}?q=${encodeURIComponent(sparqlBoxQuery(box))}`)
   }
 
   // A result with nothing the map can draw is offered grayed out, saying why.
@@ -450,7 +450,7 @@ export function MapTab() {
                   Query box
                 </button>
               </div>
-              <label className="map-toggle">
+              <label className="toggle">
                 <input type="checkbox" checked={showBox} onChange={(event) => setShowBox(event.target.checked)} />
                 Outline the box on the map
               </label>
@@ -461,7 +461,7 @@ export function MapTab() {
 
             <div className="map-control-group">
               <span className="chips-label">Dataset</span>
-              <label className="map-toggle">
+              <label className="toggle">
                 <input
                   type="checkbox"
                   checked={showExtent}

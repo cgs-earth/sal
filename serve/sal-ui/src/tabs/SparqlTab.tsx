@@ -1,14 +1,30 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Yasgui from '@zazuko/yasgui'
 import '@zazuko/yasgui/build/yasgui.min.css'
 import '../yasgui-catppuccin.css'
+import { translateSparql } from '../api'
 import { ShareLinkButton } from '../components/ShareLinkButton'
 import { registerGraphPlugin } from './sparql/GraphPlugin'
 import { setQueryRunner, setQueryTextGetter } from './sparql/sparqlBridge'
+import { SqlPreview, type Translation } from './sparql/SqlPreview'
 import { publishResult } from '../results'
 
 registerGraphPlugin(Yasgui)
+
+/** Where the SQL pane's on/off choice is remembered between visits. */
+const SHOW_SQL_KEY = 'sal-ui.sparql.showSql'
+
+function readShowSql(): boolean {
+  try {
+    return localStorage.getItem(SHOW_SQL_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+/** How long typing has to pause before the query is sent for translation. */
+const TRANSLATE_DEBOUNCE_MS = 250
 
 const PREFIXES = `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
@@ -143,6 +159,56 @@ export function SparqlTab({ sharedQuery }: { sharedQuery: string | null }) {
   // unmounting children out of a node Yasgui had already torn down.
   const [shareHost] = useState(() => document.createElement('div'))
 
+  // The SQL pane is a debugging aid, so it is off until asked for, and the
+  // choice sticks. Yasgui's own handlers read it through a ref so that turning
+  // it on or off never rebuilds the editor.
+  const [showSql, setShowSql] = useState(readShowSql)
+  const showSqlRef = useRef(showSql)
+  showSqlRef.current = showSql
+  const [translation, setTranslation] = useState<Translation>({ status: 'empty' })
+  const [editorHeight, setEditorHeight] = useState<number | null>(null)
+  const translateTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const translateAbort = useRef<AbortController | null>(null)
+
+  // Translates whatever the active Yasgui tab holds, debounced so that typing
+  // does not send a request per keystroke and an older request never lands
+  // after a newer one.
+  const scheduleTranslation = useCallback(() => {
+    if (!showSqlRef.current) return
+    if (translateTimer.current) clearTimeout(translateTimer.current)
+    translateTimer.current = setTimeout(() => {
+      translateTimer.current = null
+      translateAbort.current?.abort()
+      const query = yasgui.current?.getTab()?.getQuery() ?? ''
+      if (!query.trim()) {
+        setTranslation({ status: 'empty' })
+        return
+      }
+      const controller = new AbortController()
+      translateAbort.current = controller
+      translateSparql(query, controller.signal).then(
+        (sql) => {
+          if (!controller.signal.aborted) setTranslation({ status: 'ok', sql })
+        },
+        (caught: unknown) => {
+          if (controller.signal.aborted) return
+          setTranslation({ status: 'error', message: caught instanceof Error ? caught.message : String(caught) })
+        },
+      )
+    }, TRANSLATE_DEBOUNCE_MS)
+  }, [])
+
+  const toggleShowSql = (next: boolean) => {
+    setShowSql(next)
+    showSqlRef.current = next
+    try {
+      localStorage.setItem(SHOW_SQL_KEY, String(next))
+    } catch {
+      // Storage may be unavailable; the pane still works for this visit.
+    }
+    if (next) scheduleTranslation()
+  }
+
   useEffect(() => {
     const parent = container.current
     if (!parent) return
@@ -182,6 +248,29 @@ export function SparqlTab({ sharedQuery }: { sharedQuery: string | null }) {
     instance.on('tabAdd', syncShareHost)
     instance.on('tabClose', syncShareHost)
 
+    // The SQL pane follows the active tab's query, and matches the height of
+    // its editor so the two line up when they sit side by side. Yasgui emits
+    // tabChange for every edit of a tab's query, and tabSelect when another
+    // tab's query comes on screen; the editor element is read back a microtask
+    // later for the same reason the share host is.
+    const editorObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) setEditorHeight(Math.round(entry.contentRect.height))
+    })
+    const followActiveTab = () => {
+      queueMicrotask(() => {
+        if (disposed) return
+        editorObserver.disconnect()
+        const editor = instance.getTab()?.getYasqe()?.getWrapperElement()
+        if (editor) editorObserver.observe(editor)
+        scheduleTranslation()
+      })
+    }
+    followActiveTab()
+    instance.on('tabSelect', followActiveTab)
+    instance.on('tabAdd', followActiveTab)
+    instance.on('tabChange', scheduleTranslation)
+
     // The Map tab draws whatever geometry the last result held. Yasgui emits
     // queryResponse before Yasr has stored the result, so it is read a
     // microtask later.
@@ -207,13 +296,16 @@ export function SparqlTab({ sharedQuery }: { sharedQuery: string | null }) {
 
     return () => {
       disposed = true
+      editorObserver.disconnect()
+      if (translateTimer.current) clearTimeout(translateTimer.current)
+      translateAbort.current?.abort()
       setQueryRunner(null)
       setQueryTextGetter(null)
       yasgui.current = null
       instance.destroy()
       parent.replaceChildren()
     }
-  }, [sharedQuery, shareHost])
+  }, [sharedQuery, shareHost, scheduleTranslation])
 
   // Samples load into the active tab, which is also renamed so the tab strip
   // reads as the query it holds rather than "Query 1".
@@ -232,6 +324,12 @@ export function SparqlTab({ sharedQuery }: { sharedQuery: string | null }) {
           <p>
             Queries run against the local <code>/sparql</code> endpoint, which translates SPARQL to DuckDB SQL.
           </p>
+          <div className="panel-header-actions">
+            <label className="toggle sql-toggle" title="Show the DuckDB SQL the query translates to">
+              <input type="checkbox" checked={showSql} onChange={(event) => toggleShowSql(event.target.checked)} />
+              Show SQL
+            </label>
+          </div>
         </header>
         <div className="chips">
           {SAMPLES.map((sample) => (
@@ -240,7 +338,14 @@ export function SparqlTab({ sharedQuery }: { sharedQuery: string | null }) {
             </button>
           ))}
         </div>
-        <div className="yasgui-host" ref={container} />
+        {/* The host stays mounted whether or not the SQL pane is shown, since
+            the Yasgui instance lives in it. With the pane on, the workspace
+            puts the two side by side when it is wide enough and stacks them
+            otherwise; see .sparql-workspace in App.css. */}
+        <div className={`sparql-workspace${showSql ? ' with-sql' : ''}`}>
+          <div className="yasgui-host" ref={container} />
+          {showSql && <SqlPreview translation={translation} height={editorHeight} />}
+        </div>
         {/* The host is appended last to Yasr's header, so Yasr's own flex spacer
             pushes it to the right of the Table/Graph/Response plugin buttons. */}
         {createPortal(

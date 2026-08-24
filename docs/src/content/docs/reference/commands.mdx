@@ -252,7 +252,7 @@ See [SPARQL Query Engine](/sal/reference/sparql-engine/) for how the translation
 
 Looks up the RDF resources inside a built data product.
 Where `sal query` is about the Iceberg table that stores the triples, `sal get` is about the RDF the table describes.
-`sal get ontologies` is the exception: it reads the pinned vocabulary and project ontology nodes in `.sal/config.jsonld` rather than the built data product.
+`sal get vocabularies` is the exception: it reads the pinned vocabulary and project ontology nodes in `.sal/config.jsonld` rather than the built data product.
 
 ### `sal get classes`
 
@@ -361,23 +361,23 @@ A shape that arrives from an imported ontology keeps the namespace that ontology
 `rdfs:label`, `rdfs:comment`, and `sh:targetClass` are all optional; a column that no shape states is left out of the table entirely.
 `sh:targetClass` is the one a shape can state more than once, and a shape targeting several classes is listed once per class, the way `sal get instances` lists a resource once per class it is typed with.
 
-### `sal get ontologies`
+### `sal get vocabularies`
 
-Lists every ontology the project knows about from `.sal/config.jsonld`: the vocabularies `sal build` and `sal validate` have pinned, unioned with what `sal import` has recorded with `owl:imports` on the project ontology node, with whether each one is imported:
+Lists every vocabulary the project knows about from `.sal/config.jsonld`: the vocabularies `sal build` and `sal validate` have pinned, unioned with what `sal import` has recorded with `owl:imports` on the project ontology node, with whether each one is imported:
 
 ```sh
-sal get ontologies
+sal get vocabularies
 ```
 
 ```
-ontology                                            version                             format               imported
+vocabulary                                          version                             format               imported
 https://schema.org/                                 urn:sha256:2c8...                   application/ld+json  yes
 https://www.w3.org/ns/dcat#                         urn:sha256:9f1...                   text/turtle          no
 oci://ghcr.io/cgs-earth/example:latest                                                                        yes
 salmodule://github.com/cgs-earth/example            urn:git-commit-hash:9a1...          application/ld+json  yes
 ```
 
-`version` and `format` come from the pin a build or validation records the first time it resolves a prefix or an import against a vocabulary. An `oci://` import is never dereferenced as a document to pin, since the artifact it names is not an ontology document, so it is still listed as an ontology here but with no version or format. A `salmodule://` import is dereferenced by building the module and pinned by the module repository's git commit hash rather than a document digest, the same as a `salmodule://` vocabulary.
+`version` and `format` come from the pin a build or validation records the first time it resolves a prefix or an import against a vocabulary. An `oci://` import is never dereferenced as a document to pin, since the artifact it names is not a vocabulary document, so it is still listed as a vocabulary here but with no version or format. A `salmodule://` import is dereferenced by building the module and pinned by the module repository's git commit hash rather than a document digest, the same as a `salmodule://` vocabulary.
 
 ## `sal describe`
 
@@ -452,7 +452,7 @@ The endpoint implements the SPARQL Protocol query operation at `/sparql`.
 It accepts `GET` requests with a `query` parameter and `POST` requests using either `application/sparql-query` or `application/x-www-form-urlencoded`, and it answers with `application/sparql-results+json`.
 Queries are translated to DuckDB SQL rather than evaluated by a triplestore; [SPARQL Query Engine](/sal/reference/sparql-engine/) documents that translation and the subset of SPARQL it covers.
 
-It also serves the vocabulary and imported ontology documents the project has pinned at `GET /blobs/{sha256}`, where `{sha256}` is the SHA-256 digest a document is named by under `.sal/data/blobs` (a `urn:sha256:` prefix is accepted and stripped). A digest with no matching document answers `404`. The endpoint supports HTTP range requests, so a client can fetch part of a document without downloading the whole thing. This route is available with or without `--with-ui`; the UI's own Blobs tab, described below, is a thin form over it.
+It also serves the vocabulary and imported ontology documents the project has pinned at `GET /blobs/{hash}`, where `{hash}` is the name a document is stored by under `.sal/data/blobs`: the SHA-256 digest of the document, or the git commit hash of the module for a `salmodule://` vocabulary. Either may be given bare or headed by the scheme its `owl:versionIRI` carries, `urn:sha256:` or `urn:git-commit-hash:`, which is stripped. A hash with no matching document answers `404`. The endpoint supports HTTP range requests, so a client can fetch part of a document without downloading the whole thing. This route is available with or without `--with-ui`; the UI's own Blobs tab, described below, is a thin form over it.
 
 ### `--with-ui`
 
@@ -465,14 +465,14 @@ sal serve --with-ui
 The UI is a React app compiled into the `sal` binary, so it works offline and needs no extra install.
 It has six tabs:
 
-- **Stats**: triple, subject, predicate, and object counts, plus the Iceberg snapshots, table properties, and column statistics that `sal query --info` prints.
+- **Stats**: triple, subject, predicate, and object counts, plus the Iceberg snapshots, table properties, and column statistics that `sal query --info` prints, and the vocabulary listing `sal get vocabularies` prints. A `urn:sha256:` or `urn:git-commit-hash:` version in that listing is a link that opens the document in the Blobs tab, rendered in the page.
+- **SPARQL**: a [YASGUI](https://github.com/zazuko/Yasgui) editor pointed at the local `/sparql` endpoint. A **Show SQL** toggle in the panel header opens a read-only pane with the DuckDB SQL the query translates to, kept up to date as the query is edited, so what the endpoint runs under the hood can be read next to the SPARQL that produced it. The pane sits beside the editor when the panel is wide enough for both and below it otherwise; a query the translator rejects shows the error `/sparql` would answer with instead. The toggle is off by default and remembered by the browser.
 - **SQL**: a DuckDB editor over the same `triples` view `sal query` opens, with sample queries and `Ctrl`/`Cmd` + `Enter` to run.
-- **SPARQL**: a [YASGUI](https://github.com/zazuko/Yasgui) editor pointed at the local `/sparql` endpoint.
-- **Modules**: the browser form of [`sal salmodule inspect`](#sal-salmodule). Enter a module reference and the JSON-LD ontology it publishes is shown as formatted JSON. Every module the build downloaded is offered as a chip and as an autocompletion in the input, read from the `sal.salmodules` table property.
-- **Blobs**: the browser form of the `/blobs` endpoint. Enter the SHA-256 digest a vocabulary or imported ontology document is pinned at and it downloads through the browser's normal save flow.
 - **Map**: a [MapLibre](https://maplibre.org/) map of the `object_geometry` column, as one of two things. It draws the geometry the last SQL or SPARQL query returned — any column holding WKT or GeoJSON becomes a feature, and the other columns of its row become the properties shown when the feature is clicked — or everything inside a bounding box. Clicking the map queries the box around that point; the box's corners can also be typed in, doubled and halved, outlined on the map, and opened as a GeoSPARQL query in the SPARQL tab. A toggle shows the spatial extent of the whole table. The basemap is fetched from CARTO, so it is blank offline; the features still draw.
+- **Blobs**: the browser form of the `/blobs` endpoint. Enter the SHA-256 digest a vocabulary or imported ontology document is pinned at, or the git commit hash a `salmodule://` vocabulary is pinned at, and it downloads through the browser's normal save flow. A **Render in the browser** checkbox shows the document in the page instead, pretty printed when it is JSON; it is off by default, since most blobs are not meant to be read, and on for the links the Stats tab offers, since an ontology document is. The digest and the choice are mirrored into the URL as `/blobs?hash=<digest>&render=true`, so a rendered blob can be linked to directly; a link with `hash` but without `render=true` only fills the form in and leaves the download to the user.
+- **Modules**: the browser form of [`sal salmodule inspect`](#sal-salmodule). Enter a module reference and the JSON-LD ontology it publishes is shown as formatted JSON. Every module the build downloaded is offered as a chip and as an autocompletion in the input, read from the `sal.salmodules` table property.
 
-Each tab has a URL of its own — `/stats`, `/sql`, `/sparql`, `/modules`, `/blobs`, and `/map` — so a tab can be linked to rather than only clicked to, and the browser's back button moves between them.
+Each tab has a URL of its own — `/stats`, `/sparql`, `/sql`, `/map`, `/blobs`, and `/modules` — so a tab can be linked to rather than only clicked to, and the browser's back button moves between them.
 
 Two of those names, `/sparql` and `/blobs`, are also endpoints.
 A browser navigating to either gets the UI; anything else — `curl`, a SPARQL client library, the UI's own `fetch()` calls — gets the endpoint, as does any request carrying a SPARQL Protocol `query` parameter, whatever asked for it.
@@ -485,6 +485,7 @@ Opening the link loads that query back into the editor — into a new **Shared q
 Enabling the UI also exposes the JSON endpoints it reads:
 
 - `POST /api/sql` with a `{"sql": "..."}` body runs a DuckDB statement and returns its header and rows. Results are capped at 1000 rows, and the response message reports the full count when it truncates.
+- `POST /api/sparql/translate` with a `{"query": "..."}` body returns `{"sql": "..."}`, the DuckDB SQL the `/sparql` endpoint would run that query as, without running it. A query the translator does not support answers `400` with the same error `/sparql` would.
 - `GET /api/stats` returns the counts and Iceberg metadata shown on the Stats tab, including the `modules` list the Modules tab suggests from.
 - `GET /geometries?limit=&offset=&bbox=` returns up to 1000 `object_geometry` values at a time as GeoJSON, each feature carrying the `subject`, `predicate`, and WKT `object` of its triple. `bbox=minX,minY,maxX,maxY` keeps only the geometries intersecting that box.
 - `GET /geometries/extent` returns the bounding box of every geometry in the table as a GeoJSON feature: its `geometry` is the envelope, its `bbox` the four corners, and its `properties.geometries` how many geometries it covers. A table with no geometries answers a `null` geometry.

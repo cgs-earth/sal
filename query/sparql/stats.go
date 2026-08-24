@@ -26,10 +26,10 @@ type TableStats struct {
 	ColumnStats Result `json:"columnStats"`
 	// Modules are the SAL module URIs the build that wrote this table downloaded.
 	Modules []string `json:"modules"`
-	// Ontologies is the same listing `sal get ontologies` prints: every
+	// Vocabularies is the same listing `sal get vocabularies` prints: every
 	// vocabulary build/validate has pinned, unioned with what sal import has
 	// recorded, each marked with whether it is imported.
-	Ontologies Result `json:"ontologies"`
+	Vocabularies Result `json:"vocabularies"`
 	// ImportedTables are the imported data products queryable as views of their
 	// own, one per OCI artifact the project imported.
 	ImportedTables []ImportedTable `json:"importedTables"`
@@ -73,7 +73,7 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 	if err != nil {
 		return TableStats{}, err
 	}
-	stats.Ontologies = ontologiesResult()
+	stats.Vocabularies = vocabulariesResult()
 	stats.ImportedTables = r.Imports
 	if len(r.Imports) > 0 {
 		stats.SampleQueries = append(stats.SampleQueries, NamedQuery{
@@ -112,29 +112,29 @@ func projectImports() []string {
 	return ontology.Imports
 }
 
-// ontologiesResult builds the same ontology listing `sal get ontologies`
+// vocabulariesResult builds the same vocabulary listing `sal get vocabularies`
 // reports, as a Result the UI can render with the same header and rows a
 // `sal query --info` result gets. A directory that is not a SAL project, or
 // one with nothing pinned or imported yet, simply reports no rows rather
 // than failing the whole stats view.
-func ontologiesResult() Result {
-	header := importation.OntologyTableHeader
+func vocabulariesResult() Result {
+	header := importation.VocabularyTableHeader
 	path, err := pkg.SalConfigPath()
 	if err != nil {
-		slog.Debug("not reporting project ontologies", "error", err)
+		slog.Debug("not reporting project vocabularies", "error", err)
 		return Result{Header: header}
 	}
 	base, err := pkg.DefaultSalBase()
 	if err != nil {
-		slog.Debug("not reporting project ontologies", "error", err)
+		slog.Debug("not reporting project vocabularies", "error", err)
 		return Result{Header: header}
 	}
-	rows, err := importation.ProjectOntologyRows(path, base)
+	rows, err := importation.ProjectVocabularyRows(path, base)
 	if err != nil {
-		slog.Warn("ignoring unreadable project ontologies", "path", path, "error", err)
+		slog.Warn("ignoring unreadable project vocabularies", "path", path, "error", err)
 		return Result{Header: header}
 	}
-	return Result{Header: header, Rows: importation.OntologyTableRows(rows)}
+	return Result{Header: header, Rows: importation.VocabularyTableRows(rows)}
 }
 
 // statsFromResults assembles the stats payload from the batched results, in the

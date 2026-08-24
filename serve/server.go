@@ -29,6 +29,7 @@ type UIRunner interface {
 	salsparql.Runner
 	salsparql.GeometryRunner
 	salsparql.SQLRunner
+	salsparql.SQLTranslator
 	salsparql.StatsRunner
 }
 
@@ -94,6 +95,7 @@ func NewEndpointWithUI(runner UIRunner, blobDir string) (http.Handler, error) {
 	mux.Handle("/geometries", geometryHandler{runner: runner})
 	mux.Handle("/geometries/extent", extentHandler{runner: runner})
 	mux.Handle("/api/sql", sqlHandler{runner: runner})
+	mux.Handle("/api/sparql/translate", translateHandler{translator: runner})
 	mux.Handle("/api/stats", statsHandler{runner: runner})
 	mux.Handle("/api/salmodule", salmoduleHandler{inspect: salmodule.Inspect})
 	mux.Handle("/blobs/", browserRoute{api: blobs, ui: ui})
@@ -105,11 +107,12 @@ func NewEndpointWithUI(runner UIRunner, blobDir string) (http.Handler, error) {
 }
 
 // blobHandler serves the vocabulary and imported ontology documents a project
-// has pinned, which PinnedVocabularies names by their SHA-256 digest (or, for
-// a salmodule:// vocabulary, a git commit hash) under .sal/data/blobs. A
-// request may give the digest either bare or prefixed with "urn:sha256:";
-// the prefix is stripped before it is looked up. Range requests are honored
-// via http.ServeContent.
+// has pinned under .sal/data/blobs. PinnedVocabularies names a document by its
+// SHA-256 digest, or, for a salmodule:// vocabulary, by the git commit hash of
+// the module repository it was read from. A request may give either name bare
+// or headed by the scheme its owl:versionIRI carries, "urn:sha256:" or
+// "urn:git-commit-hash:"; the prefix is stripped before it is looked up. Range
+// requests are honored via http.ServeContent.
 type blobHandler struct {
 	dir string
 }
@@ -121,14 +124,15 @@ func (h blobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	digest := strings.TrimPrefix(r.URL.Path, "/blobs/")
-	digest = strings.TrimPrefix(digest, "urn:sha256:")
-	if !isSHA256Hex(digest) {
+	name := strings.TrimPrefix(r.URL.Path, "/blobs/")
+	name = strings.TrimPrefix(name, "urn:sha256:")
+	name = strings.TrimPrefix(name, "urn:git-commit-hash:")
+	if !isBlobName(name) {
 		http.NotFound(w, r)
 		return
 	}
 
-	file, err := os.Open(filepath.Join(h.dir, digest))
+	file, err := os.Open(filepath.Join(h.dir, name))
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -148,14 +152,15 @@ func (h blobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// keeps http.ServeContent from sniffing the content and reporting it as
 	// text/plain
 	w.Header().Set("Content-Type", "application/octet-stream")
-	http.ServeContent(w, r, digest, info.ModTime(), file)
+	http.ServeContent(w, r, name, info.ModTime(), file)
 }
 
-// isSHA256Hex reports whether s is a 64 character hex encoded SHA-256 digest,
-// the shape a blob is named by. This also guards against a request path
-// escaping the blob directory, since a bare hex string has no path separators.
-func isSHA256Hex(s string) bool {
-	if len(s) != 64 {
+// isBlobName reports whether s is a hex string of the length a blob is named
+// by: 64 characters for a SHA-256 digest, 40 for a git commit hash. This also
+// guards against a request path escaping the blob directory, since a bare hex
+// string has no path separators.
+func isBlobName(s string) bool {
+	if len(s) != 64 && len(s) != 40 {
 		return false
 	}
 	for _, c := range s {
@@ -248,6 +253,46 @@ func truncateResult(result salsparql.Result) salsparql.Result {
 		result.Message = fmt.Sprintf("%d rows (showing the first %d)", total, maxUIRows)
 	}
 	return result
+}
+
+// translateHandler answers the SQL a SPARQL query would run as, so the UI's
+// SPARQL tab can show what the endpoint does under the hood. Nothing is run:
+// the translation is the same one /sparql performs before it queries DuckDB.
+type translateHandler struct {
+	translator salsparql.SQLTranslator
+}
+
+func (h translateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "the SPARQL translate endpoint only supports POST requests", http.StatusMethodNotAllowed)
+		return
+	}
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			slog.Error("failed to close SPARQL translate request body", "error", err)
+		}
+	}()
+	var request struct {
+		Query string `json:"query"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("parse SPARQL translate request: %v", err))
+		return
+	}
+	if strings.TrimSpace(request.Query) == "" {
+		writeJSONError(w, http.StatusBadRequest, "SPARQL translate request is missing a query field")
+		return
+	}
+
+	sql, err := h.translator.Translate(request.Query)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, struct {
+		SQL string `json:"sql"`
+	}{SQL: sql})
 }
 
 type statsHandler struct {

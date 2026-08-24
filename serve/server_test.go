@@ -61,6 +61,12 @@ func (r *endpointUIRunner) Stats(_ context.Context) (salsparql.TableStats, error
 	return r.stats, r.err
 }
 
+// Translate is the real translation, since it touches neither DuckDB nor the
+// table and the endpoint's job is to report what that translation produces.
+func (r *endpointUIRunner) Translate(query string) (string, error) {
+	return salsparql.DuckDBRunner{}.Translate(query)
+}
+
 func newUIServer(t *testing.T, runner *endpointUIRunner) *httptest.Server {
 	t.Helper()
 	handler, err := NewEndpointWithUI(runner, "")
@@ -342,6 +348,75 @@ func TestEndpointWithUIRejectsEmptySQL(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
+func TestEndpointWithUITranslatesSPARQLToSQLWithoutRunningIt(t *testing.T) {
+	runner := &endpointUIRunner{}
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/sparql/translate", "application/json",
+		strings.NewReader(`{"query":"SELECT ?s WHERE { ?s ?p ?o } LIMIT 5"}`))
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+	var body struct {
+		SQL string `json:"sql"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Contains(t, body.SQL, "SELECT")
+	require.Contains(t, body.SQL, "FROM triples")
+	require.Contains(t, body.SQL, "LIMIT 5")
+	require.Empty(t, runner.sql, "translation must not run anything")
+	require.Empty(t, runner.query, "translation must not run anything")
+}
+
+func TestEndpointWithUIReportsSPARQLTranslationErrorsAsJSON(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/sparql/translate", "application/json",
+		strings.NewReader(`{"query":"ASK { ?s ?p ?o }"}`))
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Contains(t, body["error"], "SELECT")
+}
+
+func TestEndpointWithUIRejectsEmptySPARQLTranslation(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/sparql/translate", "application/json", strings.NewReader(`{"query":"  "}`))
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestEndpointWithUIOnlyTranslatesOnPOST(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/sparql/translate")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+	require.Equal(t, "POST", resp.Header.Get("Allow"))
+}
+
 // newModuleServer serves the SAL module endpoint against a canned inspector so
 // that the handler can be tested without cloning or building a real module.
 func newModuleServer(t *testing.T, inspect ModuleInspector) *httptest.Server {
@@ -437,8 +512,8 @@ func TestEndpointWithUIReturnsTableStats(t *testing.T) {
 			Header: []string{"snapshot_id"},
 			Rows:   [][]string{{"123"}},
 		},
-		Ontologies: salsparql.Result{
-			Header: []string{"ontology", "version", "format", "imported"},
+		Vocabularies: salsparql.Result{
+			Header: []string{"vocabulary", "version", "format", "imported"},
 			Rows: [][]string{
 				{"https://schema.org/", "", "", "yes"},
 				{"oci://ghcr.io/cgs-earth/sal:abc123", "", "", "yes"},
@@ -464,7 +539,7 @@ func TestEndpointWithUIReturnsTableStats(t *testing.T) {
 	require.Equal(t, [][]string{
 		{"https://schema.org/", "", "", "yes"},
 		{"oci://ghcr.io/cgs-earth/sal:abc123", "", "", "yes"},
-	}, body.Ontologies.Rows)
+	}, body.Vocabularies.Rows)
 }
 
 func TestEndpointWithUIReturnsGeometryFeatureCollection(t *testing.T) {
@@ -708,6 +783,56 @@ func TestBlobEndpointStripsUrnSha256Prefix(t *testing.T) {
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/blobs/urn:sha256:" + digest)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, body, got)
+}
+
+// writeModuleBlob stores body the way a pinned salmodule:// vocabulary is
+// stored: named by the git commit hash of the module rather than a digest.
+func writeModuleBlob(t *testing.T, dir string, body []byte) string {
+	t.Helper()
+	commit := strings.Repeat("ab", 20)
+	require.NoError(t, os.MkdirAll(dir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, commit), body, 0644))
+	return commit
+}
+
+func TestBlobEndpointServesAModuleOntologyByCommitHash(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`{"@context": {"@vocab": "salmodule://example.org/module/"}}`)
+	commit := writeModuleBlob(t, dir, body)
+
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/blobs/" + commit)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, body, got)
+}
+
+func TestBlobEndpointStripsUrnGitCommitHashPrefix(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte("module ontology bytes")
+	commit := writeModuleBlob(t, dir, body)
+
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/blobs/urn:git-commit-hash:" + commit)
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, resp.Body.Close())

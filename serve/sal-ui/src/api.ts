@@ -18,8 +18,8 @@ export type TableStats = {
   columnStats: QueryResult
   /** The `salmodule://` URIs of the modules the build that wrote this table downloaded. */
   modules: string[] | null
-  /** The same listing `sal get ontologies` prints: header ["ontology", "version", "format", "imported"]. */
-  ontologies: QueryResult
+  /** The same listing `sal get vocabularies` prints: header ["vocabulary", "version", "format", "imported"]. */
+  vocabularies: QueryResult
   /** The imported data products, each queryable as a view of its own. */
   importedTables: ImportedTable[] | null
   /** Sample queries only the server can write, such as time travel and the import listing. */
@@ -46,8 +46,10 @@ export type ModuleOntology = {
 }
 
 export type BlobResult = {
-  /** The SHA-256 digest the blob was resolved by, with any urn:sha256: prefix stripped. */
+  /** The name the blob was resolved by, with any urn:sha256: or urn:git-commit-hash: prefix stripped. */
   digest: string
+  /** The owl:versionIRI form of digest: urn:git-commit-hash: for a 40 character git commit, urn:sha256: otherwise. */
+  version: string
   blob: Blob
   contentType: string | null
 }
@@ -106,6 +108,23 @@ export async function runSQL(sql: string, signal?: AbortSignal): Promise<QueryRe
 }
 
 /**
+ * The DuckDB SQL the `/sparql` endpoint would run a SPARQL query as. Nothing is
+ * run; the SPARQL tab shows this beside the editor to explain what a query does
+ * under the hood. A query the translator does not support rejects with the
+ * same message `/sparql` would answer with.
+ */
+export async function translateSparql(query: string, signal?: AbortSignal): Promise<string> {
+  const response = await fetch('/api/sparql/translate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+    signal,
+  })
+  if (!response.ok) throw await failure(response)
+  return ((await response.json()) as { sql: string }).sql
+}
+
+/**
  * Clones, builds, and runs a SAL module so that it publishes its ontology. The
  * first inspection of a module can take minutes, since its image has to be built.
  */
@@ -116,18 +135,20 @@ export async function inspectModule(module: string, signal?: AbortSignal): Promi
 }
 
 /**
- * Fetches the vocabulary or imported ontology document a project pinned by its
- * SHA-256 digest. The server accepts the digest with or without a urn:sha256:
- * prefix, so it is stripped client side too, both to normalize what is sent
- * and to name the downloaded file by the bare digest.
+ * Fetches a document the project pinned: a vocabulary or imported ontology by
+ * its SHA-256 digest, or a salmodule:// vocabulary by the git commit hash of
+ * its module. The server accepts either name with or without its urn: prefix,
+ * so the prefix is stripped client side too, both to normalize what is sent
+ * and to name the downloaded file by the bare hash.
  */
 export async function resolveBlob(hash: string, signal?: AbortSignal): Promise<BlobResult> {
-  const digest = hash.trim().replace(/^urn:sha256:/i, '')
+  const digest = hash.trim().replace(/^urn:(sha256|git-commit-hash):/i, '')
   if (!digest) throw new Error('Enter a blob hash')
   const response = await fetch(`/blobs/${encodeURIComponent(digest)}`, { signal })
   if (!response.ok) throw await failure(response)
   const blob = await response.blob()
-  return { digest, blob, contentType: response.headers.get('Content-Type') }
+  const version = `${digest.length === 40 ? 'urn:git-commit-hash:' : 'urn:sha256:'}${digest}`
+  return { digest, version, blob, contentType: response.headers.get('Content-Type') }
 }
 
 export async function fetchGeometries(query: GeometryQuery, signal?: AbortSignal): Promise<GeoJSONFeatureCollection> {
