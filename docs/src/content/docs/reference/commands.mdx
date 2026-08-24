@@ -182,7 +182,7 @@ A `salmodule://` import is dereferenced by cloning and building the module and a
 An import that cannot be fetched fails the build, naming the ontology that could not be resolved.
 `sal validate` does not fetch imports; only `sal build` does.
 
-`sal build` does not run the SAL modules the source files reference; that is what [`sal run`](#sal-run) does.
+`sal build` does not run the SAL module's task(s) the source files reference; that is what [`sal run`](#sal-run) does.
 A build still validates each task's configuration against the module's own ontology, the same way any other term
 is checked against its vocabulary, and commits that configuration RDF into the data product like any other statement.
 
@@ -197,7 +197,7 @@ snapshot of the data product:
 sal run
 ```
 
-For each task instance, `sal run` clones the module's repository, builds the `Dockerfile` in its repository root,
+For each module's referenced task instance(s), `sal run` clones the module's repository, builds the `Dockerfile` in its repository root,
 and invokes the module's run command with the task instance serialized from the instance's RDF properties.
 The newline delimited JSON the module writes to stdout is converted to triples and committed on top of the
 last build. See [Using SAL Modules](/sal/guides/using-sal-modules/).
