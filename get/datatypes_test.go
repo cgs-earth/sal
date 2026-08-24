@@ -8,13 +8,13 @@ import (
 
 func TestDropEmptyColumnsRemovesAnAnnotationNoDatatypeStates(t *testing.T) {
 	header, rows := dropEmptyColumns(
-		[]string{"datatype", "label", "comment"},
+		[]string{"datatype", "rdfs:label", "rdfs:comment"},
 		[][]string{
 			{"https://example.org/Celsius", "Celsius", ""},
 			{"https://example.org/Knots", "", ""},
 		},
 	)
-	require.Equal(t, []string{"datatype", "label"}, header)
+	require.Equal(t, []string{"datatype", "rdfs:label"}, header)
 	require.Equal(t, [][]string{
 		{"https://example.org/Celsius", "Celsius"},
 		{"https://example.org/Knots", ""},
@@ -22,7 +22,7 @@ func TestDropEmptyColumnsRemovesAnAnnotationNoDatatypeStates(t *testing.T) {
 }
 
 func TestDropEmptyColumnsKeepsColumnsThatAnyRowStates(t *testing.T) {
-	header := []string{"datatype", "label", "comment"}
+	header := []string{"datatype", "rdfs:label", "rdfs:comment"}
 	rows := [][]string{
 		{"https://example.org/Celsius", "Celsius", "degrees Celsius"},
 		{"https://example.org/Knots", "", "nautical miles per hour"},

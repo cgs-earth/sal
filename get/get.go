@@ -10,7 +10,7 @@ import (
 // about the Iceberg table that holds a built data product belongs in
 // `sal query` instead.
 type GetCmd struct {
-	Classes    *classesCmd    `arg:"subcommand:classes" help:"List the RDF classes that resources in the data product are typed with"`
+	Classes    *classesCmd    `arg:"subcommand:classes" help:"List the RDF classes the data product declares with the annotations each one carries"`
 	Datatypes  *datatypesCmd  `arg:"subcommand:datatypes" help:"List the RDF datatypes the data product declares"`
 	Instances  *instancesCmd  `arg:"subcommand:instances" help:"List the resources in the data product with the class each one is typed with"`
 	Properties *propertiesCmd `arg:"subcommand:properties" help:"List the RDF properties the data product declares with the type each one is declared with"`

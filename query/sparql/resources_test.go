@@ -11,11 +11,33 @@ func objectText(alias string) string {
 	return "COALESCE(" + alias + ".object_iri, CAST(" + alias + ".object_float AS VARCHAR), " + alias + ".object_string)"
 }
 
-func TestClassesSQLFiltersOnRDFType(t *testing.T) {
+func TestClassesSQLSelectsSubjectsTypedAsAClass(t *testing.T) {
 	sql := ClassesSQL()
-	require.Contains(t, sql, "WHERE triples.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'")
-	require.Contains(t, sql, objectText("triples")+" AS class")
-	require.Contains(t, sql, "COUNT(DISTINCT triples.subject) AS instances")
+	require.Contains(t, sql, "classes.subject AS class")
+	require.Contains(t, sql, "WHERE classes.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'")
+	require.Contains(t, sql, "AND "+objectText("classes")+" IN ("+
+		"'http://www.w3.org/2000/01/rdf-schema#Class', "+
+		"'http://www.w3.org/2002/07/owl#Class')")
+}
+
+func TestClassesSQLLeftJoinsTheOptionalAnnotations(t *testing.T) {
+	sql := ClassesSQL()
+	require.Contains(t, sql, "LEFT JOIN triples AS labels")
+	require.Contains(t, sql, "AND labels.predicate = 'http://www.w3.org/2000/01/rdf-schema#label'")
+	require.Contains(t, sql, "MIN("+objectText("labels")+`) AS "rdfs:label"`)
+	require.Contains(t, sql, "LEFT JOIN triples AS comments")
+	require.Contains(t, sql, "AND comments.predicate = 'http://www.w3.org/2000/01/rdf-schema#comment'")
+	require.Contains(t, sql, "MIN("+objectText("comments")+`) AS "rdfs:comment"`)
+}
+
+// A class declared to be both rdfs:Class and owl:Class is one class, so the
+// lookup groups by the subject rather than reporting the type it was declared
+// with, and it no longer counts the resources typed with a class.
+func TestClassesSQLListsAClassOnceWithoutCountingItsInstances(t *testing.T) {
+	sql := ClassesSQL()
+	require.Contains(t, sql, "GROUP BY class")
+	require.NotContains(t, sql, "COUNT(")
+	require.NotContains(t, sql, "AS instances")
 }
 
 func TestDatatypesSQLSelectsSubjectsTypedAsAnRDFSDatatype(t *testing.T) {
@@ -29,10 +51,10 @@ func TestDatatypesSQLLeftJoinsTheOptionalAnnotations(t *testing.T) {
 	sql := DatatypesSQL()
 	require.Contains(t, sql, "LEFT JOIN triples AS labels")
 	require.Contains(t, sql, "AND labels.predicate = 'http://www.w3.org/2000/01/rdf-schema#label'")
-	require.Contains(t, sql, "MIN("+objectText("labels")+") AS label")
+	require.Contains(t, sql, "MIN("+objectText("labels")+`) AS "rdfs:label"`)
 	require.Contains(t, sql, "LEFT JOIN triples AS comments")
 	require.Contains(t, sql, "AND comments.predicate = 'http://www.w3.org/2000/01/rdf-schema#comment'")
-	require.Contains(t, sql, "MIN("+objectText("comments")+") AS comment")
+	require.Contains(t, sql, "MIN("+objectText("comments")+`) AS "rdfs:comment"`)
 }
 
 func TestInstancesSQLPairsEachSubjectWithTheClassItIsTypedWith(t *testing.T) {
