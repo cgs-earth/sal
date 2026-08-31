@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
 	rdflibsparql "github.com/tggo/goRDFlib/sparql"
 )
@@ -124,7 +126,7 @@ func (b sqlBinding) projection() string {
 
 // objectTextExpr renders the object union, geometry included, as text.
 func objectTextExpr(alias string) string {
-	return "COALESCE(" + alias + ".object_iri, CAST(" + alias + ".object_float AS VARCHAR), " + alias + ".object_string, ST_AsText(" + alias + ".object_geometry))"
+	return "COALESCE(" + objectScalarTextExprs(alias) + ", ST_AsText(" + alias + ".object_geometry))"
 }
 
 // bindingExpr is the column a subject or predicate is read from, or for an
@@ -134,7 +136,28 @@ func bindingExpr(alias string, column string) string {
 	if column != "object" {
 		return alias + "." + column
 	}
-	return "COALESCE(" + alias + ".object_iri, CAST(" + alias + ".object_float AS VARCHAR), " + alias + ".object_string)"
+	return "COALESCE(" + objectScalarTextExprs(alias) + ")"
+}
+
+// objectScalarTextExprs lists every non-geometry object column rendered as
+// text, for the COALESCE that reads an object back whichever column holds it.
+func objectScalarTextExprs(alias string) string {
+	return alias + ".object_iri, CAST(" + alias + ".object_float AS VARCHAR), CAST(" + alias + ".object_integer AS VARCHAR), CAST(" + alias + ".object_byte AS VARCHAR), " + timeTextExpr(alias) + ", " + alias + ".object_string"
+}
+
+// timeTextExpr renders object_time back as the xsd:dateTime lexical form it
+// was built from: DuckDB casts a timestamp to "YYYY-MM-DD HH:MM:SS[.ffffff]",
+// and build stores every value normalized to UTC, so swapping the space for a
+// 'T' and appending 'Z' restores the ISO form.
+func timeTextExpr(alias string) string {
+	return "replace(CAST(" + alias + ".object_time AS VARCHAR), ' ', 'T') || 'Z'"
+}
+
+// objectNumericExpr reads whichever numeric column holds an object, so a
+// numeric comparison matches a value whether it was typed as a float, an
+// integer, or a byte.
+func objectNumericExpr(alias string) string {
+	return "COALESCE(" + alias + ".object_float, CAST(" + alias + ".object_integer AS DOUBLE), CAST(" + alias + ".object_byte AS DOUBLE))"
 }
 
 func basicGraphPatternParts(pattern rdflibsparql.Pattern) ([]rdflibsparql.Triple, []rdflibsparql.Expr, error) {
@@ -239,15 +262,21 @@ func filterOperandSQL(expr rdflibsparql.Expr, other rdflibsparql.Expr, bindings 
 		// An object is compared in the column the other side's kind names, so a
 		// number compares as a number rather than as the text it renders to.
 		if binding.column == "object" {
-			if literal, ok := other.(*rdflibsparql.LiteralExpr); ok && literalIsFloat(literal.Value) {
-				return binding.alias + ".object_float", nil
+			if literal, ok := other.(*rdflibsparql.LiteralExpr); ok {
+				if _, ok := timestampSQL(literal.Value); ok {
+					return binding.alias + ".object_time", nil
+				}
+				if literalIsNumeric(literal.Value) {
+					return objectNumericExpr(binding.alias), nil
+				}
+				return binding.alias + ".object_string", nil
 			}
 			if _, ok := other.(*rdflibsparql.IRIExpr); ok {
 				return binding.alias + ".object_iri", nil
 			}
 			// The only function a variable can be compared against is geof:distance.
 			if _, ok := other.(*rdflibsparql.FuncExpr); ok {
-				return binding.alias + ".object_float", nil
+				return objectNumericExpr(binding.alias), nil
 			}
 			return binding.alias + ".object_string", nil
 		}
@@ -270,13 +299,41 @@ func filterOperandSQL(expr rdflibsparql.Expr, other rdflibsparql.Expr, bindings 
 	}
 }
 
-func literalIsFloat(term rdflibgo.Term) bool {
-	_, err := strconv.ParseFloat(term.String(), 64)
-	return err == nil
+// literalIsNumeric reports whether a literal compares against the numeric
+// object columns: its lexical form parses as a number and its datatype, when
+// it carries one, is a numeric XSD type rather than, say, xsd:string.
+func literalIsNumeric(term rdflibgo.Term) bool {
+	if _, err := strconv.ParseFloat(term.String(), 64); err != nil {
+		return false
+	}
+	if literal, ok := term.(rdflibgo.Literal); ok {
+		datatype := literal.Datatype().Value()
+		return datatype == "" || pkg.IsXSDNumericType(datatype)
+	}
+	return true
+}
+
+// timestampSQL renders an xsd:dateTime literal as the TIMESTAMP its value is
+// stored as: parsed with its explicit timezone and normalized to UTC, matching
+// how build writes object_time. A dateTime build would have stored as a string
+// (no timezone, or beyond microsecond precision) is not rendered as one.
+func timestampSQL(term rdflibgo.Term) (string, bool) {
+	literal, ok := term.(rdflibgo.Literal)
+	if !ok || literal.Datatype().Value() != pkg.XSDDateTime {
+		return "", false
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, literal.Lexical())
+	if err != nil || parsed.Nanosecond()%1000 != 0 {
+		return "", false
+	}
+	return "TIMESTAMP '" + parsed.UTC().Format("2006-01-02 15:04:05.999999") + "'", true
 }
 
 func termSQL(term rdflibgo.Term) string {
-	if _, err := strconv.ParseFloat(term.String(), 64); err == nil {
+	if sql, ok := timestampSQL(term); ok {
+		return sql
+	}
+	if literalIsNumeric(term) {
 		return term.String()
 	}
 	return sqlString(term.String())
@@ -294,8 +351,12 @@ func constantClauses(alias string, column string, raw string, prefixes map[strin
 	case "iri":
 		return []string{alias + ".object_iri = " + sqlString(term.value)}, nil
 	case "literal":
-		if _, err := strconv.ParseFloat(term.value, 64); err == nil {
-			return []string{alias + ".object_float = " + term.value}, nil
+		literal := rdflibgo.NewLiteral(term.value, rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(term.datatype)))
+		if timestamp, ok := timestampSQL(literal); ok {
+			return []string{alias + ".object_time = " + timestamp}, nil
+		}
+		if literalIsNumeric(literal) {
+			return []string{objectNumericExpr(alias) + " = " + term.value}, nil
 		}
 		return []string{alias + ".object_string = " + sqlString(term.value)}, nil
 	default:

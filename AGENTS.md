@@ -30,7 +30,7 @@ SAL, (semantic accessibility layer), is a CLI tool for creating RDF data and met
     - For all input RDF data, if there is a term that is not defined in the provided prefixes, SAL will throw an error which calls out the specific line number with the offending term.
         - For instance, if the user makes a typo and specifies `schema:nameee` in their JSON-LD, SAL build will throw an error saying that `nameee` is not a defined term in the RDF vocab. This should be supported for any generalized RDF vocabulary.
     - Only new data should be written to the iceberg table. For instance, if the table already has a particular triple, it should be ommitted from the new commit. 
-        - An identifier for each triple can be calculated by hashing the subject, predicate, and object. This hash identifier can then be looked up in the iceberg table to check if it exists.
+        - An identifier for each triple can be calculated by hashing the subject, predicate, object, and the object's datatype (empty for an IRI or blank node object). This hash identifier can then be looked up in the iceberg table to check if it exists. The datatype is part of the identity because the table records it in `object_type`, so two literals with the same lexical form but different datatypes are distinct rows.
     - Build can also materialize triples from a sal module and add it to the iceberg table.
         - A sal module is another github repository with a Dockerfile in the root. 
             - More info on the sal module spec can be found here: @./docs/src/content/docs/reference/salmodule-description.mdx

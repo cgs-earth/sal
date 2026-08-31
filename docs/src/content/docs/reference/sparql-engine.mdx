@@ -81,18 +81,19 @@ Press `F2` in `sal query --sparql` to see the SQL generated for whatever is in t
 
 ### Object columns
 
-The table splits objects across `object_iri`, `object_float`, `object_string`, and `object_geometry`, and the translator picks the column from the term an object is being compared against:
+The table splits objects across `object_iri`, `object_string`, `object_geometry`, `object_byte`, `object_integer`, `object_float`, and `object_time` (see [Data Layout](/sal/reference/data-layout/#rdf-triples)), and the translator picks the column from the term an object is being compared against:
 
 | Term in the query | Column used |
 | --- | --- |
 | An IRI or prefixed name | `object_iri` |
-| A number, or a literal whose lexical form parses as one | `object_float` |
+| A bare number, or a literal typed with a numeric XSD datatype | `COALESCE` over `object_float`, `object_integer`, and `object_byte` |
+| An `xsd:dateTime` literal with an explicit timezone | `object_time`, compared as a `TIMESTAMP` normalized to UTC |
 | Any other literal | `object_string` |
 | A geometry, in a [GeoSPARQL function](#geosparql) | `object_geometry` |
 
-A projected object variable is read back as `COALESCE(object_iri, CAST(object_float AS VARCHAR), object_string, ST_AsText(object_geometry))`, so a result row shows the object whichever column holds it. A triple whose object is a GeoSPARQL WKT literal stores its geometry in `object_geometry` and leaves the other object columns null; projecting it renders the geometry back to WKT, such as `POINT (-89.5 40.5)`. The `ST_AsText` is what makes projecting an object load DuckDB's spatial extension the first time; a join or a comparison on an object variable never renders the geometry and so never needs it.
+A projected object variable is read back as a `COALESCE` over every object column rendered as text — `object_iri`, the numeric columns cast to `VARCHAR`, `object_time` rendered back to its ISO form, `object_string`, and `ST_AsText(object_geometry)` — so a result row shows the object whichever column holds it. A triple whose object is a GeoSPARQL WKT literal stores its geometry in `object_geometry` and leaves the other object columns null; projecting it renders the geometry back to WKT, such as `POINT (-89.5 40.5)`. The `ST_AsText` is what makes projecting an object load DuckDB's spatial extension the first time; a join or a comparison on an object variable never renders the geometry and so never needs it.
 
-In a `FILTER`, the same rule applies to whichever side the variable is compared against, so `FILTER(?age > 21)` compares `object_float` while `FILTER(?name = "bob")` compares `object_string`.
+In a `FILTER`, the same rule applies to whichever side the variable is compared against, so `FILTER(?age > 21)` compares the numeric columns while `FILTER(?name = "bob")` compares `object_string`. Note that a quoted number like `"42"` is an `xsd:string` and compares against `object_string`, matching where build stores it.
 
 ## Supported syntax
 
@@ -130,7 +131,7 @@ Everything the engine supports is read-only. There is no SPARQL Update surface a
 | Blank nodes, `_:b` | No | Reported as an unknown prefix `_`. |
 | `BASE` and relative IRIs | No | `BASE` parses but is not applied; a relative IRI is matched literally, not resolved. |
 
-A datatype is used only to decide which object column to compare against, never matched itself. `"5"^^xsd:integer`, `"5"^^xsd:double`, and a bare `5` all become the same comparison, because the table stores every number as a `DOUBLE`. A literal whose lexical form is not numeric, such as `"2026-06-02"^^xsd:date`, is compared as a string.
+A datatype is used only to decide which object column to compare against, never matched itself. `"5"^^xsd:integer`, `"5"^^xsd:double`, and a bare `5` all become the same comparison, a `COALESCE` over the numeric columns cast to `DOUBLE`, so a value matches however it was typed. An `xsd:dateTime` with an explicit timezone compares against `object_time` as a `TIMESTAMP`. A literal stored as a string — an `xsd:string` (quoted `"42"` included), a zoneless dateTime, or a datatype without a typed column such as `"2026-06-02"^^xsd:date` — is compared as a string.
 
 ### Filters
 
@@ -161,7 +162,8 @@ WHERE {
 SELECT t0.subject AS "s"
 FROM triples AS t0
 WHERE t0.predicate = 'https://schema.org/age'
-  AND (t0.object_float >= 21 AND t0.object_float < 65)
+  AND (COALESCE(t0.object_float, CAST(t0.object_integer AS DOUBLE), CAST(t0.object_byte AS DOUBLE)) >= 21
+   AND COALESCE(t0.object_float, CAST(t0.object_integer AS DOUBLE), CAST(t0.object_byte AS DOUBLE)) < 65)
 ```
 
 ## GeoSPARQL
@@ -258,15 +260,15 @@ WHERE {
 
 ```sql
 SELECT t0.subject AS "place",
-  COALESCE(t0.object_iri, CAST(t0.object_float AS VARCHAR), t0.object_string, ST_AsText(t0.object_geometry)) AS "name",
-  COALESCE(t2.object_iri, CAST(t2.object_float AS VARCHAR), t2.object_string, ST_AsText(t2.object_geometry)) AS "wkt"
+  COALESCE(t0.object_iri, CAST(t0.object_float AS VARCHAR), CAST(t0.object_integer AS VARCHAR), CAST(t0.object_byte AS VARCHAR), replace(CAST(t0.object_time AS VARCHAR), ' ', 'T') || 'Z', t0.object_string, ST_AsText(t0.object_geometry)) AS "name",
+  COALESCE(t2.object_iri, CAST(t2.object_float AS VARCHAR), CAST(t2.object_integer AS VARCHAR), CAST(t2.object_byte AS VARCHAR), replace(CAST(t2.object_time AS VARCHAR), ' ', 'T') || 'Z', t2.object_string, ST_AsText(t2.object_geometry)) AS "wkt"
 FROM triples AS t0
 CROSS JOIN triples AS t1
 CROSS JOIN triples AS t2
 WHERE t0.predicate = 'https://schema.org/name'
   AND t0.subject = t1.subject
   AND t1.predicate = 'http://www.opengis.net/ont/geosparql#hasGeometry'
-  AND COALESCE(t1.object_iri, CAST(t1.object_float AS VARCHAR), t1.object_string) = t2.subject
+  AND COALESCE(t1.object_iri, CAST(t1.object_float AS VARCHAR), CAST(t1.object_integer AS VARCHAR), CAST(t1.object_byte AS VARCHAR), replace(CAST(t1.object_time AS VARCHAR), ' ', 'T') || 'Z', t1.object_string) = t2.subject
   AND t2.predicate = 'http://www.opengis.net/ont/geosparql#asWKT'
   AND ST_Intersects(t2.object_geometry, ST_GeomFromText('POLYGON((-91 39, -88 39, -88 42, -91 42, -91 39))'))
 ```
@@ -288,11 +290,11 @@ WHERE {
 
 ```sql
 SELECT t0.subject AS "place",
-  COALESCE(t1.object_iri, CAST(t1.object_float AS VARCHAR), t1.object_string, ST_AsText(t1.object_geometry)) AS "wkt"
+  COALESCE(t1.object_iri, CAST(t1.object_float AS VARCHAR), CAST(t1.object_integer AS VARCHAR), CAST(t1.object_byte AS VARCHAR), replace(CAST(t1.object_time AS VARCHAR), ' ', 'T') || 'Z', t1.object_string, ST_AsText(t1.object_geometry)) AS "wkt"
 FROM triples AS t0
 CROSS JOIN triples AS t1
 WHERE t0.predicate = 'http://www.opengis.net/ont/geosparql#hasGeometry'
-  AND COALESCE(t0.object_iri, CAST(t0.object_float AS VARCHAR), t0.object_string) = t1.subject
+  AND COALESCE(t0.object_iri, CAST(t0.object_float AS VARCHAR), CAST(t0.object_integer AS VARCHAR), CAST(t0.object_byte AS VARCHAR), replace(CAST(t0.object_time AS VARCHAR), ' ', 'T') || 'Z', t0.object_string) = t1.subject
   AND t1.predicate = 'http://www.opengis.net/ont/geosparql#asWKT'
   AND ST_Distance_Sphere(t1.object_geometry, ST_GeomFromText('POINT(-89.5 40.5)')) < 25000
 ```

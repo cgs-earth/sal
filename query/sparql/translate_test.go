@@ -33,7 +33,7 @@ WHERE {
 }`)
 
 	require.NoError(t, err)
-	require.Equal(t, `SELECT COALESCE(t1.object_iri, CAST(t1.object_float AS VARCHAR), t1.object_string, ST_AsText(t1.object_geometry)) AS "name"
+	require.Equal(t, `SELECT `+objectProjection("t1")+` AS "name"
 FROM triples AS t0
 CROSS JOIN triples AS t1
 WHERE t0.subject = 'https://example.org/alice'
@@ -55,7 +55,7 @@ WHERE {
 
 	require.NoError(t, err)
 	require.Contains(t, query, "t0.subject = t1.subject")
-	require.Contains(t, query, `COALESCE(t1.object_iri, CAST(t1.object_float AS VARCHAR), t1.object_string, ST_AsText(t1.object_geometry)) AS "age"`)
+	require.Contains(t, query, objectProjection("t1")+` AS "age"`)
 }
 
 func TestToSQLComparesLiteralsInTheStringColumn(t *testing.T) {
@@ -74,7 +74,7 @@ WHERE {
 	require.NotContains(t, query, "t0.object =")
 }
 
-func TestToSQLComparesNumbersInTheFloatColumn(t *testing.T) {
+func TestToSQLComparesNumbersInTheNumericColumns(t *testing.T) {
 	query, err := ToSQL(`
 PREFIX schema: <https://schema.org/>
 
@@ -84,7 +84,67 @@ WHERE {
 }`)
 
 	require.NoError(t, err)
-	require.Contains(t, query, "t0.object_float = 12.5")
+	require.Contains(t, query, objectNumeric("t0")+" = 12.5")
+}
+
+// A quoted number is an xsd:string, which build stores in object_string, so it
+// is compared there rather than in the numeric columns.
+func TestToSQLComparesQuotedNumbersInTheStringColumn(t *testing.T) {
+	query, err := ToSQL(`
+PREFIX schema: <https://schema.org/>
+
+SELECT ?s
+WHERE {
+  ?s schema:name "42" .
+}`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "t0.object_string = '42'")
+}
+
+func TestToSQLComparesTypedIntegersInTheNumericColumns(t *testing.T) {
+	query, err := ToSQL(`
+PREFIX schema: <https://schema.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+SELECT ?s
+WHERE {
+  ?s schema:age "42"^^xsd:integer .
+}`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, objectNumeric("t0")+" = 42")
+}
+
+// A dateTime with an explicit timezone is stored in object_time normalized to
+// UTC, so it is compared there as the TIMESTAMP it was stored as.
+func TestToSQLComparesDateTimesInTheTimeColumn(t *testing.T) {
+	query, err := ToSQL(`
+PREFIX schema: <https://schema.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+SELECT ?s
+WHERE {
+  ?s schema:startDate "2002-05-30T09:30:10-06:00"^^xsd:dateTime .
+}`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "t0.object_time = TIMESTAMP '2002-05-30 15:30:10'")
+}
+
+// A zoneless dateTime is stored as a string, so it is compared there.
+func TestToSQLComparesZonelessDateTimesInTheStringColumn(t *testing.T) {
+	query, err := ToSQL(`
+PREFIX schema: <https://schema.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+SELECT ?s
+WHERE {
+  ?s schema:startDate "2002-05-30T09:30:10"^^xsd:dateTime .
+}`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "t0.object_string = '2002-05-30T09:30:10'")
 }
 
 func TestToSQLUsesTypedObjectColumnsForIRIObjectFilters(t *testing.T) {
@@ -111,7 +171,7 @@ WHERE {
 }`)
 
 	require.NoError(t, err)
-	require.Contains(t, query, "t0.object_float > 21")
+	require.Contains(t, query, objectNumeric("t0")+" > 21")
 }
 
 func TestToSQLSupportsAndFilter(t *testing.T) {
@@ -125,7 +185,7 @@ WHERE {
 }`)
 
 	require.NoError(t, err)
-	require.Contains(t, query, "(t0.object_float >= 21 AND t0.object_float < 65)")
+	require.Contains(t, query, "("+objectNumeric("t0")+" >= 21 AND "+objectNumeric("t0")+" < 65)")
 }
 
 func TestToSQLRejectsAskQueries(t *testing.T) {
@@ -184,7 +244,7 @@ WHERE {
 }`)
 
 	require.NoError(t, err)
-	require.Contains(t, query, `SELECT t0.subject AS "property", COALESCE(t0.object_iri, CAST(t0.object_float AS VARCHAR), t0.object_string, ST_AsText(t0.object_geometry)) AS "type"`)
+	require.Contains(t, query, `SELECT t0.subject AS "property", `+objectProjection("t0")+` AS "type"`)
 	require.Contains(t, query, `t0.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'`)
 	require.Contains(t, query, `t0.object_iri = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#Property'`)
 	require.Contains(t, query, `t0.object_iri = 'http://www.w3.org/2002/07/owl#AnnotationProperty'`)
@@ -200,7 +260,7 @@ WHERE {
 }`)
 
 	require.NoError(t, err)
-	require.Contains(t, query, `COALESCE(t0.object_iri, CAST(t0.object_float AS VARCHAR), t0.object_string, ST_AsText(t0.object_geometry)) AS "wkt"`)
+	require.Contains(t, query, objectProjection("t0")+` AS "wkt"`)
 }
 
 func TestToSQLJoinsObjectVariablesWithoutTheGeometryColumn(t *testing.T) {
@@ -217,7 +277,7 @@ WHERE {
 
 	require.NoError(t, err)
 	require.NotContains(t, query, "ST_AsText")
-	require.Contains(t, query, "COALESCE(t0.object_iri, CAST(t0.object_float AS VARCHAR), t0.object_string) = t1.subject")
+	require.Contains(t, query, objectText("t0")+" = t1.subject")
 }
 
 func TestToSQLTranslatesGeoSPARQLIntersectsWithWKTLiteral(t *testing.T) {

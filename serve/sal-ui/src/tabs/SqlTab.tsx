@@ -19,7 +19,11 @@ const TRIPLES_COLUMNS = [
   'predicate',
   'object_iri',
   'object_string',
+  'object_byte',
+  'object_integer',
   'object_float',
+  'object_time',
+  'object_type',
   'object_geometry',
 ]
 

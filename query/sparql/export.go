@@ -8,17 +8,24 @@ import (
 
 // ExportSQL selects the columns an N-Triples export needs, leaving out
 // triple_hash since it identifies a row rather than being part of the triple
-// it names. The object union is read back as its four candidate columns;
-// object_geometry comes back as WKT text since the driver has no Go value for
-// DuckDB's GEOMETRY, and object_float is cast to text so its rendering matches
-// what every other numeric object lookup in this package already produces.
-const ExportSQL = `SELECT
+// it names. The object union is read back as its candidate columns plus
+// object_type, which carries the datatype the exported literal is retyped
+// with. object_geometry comes back as WKT text since the driver has no Go
+// value for DuckDB's GEOMETRY, the numeric columns are cast to text so their
+// rendering matches what every other numeric object lookup in this package
+// already produces, and object_time is rendered back to its xsd:dateTime
+// lexical form the same way a SPARQL projection renders it.
+var ExportSQL = `SELECT
 	subject,
 	predicate,
 	object_iri,
 	CAST(object_float AS VARCHAR) AS object_float,
+	CAST(object_integer AS VARCHAR) AS object_integer,
+	CAST(object_byte AS VARCHAR) AS object_byte,
+	` + timeTextExpr("triples") + ` AS object_time,
 	ST_AsText(object_geometry) AS object_wkt,
-	object_string
+	object_string,
+	object_type
 FROM triples`
 
 // StreamSQL runs a statement against the triples table and calls rowFn with

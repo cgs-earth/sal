@@ -8,7 +8,19 @@ import (
 
 // objectText is the expression every lookup reads an object through.
 func objectText(alias string) string {
-	return "COALESCE(" + alias + ".object_iri, CAST(" + alias + ".object_float AS VARCHAR), " + alias + ".object_string)"
+	return "COALESCE(" + alias + ".object_iri, CAST(" + alias + ".object_float AS VARCHAR), CAST(" + alias + ".object_integer AS VARCHAR), CAST(" + alias + ".object_byte AS VARCHAR), replace(CAST(" + alias + ".object_time AS VARCHAR), ' ', 'T') || 'Z', " + alias + ".object_string)"
+}
+
+// objectProjection is objectText with the geometry rendered as WKT, the
+// expression a projected object variable is read back through.
+func objectProjection(alias string) string {
+	return "COALESCE(" + alias + ".object_iri, CAST(" + alias + ".object_float AS VARCHAR), CAST(" + alias + ".object_integer AS VARCHAR), CAST(" + alias + ".object_byte AS VARCHAR), replace(CAST(" + alias + ".object_time AS VARCHAR), ' ', 'T') || 'Z', " + alias + ".object_string, ST_AsText(" + alias + ".object_geometry))"
+}
+
+// objectNumeric is the expression a numeric comparison reads an object
+// through, whichever numeric column holds it.
+func objectNumeric(alias string) string {
+	return "COALESCE(" + alias + ".object_float, CAST(" + alias + ".object_integer AS DOUBLE), CAST(" + alias + ".object_byte AS DOUBLE))"
 }
 
 func TestClassesSQLSelectsSubjectsTypedAsAClass(t *testing.T) {

@@ -430,13 +430,13 @@ sal export |  uv run --with rdflib python -c 'import sys, rdflib; g=rdflib.Graph
 
 `triple_hash` is left out, since it identifies a row rather than being part of the triple it names.
 
-Each object is restored to its original shape from the typed object column that holds it (see [Data Layout](/sal/reference/data-layout/#rdf-triples)):
+Each object is restored to its original shape from the typed object column that holds it, retyped with the exact datatype IRI the `object_type` column recorded at build time (see [Data Layout](/sal/reference/data-layout/#rdf-triples)):
 
 - An IRI object comes back as `<...>`.
-- A numeric literal comes back typed `^^xsd:double`, whether it was originally an integer or a float; the two are not told apart, since the table stores every number as a `DOUBLE` and does not record which it was.
+- A typed literal comes back with its original datatype — `"5"^^xsd:byte` and `"5"^^xsd:integer` are stored in different columns and both round-trip as themselves, and a datatype without a typed column, such as `xsd:date`, was stored as a string alongside its datatype and comes back typed too. A numeric or dateTime value's lexical form is the column's canonical rendering (`1e3` comes back as `1000.0`; a stored dateTime comes back in UTC), but the datatype is always exact.
 - A geometry literal comes back typed `^^<http://www.opengis.net/ont/geosparql#wktLiteral>`, with its WKT text restored from the geometry the table stores. Any GeoSPARQL CRS prefix the original literal had is not restored.
 - A blank node comes back as `_:...`. The table stores every blank node with its `_:` prefix, so a blank node round-trips exactly in both subject and object position.
-- Anything else comes back as a plain string literal.
+- An `xsd:string` comes back as a plain string literal, which is the same RDF term. A language-tagged literal also comes back plain, since the tag itself is not stored.
 
 `sal export` mirrors the table exactly rather than rewriting anything it reads: a value is written out with whichever N-Triples syntax its stored shape calls for (`<...>`, `_:...`, or `"..."`), but its content is never altered. In particular, IRIs are not resolved against a base — if a subject or object is stored as a relative IRI, it is exported as a relative IRI, which is not valid per the N-Triples grammar but does guarantee the export always says exactly what the table says.
 

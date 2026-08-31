@@ -109,3 +109,51 @@ func TestQueryRowsReportsAStatementThatDoesNotParse(t *testing.T) {
 
 	require.ErrorContains(t, err, "duckdb query failed")
 }
+
+// TestObjectExpressionsRenderTimestampsAsXSDDateTime runs the object COALESCE
+// expressions against DuckDB itself, checking they are valid core SQL (no
+// extensions) and that a stored UTC timestamp renders back as the xsd:dateTime
+// lexical form build parsed it from, fractional seconds included.
+func TestObjectExpressionsRenderTimestampsAsXSDDateTime(t *testing.T) {
+	db := localDB(t)
+	_, err := db.ExecContext(context.Background(), `CREATE TABLE triples AS SELECT
+		NULL::VARCHAR AS object_iri,
+		NULL::DOUBLE AS object_float,
+		NULL::BIGINT AS object_integer,
+		NULL::INTEGER AS object_byte,
+		TIMESTAMP '2002-05-30 15:30:10' AS object_time,
+		NULL::VARCHAR AS object_string`)
+	require.NoError(t, err)
+
+	var rendered string
+	require.NoError(t, db.QueryRow("SELECT "+bindingExpr("triples", "object")+" FROM triples").Scan(&rendered))
+	require.Equal(t, "2002-05-30T15:30:10Z", rendered)
+
+	_, err = db.ExecContext(context.Background(), "UPDATE triples SET object_time = TIMESTAMP '2002-05-30 15:30:10.123456'")
+	require.NoError(t, err)
+	require.NoError(t, db.QueryRow("SELECT "+bindingExpr("triples", "object")+" FROM triples").Scan(&rendered))
+	require.Equal(t, "2002-05-30T15:30:10.123456Z", rendered)
+}
+
+// TestObjectNumericExprReadsEveryNumericColumn checks the numeric COALESCE a
+// FILTER compares through reads a value whichever numeric column holds it.
+func TestObjectNumericExprReadsEveryNumericColumn(t *testing.T) {
+	db := localDB(t)
+	_, err := db.ExecContext(context.Background(), `CREATE TABLE triples AS
+		SELECT 42.5::DOUBLE AS object_float, NULL::BIGINT AS object_integer, NULL::INTEGER AS object_byte
+		UNION ALL SELECT NULL, 7, NULL
+		UNION ALL SELECT NULL, NULL, -8`)
+	require.NoError(t, err)
+
+	rows, err := db.QueryContext(context.Background(), "SELECT "+objectNumericExpr("triples")+" AS n FROM triples ORDER BY n")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, rows.Close()) }()
+	var values []float64
+	for rows.Next() {
+		var value float64
+		require.NoError(t, rows.Scan(&value))
+		values = append(values, value)
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, []float64{-8, 7, 42.5}, values)
+}

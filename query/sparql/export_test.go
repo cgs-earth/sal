@@ -15,8 +15,12 @@ func TestExportSQLSelectsEveryUnionColumn(t *testing.T) {
 	require.Contains(t, sql, "predicate")
 	require.Contains(t, sql, "object_iri")
 	require.Contains(t, sql, "CAST(object_float AS VARCHAR) AS object_float")
+	require.Contains(t, sql, "CAST(object_integer AS VARCHAR) AS object_integer")
+	require.Contains(t, sql, "CAST(object_byte AS VARCHAR) AS object_byte")
+	require.Contains(t, sql, timeTextExpr("triples")+" AS object_time")
 	require.Contains(t, sql, "ST_AsText(object_geometry) AS object_wkt")
 	require.Contains(t, sql, "object_string")
+	require.Contains(t, sql, "object_type")
 	require.NotContains(t, sql, "triple_hash")
 }
 

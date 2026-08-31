@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/cgs-earth/sal/pkg"
 	salsparql "github.com/cgs-earth/sal/query/sparql"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/nt"
@@ -89,23 +90,41 @@ func subjectTerm(value string) rdflibgo.Subject {
 }
 
 // objectTerm rebuilds the RDF term the object columns held, writing the stored
-// value exactly as-is. The table stores which union member is populated, so
-// restoring an IRI, a numeric literal's xsd:double datatype, and a geometry
-// literal's geosparql:wktLiteral datatype is exact. A blank node object lands
+// value exactly as-is. The object_type column carries the datatype IRI the
+// literal was built with, so a typed literal is restored with its exact
+// datatype whichever column its value landed in; a typed value column only
+// supplies a fallback for a row written without one. A blank node object lands
 // in object_string carrying the "_:" prefix build stored it with, which is what
 // tells it apart from a plain string literal there; only a literal whose own
 // text starts with "_:" would be misread, and nothing SAL builds writes one.
 func objectTerm(cols []sql.NullString) rdflibgo.Term {
-	iri, float, wkt, str := cols[0], cols[1], cols[2], cols[3]
+	iri, float, integer, byteCol, timeCol, wkt, str, datatype := cols[0], cols[1], cols[2], cols[3], cols[4], cols[5], cols[6], cols[7]
+	typed := func(value string, fallback rdflibgo.URIRef) rdflibgo.Term {
+		if datatype.Valid {
+			return rdflibgo.NewLiteral(value, rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(datatype.String)))
+		}
+		return rdflibgo.NewLiteral(value, rdflibgo.WithDatatype(fallback))
+	}
 	switch {
 	case iri.Valid:
 		return rdflibgo.NewURIRefUnsafe(iri.String)
 	case wkt.Valid:
-		return rdflibgo.NewLiteral(wkt.String, rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(wktLiteralDatatype)))
+		return typed(wkt.String, rdflibgo.NewURIRefUnsafe(wktLiteralDatatype))
 	case float.Valid:
-		return rdflibgo.NewLiteral(float.String, rdflibgo.WithDatatype(rdflibgo.XSDDouble))
+		return typed(float.String, rdflibgo.XSDDouble)
+	case integer.Valid:
+		return typed(integer.String, rdflibgo.XSDInteger)
+	case byteCol.Valid:
+		return typed(byteCol.String, rdflibgo.NewURIRefUnsafe(pkg.XSDByte))
+	case timeCol.Valid:
+		return typed(timeCol.String, rdflibgo.XSDDateTime)
 	case strings.HasPrefix(str.String, blankNodePrefix):
 		return rdflibgo.NewBNode(strings.TrimPrefix(str.String, blankNodePrefix))
+	case datatype.Valid && datatype.String != pkg.XSDString && datatype.String != rdflibgo.RDFLangString.Value():
+		// rdf:langString is excluded since the language tag itself is not
+		// stored; the value exports as a plain literal rather than as an
+		// invalid tagless langString.
+		return rdflibgo.NewLiteral(str.String, rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(datatype.String)))
 	default:
 		return rdflibgo.NewLiteral(str.String)
 	}
