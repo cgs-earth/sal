@@ -311,9 +311,11 @@ func (s *SalModuleSuite) builtObjectsForPredicate(predicate string) []string {
 	}
 
 	// An object is stored in exactly one typed column. What a module produces
-	// here is IRIs, strings, and numbers, so the geometry column is not read.
+	// here is IRIs, strings, and numbers, so the geometry, byte, and time
+	// columns are not read. Columns are resolved by name since a projection
+	// comes back in schema order rather than selection order.
 	_, records, err := tbl.Scan(
-		table.WithSelectedFields("subject", "predicate", "object_iri", "object_float", "object_string"),
+		table.WithSelectedFields("subject", "predicate", "object_iri", "object_float", "object_integer", "object_string"),
 		table.WithCaseSensitive(true),
 	).ToArrowRecords(context.Background())
 	s.Require().NoError(err)
@@ -324,11 +326,16 @@ func (s *SalModuleSuite) builtObjectsForPredicate(predicate string) []string {
 		if record == nil {
 			continue
 		}
-		subjects := record.Column(0).(*array.String)
-		predicates := record.Column(1).(*array.String)
-		iris := record.Column(2).(*array.String)
-		floats := record.Column(3).(*array.Float64)
-		strs := record.Column(4).(*array.String)
+		columns := map[string]int{}
+		for i, field := range record.Schema().Fields() {
+			columns[field.Name] = i
+		}
+		subjects := record.Column(columns["subject"]).(*array.String)
+		predicates := record.Column(columns["predicate"]).(*array.String)
+		iris := record.Column(columns["object_iri"]).(*array.String)
+		floats := record.Column(columns["object_float"]).(*array.Float64)
+		integers := record.Column(columns["object_integer"]).(*array.Int64)
+		strs := record.Column(columns["object_string"]).(*array.String)
 		for i := range int(record.NumRows()) {
 			if !strings.HasPrefix(subjects.Value(i), placeNamespace) || predicates.Value(i) != predicate {
 				continue
@@ -338,6 +345,8 @@ func (s *SalModuleSuite) builtObjectsForPredicate(predicate string) []string {
 				objects = append(objects, iris.Value(i))
 			case floats.IsValid(i):
 				objects = append(objects, strconv.FormatFloat(floats.Value(i), 'f', -1, 64))
+			case integers.IsValid(i):
+				objects = append(objects, strconv.FormatInt(integers.Value(i), 10))
 			default:
 				objects = append(objects, strs.Value(i))
 			}

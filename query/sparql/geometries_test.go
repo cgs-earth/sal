@@ -9,7 +9,7 @@ import (
 func TestGeometrySQLReadsTheObjectAsTextAndTheGeometryAsGeoJSON(t *testing.T) {
 	sql := geometrySQL(GeometryQuery{Limit: 100, Offset: 12})
 
-	require.Contains(t, sql, "COALESCE(triples.object_iri, CAST(triples.object_float AS VARCHAR), triples.object_string, ST_AsText(triples.object_geometry)) AS object")
+	require.Contains(t, sql, objectProjection("triples")+" AS object")
 	require.Contains(t, sql, "ST_AsGeoJSON(triples.object_geometry) AS geometry")
 	require.Contains(t, sql, "WHERE triples.object_geometry IS NOT NULL")
 	require.Contains(t, sql, "LIMIT 100")

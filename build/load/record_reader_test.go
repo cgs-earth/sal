@@ -16,25 +16,24 @@ func TestGetSchemasUseNativeIcebergGeometry(t *testing.T) {
 	arrowSchema, icebergSchema, err := GetSchemas()
 	require.NoError(t, err)
 
-	convertedType, err := table.ArrowTypeToIceberg(arrowSchema.Field(5).Type, false)
+	convertedType, err := table.ArrowTypeToIceberg(arrowSchema.Field(4).Type, false)
 	require.NoError(t, err)
-	require.Equal(t, icebergSchema.Field(5).Type.String(), convertedType.String())
-	require.Equal(t, "geometry", icebergSchema.Field(5).Type.String())
+	require.Equal(t, icebergSchema.Field(4).Type.String(), convertedType.String())
+	require.Equal(t, "geometry", icebergSchema.Field(4).Type.String())
 }
 
 func TestGetSchemasSplitsObjectsByDatatype(t *testing.T) {
 	arrowSchema, icebergSchema, err := GetSchemas()
 	require.NoError(t, err)
 
-	require.Equal(t, 7, arrowSchema.NumFields())
-	require.Equal(t, "object_iri", arrowSchema.Field(2).Name)
-	require.Equal(t, "object_float", arrowSchema.Field(3).Name)
-	require.Equal(t, "object_string", arrowSchema.Field(4).Name)
-	require.Equal(t, "object_geometry", arrowSchema.Field(5).Name)
-	require.Equal(t, "triple_hash", arrowSchema.Field(6).Name)
-	require.Equal(t, "object_geometry", icebergSchema.Field(5).Name)
-	require.Equal(t, "triple_hash", icebergSchema.Field(6).Name)
-	require.Equal(t, []int{7}, icebergSchema.IdentifierFieldIDs)
+	names := []string{"subject", "predicate", "object_string", "object_iri", "object_geometry", "object_byte", "object_integer", "object_float", "object_time", "object_type", "triple_hash"}
+	require.Equal(t, len(names), arrowSchema.NumFields())
+	require.Equal(t, len(names), len(icebergSchema.Fields()))
+	for i, name := range names {
+		require.Equal(t, name, arrowSchema.Field(i).Name)
+		require.Equal(t, name, icebergSchema.Field(i).Name)
+	}
+	require.Equal(t, []int{11}, icebergSchema.IdentifierFieldIDs)
 }
 
 func TestAppendGraphIngestsSimpleWKTGeometry(t *testing.T) {
@@ -66,7 +65,7 @@ func TestAppendGraphIngestsSimpleWKTGeometry(t *testing.T) {
 	require.NotNil(t, loaded.CurrentSnapshot())
 	require.NotNil(t, loaded.CurrentSnapshot().Summary)
 	require.Equal(t, 3, loaded.Metadata().Version())
-	require.Equal(t, "geometry", loaded.Schema().Field(5).Type.String())
+	require.Equal(t, "geometry", loaded.Schema().Field(4).Type.String())
 	require.Equal(t, "1", loaded.CurrentSnapshot().Summary.Properties["added-records"])
 }
 
@@ -108,9 +107,10 @@ func TestProcessGraphDiffAddsAndRemovesByTripleHash(t *testing.T) {
 	hashes, err := readExistingTripleHashes(ctx, loaded)
 	require.NoError(t, err)
 
-	require.Contains(t, hashes, tripleHash("http://example.com/keep", "http://example.com/p", "same"))
-	require.Contains(t, hashes, tripleHash("http://example.com/add", "http://example.com/p", "new"))
-	require.NotContains(t, hashes, tripleHash("http://example.com/drop", "http://example.com/p", "old"))
+	xsdString := rdflibgo.XSDString.Value()
+	require.Contains(t, hashes, tripleHash("http://example.com/keep", "http://example.com/p", "same", xsdString))
+	require.Contains(t, hashes, tripleHash("http://example.com/add", "http://example.com/p", "new", xsdString))
+	require.NotContains(t, hashes, tripleHash("http://example.com/drop", "http://example.com/p", "old", xsdString))
 	require.Len(t, hashes, 2)
 }
 

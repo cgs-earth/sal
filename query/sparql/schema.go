@@ -22,8 +22,8 @@ func VerifyObjectColumns(ctx context.Context, warehouse string, namespace string
 	if err != nil {
 		return fmt.Errorf("load table: %w", err)
 	}
-	if _, ok := tbl.Schema().FindFieldByName("object_geometry"); !ok {
-		return fmt.Errorf("the triples table was built by an older sal with a single object column, which this version no longer reads; run `sal clean --wipe` and `sal build` to rebuild it with typed object columns")
+	if _, ok := tbl.Schema().FindFieldByName("object_type"); !ok {
+		return fmt.Errorf("the triples table was built by an older sal without the typed object columns and the object_type column this version reads; run `sal clean --wipe` and `sal build` to rebuild it")
 	}
 	return nil
 }

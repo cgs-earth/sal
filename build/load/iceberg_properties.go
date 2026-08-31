@@ -17,9 +17,13 @@ import (
 )
 
 // GetSchemas is the schema of a triples table, in both its Arrow and Iceberg
-// forms. An object is split across one column per datatype -- IRI, number,
-// string, geometry -- so that a query compares and reads each kind natively
-// rather than parsing it out of a single text column.
+// forms. An object is split across one column per datatype -- IRI, string,
+// geometry, byte, integer, float, timestamp -- so that a query compares and
+// reads each kind natively rather than parsing it out of a single text column.
+// object_type keeps the datatype IRI the literal was written with, so a typed
+// literal round-trips back to RDF with its exact datatype even when its value
+// is stored in a typed column (or when no typed column fits and it is stored
+// as a string).
 func GetSchemas() (*arrow.Schema, *iceberg.Schema, error) {
 	geoCRS, err := json.Marshal("OGC:CRS84")
 	if err != nil {
@@ -33,10 +37,17 @@ func GetSchemas() (*arrow.Schema, *iceberg.Schema, error) {
 		[]arrow.Field{
 			{Name: "subject", Type: arrow.BinaryTypes.String},
 			{Name: "predicate", Type: arrow.BinaryTypes.String},
-			{Name: "object_iri", Type: arrow.BinaryTypes.String, Nullable: true},
-			{Name: "object_float", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
 			{Name: "object_string", Type: arrow.BinaryTypes.String, Nullable: true},
+			{Name: "object_iri", Type: arrow.BinaryTypes.String, Nullable: true},
 			{Name: "object_geometry", Type: geoarrow.NewWKBType(geoarrow.WKBWithBinaryStorage(), geoarrow.WKBWithMetadata(geoMetadata)), Nullable: true},
+			{Name: "object_byte", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			{Name: "object_integer", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+			{Name: "object_float", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
+			// object_time carries no timezone: build normalizes every stored
+			// xsd:dateTime to UTC, which keeps DuckDB's text rendering of the
+			// column independent of the querying machine's timezone setting.
+			{Name: "object_time", Type: &arrow.TimestampType{Unit: arrow.Microsecond}, Nullable: true},
+			{Name: "object_type", Type: arrow.BinaryTypes.String, Nullable: true},
 			{Name: "triple_hash", Type: arrow.BinaryTypes.String, Nullable: false},
 		},
 		nil,
@@ -45,14 +56,20 @@ func GetSchemas() (*arrow.Schema, *iceberg.Schema, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	var icebergSchema = iceberg.NewSchemaWithIdentifiers(1, []int{7},
+	var icebergSchema = iceberg.NewSchemaWithIdentifiers(1, []int{11},
 		iceberg.NestedField{ID: 1, Name: "subject", Type: iceberg.PrimitiveTypes.String, Required: true},
 		iceberg.NestedField{ID: 2, Name: "predicate", Type: iceberg.PrimitiveTypes.String, Required: true},
-		iceberg.NestedField{ID: 3, Name: "object_iri", Type: iceberg.PrimitiveTypes.String, Required: false},
-		iceberg.NestedField{ID: 4, Name: "object_float", Type: iceberg.PrimitiveTypes.Float64, Required: false},
-		iceberg.NestedField{ID: 5, Name: "object_string", Type: iceberg.PrimitiveTypes.String, Required: false},
-		iceberg.NestedField{ID: 6, Name: "object_geometry", Type: geometry_type, Required: false},
-		iceberg.NestedField{ID: 7, Name: "triple_hash", Type: iceberg.PrimitiveTypes.String, Required: true},
+		iceberg.NestedField{ID: 3, Name: "object_string", Type: iceberg.PrimitiveTypes.String, Required: false},
+		iceberg.NestedField{ID: 4, Name: "object_iri", Type: iceberg.PrimitiveTypes.String, Required: false},
+		iceberg.NestedField{ID: 5, Name: "object_geometry", Type: geometry_type, Required: false},
+		// Iceberg has no 8-bit integer type, so object_byte is an int32 column
+		// whose values build range-checks to xsd:byte before writing.
+		iceberg.NestedField{ID: 6, Name: "object_byte", Type: iceberg.PrimitiveTypes.Int32, Required: false},
+		iceberg.NestedField{ID: 7, Name: "object_integer", Type: iceberg.PrimitiveTypes.Int64, Required: false},
+		iceberg.NestedField{ID: 8, Name: "object_float", Type: iceberg.PrimitiveTypes.Float64, Required: false},
+		iceberg.NestedField{ID: 9, Name: "object_time", Type: iceberg.PrimitiveTypes.Timestamp, Required: false},
+		iceberg.NestedField{ID: 10, Name: "object_type", Type: iceberg.PrimitiveTypes.String, Required: false},
+		iceberg.NestedField{ID: 11, Name: "triple_hash", Type: iceberg.PrimitiveTypes.String, Required: true},
 	)
 
 	return arrowSchema, icebergSchema, nil
@@ -75,6 +92,9 @@ func NewIcebergTableFromCfg(ctx context.Context, tableSchema *iceberg.Schema, ca
 
 	tableIdent := catalog.ToIdentifier(cfg.Namespace, "triples")
 	if tbl, err := cat.LoadTable(ctx, tableIdent); err == nil {
+		if _, ok := tbl.Schema().FindFieldByName("object_type"); !ok {
+			return nil, fmt.Errorf("the existing triples table was built by an older sal without the object_type column; run `sal clean --wipe` and `sal build` to rebuild it")
+		}
 		slog.Info("Loaded existing Iceberg table")
 		return tbl, nil
 	} else if !errors.Is(err, catalog.ErrNoSuchTable) {

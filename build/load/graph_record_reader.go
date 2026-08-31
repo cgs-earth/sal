@@ -111,7 +111,7 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 		subject := storedSubject(triple.Subject)
 		predicate := triple.Predicate.String()
 		object := graphTripleObject(triple.Object)
-		hashValue := tripleHash(subject, predicate, object.o)
+		hashValue := tripleHash(subject, predicate, object.o, object.oDatatype)
 		if r.hashes != nil {
 			if _, ok := r.hashes[hashValue]; !ok {
 				continue
@@ -123,9 +123,12 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 		if err := appendObjectFields(builder, object); err != nil {
 			return nil, fmt.Errorf("serialize object for %s %s: %w", triple.Subject.String(), triple.Predicate.String(), err)
 		}
-		// triple_hash is the final schema field. It is generated from subject, predicate,
-		// and the object term before typed object columns are derived, so storage type
-		// markers like xsd:date or geometry WKB do not affect the row identity.
+		// triple_hash is the final schema field. It is generated from the subject,
+		// predicate, and the object's lexical form and datatype, before typed object
+		// columns are derived, so the storage representation (geometry WKB, float
+		// rendering) does not affect the row identity but the datatype does: two
+		// triples differing only in datatype are distinct rows, matching what
+		// object_type records.
 		lastIndex := r.schema.NumFields() - 1
 		builder.Field(lastIndex).(*array.StringBuilder).Append(hashValue)
 		count++
@@ -138,8 +141,11 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 	return builder.NewRecordBatch(), nil
 }
 
-// tripleHash returns a stable SHA-256 row identifier from the RDF triple terms.
-func tripleHash(subject string, predicate string, object string) string {
+// tripleHash returns a stable SHA-256 row identifier from the RDF triple
+// terms. The object's datatype is part of the identity (empty for an IRI or a
+// blank node object), since the table stores it in object_type and a literal
+// with the same lexical form but a different datatype is a different triple.
+func tripleHash(subject string, predicate string, object string, datatype string) string {
 	hash := sha256.New()
 	_, _ = hash.Write([]byte("subject="))
 	_, _ = hash.Write([]byte(subject))
@@ -147,11 +153,14 @@ func tripleHash(subject string, predicate string, object string) string {
 	_, _ = hash.Write([]byte(predicate))
 	_, _ = hash.Write([]byte("\nobject="))
 	_, _ = hash.Write([]byte(object))
+	_, _ = hash.Write([]byte("\ndatatype="))
+	_, _ = hash.Write([]byte(datatype))
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func tripleHashForTriple(triple rdflibgo.Triple) string {
-	return tripleHash(storedSubject(triple.Subject), triple.Predicate.String(), graphTripleObject(triple.Object).o)
+	object := graphTripleObject(triple.Object)
+	return tripleHash(storedSubject(triple.Subject), triple.Predicate.String(), object.o, object.oDatatype)
 }
 
 // storedSubject renders a subject the way the triples table stores it: a blank

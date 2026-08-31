@@ -42,15 +42,19 @@ SAL builds RDF into rows representing triples, with the object split across one 
 
 - `subject`
 - `predicate`
+- `object_string`: a string or any other literal without a typed column, or a blank node with its `_:` prefix
 - `object_iri`: an IRI object
-- `object_float`: a numeric literal, stored as a `DOUBLE`
-- `object_string`: any other literal, or a blank node with its `_:` prefix
 - `object_geometry`: a GeoSPARQL `wktLiteral`, stored as an Iceberg `geometry`
+- `object_byte`: an `xsd:byte` literal, stored as an `INTEGER` (Iceberg has no 8-bit type)
+- `object_integer`: an integer-valued XSD literal (`xsd:integer`, `xsd:int`, `xsd:long`, ...), stored as a `BIGINT`
+- `object_float`: an `xsd:float`, `xsd:double`, or `xsd:decimal` literal, stored as a `DOUBLE`
+- `object_time`: an `xsd:dateTime` literal with an explicit timezone, stored as a `TIMESTAMP` normalized to UTC
+- `object_type`: the datatype IRI the literal object was written with; `NULL` for an IRI or blank node object
 - `triple_hash`
 
-Exactly one of the four object columns is set on each row. The geometry column is what makes the table an Iceberg format version 3 table.
+Exactly one of the object value columns is set on each row, chosen by the literal's declared datatype rather than by what its text happens to parse as. A typed literal whose lexical form does not fit its column — an out-of-range `xsd:byte`, a zoneless or sub-microsecond `xsd:dateTime` — is stored in `object_string`, and any datatype without a typed column (booleans, dates, custom types) lands there too. `object_type` keeps the exact datatype in every case, so exporting the table back to RDF ([`sal export`](/sal/reference/commands/#sal-export)) reproduces the original typed literal even when the value was stored as a string. The geometry column is what makes the table an Iceberg format version 3 table.
 
-The hash identifies a triple from its subject, predicate, and object.
+The hash identifies a triple from its subject, predicate, object, and the object's datatype.
 SAL uses this identity to avoid writing duplicate triples when the table already contains the same data.
 
 ## Validation and vocabularies
