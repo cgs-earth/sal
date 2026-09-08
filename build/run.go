@@ -13,9 +13,9 @@ import (
 )
 
 type RunCmd struct {
-	Paths []string `arg:"positional" help:"RDF files declaring the SAL module tasks to run"`
-	Force bool     `arg:"--force" help:"run modules even if the git worktree is dirty or the data product was not built from the current commit"`
-	Yes   bool     `arg:"-y,--yes" help:"include a prefix whose namespace does not end in / or # without asking"`
+	Paths                           []string `arg:"positional" help:"RDF files declaring the SAL module tasks to run"`
+	Force                           bool     `arg:"--force" help:"run modules even if the git worktree is dirty or the data product was not built from the current commit"`
+	AllowPrefixesWithoutSlashOrHash bool     `arg:"--allow-prefixes-without-slash-or-hash" help:"include a prefix whose namespace does not end in / or # without asking"`
 }
 
 var ErrRunUncommittedChanges = errors.New("git repository has uncommitted changes; commit them and run `sal build` before `sal run`")
@@ -69,11 +69,11 @@ func (cfg *RunCmd) Run() (*rdflibgo.Graph, error) {
 	// the same pipeline `sal build` committed it with, so the only change the
 	// snapshot ends up carrying is what the modules produced
 	buildCfg := &BuildCmd{
-		Paths:      cfg.Paths,
-		Format:     GraphExportFormatIceberg,
-		Force:      cfg.Force,
-		Yes:        cfg.Yes,
-		runModules: true,
+		Paths:                           cfg.Paths,
+		Format:                          GraphExportFormatIceberg,
+		Force:                           cfg.Force,
+		AllowPrefixesWithoutSlashOrHash: cfg.AllowPrefixesWithoutSlashOrHash,
+		runModules:                      true,
 	}
 	return buildCfg.Run()
 }

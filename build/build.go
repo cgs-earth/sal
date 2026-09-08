@@ -15,31 +15,31 @@ import (
 )
 
 type ValidateCmd struct {
-	Paths      []string `arg:"positional" help:"RDF files to validate"`
-	PrefixMaps []string `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
-	NoCache    bool     `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources instead of the versions pinned in .sal/config.jsonld"`
-	Yes        bool     `arg:"-y,--yes" help:"include a prefix whose namespace does not end in / or # without asking"`
+	Paths                           []string `arg:"positional" help:"RDF files to validate"`
+	PrefixMaps                      []string `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
+	NoCache                         bool     `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources instead of the versions pinned in .sal/config.jsonld"`
+	AllowPrefixesWithoutSlashOrHash bool     `arg:"--allow-prefixes-without-slash-or-hash" help:"include a prefix whose namespace does not end in / or # without asking"`
 }
 
 func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
 	buildCfg := &BuildCmd{
-		Paths:             cfg.Paths,
-		PrefixMaps:        cfg.PrefixMaps,
-		NoCache:           cfg.NoCache,
-		Yes:               cfg.Yes,
-		skipCommit:        true,
-		skipProjectChecks: true,
+		Paths:                           cfg.Paths,
+		PrefixMaps:                      cfg.PrefixMaps,
+		NoCache:                         cfg.NoCache,
+		AllowPrefixesWithoutSlashOrHash: cfg.AllowPrefixesWithoutSlashOrHash,
+		skipCommit:                      true,
+		skipProjectChecks:               true,
 	}
 	return buildCfg.Run()
 }
 
 type BuildCmd struct {
-	Paths      []string          `arg:"positional" help:"RDF files to validate"`
-	PrefixMaps []string          `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
-	Format     GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
-	Force      bool              `arg:"--force" help:"force build even if there are uncommitted changes in the git repository"`
-	NoCache    bool              `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources and re-pin them in .sal/config.jsonld"`
-	Yes        bool              `arg:"-y,--yes" help:"include a prefix whose namespace does not end in / or # without asking"`
+	Paths                           []string          `arg:"positional" help:"RDF files to validate"`
+	PrefixMaps                      []string          `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
+	Format                          GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
+	Force                           bool              `arg:"--force" help:"force build even if there are uncommitted changes in the git repository"`
+	NoCache                         bool              `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources and re-pin them in .sal/config.jsonld"`
+	AllowPrefixesWithoutSlashOrHash bool              `arg:"--allow-prefixes-without-slash-or-hash" help:"include a prefix whose namespace does not end in / or # without asking"`
 
 	// skip committing the built data to iceberg
 	skipCommit bool
@@ -61,7 +61,7 @@ var confirm = pkg.Confirm
 // ErrPrefixRejected is returned when the user declines to include a prefix
 // whose namespace does not end in / or #. The prefix and the files declaring
 // it are logged before it is returned.
-var ErrPrefixRejected = errors.New("build: refused a prefix whose namespace does not end in / or #; fix the namespace, or pass --yes to include it as written")
+var ErrPrefixRejected = errors.New("build: refused a prefix whose namespace does not end in / or #; fix the namespace, or pass --allow-prefixes-without-slash-or-hash to include it as written")
 
 // ErrConflictingPrefixes is returned when the source files declare one
 // vocabulary under namespaces mixing http and https, or with and without a
@@ -73,13 +73,13 @@ var ErrUncommittedChanges = fmt.Errorf("git repository has uncommitted changes; 
 
 // confirmPrefixesWithoutTerminator warns about every declared prefix whose
 // namespace ends in neither / nor #, and asks before including each one unless
-// the user passed --yes. It runs once every file is parsed and before any
+// the user passed --allow-prefixes-without-slash-or-hash. It runs once every file is parsed and before any
 // term is checked, so nothing is fetched for a prefix the user then refuses.
-func confirmPrefixesWithoutTerminator(validator *validate.Validator, yes bool) error {
+func confirmPrefixesWithoutTerminator(validator *validate.Validator, allow bool) error {
 	for _, prefix := range validator.PrefixesWithoutTerminator() {
 		question := fmt.Sprintf("Detected prefix <%s> in %s which does not end in a / or #, so its terms will be joined straight onto it. Are you sure you want to include this?", prefix.Namespace, strings.Join(prefix.Paths, ", "))
-		if yes {
-			slog.Warn(question + " Including it because --yes was passed.")
+		if allow {
+			slog.Warn(question + " Including it because --allow-prefixes-without-slash-or-hash was passed.")
 			continue
 		}
 		if !confirm(question) {
@@ -223,7 +223,7 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 	if len(errs) > 0 {
 		return nil, errs
 	}
-	if err := confirmPrefixesWithoutTerminator(validator, cfg.Yes); err != nil {
+	if err := confirmPrefixesWithoutTerminator(validator, cfg.AllowPrefixesWithoutSlashOrHash); err != nil {
 		return nil, err
 	}
 

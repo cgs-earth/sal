@@ -86,18 +86,18 @@ func TestBuildIncludesAPrefixWithoutTerminatorTheUserAccepts(t *testing.T) {
 	require.Contains(t, string(content), `"@id": "https://vocab.test/bare"`)
 }
 
-func TestYesIncludesAPrefixWithoutTerminatorWithoutAsking(t *testing.T) {
+func TestAllowPrefixesWithoutSlashOrHashIncludesThemWithoutAsking(t *testing.T) {
 	project := newPinsTestProject(t)
 	writeBareNamespaceSource(t, project)
 	asked := answerPrompt(t, false)
 
-	_, err := (&BuildCmd{Format: GraphExportFormatNQuads, Force: true, Yes: true}).Run()
+	_, err := (&BuildCmd{Format: GraphExportFormatNQuads, Force: true, AllowPrefixesWithoutSlashOrHash: true}).Run()
 
 	require.NoError(t, err)
 	require.Empty(t, *asked)
 }
 
-func TestValidateAsksAboutAPrefixWithoutTerminatorAndYesSkipsTheQuestion(t *testing.T) {
+func TestValidateAsksAboutAPrefixWithoutTerminatorUnlessAllowed(t *testing.T) {
 	project := newPinsTestProject(t)
 	writeBareNamespaceSource(t, project)
 	// validate has no --force, so the source has to be committed
@@ -113,7 +113,7 @@ func TestValidateAsksAboutAPrefixWithoutTerminatorAndYesSkipsTheQuestion(t *test
 	require.ErrorIs(t, err, ErrPrefixRejected)
 	require.Len(t, *asked, 1)
 
-	_, err = (&ValidateCmd{Paths: []string{project}, Yes: true}).Run()
+	_, err = (&ValidateCmd{Paths: []string{project}, AllowPrefixesWithoutSlashOrHash: true}).Run()
 	require.NoError(t, err)
 	require.Len(t, *asked, 1)
 }
