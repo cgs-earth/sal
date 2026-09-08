@@ -15,28 +15,31 @@ import (
 )
 
 type ValidateCmd struct {
-	Paths      []string `arg:"positional" help:"RDF files to validate"`
-	PrefixMaps []string `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
-	NoCache    bool     `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources instead of the versions pinned in .sal/config.jsonld"`
+	Paths                           []string `arg:"positional" help:"RDF files to validate"`
+	PrefixMaps                      []string `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
+	NoCache                         bool     `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources instead of the versions pinned in .sal/config.jsonld"`
+	AllowPrefixesWithoutSlashOrHash bool     `arg:"--allow-prefixes-without-slash-or-hash" help:"include a prefix whose namespace does not end in / or # without asking"`
 }
 
 func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
 	buildCfg := &BuildCmd{
-		Paths:             cfg.Paths,
-		PrefixMaps:        cfg.PrefixMaps,
-		NoCache:           cfg.NoCache,
-		skipCommit:        true,
-		skipProjectChecks: true,
+		Paths:                           cfg.Paths,
+		PrefixMaps:                      cfg.PrefixMaps,
+		NoCache:                         cfg.NoCache,
+		AllowPrefixesWithoutSlashOrHash: cfg.AllowPrefixesWithoutSlashOrHash,
+		skipCommit:                      true,
+		skipProjectChecks:               true,
 	}
 	return buildCfg.Run()
 }
 
 type BuildCmd struct {
-	Paths      []string          `arg:"positional" help:"RDF files to validate"`
-	PrefixMaps []string          `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
-	Format     GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
-	Force      bool              `arg:"--force" help:"force build even if there are uncommitted changes in the git repository"`
-	NoCache    bool              `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources and re-pin them in .sal/config.jsonld"`
+	Paths                           []string          `arg:"positional" help:"RDF files to validate"`
+	PrefixMaps                      []string          `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
+	Format                          GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
+	Force                           bool              `arg:"--force" help:"force build even if there are uncommitted changes in the git repository"`
+	NoCache                         bool              `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources and re-pin them in .sal/config.jsonld"`
+	AllowPrefixesWithoutSlashOrHash bool              `arg:"--allow-prefixes-without-slash-or-hash" help:"include a prefix whose namespace does not end in / or # without asking"`
 
 	// skip committing the built data to iceberg
 	skipCommit bool
@@ -52,7 +55,40 @@ type BuildCmd struct {
 
 var findSALProjectDir = pkg.SALProjectDir
 
+// confirm asks the user a yes/no question on the terminal; tests replace it
+var confirm = pkg.Confirm
+
+// ErrPrefixRejected is returned when the user declines to include a prefix
+// whose namespace does not end in / or #. The prefix and the files declaring
+// it are logged before it is returned.
+var ErrPrefixRejected = errors.New("build: refused a prefix whose namespace does not end in / or #; fix the namespace, or pass --allow-prefixes-without-slash-or-hash to include it as written")
+
+// ErrConflictingPrefixes is returned when the source files declare one
+// vocabulary under namespaces mixing http and https, or with and without a
+// trailing / or #. The conflict itself is logged with every file involved
+// before it is returned.
+var ErrConflictingPrefixes = errors.New("build: a vocabulary is declared under namespaces that mix http and https or a trailing / or #; declare one namespace everywhere or fold them together with --prefix-maps")
+
 var ErrUncommittedChanges = fmt.Errorf("git repository has uncommitted changes; please commit and finalize changes before creating a new build snapshot")
+
+// confirmPrefixesWithoutTerminator warns about every declared prefix whose
+// namespace ends in neither / nor #, and asks before including each one unless
+// the user passed --allow-prefixes-without-slash-or-hash. It runs once every file is parsed and before any
+// term is checked, so nothing is fetched for a prefix the user then refuses.
+func confirmPrefixesWithoutTerminator(validator *validate.Validator, allow bool) error {
+	for _, prefix := range validator.PrefixesWithoutTerminator() {
+		question := fmt.Sprintf("Detected prefix <%s> in %s which does not end in a / or #, so its terms will be joined straight onto it. Are you sure you want to include this?", prefix.Namespace, strings.Join(prefix.Paths, ", "))
+		if allow {
+			slog.Warn(question + " Including it because --allow-prefixes-without-slash-or-hash was passed.")
+			continue
+		}
+		if !confirm(question) {
+			slog.Error("Refused prefix whose namespace does not end in / or #", "namespace", prefix.Namespace, "declared_in", prefix.Paths)
+			return ErrPrefixRejected
+		}
+	}
+	return nil
+}
 
 // Run validates RDF files for terms that are not defined by their vocabularies and returns their merged RDF graph.
 func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
@@ -141,12 +177,60 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		return nil, err
 	}
 
-	finalGraph := rdflibgo.NewGraph(rdflibgo.WithBase(base))
+	// every file is parsed before any term is checked, so that the prefixes
+	// they declare can be inspected, and the user asked about the doubtful
+	// ones, before a single vocabulary is fetched to resolve a term against
 	validator := validate.NewValidator(pins, base, vocabsToReplace)
+	var docs []*validate.Document
 	var errs validate.MultiError
 	for _, file := range files {
+		doc, err := validator.ParseFile(file)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		docs = append(docs, doc)
+	}
+	if ontologyContent != nil {
+		configPath, err := pkg.SalConfigPath()
+		if err != nil {
+			return nil, err
+		}
+		doc, err := validator.ParseContent(ontologyContent, configPath)
+		if err != nil {
+			errs = append(errs, err)
+		} else {
+			docs = append(docs, doc)
+		}
+	}
+	// a vocabulary declared under mixed spellings is one error, logged with
+	// every file involved, so the summary error can stay short
+	for _, conflict := range validator.ConflictingPrefixes() {
+		var mixes []string
+		if conflict.MixesSchemes {
+			mixes = append(mixes, "http and https")
+		}
+		if conflict.MixesTerminators {
+			mixes = append(mixes, "with and without a trailing / or #")
+		}
+		attrs := []any{"vocabulary", conflict.Vocabulary, "mixes", strings.Join(mixes, ", ")}
+		for _, spelling := range conflict.Spellings {
+			attrs = append(attrs, spelling.Namespace, spelling.Paths)
+		}
+		slog.Error("Vocabulary is declared under mixed namespaces, so its terms would not match across files", attrs...)
+		errs = append(errs, ErrConflictingPrefixes)
+	}
+	if len(errs) > 0 {
+		return nil, errs
+	}
+	if err := confirmPrefixesWithoutTerminator(validator, cfg.AllowPrefixesWithoutSlashOrHash); err != nil {
+		return nil, err
+	}
+
+	finalGraph := rdflibgo.NewGraph(rdflibgo.WithBase(base))
+	for _, doc := range docs {
 		// TODO do this in parallel.
-		graph, err := validator.ValidateFile(file)
+		graph, err := validator.Validate(doc)
 		if err != nil {
 			if nested, ok := err.(validate.MultiError); ok {
 				errs = append(errs, nested...)
@@ -157,27 +241,10 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		}
 		mergeGraph(finalGraph, graph)
 	}
-	validatedCount := len(files)
-	if ontologyContent != nil {
-		configPath, err := pkg.SalConfigPath()
-		if err != nil {
-			return nil, err
-		}
-		graph, err := validator.ValidateContent(ontologyContent, configPath)
-		if err != nil {
-			if nested, ok := err.(validate.MultiError); ok {
-				errs = append(errs, nested...)
-			} else {
-				errs = append(errs, err)
-			}
-		} else {
-			mergeGraph(finalGraph, graph)
-			validatedCount++
-		}
-	}
 	if len(errs) > 0 {
 		return nil, errs
 	}
+	validatedCount := len(docs)
 	// a prefix a file declares is pinned even when no term from it was used, so
 	// that what a project resolves against is what it declares
 	if err := validator.PinDeclaredPrefixes(); err != nil {
