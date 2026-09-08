@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import maplibregl, { type GeoJSONSource, type LngLat, type StyleSpecification } from 'maplibre-gl'
+import maplibregl, { type GeoJSONSource, type LngLat } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { Feature, FeatureCollection } from 'geojson'
 import { fetchExtent, fetchGeometries, type BBox, type GeoJSONFeature } from '../api'
@@ -33,24 +33,7 @@ const DEFAULT_BOX_SIZE = 1
 
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] }
 
-/*
- * A raster basemap rather than a vector style, since it needs no glyphs or
- * sprites to work and a single dark tile set matches the rest of the UI. The
- * features still draw when the tiles cannot be fetched, only over black.
- */
-const BASEMAP: StyleSpecification = {
-  version: 8,
-  sources: {
-    basemap: {
-      type: 'raster',
-      tiles: ['a', 'b', 'c', 'd'].map((host) => `https://${host}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png`),
-      tileSize: 256,
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    },
-  },
-  layers: [{ id: 'basemap', type: 'raster', source: 'basemap' }],
-}
+const BASEMAP = 'https://tiles.openfreemap.org/styles/fiord'
 
 // Catppuccin Mocha, matching theme.ts; MapLibre paint wants literal colors, not CSS variables.
 const SKY = '#89dceb'
