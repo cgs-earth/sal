@@ -15,7 +15,7 @@ The cost is that only the subset of SPARQL that has a direct relational translat
 | Surface | Notes |
 | --- | --- |
 | [`sal query --sparql`](/sal/reference/commands/#sal-query) | Interactive shell. `Ctrl` + `R` runs, `F2` shows the translated SQL, `Ctrl` + `H` lists the other keys, `Ctrl` + `D` quits. |
-| [`sal serve`](/sal/reference/commands/#sal-serve) | SPARQL Protocol endpoint at `/sparql`, answering `application/sparql-results+json`. |
+| [`sal serve`](/sal/reference/commands/#sal-serve) | SPARQL Protocol endpoint at `/sparql`, answering `application/sparql-results+json`. `/v{snapshot}/sparql` is the same endpoint over the table at an earlier Iceberg snapshot. |
 | `sal serve --with-ui` | The **SPARQL** tab, a [YASGUI](https://github.com/zazuko/Yasgui) editor pointed at that same local endpoint. |
 
 All three go through the same translator, so a query that works in one works in all of them.
@@ -35,9 +35,9 @@ flowchart LR
 ```
 
 1. **Parse.** The query text is parsed by `goRDFlib`'s SPARQL parser. A query that is not a `SELECT`, or that uses a solution modifier the translator cannot express, is rejected here.
-2. **Flatten the pattern.** The `WHERE` clause is walked and reduced to a flat list of triple patterns plus a list of `FILTER` expressions. A group pattern that is neither, such as `OPTIONAL` or `UNION`, ends the walk with an error.
+2. **Flatten the pattern.** The `WHERE` clause is walked and reduced to a flat list of triple patterns, a list of `FILTER` expressions, and the groups a `MINUS` subtracts. A pattern inside a `SERVICE` clause is kept with the endpoint it was written under. A group pattern that is none of these, such as `OPTIONAL` or `UNION`, ends the walk with an error.
 3. **Translate.** Each triple pattern becomes one self-join of the `triples` view; constants become `WHERE` equalities and shared variables become join conditions. This is described in [The translation](#the-translation) below.
-4. **Execute.** DuckDB runs the statement against the Iceberg table through the `triples` view, reading the current snapshot. DuckDB is linked into the `sal` binary, so no external database or `duckdb` CLI is involved.
+4. **Execute.** DuckDB runs the statement against the Iceberg table through the `triples` view, reading the current snapshot. A query sent to `sal serve`'s `/v{snapshot}/sparql` route scans the table at that snapshot instead: each triple pattern becomes an `iceberg_scan(..., snapshot_from_id = {snapshot})` in place of the view, so the translated SQL says which snapshot it reads. DuckDB is linked into the `sal` binary, so no external database or `duckdb` CLI is involved.
 5. **Render.** Every column is rendered to text by DuckDB itself, then printed as a table by the shell or encoded as SPARQL JSON by the endpoint.
 
 The DuckDB handle, its extensions, and the `triples` view are opened once per process and reused, so `sal serve` pays that cost on the first request rather than on every one.
@@ -112,7 +112,10 @@ In a `FILTER`, the same rule applies to whichever side the variable is compared 
 | `(LANG(?o) AS ?lang)`, `(DATATYPE(?o) AS ?type)` | Yes | The only projection expressions; see [Language tags and datatypes](#language-tags-and-datatypes). |
 | `OFFSET`, `ORDER BY`, `GROUP BY`, `HAVING` | No | `SPARQL solution modifiers are not supported yet`. |
 | Aggregates and other projection expressions, e.g. `(COUNT(?s) AS ?n)` | No | `SPARQL function "count" is not supported yet`. Count in SQL instead: `SELECT count(*) FROM triples`. |
-| `OPTIONAL`, `UNION`, `MINUS`, `GRAPH`, `BIND`, `VALUES`, subqueries | No | `only basic SPARQL triple patterns and FILTER expressions are supported yet`. |
+| `SERVICE <endpoint> { ... }` | Partly | Only this server's own `/sparql` and `/v{snapshot}/sparql` endpoints; see [Diffing snapshots with SERVICE and MINUS](#diffing-snapshots-with-service-and-minus). |
+| `MINUS { ... }` | Yes | Becomes a correlated `NOT EXISTS` subquery; see [MINUS and EXISTS](#minus-and-exists). |
+| `FILTER EXISTS { ... }`, `FILTER NOT EXISTS { ... }` | Yes | Become a correlated `EXISTS` / `NOT EXISTS` subquery, usable inside `&&`, `\|\|`, and `!`. |
+| `OPTIONAL`, `UNION`, `GRAPH`, `BIND`, `VALUES`, subqueries | No | `only basic SPARQL triple patterns and FILTER expressions are supported yet`. |
 | Property paths, e.g. `schema:knows/schema:name` | No | `SPARQL property paths are not supported yet`. |
 | `REDUCED` | Ignored | Accepted, but results are not deduplicated. Use `DISTINCT` if you need that. |
 
@@ -167,6 +170,92 @@ WHERE t0.predicate = 'https://schema.org/age'
   AND (COALESCE(t0.object_float, CAST(t0.object_integer AS DOUBLE), CAST(t0.object_byte AS DOUBLE)) >= 21
    AND COALESCE(t0.object_float, CAST(t0.object_integer AS DOUBLE), CAST(t0.object_byte AS DOUBLE)) < 65)
 ```
+
+## MINUS and EXISTS
+
+`MINUS { ... }`, `FILTER EXISTS { ... }`, and `FILTER NOT EXISTS { ... }` each become an `EXISTS` subquery in the `WHERE` clause, correlated to the enclosing query through the variables the two share.
+The group inside is translated like a query of its own, one aliased scan per triple pattern (`x0_0`, `x0_1`, ..., a second group gets `x1_`), and every variable it shares with the enclosing query becomes a correlation clause instead of a new binding:
+
+| Shared variable | Correlation |
+| --- | --- |
+| Subject or predicate | `x0_0.subject = t0.subject` |
+| Object | The rendered text, language tag, and datatype compared with `IS NOT DISTINCT FROM`, so two literals are the same solution only when they are the same RDF term, and a geometry compares by its WKT. |
+| A whole pattern, `?s ?p ?o` against `?s ?p ?o` of one enclosing scan | `x0_0.triple_hash = t0.triple_hash`, which asks whether that exact triple exists in one comparison and never renders an object. |
+
+```sparql
+PREFIX schema: <https://schema.org/>
+
+SELECT ?station
+WHERE {
+  ?station schema:name ?name .
+  MINUS { ?station schema:identifier ?id . }
+}
+```
+
+```sql
+SELECT t0.subject AS "station"
+FROM triples AS t0
+WHERE t0.predicate = 'https://schema.org/name'
+  AND NOT EXISTS (SELECT 1
+  FROM triples AS x0_0
+  WHERE x0_0.predicate = 'https://schema.org/identifier'
+    AND x0_0.subject = t0.subject)
+```
+
+The two follow SPARQL's own scoping rules, which differ:
+
+- `MINUS` subtracts through the variables of the group *before* it only. `{ A MINUS { B } C }` subtracts `B` from `A`; a variable `B` shares with `C` alone is not a correlation. A `MINUS` group sharing no variable with the group before it subtracts nothing, and a `FILTER` inside it may name only the group's own variables.
+- `EXISTS` is a filter, so it sees the whole group it is written in: it is correlated on every variable in scope, and a `FILTER` inside it may name any of them. `!EXISTS` and `NOT EXISTS` are the same thing, and an `EXISTS` can sit inside `&&`, `||`, and `!` like any other boolean.
+
+A variable bound only inside a `MINUS` or `EXISTS` group is not bound outside it: `SELECT *` does not project it, and naming it in an outer `FILTER` or `SELECT` is an error.
+A group with no triple pattern is an error as well.
+Correlating an object variable renders it with `ST_AsText`, which loads the spatial extension the first time, the same way projecting an object does; the `triple_hash` case does not.
+
+## Diffing snapshots with SERVICE and MINUS
+
+Every `sal build` commits a new Iceberg snapshot, and [`sal serve`](/sal/reference/commands/#sal-serve) answers SPARQL against any of them at `/v{snapshot}/sparql`.
+A `SERVICE` clause naming one of those endpoints reads its triple patterns from the table at that snapshot, while the patterns outside it read the snapshot the query was sent to.
+Subtracting one from the other with `MINUS` lists what a build added:
+
+```sparql
+SELECT ?subject ?predicate ?object
+WHERE {
+  ?subject ?predicate ?object .
+  MINUS {
+    SERVICE <http://localhost:8080/v6602266655370734327/sparql> {
+      ?subject ?predicate ?object .
+    }
+  }
+}
+```
+
+```sql
+SELECT t0.subject AS "subject", t0.predicate AS "predicate", COALESCE(...) AS "object"
+FROM triples AS t0
+WHERE NOT EXISTS (SELECT 1
+  FROM iceberg_scan('.sal/data/sal-demo/triples', allow_moved_paths = true, snapshot_from_id = 6602266655370734327) AS x0_0
+  WHERE x0_0.triple_hash = t0.triple_hash)
+```
+
+Swapping the two, the `SERVICE` outside and the plain pattern inside the `MINUS`, lists what the build removed.
+The SPARQL tab of `sal serve --with-ui` offers both as the **Added since previous snapshot** and **Removed since previous snapshot** samples, filled in with the table's own previous snapshot ID.
+
+A join is not a diff.
+Joining the two snapshots on `?subject ?predicate` and filtering `?before != ?after` pairs every value of a multi-valued predicate, such as a resource with three `rdf:type`s, with every *other* value, and reports the pairs as changes even when nothing changed at all.
+`MINUS` asks the question a diff asks, whether this exact triple is absent from the other snapshot, and the `triple_hash` correlation answers it exactly.
+
+Nothing is fetched over HTTP.
+The endpoint is recognized by its path alone, `/sparql` for the current snapshot or `/v{snapshot}/sparql` for an earlier one, and becomes an `iceberg_scan` of the local table at that snapshot, so the host the IRI is written with does not matter and the query costs no more than any other subquery.
+This is also why only this server's own endpoints are accepted: a `SERVICE` naming any other SPARQL endpoint is an error, not a federated query.
+A snapshot the table does not have fails when the query runs, with DuckDB's own report of the missing snapshot.
+
+A few details of the translation:
+
+- Variables are shared across the `SERVICE` boundary the same way they are between any two triple patterns, so a variable bound both inside and outside becomes a join condition, and a `SERVICE` can also be joined rather than subtracted to compare values side by side.
+- A `FILTER`, `MINUS`, or `EXISTS` written inside the `SERVICE` reads its patterns from the same snapshot; one written outside reads the snapshot the query was sent to.
+- Two variables compared in a `FILTER` are compared as the text each object renders to, so an IRI, a number, or a date compares the same way a string does.
+- `SILENT` is accepted and ignored, since nothing remote can fail. The endpoint must be written as a full IRI in angle brackets; a prefixed name or a variable is an error.
+- The query sent to `/v{snapshot}/sparql` can name the plain `/sparql` endpoint in a `SERVICE` to diff that snapshot against the current table.
 
 ## Language tags and datatypes
 

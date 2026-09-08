@@ -2,6 +2,8 @@ package sparql
 
 import (
 	"fmt"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -19,8 +21,143 @@ type sqlBinding struct {
 // ToSQL converts a read-only SPARQL SELECT over supported triple patterns
 // into SQL that runs against the DuckDB triples view.
 func ToSQL(input string) (string, error) {
-	parsed, err := rdflibsparql.Parse(input)
+	return toSQL(input, tableSources{})
+}
+
+// tableSources decides which table a triple pattern scans: the runner's own
+// snapshot for a pattern in the WHERE clause, or the snapshot the endpoint of
+// a SERVICE clause names for a pattern inside one. Either is the `triples`
+// view for the current snapshot and an iceberg_scan of the table at an
+// earlier one, scanned inline rather than through a view of its own so the
+// translated SQL says which snapshot it reads.
+type tableSources struct {
+	tablePath  string
+	snapshotID int64
+}
+
+func (s tableSources) source(service string) (string, error) {
+	snapshotID := s.snapshotID
+	if service != "" {
+		id, err := serviceSnapshot(service)
+		if err != nil {
+			return "", err
+		}
+		snapshotID = id
+	}
+	if snapshotID == 0 {
+		return "triples", nil
+	}
+	return fmt.Sprintf("iceberg_scan('%s', allow_moved_paths = true, snapshot_from_id = %d)", escapeSQLLiteral(s.tablePath), snapshotID), nil
+}
+
+// servicePath is the path of a SPARQL endpoint of this server: /sparql for the
+// current snapshot, /v{snapshot}/sparql for an earlier one. It has to agree
+// with the routes `sal serve` registers.
+var servicePath = regexp.MustCompile(`^/(?:v(\d+)/)?sparql$`)
+
+// serviceSnapshot reads the snapshot a SERVICE endpoint names, zero for the
+// current one. Only this server's own endpoints are supported, and they are
+// recognized by path alone, so the host a query writes them with does not
+// matter; a SERVICE naming any other endpoint is an error rather than a
+// federated query, since nothing here is fetched over HTTP.
+func serviceSnapshot(service string) (int64, error) {
+	endpoint, err := url.Parse(service)
 	if err != nil {
+		return 0, fmt.Errorf("SERVICE <%s> is not a URL: %w", service, err)
+	}
+	match := servicePath.FindStringSubmatch(endpoint.Path)
+	if match == nil {
+		return 0, fmt.Errorf("SERVICE <%s> is not a SPARQL endpoint of this server; only /sparql and /v<snapshot id>/sparql can be queried, which read the table at the current or the named Iceberg snapshot", service)
+	}
+	if match[1] == "" {
+		return 0, nil
+	}
+	snapshotID, err := strconv.ParseInt(match[1], 10, 64)
+	if err != nil || snapshotID <= 0 {
+		return 0, fmt.Errorf("SERVICE <%s> does not name a snapshot ID", service)
+	}
+	return snapshotID, nil
+}
+
+// serviceMarker heads the IRI a SERVICE endpoint reaches the translator in.
+// goRDFlib rejects SERVICE outright but parses GRAPH, so rewriteService turns
+// `SERVICE <iri>` into `GRAPH <urn:x-sal-service:iri>` before parsing and
+// basicGraphPatternParts reads the marked GraphPattern back as a service. A
+// GRAPH clause a query wrote itself carries no marker and stays unsupported.
+const serviceMarker = "urn:x-sal-service:"
+
+// serviceClause matches `SERVICE [SILENT] <iri>`. The character before the
+// keyword rules out a variable or prefixed name that happens to be called
+// service, which in subject position is followed by a predicate IRI just as
+// the keyword is followed by an endpoint.
+var serviceClause = regexp.MustCompile(`(?i)(^|[^\w?$:])SERVICE\s+(?:SILENT\s+)?<([^<>\s]*)>`)
+
+func rewriteService(input string) string {
+	return serviceClause.ReplaceAllString(input, "${1}GRAPH <"+serviceMarker+"${2}>")
+}
+
+// patternTriple is a triple pattern with the SERVICE endpoint it was written
+// under, empty for one in the query's own WHERE clause.
+type patternTriple struct {
+	rdflibsparql.Triple
+	service string
+}
+
+// groupParts is a group graph pattern flattened into what the translator works
+// from: its triple patterns, its FILTER expressions, and the groups a MINUS
+// subtracts from it.
+type groupParts struct {
+	triples []patternTriple
+	filters []rdflibsparql.Expr
+	minuses []minusGroup
+}
+
+// minusGroup is the right side of a MINUS together with the variables its left
+// side binds. The parser nests `{ A MINUS { B } C }` as Join(Minus(A, B), C), so
+// B is subtracted from A's solutions alone and never sees C's variables;
+// recording A's variables here is what keeps C out of the correlation once the
+// whole query has been flattened.
+type minusGroup struct {
+	pattern  rdflibsparql.Pattern
+	leftVars map[string]bool
+}
+
+// translator carries what every part of one query's translation needs: the
+// query's prefixes, the tables its patterns scan, and a count of the EXISTS
+// subqueries written so far so that each one aliases its scans apart from the
+// others and from the enclosing query.
+type translator struct {
+	prefixes   map[string]string
+	sources    tableSources
+	subqueries int
+}
+
+// patternSQL is what a list of triple patterns translates to: one aliased scan
+// per pattern in from, their constants and joins in where, the variable each
+// alias and column binds, and the variables in the order they were first seen,
+// which is what SELECT * projects. correlated reports whether any variable was
+// already bound by an enclosing query, which a MINUS needs to know.
+type patternSQL struct {
+	from       []string
+	where      []string
+	bindings   map[string]sqlBinding
+	discovered []string
+	correlated bool
+}
+
+// toSQL is ToSQL with each triple pattern scanning the table sources decides
+// on: the runner's own snapshot, or the one a SERVICE endpoint names. Every
+// triple pattern becomes one aliased scan of its source, joined to the others,
+// so a pattern under a SERVICE joins the rest of the query the same way any
+// other pattern does, which is what lets one query compare two snapshots. A
+// MINUS or a FILTER [NOT] EXISTS becomes an EXISTS subquery correlated to the
+// enclosing query, which is what lets one query diff two snapshots.
+func toSQL(input string, sources tableSources) (string, error) {
+	parsed, err := rdflibsparql.Parse(rewriteService(input))
+	if err != nil {
+		if strings.Contains(err.Error(), "SERVICE not supported") {
+			return "", fmt.Errorf("SERVICE must name its endpoint as a full IRI in angle brackets, such as SERVICE <http://localhost:8080/v<snapshot id>/sparql> { ... }")
+		}
 		return "", fmt.Errorf("parse SPARQL query: %w", err)
 	}
 	if parsed.Type != "SELECT" {
@@ -30,58 +167,29 @@ func ToSQL(input string) (string, error) {
 		return "", fmt.Errorf("SPARQL solution modifiers are not supported yet")
 	}
 
-	triples, filters, err := basicGraphPatternParts(parsed.Where)
+	parts, err := basicGraphPatternParts(parsed.Where)
 	if err != nil {
 		return "", err
 	}
-	if len(triples) == 0 {
+	if len(parts.triples) == 0 {
 		return "", fmt.Errorf("SPARQL query must include at least one triple pattern")
 	}
 
-	var from []string
-	var where []string
-	bindings := make(map[string]sqlBinding)
-	var discovered []string
-	for i, triple := range triples {
-		alias := fmt.Sprintf("t%d", i)
-		from = append(from, "triples AS "+alias)
-		for _, part := range []struct {
-			term   string
-			column string
-		}{
-			{term: triple.Subject, column: "subject"},
-			{term: triple.Predicate, column: "predicate"},
-			{term: triple.Object, column: "object"},
-		} {
-			if variableName(part.term) != "" {
-				name := variableName(part.term)
-				expr := bindingExpr(alias, part.column)
-				if previous, ok := bindings[name]; ok {
-					where = append(where, previous.expr()+" = "+expr)
-				} else {
-					bindings[name] = sqlBinding{alias: alias, column: part.column}
-					discovered = append(discovered, name)
-				}
-				continue
-			}
-			clauses, err := constantClauses(alias, part.column, part.term, parsed.Prefixes)
-			if err != nil {
-				return "", err
-			}
-			where = append(where, clauses...)
-		}
+	t := &translator{prefixes: parsed.Prefixes, sources: sources}
+	patterns, err := t.patternSQL(parts.triples, "t", nil)
+	if err != nil {
+		return "", err
 	}
-	for _, filter := range filters {
-		clause, err := filterSQL(filter, bindings)
-		if err != nil {
-			return "", err
-		}
-		where = append(where, clause)
+	from, where, bindings := patterns.from, patterns.where, patterns.bindings
+	clauses, err := t.clauseSQL(parts, bindings)
+	if err != nil {
+		return "", err
 	}
+	where = append(where, clauses...)
 
 	projected := parsed.Variables
 	if len(projected) == 0 {
-		projected = discovered
+		projected = patterns.discovered
 	}
 	if len(projected) == 0 {
 		return "", fmt.Errorf("SPARQL SELECT must project at least one variable")
@@ -124,6 +232,169 @@ func ToSQL(input string) (string, error) {
 		sql += "\nLIMIT " + strconv.Itoa(parsed.Limit)
 	}
 	return sql, nil
+}
+
+// patternSQL translates triple patterns into aliased scans, numbered from zero
+// under aliasPrefix. A variable seen before in the same list becomes a join; one
+// bound by an enclosing query, in outer, becomes a correlation instead, so that
+// a MINUS or EXISTS group is evaluated per solution of the query it belongs to.
+func (t *translator) patternSQL(triples []patternTriple, aliasPrefix string, outer map[string]sqlBinding) (patternSQL, error) {
+	result := patternSQL{bindings: make(map[string]sqlBinding)}
+	for i, triple := range triples {
+		alias := fmt.Sprintf("%s%d", aliasPrefix, i)
+		source, err := t.sources.source(triple.service)
+		if err != nil {
+			return patternSQL{}, err
+		}
+		result.from = append(result.from, source+" AS "+alias)
+		var correlations []correlation
+		for _, part := range []struct {
+			term   string
+			column string
+		}{
+			{term: triple.Subject, column: "subject"},
+			{term: triple.Predicate, column: "predicate"},
+			{term: triple.Object, column: "object"},
+		} {
+			if name := variableName(part.term); name != "" {
+				binding := sqlBinding{alias: alias, column: part.column}
+				if previous, ok := result.bindings[name]; ok {
+					result.where = append(result.where, previous.expr()+" = "+binding.expr())
+				} else if enclosing, ok := outer[name]; ok {
+					result.bindings[name] = binding
+					result.correlated = true
+					correlations = append(correlations, correlation{inner: binding, outer: enclosing})
+				} else {
+					result.bindings[name] = binding
+					result.discovered = append(result.discovered, name)
+				}
+				continue
+			}
+			clauses, err := constantClauses(alias, part.column, part.term, t.prefixes)
+			if err != nil {
+				return patternSQL{}, err
+			}
+			result.where = append(result.where, clauses...)
+		}
+		result.where = append(result.where, correlationSQL(alias, correlations)...)
+	}
+	return result, nil
+}
+
+// correlation ties a variable a subquery's pattern binds to the binding the
+// enclosing query already has for it.
+type correlation struct {
+	inner sqlBinding
+	outer sqlBinding
+}
+
+// correlationSQL is the clauses that tie one subquery scan to the enclosing
+// query. A pattern whose subject, predicate, and object all correlate to the
+// same positions of one enclosing scan asks whether that exact triple exists,
+// which triple_hash answers in one comparison, exactly and without rendering
+// any object. Anything else is correlated position by position: subject and
+// predicate by column, and an object by the RDF term it holds, so that a
+// literal differing only in its language tag or datatype, or a geometry, which
+// renders as NULL everywhere but ST_AsText, still compares as a different term.
+func correlationSQL(alias string, correlations []correlation) []string {
+	if len(correlations) == 3 {
+		sameScan := true
+		for _, c := range correlations {
+			if c.inner.column != c.outer.column || c.outer.alias != correlations[0].outer.alias {
+				sameScan = false
+			}
+		}
+		if sameScan {
+			return []string{alias + ".triple_hash = " + correlations[0].outer.alias + ".triple_hash"}
+		}
+	}
+	var clauses []string
+	for _, c := range correlations {
+		if c.inner.column != "object" || c.outer.column != "object" {
+			clauses = append(clauses, c.inner.expr()+" = "+c.outer.expr())
+			continue
+		}
+		inner, outer := c.inner.alias, c.outer.alias
+		clauses = append(clauses,
+			objectTextExpr(inner)+" IS NOT DISTINCT FROM "+objectTextExpr(outer),
+			inner+".object_language IS NOT DISTINCT FROM "+outer+".object_language",
+			inner+".object_type IS NOT DISTINCT FROM "+outer+".object_type")
+	}
+	return clauses
+}
+
+// clauseSQL translates a group's FILTERs and MINUSes against the variables the
+// group binds. A MINUS is subtracted only through the variables its own left
+// side binds, and one sharing no variable with it subtracts nothing at all, as
+// SPARQL specifies; NOT EXISTS, by contrast, is written by the query as a
+// filter and is correlated on everything in scope.
+func (t *translator) clauseSQL(parts groupParts, bindings map[string]sqlBinding) ([]string, error) {
+	var where []string
+	for _, filter := range parts.filters {
+		clause, err := t.filterSQL(filter, bindings)
+		if err != nil {
+			return nil, err
+		}
+		where = append(where, clause)
+	}
+	for _, minus := range parts.minuses {
+		left := make(map[string]sqlBinding, len(minus.leftVars))
+		for name := range minus.leftVars {
+			if binding, ok := bindings[name]; ok {
+				left[name] = binding
+			}
+		}
+		sql, correlated, err := t.subquerySQL(minus.pattern, left, false)
+		if err != nil {
+			return nil, err
+		}
+		if correlated {
+			where = append(where, "NOT "+sql)
+		}
+	}
+	return where, nil
+}
+
+// subquerySQL translates a MINUS or EXISTS group into an EXISTS subquery
+// correlated to the enclosing query through outer, the bindings the group is
+// evaluated against. Filters inside the group see the enclosing query's
+// variables only when seesOuter is set: an EXISTS is evaluated with the
+// enclosing solution substituted in, a MINUS group is evaluated on its own.
+// correlated reports whether the group shares a variable with outer at all.
+func (t *translator) subquerySQL(pattern rdflibsparql.Pattern, outer map[string]sqlBinding, seesOuter bool) (sql string, correlated bool, err error) {
+	parts, err := basicGraphPatternParts(pattern)
+	if err != nil {
+		return "", false, err
+	}
+	if len(parts.triples) == 0 {
+		return "", false, fmt.Errorf("a MINUS or EXISTS group must include at least one triple pattern")
+	}
+	prefix := fmt.Sprintf("x%d_", t.subqueries)
+	t.subqueries++
+	patterns, err := t.patternSQL(parts.triples, prefix, outer)
+	if err != nil {
+		return "", false, err
+	}
+	scope := patterns.bindings
+	if seesOuter {
+		scope = make(map[string]sqlBinding, len(outer)+len(patterns.bindings))
+		for name, binding := range outer {
+			scope[name] = binding
+		}
+		for name, binding := range patterns.bindings {
+			scope[name] = binding
+		}
+	}
+	clauses, err := t.clauseSQL(parts, scope)
+	if err != nil {
+		return "", false, err
+	}
+	where := append(patterns.where, clauses...)
+	sql = "EXISTS (SELECT 1\n  FROM " + strings.Join(patterns.from, "\n  CROSS JOIN ")
+	if len(where) > 0 {
+		sql += "\n  WHERE " + strings.Join(where, "\n    AND ")
+	}
+	return sql + ")", patterns.correlated, nil
 }
 
 func (b sqlBinding) expr() string {
@@ -178,45 +449,108 @@ func objectNumericExpr(alias string) string {
 	return "COALESCE(" + alias + ".object_float, CAST(" + alias + ".object_integer AS DOUBLE), CAST(" + alias + ".object_byte AS DOUBLE))"
 }
 
-func basicGraphPatternParts(pattern rdflibsparql.Pattern) ([]rdflibsparql.Triple, []rdflibsparql.Expr, error) {
+func basicGraphPatternParts(pattern rdflibsparql.Pattern) (groupParts, error) {
 	switch p := pattern.(type) {
 	case *rdflibsparql.BGP:
+		parts := groupParts{triples: make([]patternTriple, 0, len(p.Triples))}
 		for _, triple := range p.Triples {
 			if triple.PredicatePath != nil {
-				return nil, nil, fmt.Errorf("SPARQL property paths are not supported yet")
+				return groupParts{}, fmt.Errorf("SPARQL property paths are not supported yet")
+			}
+			parts.triples = append(parts.triples, patternTriple{Triple: triple})
+		}
+		return parts, nil
+	case *rdflibsparql.GraphPattern:
+		service, ok := strings.CutPrefix(strings.Trim(p.Name, "<>"), serviceMarker)
+		if !ok {
+			return groupParts{}, fmt.Errorf("only basic SPARQL triple patterns and FILTER expressions are supported yet")
+		}
+		parts, err := basicGraphPatternParts(p.Pattern)
+		if err != nil {
+			return groupParts{}, err
+		}
+		for i := range parts.triples {
+			// A SERVICE nested in another keeps its own endpoint.
+			if parts.triples[i].service == "" {
+				parts.triples[i].service = service
 			}
 		}
-		return p.Triples, nil, nil
+		// A MINUS or EXISTS group written inside the SERVICE is read from the
+		// same endpoint. Its patterns are translated later, so the endpoint is
+		// carried by wrapping the group in the GRAPH it was found under.
+		for i := range parts.minuses {
+			parts.minuses[i].pattern = &rdflibsparql.GraphPattern{Name: p.Name, Pattern: parts.minuses[i].pattern}
+		}
+		for i := range parts.filters {
+			parts.filters[i] = scopeExists(parts.filters[i], p.Name)
+		}
+		return parts, nil
 	case *rdflibsparql.JoinPattern:
-		leftTriples, leftFilters, err := basicGraphPatternParts(p.Left)
+		left, err := basicGraphPatternParts(p.Left)
 		if err != nil {
-			return nil, nil, err
+			return groupParts{}, err
 		}
-		rightTriples, rightFilters, err := basicGraphPatternParts(p.Right)
+		right, err := basicGraphPatternParts(p.Right)
 		if err != nil {
-			return nil, nil, err
+			return groupParts{}, err
 		}
-		return append(leftTriples, rightTriples...), append(leftFilters, rightFilters...), nil
+		return groupParts{
+			triples: append(left.triples, right.triples...),
+			filters: append(left.filters, right.filters...),
+			minuses: append(left.minuses, right.minuses...),
+		}, nil
 	case *rdflibsparql.FilterPattern:
-		triples, filters, err := basicGraphPatternParts(p.Pattern)
+		parts, err := basicGraphPatternParts(p.Pattern)
 		if err != nil {
-			return nil, nil, err
+			return groupParts{}, err
 		}
-		return triples, append(filters, p.Expr), nil
+		parts.filters = append(parts.filters, p.Expr)
+		return parts, nil
+	case *rdflibsparql.MinusPattern:
+		left, err := basicGraphPatternParts(p.Left)
+		if err != nil {
+			return groupParts{}, err
+		}
+		leftVars := make(map[string]bool)
+		for _, triple := range left.triples {
+			for _, term := range []string{triple.Subject, triple.Predicate, triple.Object} {
+				if name := variableName(term); name != "" {
+					leftVars[name] = true
+				}
+			}
+		}
+		left.minuses = append(left.minuses, minusGroup{pattern: p.Right, leftVars: leftVars})
+		return left, nil
 	default:
-		return nil, nil, fmt.Errorf("only basic SPARQL triple patterns and FILTER expressions are supported yet")
+		return groupParts{}, fmt.Errorf("only basic SPARQL triple patterns and FILTER expressions are supported yet")
 	}
 }
 
-func filterSQL(expr rdflibsparql.Expr, bindings map[string]sqlBinding) (string, error) {
+// scopeExists rewrites every EXISTS in a filter expression so that its group
+// is read from the named GRAPH, which is how a SERVICE carries its endpoint to
+// a group nested inside it.
+func scopeExists(expr rdflibsparql.Expr, graph string) rdflibsparql.Expr {
+	switch e := expr.(type) {
+	case *rdflibsparql.ExistsExpr:
+		return &rdflibsparql.ExistsExpr{Pattern: &rdflibsparql.GraphPattern{Name: graph, Pattern: e.Pattern}, Not: e.Not}
+	case *rdflibsparql.BinaryExpr:
+		return &rdflibsparql.BinaryExpr{Op: e.Op, Left: scopeExists(e.Left, graph), Right: scopeExists(e.Right, graph)}
+	case *rdflibsparql.UnaryExpr:
+		return &rdflibsparql.UnaryExpr{Op: e.Op, Arg: scopeExists(e.Arg, graph)}
+	default:
+		return expr
+	}
+}
+
+func (t *translator) filterSQL(expr rdflibsparql.Expr, bindings map[string]sqlBinding) (string, error) {
 	switch e := expr.(type) {
 	case *rdflibsparql.BinaryExpr:
 		if e.Op == "&&" || e.Op == "||" {
-			left, err := filterSQL(e.Left, bindings)
+			left, err := t.filterSQL(e.Left, bindings)
 			if err != nil {
 				return "", err
 			}
-			right, err := filterSQL(e.Right, bindings)
+			right, err := t.filterSQL(e.Right, bindings)
 			if err != nil {
 				return "", err
 			}
@@ -242,11 +576,20 @@ func filterSQL(expr rdflibsparql.Expr, bindings map[string]sqlBinding) (string, 
 		if e.Op != "!" {
 			return "", fmt.Errorf("SPARQL FILTER operator %q is not supported yet", e.Op)
 		}
-		inner, err := filterSQL(e.Arg, bindings)
+		inner, err := t.filterSQL(e.Arg, bindings)
 		if err != nil {
 			return "", err
 		}
 		return "NOT (" + inner + ")", nil
+	case *rdflibsparql.ExistsExpr:
+		sql, _, err := t.subquerySQL(e.Pattern, bindings, true)
+		if err != nil {
+			return "", err
+		}
+		if e.Not {
+			return "NOT " + sql, nil
+		}
+		return sql, nil
 	case *rdflibsparql.FuncExpr:
 		sql, boolean, err := functionSQL(e, bindings)
 		if err != nil {
@@ -291,6 +634,11 @@ func filterOperandSQL(expr rdflibsparql.Expr, other rdflibsparql.Expr, bindings 
 			}
 			if _, ok := other.(*rdflibsparql.IRIExpr); ok {
 				return binding.alias + ".object_iri", nil
+			}
+			// Two variables are compared as the text each renders to, so that
+			// an IRI, a number, or a date compares as well as a string does.
+			if _, ok := other.(*rdflibsparql.VarExpr); ok {
+				return binding.expr(), nil
 			}
 			// The only function a variable can be compared against is geof:distance.
 			if _, ok := other.(*rdflibsparql.FuncExpr); ok {

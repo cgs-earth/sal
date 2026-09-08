@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import Yasgui from '@zazuko/yasgui'
 import '@zazuko/yasgui/build/yasgui.min.css'
 import '../yasgui-catppuccin.css'
-import { translateSparql } from '../api'
+import { translateSparql, type QueryResult } from '../api'
 import { ShareLinkButton } from '../components/ShareLinkButton'
 import { registerGraphPlugin } from './sparql/GraphPlugin'
 import { setQueryRunner, setQueryTextGetter } from './sparql/sparqlBridge'
@@ -35,8 +35,11 @@ type Sample = { name: string; query: string }
 /*
  * Starter queries. The `/sparql` endpoint translates SPARQL to DuckDB SQL and
  * only understands basic triple patterns, FILTER comparisons, the LANG and
- * DATATYPE accessors, DISTINCT and LIMIT, so every sample stays inside that
- * subset.
+ * DATATYPE accessors, DISTINCT, LIMIT, MINUS and FILTER [NOT] EXISTS, and a
+ * SERVICE naming one of this server's own snapshot endpoints, so every sample
+ * stays inside that subset. The snapshot samples need a snapshot ID only the
+ * server knows, so they are built by snapshotSamples from the Stats listing
+ * rather than listed here.
  */
 const SAMPLES: Sample[] = [
   {
@@ -161,7 +164,54 @@ WHERE {
   },
 ]
 
-export function SparqlTab({ sharedQuery }: { sharedQuery: string | null }) {
+/**
+ * The samples diffing the table against its previous snapshot: the triples
+ * the table has that the snapshot lacks, and the reverse, each a MINUS over a
+ * SERVICE on the versioned endpoint. A join could not answer this, since it
+ * would pair every value of a multi-valued predicate with every other. The
+ * endpoint is written with this page's own origin so the samples run wherever
+ * the server is reached from. A table with a single snapshot is diffed against
+ * that snapshot itself, which answers no rows but still shows the shape; with
+ * no snapshot listing there is no ID to write, so there are no samples.
+ */
+function snapshotSamples(snapshots: QueryResult | null): Sample[] {
+  const column = snapshots?.header?.indexOf('snapshot_id') ?? -1
+  if (column < 0) return []
+  // The Stats listing is ordered newest first.
+  const ids = (snapshots?.rows ?? []).map((row) => row[column] ?? '').filter((id) => id !== '')
+  const previous = ids[1] ?? ids[0]
+  if (!previous) return []
+  const snapshot = `SERVICE <${window.location.origin}/v${previous}/sparql> {
+    ?subject ?predicate ?object .
+  }`
+  return [
+    {
+      name: 'Added since previous snapshot',
+      query: `SELECT ?subject ?predicate ?object
+WHERE {
+  ?subject ?predicate ?object .
+  MINUS {
+    ${snapshot.replace(/\n/g, '\n  ')}
+  }
+}
+LIMIT 50`,
+    },
+    {
+      name: 'Removed since previous snapshot',
+      query: `SELECT ?subject ?predicate ?object
+WHERE {
+  ${snapshot}
+  MINUS {
+    ?subject ?predicate ?object .
+  }
+}
+LIMIT 50`,
+    },
+  ]
+}
+
+export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | null; snapshots: QueryResult | null }) {
+  const samples = [...SAMPLES, ...snapshotSamples(snapshots)]
   const container = useRef<HTMLDivElement>(null)
   const yasgui = useRef<Yasgui | null>(null)
   // Yasr builds a results header per Yasgui tab, so the share button lives in a
@@ -333,7 +383,9 @@ export function SparqlTab({ sharedQuery }: { sharedQuery: string | null }) {
         <header className="panel-header">
           <h3>SPARQL</h3>
           <p>
-            Queries run against the local <code>/sparql</code> endpoint, which translates SPARQL to DuckDB SQL.
+            Queries run against the local <code>/sparql</code> endpoint, which translates SPARQL to DuckDB SQL. A{' '}
+            <code>SERVICE</code> naming <code>/v&#123;snapshot&#125;/sparql</code> reads the table at an earlier snapshot, and{' '}
+            <code>MINUS</code> subtracts one from the other, so one query can diff two.
           </p>
           <div className="panel-header-actions">
             <label className="toggle sql-toggle" title="Show the DuckDB SQL the query translates to">
@@ -343,7 +395,7 @@ export function SparqlTab({ sharedQuery }: { sharedQuery: string | null }) {
           </div>
         </header>
         <div className="chips">
-          {SAMPLES.map((sample) => (
+          {samples.map((sample) => (
             <button key={sample.name} type="button" className="chip" onClick={() => loadSample(sample)}>
               {sample.name}
             </button>

@@ -85,7 +85,7 @@ export function App() {
         {/* YASGUI restores its own query state from localStorage, so remounting is safe. */}
         {active === 'SPARQL' && (
           <Suspense fallback={<p className="empty">Loading the SPARQL editor…</p>}>
-            <SparqlTab sharedQuery={sharedQuery} />
+            <SparqlTab sharedQuery={sharedQuery} snapshots={stats?.snapshots ?? null} />
           </Suspense>
         )}
         {active === 'Modules' && <ModulesTab modules={stats?.modules ?? null} />}

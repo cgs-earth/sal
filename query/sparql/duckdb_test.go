@@ -157,3 +157,11 @@ func TestObjectNumericExprReadsEveryNumericColumn(t *testing.T) {
 	require.NoError(t, rows.Err())
 	require.Equal(t, []float64{-8, 7, 42.5}, values)
 }
+
+func TestNeedsSpatialSeesAnObjectCorrelationInASubquery(t *testing.T) {
+	// A MINUS correlating an object renders it with ST_AsText inside the
+	// subquery, which must load spatial like a projection would.
+	sql, err := ToSQL(`SELECT ?s WHERE { ?s <http://p> ?o . MINUS { ?s <http://q> ?o } }`)
+	require.NoError(t, err)
+	require.True(t, needsSpatial(sql))
+}
