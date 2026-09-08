@@ -44,12 +44,26 @@ type StatsRunner interface {
 	Stats(ctx context.Context) (TableStats, error)
 }
 
+// SnapshotRunner answers SPARQL against the triples table as it stood at an
+// earlier Iceberg snapshot, which is what the versioned /v{snapshot}/sparql
+// route of `sal serve` reads through.
+type SnapshotRunner interface {
+	Runner
+	// HasSnapshot reports whether the table has a snapshot with the given ID.
+	HasSnapshot(ctx context.Context, snapshotID int64) (bool, error)
+	// AtSnapshot returns a Runner reading the table at the given snapshot.
+	AtSnapshot(snapshotID int64) Runner
+}
+
 type DuckDBRunner struct {
 	TablePath string
 	Limit     int
 	// Imports are the imported data products registered as views of their own
 	// beside the project's `triples` view.
 	Imports []ImportedTable
+	// SnapshotID is the Iceberg snapshot a SPARQL query reads the table at.
+	// Zero, the default, reads the current snapshot through the `triples` view.
+	SnapshotID int64
 }
 
 // RunShell opens an interactive SPARQL prompt against the Iceberg triples table.
@@ -86,9 +100,10 @@ func (r DuckDBRunner) Run(ctx context.Context, query string) (Result, error) {
 }
 
 // Translate is the SQL Run executes for a SPARQL query: the translation with
-// the runner's own row limit appended when the query does not state one.
+// the runner's own row limit appended when the query does not state one, read
+// from the runner's snapshot when it has one.
 func (r DuckDBRunner) Translate(query string) (string, error) {
-	sql, err := ToSQL(query)
+	sql, err := toSQL(query, tableSources{tablePath: r.TablePath, snapshotID: r.SnapshotID})
 	if err != nil {
 		return "", err
 	}

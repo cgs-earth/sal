@@ -26,7 +26,7 @@ const maxUIRows = 1000
 
 // UIRunner is the query surface the bundled web UI needs from the DuckDB backend.
 type UIRunner interface {
-	salsparql.Runner
+	salsparql.SnapshotRunner
 	salsparql.GeometryRunner
 	salsparql.SQLRunner
 	salsparql.SQLTranslator
@@ -68,12 +68,13 @@ func Serve(ctx context.Context, addr string, runner salsparql.DuckDBRunner, blob
 }
 
 // NewEndpoint returns an HTTP handler for the SPARQL Protocol query operation,
-// plus the /blobs endpoint serving the vocabulary and imported ontology
+// at /sparql for the current snapshot and at /v{snapshot}/sparql for an earlier
+// one, plus the /blobs endpoint serving the vocabulary and imported ontology
 // documents pinned under blobDir.
-func NewEndpoint(runner salsparql.Runner, blobDir string) http.Handler {
+func NewEndpoint(runner salsparql.SnapshotRunner, blobDir string) http.Handler {
 	mux := http.NewServeMux()
 	handler := sparqlHandler{runner: runner}
-	mux.Handle("/", handler)
+	mux.Handle("/", snapshotSparqlHandler{runner: runner, fallback: handler})
 	mux.Handle("/sparql", handler)
 	mux.Handle("/blobs/", blobHandler{dir: blobDir})
 	return mux
@@ -102,7 +103,9 @@ func NewEndpointWithUI(runner UIRunner, blobDir string) (http.Handler, error) {
 	// Registered so that ServeMux answers the tab's own URL rather than redirecting
 	// it to /blobs/, which is the endpoint's prefix and not a tab.
 	mux.Handle("/blobs", browserRoute{api: blobs, ui: ui})
-	mux.Handle("/", ui)
+	// The versioned SPARQL route has no UI tab of its own, so it is the API
+	// whatever asked for it; everything else at the root is the app.
+	mux.Handle("/", snapshotSparqlHandler{runner: runner, fallback: ui})
 	return mux, nil
 }
 
@@ -326,6 +329,54 @@ func writeJSONError(w http.ResponseWriter, status int, message string) {
 	if err := json.NewEncoder(w).Encode(map[string]string{"error": message}); err != nil {
 		slog.Error("failed to write JSON error response", "error", err)
 	}
+}
+
+// snapshotSparqlPath is the route of the SPARQL endpoint over an earlier
+// snapshot, /v{snapshot}/sparql. It is matched by hand at the root rather than
+// registered as a ServeMux pattern: a wildcard has to be a whole path segment,
+// so the "v" cannot be part of one, and a bare "/{version}/sparql" conflicts
+// with the "/blobs/" prefix.
+var snapshotSparqlPath = regexp.MustCompile(`^/v([^/]*)/sparql$`)
+
+// snapshotSparqlHandler is the SPARQL Protocol query operation against the
+// triples table as it stood at the Iceberg snapshot the path names, so that a
+// client can query the data product at a version a build has since moved past.
+// A path that does not name a snapshot the table has answers 404; a path that
+// is not the versioned route at all goes to fallback, whatever else the root
+// serves.
+type snapshotSparqlHandler struct {
+	runner   salsparql.SnapshotRunner
+	fallback http.Handler
+}
+
+func (h snapshotSparqlHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	match := snapshotSparqlPath.FindStringSubmatch(r.URL.Path)
+	if match == nil {
+		h.fallback.ServeHTTP(w, r)
+		return
+	}
+	// A preflight never touches the table, so it is answered before the
+	// snapshot is looked up: a browser client that is refused CORS on an
+	// unknown snapshot would see a network error instead of the 404.
+	if r.Method == http.MethodOptions {
+		sparqlHandler{runner: h.runner}.ServeHTTP(w, r)
+		return
+	}
+	snapshotID, err := strconv.ParseInt(match[1], 10, 64)
+	if err != nil || snapshotID <= 0 {
+		http.Error(w, fmt.Sprintf("%q is not a snapshot ID; the table at a snapshot is queried at /v<snapshot id>/sparql", match[1]), http.StatusNotFound)
+		return
+	}
+	exists, err := h.runner.HasSnapshot(r.Context(), snapshotID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !exists {
+		http.Error(w, fmt.Sprintf("the triples table has no snapshot %d", snapshotID), http.StatusNotFound)
+		return
+	}
+	sparqlHandler{runner: h.runner.AtSnapshot(snapshotID)}.ServeHTTP(w, r)
 }
 
 type sparqlHandler struct {

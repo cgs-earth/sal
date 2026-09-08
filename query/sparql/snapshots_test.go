@@ -83,3 +83,59 @@ func TestSnapshotQueriesIgnoresAnUnexpectedSnapshotListing(t *testing.T) {
 		Rows:   [][]string{{"1", "append"}},
 	}))
 }
+
+func TestTranslateScansTheTableAtTheRunnersSnapshot(t *testing.T) {
+	runner := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples", SnapshotID: 122}
+
+	sql, err := runner.Translate(`
+PREFIX schema: <https://schema.org/>
+
+SELECT ?s ?name
+WHERE {
+  ?s schema:name ?name .
+  ?s schema:age 42 .
+}`)
+
+	require.NoError(t, err)
+	require.Contains(t, sql, "FROM iceberg_scan('/tmp/warehouse/sal/triples', allow_moved_paths = true, snapshot_from_id = 122) AS t0")
+	require.Contains(t, sql, "CROSS JOIN iceberg_scan('/tmp/warehouse/sal/triples', allow_moved_paths = true, snapshot_from_id = 122) AS t1")
+	require.NotContains(t, sql, "triples AS")
+	require.Contains(t, sql, "t0.subject = t1.subject")
+}
+
+func TestTranslateScansTheTriplesViewWithoutASnapshot(t *testing.T) {
+	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate("SELECT ?s WHERE { ?s ?p ?o }")
+
+	require.NoError(t, err)
+	require.Contains(t, sql, "FROM triples AS t0")
+	require.NotContains(t, sql, "iceberg_scan")
+}
+
+func TestTranslateEscapesQuotesInTheSnapshotTablePath(t *testing.T) {
+	sql, err := DuckDBRunner{TablePath: "/tmp/o'brien/sal/triples", SnapshotID: 1}.Translate("SELECT ?s WHERE { ?s ?p ?o }")
+
+	require.NoError(t, err)
+	require.Contains(t, sql, "iceberg_scan('/tmp/o''brien/sal/triples', allow_moved_paths = true, snapshot_from_id = 1) AS t0")
+}
+
+func TestSnapshotSourceDoesNotForceTheSpatialExtension(t *testing.T) {
+	// The scan of a snapshot must not read as an ST_ call or a star projection,
+	// or every snapshot query would load the spatial extension for nothing.
+	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples", SnapshotID: 122}.Translate("SELECT ?s WHERE { ?s ?p ?o }")
+
+	require.NoError(t, err)
+	require.False(t, needsSpatial(sql))
+}
+
+func TestAtSnapshotKeepsTheRestOfTheRunner(t *testing.T) {
+	runner := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples", Limit: 100, Imports: []ImportedTable{{View: "upstream", Path: "/tmp/upstream"}}}
+
+	snapshot, ok := runner.AtSnapshot(122).(DuckDBRunner)
+
+	require.True(t, ok)
+	require.Equal(t, int64(122), snapshot.SnapshotID)
+	require.Equal(t, runner.TablePath, snapshot.TablePath)
+	require.Equal(t, runner.Limit, snapshot.Limit)
+	require.Equal(t, runner.Imports, snapshot.Imports)
+	require.Zero(t, runner.SnapshotID, "the runner AtSnapshot was called on must read the current table still")
+}

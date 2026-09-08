@@ -5,7 +5,7 @@
 
 <PersonShape>
     a sh:NodeShape ;
-    rdfs:label "Person Shape" ;
+    rdfs:label "Person Shape for Project" ;
     rdfs:comment "Every person this project describes is named, and has at most one email address." ;
     sh:targetClass schema:Person ;
     sh:property <PersonNameShape>, <PersonEmailShape> .

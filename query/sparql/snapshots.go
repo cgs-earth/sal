@@ -1,6 +1,7 @@
 package sparql
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strconv"
@@ -100,4 +101,23 @@ func snapshotQueries(tablePath string, snapshots Result) []NamedQuery {
 			{Name: "Latest snapshot diff", SQL: SnapshotDiffSQL(tablePath, ids[0], &ids[1])},
 		}
 	}
+}
+
+// AtSnapshot returns the runner reading the table at the given snapshot instead
+// of the current one.
+func (r DuckDBRunner) AtSnapshot(snapshotID int64) Runner {
+	r.SnapshotID = snapshotID
+	return r
+}
+
+// HasSnapshot reports whether the triples table has a snapshot with the given
+// ID. It asks the table each time rather than remembering the answer, since a
+// build can commit a new snapshot while a server is running.
+func (r DuckDBRunner) HasSnapshot(ctx context.Context, snapshotID int64) (bool, error) {
+	statement := fmt.Sprintf("SELECT snapshot_id FROM iceberg_snapshots('%s') WHERE snapshot_id = %d", escapeSQLLiteral(r.TablePath), snapshotID)
+	_, rows, err := r.runSQL(ctx, statement, false)
+	if err != nil {
+		return false, err
+	}
+	return len(rows) > 0, nil
 }

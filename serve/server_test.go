@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -24,11 +25,26 @@ type endpointRunner struct {
 	result salsparql.Result
 	err    error
 	query  string
+	// snapshots are the snapshot IDs HasSnapshot reports the table as having.
+	snapshots   []int64
+	snapshotErr error
+	// snapshot is the snapshot AtSnapshot was last asked for, zero when a query
+	// went to the current table.
+	snapshot int64
 }
 
 func (r *endpointRunner) Run(_ context.Context, query string) (salsparql.Result, error) {
 	r.query = query
 	return r.result, r.err
+}
+
+func (r *endpointRunner) HasSnapshot(_ context.Context, snapshotID int64) (bool, error) {
+	return slices.Contains(r.snapshots, snapshotID), r.snapshotErr
+}
+
+func (r *endpointRunner) AtSnapshot(snapshotID int64) salsparql.Runner {
+	r.snapshot = snapshotID
+	return r
 }
 
 // endpointUIRunner is a UIRunner whose four query surfaces are all canned responses.
@@ -912,4 +928,153 @@ func TestBlobEndpointRejectsUnsupportedMethod(t *testing.T) {
 	}()
 
 	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+}
+
+// snapshotGet queries the SPARQL endpoint at the given path as a SPARQL client would.
+func snapshotGet(t *testing.T, serverURL string, path string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, serverURL+path+"?query="+url.QueryEscape("SELECT ?s WHERE { ?s ?p ?o }"), nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept", sparqlResultsJSON)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	return resp
+}
+
+func TestEndpointQueriesTheTableAtASnapshot(t *testing.T) {
+	runner := &endpointRunner{
+		snapshots: []int64{1234, 5678},
+		result: salsparql.Result{
+			Header: []string{"s"},
+			Rows:   [][]string{{"https://example.org/alice"}},
+		},
+	}
+	server := httptest.NewServer(NewEndpoint(runner, ""))
+	defer server.Close()
+
+	resp := snapshotGet(t, server.URL, "/v1234/sparql")
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, sparqlResultsJSON, resp.Header.Get("Content-Type"))
+	require.Equal(t, int64(1234), runner.snapshot)
+	require.Equal(t, "SELECT ?s WHERE { ?s ?p ?o }", runner.query)
+
+	var body sparqlJSONResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, "https://example.org/alice", body.Results.Bindings[0]["s"].Value)
+}
+
+func TestEndpointAnswersNotFoundForAnUnknownSnapshot(t *testing.T) {
+	runner := &endpointRunner{snapshots: []int64{1234}}
+	server := httptest.NewServer(NewEndpoint(runner, ""))
+	defer server.Close()
+
+	resp := snapshotGet(t, server.URL, "/v99/sparql")
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(body), "no snapshot 99")
+	require.Empty(t, runner.query, "nothing must be run against a snapshot the table does not have")
+}
+
+func TestEndpointAnswersNotFoundForAPathThatIsNotASnapshotVersion(t *testing.T) {
+	runner := &endpointRunner{snapshots: []int64{1234}}
+	server := httptest.NewServer(NewEndpoint(runner, ""))
+	defer server.Close()
+
+	for _, path := range []string{"/v12abc/sparql", "/v-1/sparql", "/v0/sparql", "/v/sparql"} {
+		resp := snapshotGet(t, server.URL, path)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, http.StatusNotFound, resp.StatusCode, path)
+		require.Contains(t, string(body), "/v<snapshot id>/sparql", path)
+	}
+	require.Empty(t, runner.query)
+}
+
+// Only /v{snapshot}/sparql is the versioned route; anything else at the root
+// keeps going where it went before, which for the UI is the app itself.
+func TestEndpointWithUIStillServesTheAppBesideTheVersionedRoute(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
+	defer server.Close()
+
+	for _, path := range []string{"/v1234", "/v1234/sparql/extra", "/stats", "/latest/sparql"} {
+		resp := browserGet(t, server.URL+path)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, http.StatusOK, resp.StatusCode, path)
+		require.Contains(t, resp.Header.Get("Content-Type"), "text/html", path)
+	}
+}
+
+func TestEndpointReportsASnapshotLookupFailure(t *testing.T) {
+	runner := &endpointRunner{snapshotErr: fmt.Errorf("duckdb query failed: no such table")}
+	server := httptest.NewServer(NewEndpoint(runner, ""))
+	defer server.Close()
+
+	resp := snapshotGet(t, server.URL, "/v1234/sparql")
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(body), "no such table")
+}
+
+// A preflight is answered whatever the snapshot, so that a browser client gets
+// the 404 for an unknown one rather than a CORS failure.
+func TestEndpointAnswersPreflightForAnyVersionedSparqlPath(t *testing.T) {
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, ""))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodOptions, server.URL+"/v99/sparql", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+	require.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
+}
+
+func TestEndpointWithUIQueriesTheTableAtASnapshotByPOST(t *testing.T) {
+	runner := &endpointUIRunner{endpointRunner: endpointRunner{
+		snapshots: []int64{7847372623449923428},
+		result:    salsparql.Result{Header: []string{"s"}},
+	}}
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v7847372623449923428/sparql", "application/sparql-query", strings.NewReader("SELECT ?s WHERE { ?s ?p ?o }"))
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, sparqlResultsJSON, resp.Header.Get("Content-Type"))
+	require.Equal(t, int64(7847372623449923428), runner.snapshot)
+	require.Equal(t, "SELECT ?s WHERE { ?s ?p ?o }", runner.query)
+}
+
+func TestEndpointWithUIAnswersNotFoundForAnUnknownSnapshot(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
+	defer server.Close()
+
+	resp := snapshotGet(t, server.URL, "/v1234/sparql")
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+	require.Contains(t, resp.Header.Get("Content-Type"), "text/plain")
 }
