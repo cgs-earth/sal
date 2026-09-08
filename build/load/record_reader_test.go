@@ -26,14 +26,14 @@ func TestGetSchemasSplitsObjectsByDatatype(t *testing.T) {
 	arrowSchema, icebergSchema, err := GetSchemas()
 	require.NoError(t, err)
 
-	names := []string{"subject", "predicate", "object_string", "object_iri", "object_geometry", "object_byte", "object_integer", "object_float", "object_time", "object_type", "triple_hash"}
+	names := []string{"subject", "predicate", "object_string", "object_iri", "object_geometry", "object_byte", "object_integer", "object_float", "object_time", "object_type", "object_language", "triple_hash"}
 	require.Equal(t, len(names), arrowSchema.NumFields())
 	require.Equal(t, len(names), len(icebergSchema.Fields()))
 	for i, name := range names {
 		require.Equal(t, name, arrowSchema.Field(i).Name)
 		require.Equal(t, name, icebergSchema.Field(i).Name)
 	}
-	require.Equal(t, []int{11}, icebergSchema.IdentifierFieldIDs)
+	require.Equal(t, []int{12}, icebergSchema.IdentifierFieldIDs)
 }
 
 func TestAppendGraphIngestsSimpleWKTGeometry(t *testing.T) {
@@ -108,9 +108,9 @@ func TestProcessGraphDiffAddsAndRemovesByTripleHash(t *testing.T) {
 	require.NoError(t, err)
 
 	xsdString := rdflibgo.XSDString.Value()
-	require.Contains(t, hashes, tripleHash("http://example.com/keep", "http://example.com/p", "same", xsdString))
-	require.Contains(t, hashes, tripleHash("http://example.com/add", "http://example.com/p", "new", xsdString))
-	require.NotContains(t, hashes, tripleHash("http://example.com/drop", "http://example.com/p", "old", xsdString))
+	require.Contains(t, hashes, tripleHash("http://example.com/keep", "http://example.com/p", "same", xsdString, ""))
+	require.Contains(t, hashes, tripleHash("http://example.com/add", "http://example.com/p", "new", xsdString, ""))
+	require.NotContains(t, hashes, tripleHash("http://example.com/drop", "http://example.com/p", "old", xsdString, ""))
 	require.Len(t, hashes, 2)
 }
 

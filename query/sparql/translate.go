@@ -26,8 +26,8 @@ func ToSQL(input string) (string, error) {
 	if parsed.Type != "SELECT" {
 		return "", fmt.Errorf("only read-only SPARQL SELECT queries are supported")
 	}
-	if len(parsed.ProjectExprs) > 0 || len(parsed.GroupBy) > 0 || parsed.Having != nil || len(parsed.OrderBy) > 0 || parsed.Offset > 0 {
-		return "", fmt.Errorf("SPARQL projection expressions and solution modifiers are not supported yet")
+	if len(parsed.GroupBy) > 0 || parsed.Having != nil || len(parsed.OrderBy) > 0 || parsed.Offset > 0 {
+		return "", fmt.Errorf("SPARQL solution modifiers are not supported yet")
 	}
 
 	triples, filters, err := basicGraphPatternParts(parsed.Where)
@@ -86,13 +86,31 @@ func ToSQL(input string) (string, error) {
 	if len(projected) == 0 {
 		return "", fmt.Errorf("SPARQL SELECT must project at least one variable")
 	}
+	// A projection expression, (expr AS ?name), is listed among the variables
+	// under the name it binds; the expression itself is what is projected.
+	projectExprs := make(map[string]rdflibsparql.Expr, len(parsed.ProjectExprs))
+	for _, projectExpr := range parsed.ProjectExprs {
+		projectExprs[projectExpr.Var] = projectExpr.Expr
+	}
 	selects := make([]string, 0, len(projected))
 	for _, name := range projected {
-		binding, ok := bindings[name]
+		if binding, ok := bindings[name]; ok {
+			selects = append(selects, binding.projection()+" AS "+quoteIdent(name))
+			continue
+		}
+		expr, ok := projectExprs[name]
 		if !ok {
 			return "", fmt.Errorf("projected variable ?%s is not bound by a supported triple pattern", name)
 		}
-		selects = append(selects, binding.projection()+" AS "+quoteIdent(name))
+		call, ok := expr.(*rdflibsparql.FuncExpr)
+		if !ok {
+			return "", fmt.Errorf("SPARQL projection expressions other than a function call, such as (LANG(?o) AS ?%s), are not supported yet", name)
+		}
+		sql, _, err := functionSQL(call, bindings)
+		if err != nil {
+			return "", err
+		}
+		selects = append(selects, sql+" AS "+quoteIdent(name))
 	}
 
 	sql := "SELECT " + strings.Join(selects, ", ") + "\nFROM " + strings.Join(from, "\nCROSS JOIN ")
@@ -230,7 +248,7 @@ func filterSQL(expr rdflibsparql.Expr, bindings map[string]sqlBinding) (string, 
 		}
 		return "NOT (" + inner + ")", nil
 	case *rdflibsparql.FuncExpr:
-		sql, boolean, err := geoFunctionSQL(e, bindings)
+		sql, boolean, err := functionSQL(e, bindings)
 		if err != nil {
 			return "", err
 		}
@@ -286,7 +304,7 @@ func filterOperandSQL(expr rdflibsparql.Expr, other rdflibsparql.Expr, bindings 
 	case *rdflibsparql.IRIExpr:
 		return sqlString(e.Value), nil
 	case *rdflibsparql.FuncExpr:
-		sql, boolean, err := geoFunctionSQL(e, bindings)
+		sql, boolean, err := functionSQL(e, bindings)
 		if err != nil {
 			return "", err
 		}
@@ -358,7 +376,12 @@ func constantClauses(alias string, column string, raw string, prefixes map[strin
 		if literalIsNumeric(literal) {
 			return []string{objectNumericExpr(alias) + " = " + term.value}, nil
 		}
-		return []string{alias + ".object_string = " + sqlString(term.value)}, nil
+		clauses := []string{alias + ".object_string = " + sqlString(term.value)}
+		if term.language != "" {
+			// tags are stored lower case, see the object_language column
+			clauses = append(clauses, alias+".object_language = "+sqlString(strings.ToLower(term.language)))
+		}
+		return clauses, nil
 	default:
 		return nil, fmt.Errorf("unsupported object term %q", raw)
 	}
@@ -368,6 +391,7 @@ type sparqlTerm struct {
 	kind     string
 	value    string
 	datatype string
+	language string
 }
 
 func parseSPARQLTerm(raw string, prefixes map[string]string) (sparqlTerm, error) {
@@ -375,8 +399,8 @@ func parseSPARQLTerm(raw string, prefixes map[string]string) (sparqlTerm, error)
 		return sparqlTerm{kind: "iri", value: raw[1 : len(raw)-1]}, nil
 	}
 	if strings.HasPrefix(raw, "\"") || strings.HasPrefix(raw, "'") {
-		literal, datatype, err := parseLiteral(raw, prefixes)
-		return sparqlTerm{kind: "literal", value: literal, datatype: datatype}, err
+		literal, datatype, language, err := parseLiteral(raw, prefixes)
+		return sparqlTerm{kind: "literal", value: literal, datatype: datatype, language: language}, err
 	}
 	if raw == "true" || raw == "false" {
 		return sparqlTerm{kind: "literal", value: raw, datatype: rdflibgo.XSDBoolean.Value()}, nil
@@ -395,7 +419,10 @@ func parseSPARQLTerm(raw string, prefixes map[string]string) (sparqlTerm, error)
 	return sparqlTerm{}, fmt.Errorf("unsupported SPARQL term %q", raw)
 }
 
-func parseLiteral(raw string, prefixes map[string]string) (string, string, error) {
+// parseLiteral splits a quoted literal into its value and either the datatype
+// it is typed with or the language tag it carries. An untagged, untyped
+// literal is an xsd:string; a tagged one is an rdf:langString.
+func parseLiteral(raw string, prefixes map[string]string) (value string, datatype string, language string, err error) {
 	quote := raw[0]
 	end := 1
 	escaped := false
@@ -416,29 +443,32 @@ func parseLiteral(raw string, prefixes map[string]string) (string, string, error
 		end++
 	}
 	if end >= len(raw) {
-		return "", "", fmt.Errorf("invalid SPARQL literal %q", raw)
+		return "", "", "", fmt.Errorf("invalid SPARQL literal %q", raw)
 	}
-	value, err := strconv.Unquote(raw[:end+1])
+	value, err = strconv.Unquote(raw[:end+1])
 	if err != nil {
-		return "", "", fmt.Errorf("invalid SPARQL literal %q: %w", raw, err)
+		return "", "", "", fmt.Errorf("invalid SPARQL literal %q: %w", raw, err)
 	}
-	datatype := rdflibgo.XSDString.Value()
+	datatype = rdflibgo.XSDString.Value()
 	rest := raw[end+1:]
+	if strings.HasPrefix(rest, "@") {
+		return value, rdflibgo.RDFLangString.Value(), rest[1:], nil
+	}
 	if strings.HasPrefix(rest, "^^<") && strings.HasSuffix(rest, ">") {
 		datatype = rest[3 : len(rest)-1]
 	} else if strings.HasPrefix(rest, "^^") {
 		prefixed := rest[2:]
 		idx := strings.Index(prefixed, ":")
 		if idx < 0 {
-			return "", "", fmt.Errorf("invalid SPARQL datatype %q", rest)
+			return "", "", "", fmt.Errorf("invalid SPARQL datatype %q", rest)
 		}
 		namespace, ok := prefixes[prefixed[:idx]]
 		if !ok {
-			return "", "", fmt.Errorf("unknown SPARQL prefix %q", prefixed[:idx])
+			return "", "", "", fmt.Errorf("unknown SPARQL prefix %q", prefixed[:idx])
 		}
 		datatype = namespace + prefixed[idx+1:]
 	}
-	return value, datatype, nil
+	return value, datatype, "", nil
 }
 
 func variableName(raw string) string {

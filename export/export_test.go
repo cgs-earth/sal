@@ -40,11 +40,11 @@ func valid(value string) sql.NullString {
 // objectCols is one row of the object columns ExportSQL selects, so a test
 // names the column it fills instead of counting positions.
 type objectCols struct {
-	iri, float, integer, byteVal, time, wkt, str, typ sql.NullString
+	iri, float, integer, byteVal, time, wkt, str, typ, lang sql.NullString
 }
 
 func (c objectCols) row() []sql.NullString {
-	return []sql.NullString{c.iri, c.float, c.integer, c.byteVal, c.time, c.wkt, c.str, c.typ}
+	return []sql.NullString{c.iri, c.float, c.integer, c.byteVal, c.time, c.wkt, c.str, c.typ, c.lang}
 }
 
 func TestObjectTermRestoresAnIRI(t *testing.T) {
@@ -107,16 +107,26 @@ func TestObjectTermFallsBackToAPlainStringLiteral(t *testing.T) {
 	require.Equal(t, `"hello"`, object.N3())
 }
 
-// An xsd:string type and a language-tagged rdf:langString both export as a
-// plain literal: xsd:string is what a plain literal means, and the language
-// tag itself is not stored, so retyping the value as langString would write
-// an invalid tagless literal.
-func TestObjectTermExportsStringAndLangStringAsPlainLiterals(t *testing.T) {
+// An xsd:string type and a tagless rdf:langString both export as a plain
+// literal: xsd:string is what a plain literal means, and retyping an untagged
+// value as langString would write an invalid tagless literal.
+func TestObjectTermExportsStringAndTaglessLangStringAsPlainLiterals(t *testing.T) {
 	object := objectTerm(objectCols{str: valid("hello"), typ: valid("http://www.w3.org/2001/XMLSchema#string")}.row())
 	require.Equal(t, `"hello"`, object.N3())
 
 	object = objectTerm(objectCols{str: valid("hello"), typ: valid(rdflibgo.RDFLangString.Value())}.row())
 	require.Equal(t, `"hello"`, object.N3())
+}
+
+// TestObjectTermRestoresTheLanguageTag checks that the object_language column
+// turns a stored rdf:langString back into the tagged literal it was built from.
+func TestObjectTermRestoresTheLanguageTag(t *testing.T) {
+	object := objectTerm(objectCols{str: valid("hello"), typ: valid(rdflibgo.RDFLangString.Value()), lang: valid("en")}.row())
+	require.Equal(t, `"hello"@en`, object.N3())
+	literal, ok := object.(rdflibgo.Literal)
+	require.True(t, ok)
+	require.Equal(t, "en", literal.Language())
+	require.Equal(t, rdflibgo.RDFLangString, literal.Datatype())
 }
 
 // TestObjectTermReadsTheStoredBlankNodePrefixAsABlankNode

@@ -1,6 +1,7 @@
 package sparql
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -67,6 +68,22 @@ func TestDatatypesSQLLeftJoinsTheOptionalAnnotations(t *testing.T) {
 	require.Contains(t, sql, "LEFT JOIN triples AS comments")
 	require.Contains(t, sql, "AND comments.predicate = 'http://www.w3.org/2000/01/rdf-schema#comment'")
 	require.Contains(t, sql, "MIN("+objectText("comments")+`) AS "rdfs:comment"`)
+}
+
+func TestStatementsSQLReadsTheObjectUnionWithItsDatatypeAndLanguage(t *testing.T) {
+	sql := StatementsSQL(0)
+	require.Contains(t, sql, "triples.subject AS subject")
+	require.Contains(t, sql, "triples.predicate AS predicate")
+	require.Contains(t, sql, objectProjection("triples")+" AS object")
+	require.Contains(t, sql, "triples.object_type AS type")
+	require.Contains(t, sql, "triples.object_language AS language")
+	require.NotContains(t, sql, "LIMIT")
+	require.NotContains(t, sql, "ORDER BY")
+}
+
+func TestStatementsSQLBoundsTheRowsToTheLimit(t *testing.T) {
+	require.True(t, strings.HasSuffix(StatementsSQL(25), "\nLIMIT 25"))
+	require.NotContains(t, StatementsSQL(-1), "LIMIT")
 }
 
 func TestInstancesSQLPairsEachSubjectWithTheClassItIsTypedWith(t *testing.T) {

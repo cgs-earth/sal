@@ -24,6 +24,7 @@ const TRIPLES_COLUMNS = [
   'object_float',
   'object_time',
   'object_type',
+  'object_language',
   'object_geometry',
 ]
 

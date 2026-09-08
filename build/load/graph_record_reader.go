@@ -111,7 +111,7 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 		subject := storedSubject(triple.Subject)
 		predicate := triple.Predicate.String()
 		object := graphTripleObject(triple.Object)
-		hashValue := tripleHash(subject, predicate, object.o, object.oDatatype)
+		hashValue := tripleHash(subject, predicate, object.o, object.oDatatype, object.oLanguage)
 		if r.hashes != nil {
 			if _, ok := r.hashes[hashValue]; !ok {
 				continue
@@ -124,11 +124,12 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 			return nil, fmt.Errorf("serialize object for %s %s: %w", triple.Subject.String(), triple.Predicate.String(), err)
 		}
 		// triple_hash is the final schema field. It is generated from the subject,
-		// predicate, and the object's lexical form and datatype, before typed object
-		// columns are derived, so the storage representation (geometry WKB, float
-		// rendering) does not affect the row identity but the datatype does: two
-		// triples differing only in datatype are distinct rows, matching what
-		// object_type records.
+		// predicate, and the object's lexical form, datatype, and language tag,
+		// before typed object columns are derived, so the storage representation
+		// (geometry WKB, float rendering) does not affect the row identity but the
+		// datatype and language do: two triples differing only in datatype or
+		// language are distinct rows, matching what object_type and
+		// object_language record.
 		lastIndex := r.schema.NumFields() - 1
 		builder.Field(lastIndex).(*array.StringBuilder).Append(hashValue)
 		count++
@@ -142,10 +143,12 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 }
 
 // tripleHash returns a stable SHA-256 row identifier from the RDF triple
-// terms. The object's datatype is part of the identity (empty for an IRI or a
-// blank node object), since the table stores it in object_type and a literal
-// with the same lexical form but a different datatype is a different triple.
-func tripleHash(subject string, predicate string, object string, datatype string) string {
+// terms. The object's datatype and language tag are part of the identity
+// (both empty for an IRI or a blank node object, and the language empty for
+// any literal but an rdf:langString), since the table stores them in
+// object_type and object_language and a literal with the same lexical form
+// but a different datatype or language is a different triple.
+func tripleHash(subject string, predicate string, object string, datatype string, language string) string {
 	hash := sha256.New()
 	_, _ = hash.Write([]byte("subject="))
 	_, _ = hash.Write([]byte(subject))
@@ -155,12 +158,14 @@ func tripleHash(subject string, predicate string, object string, datatype string
 	_, _ = hash.Write([]byte(object))
 	_, _ = hash.Write([]byte("\ndatatype="))
 	_, _ = hash.Write([]byte(datatype))
+	_, _ = hash.Write([]byte("\nlanguage="))
+	_, _ = hash.Write([]byte(language))
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func tripleHashForTriple(triple rdflibgo.Triple) string {
 	object := graphTripleObject(triple.Object)
-	return tripleHash(storedSubject(triple.Subject), triple.Predicate.String(), object.o, object.oDatatype)
+	return tripleHash(storedSubject(triple.Subject), triple.Predicate.String(), object.o, object.oDatatype, object.oLanguage)
 }
 
 // storedSubject renders a subject the way the triples table stores it: a blank
@@ -182,7 +187,7 @@ func graphTripleObject(object rdflibgo.Term) rdfObject {
 	case rdflibgo.BNode:
 		return rdfObject{o: "_:" + o.Value(), oKind: objectKindBNode}
 	case rdflibgo.Literal:
-		return rdfObject{o: o.String(), oKind: objectKindLiteral, oDatatype: o.Datatype().Value()}
+		return rdfObject{o: o.String(), oKind: objectKindLiteral, oDatatype: o.Datatype().Value(), oLanguage: o.Language()}
 	default:
 		return rdfObject{o: object.String(), oKind: objectKindLiteral}
 	}

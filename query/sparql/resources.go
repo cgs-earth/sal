@@ -3,6 +3,7 @@ package sparql
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -115,6 +116,27 @@ ORDER BY datatype`,
 		RDFTypeIRI,
 		bindingExpr("datatypes", "object"),
 		RDFSDatatypeIRI)
+}
+
+// StatementsSQL lists the statements of the data product one per row, with the
+// object read back as text whichever column holds it, geometry included, and
+// the datatype and language tag the object columns record alongside it. A
+// limit above zero bounds the rows; zero lists them all. The rows are left in
+// table order rather than sorted, so that a listing streams rather than
+// waiting on a sort of the whole table.
+func StatementsSQL(limit int) string {
+	sql := fmt.Sprintf(`
+SELECT
+	triples.subject AS subject,
+	triples.predicate AS predicate,
+	%s AS object,
+	triples.object_type AS type,
+	triples.object_language AS language
+FROM triples`, objectTextExpr("triples"))
+	if limit > 0 {
+		sql += "\nLIMIT " + strconv.Itoa(limit)
+	}
+	return sql
 }
 
 // DescribeSQL lists every statement the data product makes about one subject.

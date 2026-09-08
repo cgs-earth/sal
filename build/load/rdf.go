@@ -12,4 +12,7 @@ type rdfObject struct {
 	o         string
 	oKind     objectKind
 	oDatatype string
+	// oLanguage is the language tag of an rdf:langString literal, and empty
+	// for every other object.
+	oLanguage string
 }

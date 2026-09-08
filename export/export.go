@@ -93,12 +93,15 @@ func subjectTerm(value string) rdflibgo.Subject {
 // value exactly as-is. The object_type column carries the datatype IRI the
 // literal was built with, so a typed literal is restored with its exact
 // datatype whichever column its value landed in; a typed value column only
-// supplies a fallback for a row written without one. A blank node object lands
+// supplies a fallback for a row written without one. The object_language
+// column carries the language tag of an rdf:langString, which is restored
+// ahead of the datatype since tagging a literal is what makes it a langString.
+// A blank node object lands
 // in object_string carrying the "_:" prefix build stored it with, which is what
 // tells it apart from a plain string literal there; only a literal whose own
 // text starts with "_:" would be misread, and nothing SAL builds writes one.
 func objectTerm(cols []sql.NullString) rdflibgo.Term {
-	iri, float, integer, byteCol, timeCol, wkt, str, datatype := cols[0], cols[1], cols[2], cols[3], cols[4], cols[5], cols[6], cols[7]
+	iri, float, integer, byteCol, timeCol, wkt, str, datatype, language := cols[0], cols[1], cols[2], cols[3], cols[4], cols[5], cols[6], cols[7], cols[8]
 	typed := func(value string, fallback rdflibgo.URIRef) rdflibgo.Term {
 		if datatype.Valid {
 			return rdflibgo.NewLiteral(value, rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(datatype.String)))
@@ -120,10 +123,12 @@ func objectTerm(cols []sql.NullString) rdflibgo.Term {
 		return typed(timeCol.String, rdflibgo.XSDDateTime)
 	case strings.HasPrefix(str.String, blankNodePrefix):
 		return rdflibgo.NewBNode(strings.TrimPrefix(str.String, blankNodePrefix))
+	case language.Valid && language.String != "":
+		return rdflibgo.NewLiteral(str.String, rdflibgo.WithLang(language.String))
 	case datatype.Valid && datatype.String != pkg.XSDString && datatype.String != rdflibgo.RDFLangString.Value():
-		// rdf:langString is excluded since the language tag itself is not
-		// stored; the value exports as a plain literal rather than as an
-		// invalid tagless langString.
+		// rdf:langString without a stored tag is excluded, since retyping the
+		// value as langString would write an invalid tagless literal; it
+		// exports as a plain literal instead.
 		return rdflibgo.NewLiteral(str.String, rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(datatype.String)))
 	default:
 		return rdflibgo.NewLiteral(str.String)
