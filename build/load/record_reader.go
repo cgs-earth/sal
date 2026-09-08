@@ -28,6 +28,7 @@ type objectBuilders struct {
 	float   *array.Float64Builder
 	time    *array.TimestampBuilder
 	typ     *array.StringBuilder
+	lang    *array.StringBuilder
 }
 
 func newObjectBuilders(builder *array.RecordBuilder) objectBuilders {
@@ -40,13 +41,14 @@ func newObjectBuilders(builder *array.RecordBuilder) objectBuilders {
 		float:   builder.Field(7).(*array.Float64Builder),
 		time:    builder.Field(8).(*array.TimestampBuilder),
 		typ:     builder.Field(9).(*array.StringBuilder),
+		lang:    builder.Field(10).(*array.StringBuilder),
 	}
 }
 
 // nullsExcept appends NULL to every typed object value column but the one the
 // row's value was appended to, so exactly one value column is set per row.
-// object_type is appended separately since it accompanies a value rather than
-// being one.
+// object_type and object_language are appended separately since they
+// accompany a value rather than being one.
 func (b objectBuilders) nullsExcept(set interface{ AppendNull() }) {
 	for _, builder := range []interface{ AppendNull() }{b.str, b.iri, b.geo, b.byt, b.integer, b.float, b.time} {
 		if builder != set {
@@ -63,8 +65,15 @@ func (b objectBuilders) nullsExcept(set interface{ AppendNull() }) {
 // lexical form does not parse as one -- lands in object_string. Exactly one
 // value column is set on each row, and object_type records the literal's
 // datatype IRI so the original RDF term can be rebuilt losslessly.
+// object_language records the language tag of an rdf:langString literal, and
+// is NULL for every other object.
 func appendObjectFields(builder *array.RecordBuilder, t rdfObject) error {
 	b := newObjectBuilders(builder)
+	if t.oKind == objectKindLiteral && t.oLanguage != "" {
+		b.lang.Append(t.oLanguage)
+	} else {
+		b.lang.AppendNull()
+	}
 
 	if t.oKind == objectKindIRI {
 		b.iri.Append(t.o)

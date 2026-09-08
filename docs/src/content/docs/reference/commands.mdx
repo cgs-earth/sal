@@ -361,6 +361,28 @@ A shape that arrives from an imported ontology keeps the namespace that ontology
 `rdfs:label`, `rdfs:comment`, and `sh:targetClass` are all optional; a column that no shape states is left out of the table entirely.
 `sh:targetClass` is the one a shape can state more than once, and a shape targeting several classes is listed once per class, the way `sal get instances` lists a resource once per class it is typed with.
 
+### `sal get statements`
+
+Lists the statements of the data product, one row per triple:
+
+```sh
+sal get statements --limit 3
+```
+
+```
+subject                             predicate                                    object                             type                                                    language
+https://geoconnex.us/ref/dams/1078  http://www.w3.org/1999/02/22-rdf-syntax-ns#type  http://www.w3.org/ns/dcat#Dataset
+https://geoconnex.us/ref/dams/1078  http://www.w3.org/2000/01/rdf-schema#label   Bureau of Reclamation Dam 1078     http://www.w3.org/1999/02/22-rdf-syntax-ns#langString  en
+https://geoconnex.us/ref/dams/1078  http://purl.org/dc/terms/created             2026-06-02                         http://www.w3.org/2001/XMLSchema#date
+```
+
+The `object` column is the object of the triple whichever typed column of the table holds it, with a geometry rendered as WKT.
+`type` is the datatype IRI of a literal object and `language` is the language tag of a language-tagged string; both are empty for an IRI or blank node object, and `language` is empty for any literal that carries no tag.
+
+`--limit` bounds how many statements are listed, and without it every statement is.
+The rows stream to standard out in table order, so a data product larger than memory can still be listed in full; they are aligned in blocks of 5000 rows rather than across the whole listing.
+Use [`sal export`](/sal/reference/commands/#sal-export) instead to get the statements back as RDF.
+
 ### `sal get vocabularies`
 
 Lists every vocabulary the project knows about from `.sal/config.jsonld`: the vocabularies `sal build` and `sal validate` have pinned, unioned with what `sal import` has recorded with `owl:imports` on the project ontology node, with whether each one is imported:

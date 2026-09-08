@@ -109,8 +109,9 @@ In a `FILTER`, the same rule applies to whichever side the variable is compared 
 | `FILTER` | Partly | Comparisons and boolean combinations only — see [Filters](#filters). |
 | `LIMIT` | Yes | Becomes `LIMIT`. |
 | `ASK`, `CONSTRUCT`, `DESCRIBE` | No | `only read-only SPARQL SELECT queries are supported`. |
-| `OFFSET`, `ORDER BY`, `GROUP BY`, `HAVING` | No | `SPARQL projection expressions and solution modifiers are not supported yet`. |
-| Aggregates and projection expressions, e.g. `(COUNT(?s) AS ?n)` | No | Same error. Count in SQL instead: `SELECT count(*) FROM triples`. |
+| `(LANG(?o) AS ?lang)`, `(DATATYPE(?o) AS ?type)` | Yes | The only projection expressions; see [Language tags and datatypes](#language-tags-and-datatypes). |
+| `OFFSET`, `ORDER BY`, `GROUP BY`, `HAVING` | No | `SPARQL solution modifiers are not supported yet`. |
+| Aggregates and other projection expressions, e.g. `(COUNT(?s) AS ?n)` | No | `SPARQL function "count" is not supported yet`. Count in SQL instead: `SELECT count(*) FROM triples`. |
 | `OPTIONAL`, `UNION`, `MINUS`, `GRAPH`, `BIND`, `VALUES`, subqueries | No | `only basic SPARQL triple patterns and FILTER expressions are supported yet`. |
 | Property paths, e.g. `schema:knows/schema:name` | No | `SPARQL property paths are not supported yet`. |
 | `REDUCED` | Ignored | Accepted, but results are not deduplicated. Use `DISTINCT` if you need that. |
@@ -127,7 +128,7 @@ Everything the engine supports is read-only. There is no SPARQL Update surface a
 | The `a` keyword | Yes | Expands to `rdf:type`. |
 | Predicate-object lists, `?s p1 ?a ; p2 ?b` | Yes | Expanded by the parser into separate patterns. |
 | Plain and typed literals | Yes | Compared by lexical form; see the note below. |
-| Language-tagged literals, `"hello"@en` | Partly | The tag is dropped and only `"hello"` is matched. |
+| Language-tagged literals, `"hello"@en` | Yes | Matched by value and tag, against `object_string` and `object_language`. |
 | Blank nodes, `_:b` | No | Reported as an unknown prefix `_`. |
 | `BASE` and relative IRIs | No | `BASE` parses but is not applied; a relative IRI is matched literally, not resolved. |
 
@@ -141,9 +142,10 @@ A datatype is used only to decide which object column to compare against, never 
 | --- | --- | --- |
 | `=`, `!=`, `<`, `>`, `<=`, `>=` | Yes | |
 | `&&`, `\|\|`, `!` | Yes | |
+| `LANG`, `DATATYPE`, `LANGMATCHES` | Yes | Over an object variable; see [Language tags and datatypes](#language-tags-and-datatypes). |
 | GeoSPARQL `geof:` functions | Partly | The Simple Features relations, `geof:distance`, and the geometry constructors; see [GeoSPARQL](#geosparql). |
 | Arithmetic, `IN`, `EXISTS` | No | |
-| Functions such as `REGEX`, `STR`, `LANG`, `BOUND` | No | |
+| Functions such as `REGEX`, `STR`, `BOUND` | No | |
 
 Several `FILTER`s in one group are all applied, as if joined by `&&`.
 A `FILTER` over a variable no triple pattern binds is an error rather than a query that matches nothing.
@@ -164,6 +166,36 @@ FROM triples AS t0
 WHERE t0.predicate = 'https://schema.org/age'
   AND (COALESCE(t0.object_float, CAST(t0.object_integer AS DOUBLE), CAST(t0.object_byte AS DOUBLE)) >= 21
    AND COALESCE(t0.object_float, CAST(t0.object_integer AS DOUBLE), CAST(t0.object_byte AS DOUBLE)) < 65)
+```
+
+## Language tags and datatypes
+
+A projected object variable shows only the lexical form of a literal: `"My test datatype"@en` comes back as `My test datatype`, and `"1995-01-15"^^xsd:date` as `1995-01-15`. The tag and the datatype are stored beside the value, in the `object_language` and `object_type` columns (see [Data Layout](/sal/reference/data-layout/#rdf-triples)), and `LANG` and `DATATYPE` are how a query reads them. Both accept one variable bound in object position; a subject or predicate is never a literal, so calling either on one is an error.
+
+| Function | Becomes | Notes |
+| --- | --- | --- |
+| `LANG(?o)` | `CASE WHEN object_type IS NULL THEN NULL ELSE COALESCE(object_language, '') END` | The tag, `""` for a literal without one, and unbound for an IRI or blank node, as SPARQL specifies. |
+| `DATATYPE(?o)` | `object_type` | The datatype IRI; `rdf:langString` for a tagged literal, `xsd:string` for a plain one, unbound for an IRI or blank node. |
+| `LANGMATCHES(LANG(?o), "en")` | `(object_language = 'en' OR starts_with(object_language, 'en-'))` | RFC 4647 basic filtering, so `"en"` also matches `en-us`. The range is compared lower case, since tags are stored lower case. |
+| `LANGMATCHES(LANG(?o), "*")` | `object_language IS NOT NULL` | Any tagged literal. |
+
+`LANG` and `DATATYPE` can be projected with `AS` or compared in a `FILTER`; `LANGMATCHES` is a boolean and stands on its own in a `FILTER`. Only a `LANG` call is accepted as its first argument.
+
+```sparql
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?s ?label (LANG(?label) AS ?lang)
+WHERE {
+  ?s rdfs:label ?label .
+  FILTER(langMatches(LANG(?label), "en"))
+}
+```
+
+```sql
+SELECT t0.subject AS "s", COALESCE(...) AS "label", CASE WHEN t0.object_type IS NULL THEN NULL ELSE COALESCE(t0.object_language, '') END AS "lang"
+FROM triples AS t0
+WHERE t0.predicate = 'http://www.w3.org/2000/01/rdf-schema#label'
+  AND (t0.object_language = 'en' OR starts_with(t0.object_language, 'en-'))
 ```
 
 ## GeoSPARQL

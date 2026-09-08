@@ -23,7 +23,9 @@ import (
 // object_type keeps the datatype IRI the literal was written with, so a typed
 // literal round-trips back to RDF with its exact datatype even when its value
 // is stored in a typed column (or when no typed column fits and it is stored
-// as a string).
+// as a string). object_language keeps the language tag of an rdf:langString
+// literal, and is NULL for every other object, so a language-tagged literal
+// round-trips too.
 func GetSchemas() (*arrow.Schema, *iceberg.Schema, error) {
 	geoCRS, err := json.Marshal("OGC:CRS84")
 	if err != nil {
@@ -48,6 +50,7 @@ func GetSchemas() (*arrow.Schema, *iceberg.Schema, error) {
 			// column independent of the querying machine's timezone setting.
 			{Name: "object_time", Type: &arrow.TimestampType{Unit: arrow.Microsecond}, Nullable: true},
 			{Name: "object_type", Type: arrow.BinaryTypes.String, Nullable: true},
+			{Name: "object_language", Type: arrow.BinaryTypes.String, Nullable: true},
 			{Name: "triple_hash", Type: arrow.BinaryTypes.String, Nullable: false},
 		},
 		nil,
@@ -56,7 +59,7 @@ func GetSchemas() (*arrow.Schema, *iceberg.Schema, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	var icebergSchema = iceberg.NewSchemaWithIdentifiers(1, []int{11},
+	var icebergSchema = iceberg.NewSchemaWithIdentifiers(1, []int{12},
 		iceberg.NestedField{ID: 1, Name: "subject", Type: iceberg.PrimitiveTypes.String, Required: true},
 		iceberg.NestedField{ID: 2, Name: "predicate", Type: iceberg.PrimitiveTypes.String, Required: true},
 		iceberg.NestedField{ID: 3, Name: "object_string", Type: iceberg.PrimitiveTypes.String, Required: false},
@@ -69,7 +72,8 @@ func GetSchemas() (*arrow.Schema, *iceberg.Schema, error) {
 		iceberg.NestedField{ID: 8, Name: "object_float", Type: iceberg.PrimitiveTypes.Float64, Required: false},
 		iceberg.NestedField{ID: 9, Name: "object_time", Type: iceberg.PrimitiveTypes.Timestamp, Required: false},
 		iceberg.NestedField{ID: 10, Name: "object_type", Type: iceberg.PrimitiveTypes.String, Required: false},
-		iceberg.NestedField{ID: 11, Name: "triple_hash", Type: iceberg.PrimitiveTypes.String, Required: true},
+		iceberg.NestedField{ID: 11, Name: "object_language", Type: iceberg.PrimitiveTypes.String, Required: false},
+		iceberg.NestedField{ID: 12, Name: "triple_hash", Type: iceberg.PrimitiveTypes.String, Required: true},
 	)
 
 	return arrowSchema, icebergSchema, nil
@@ -92,8 +96,8 @@ func NewIcebergTableFromCfg(ctx context.Context, tableSchema *iceberg.Schema, ca
 
 	tableIdent := catalog.ToIdentifier(cfg.Namespace, "triples")
 	if tbl, err := cat.LoadTable(ctx, tableIdent); err == nil {
-		if _, ok := tbl.Schema().FindFieldByName("object_type"); !ok {
-			return nil, fmt.Errorf("the existing triples table was built by an older sal without the object_type column; run `sal clean --wipe` and `sal build` to rebuild it")
+		if _, ok := tbl.Schema().FindFieldByName("object_language"); !ok {
+			return nil, fmt.Errorf("the existing triples table was built by an older sal without the object_language column; run `sal clean --wipe` and `sal build` to rebuild it")
 		}
 		slog.Info("Loaded existing Iceberg table")
 		return tbl, nil

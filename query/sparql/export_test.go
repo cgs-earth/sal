@@ -21,6 +21,7 @@ func TestExportSQLSelectsEveryUnionColumn(t *testing.T) {
 	require.Contains(t, sql, "ST_AsText(object_geometry) AS object_wkt")
 	require.Contains(t, sql, "object_string")
 	require.Contains(t, sql, "object_type")
+	require.Contains(t, sql, "object_language")
 	require.NotContains(t, sql, "triple_hash")
 }
 

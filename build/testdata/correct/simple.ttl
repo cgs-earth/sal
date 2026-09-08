@@ -11,10 +11,10 @@
 
 <MyClass> 
     a rdfs:Class ; 
-    rdfs:label "My test class" ;
-    rdfs:comment "Test class for integration tests" .
+    rdfs:label "My test class"@en ;
+    rdfs:comment "Test class for integration tests"@en .
 
 <MyDatatype>
     a rdfs:Datatype ;
-    rdfs:label "My test datatype" ;
-    rdfs:comment "Test datatype for integration tests" .
+    rdfs:label "My test datatype"@en ;
+    rdfs:comment "Test datatype for integration tests"@en .

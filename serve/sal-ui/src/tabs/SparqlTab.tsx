@@ -34,8 +34,9 @@ type Sample = { name: string; query: string }
 
 /*
  * Starter queries. The `/sparql` endpoint translates SPARQL to DuckDB SQL and
- * only understands basic triple patterns, FILTER comparisons, DISTINCT and
- * LIMIT, so every sample stays inside that subset.
+ * only understands basic triple patterns, FILTER comparisons, the LANG and
+ * DATATYPE accessors, DISTINCT and LIMIT, so every sample stays inside that
+ * subset.
  */
 const SAMPLES: Sample[] = [
   {
@@ -100,6 +101,16 @@ WHERE {
 SELECT ?subject ?label
 WHERE {
   ?subject rdfs:label ?label .
+}
+LIMIT 50`,
+  },
+  {
+    name: 'Labels by language',
+    query: `${PREFIXES}
+SELECT ?subject ?label (LANG(?label) AS ?lang)
+WHERE {
+  ?subject rdfs:label ?label .
+  FILTER(langMatches(LANG(?label), "en"))
 }
 LIMIT 50`,
   },

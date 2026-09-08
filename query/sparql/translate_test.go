@@ -422,3 +422,134 @@ WHERE {
 
 	require.ErrorContains(t, err, "must be a geo:wktLiteral")
 }
+
+func TestToSQLProjectsTheLanguageTagAndDatatype(t *testing.T) {
+	query, err := ToSQL(`
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?s ?label (LANG(?label) AS ?lang) (DATATYPE(?label) AS ?type)
+WHERE {
+  ?s rdfs:label ?label .
+}`)
+
+	require.NoError(t, err)
+	require.Equal(t, `SELECT t0.subject AS "s", `+objectProjection("t0")+` AS "label", CASE WHEN t0.object_type IS NULL THEN NULL ELSE COALESCE(t0.object_language, '') END AS "lang", t0.object_type AS "type"
+FROM triples AS t0
+WHERE t0.predicate = 'http://www.w3.org/2000/01/rdf-schema#label'`, query)
+}
+
+func TestToSQLFiltersOnTheLanguageTag(t *testing.T) {
+	query, err := ToSQL(`
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?label
+WHERE {
+  ?s rdfs:label ?label .
+  FILTER(lang(?label) = "en")
+}`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "AND CASE WHEN t0.object_type IS NULL THEN NULL ELSE COALESCE(t0.object_language, '') END = 'en'")
+}
+
+func TestToSQLFiltersOnTheDatatype(t *testing.T) {
+	query, err := ToSQL(`
+PREFIX schema: <https://schema.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+SELECT ?date
+WHERE {
+  ?s schema:birthDate ?date .
+  FILTER(DATATYPE(?date) = xsd:date)
+}`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "AND t0.object_type = 'http://www.w3.org/2001/XMLSchema#date'")
+}
+
+// LANGMATCHES follows RFC 4647 basic filtering: a range matches a tag equal to
+// it or extending it with a subtag, and "*" matches any tagged literal. The
+// range is lowered since the table stores tags lower case.
+func TestToSQLTranslatesLangMatches(t *testing.T) {
+	query, err := ToSQL(`
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?label
+WHERE {
+  ?s rdfs:label ?label .
+  FILTER(langMatches(LANG(?label), "EN"))
+}`)
+	require.NoError(t, err)
+	require.Contains(t, query, "AND (t0.object_language = 'en' OR starts_with(t0.object_language, 'en-'))")
+
+	query, err = ToSQL(`
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?label
+WHERE {
+  ?s rdfs:label ?label .
+  FILTER(langMatches(LANG(?label), "*"))
+}`)
+	require.NoError(t, err)
+	require.Contains(t, query, "AND t0.object_language IS NOT NULL")
+}
+
+func TestToSQLMatchesALanguageTaggedLiteralByValueAndTag(t *testing.T) {
+	query, err := ToSQL(`
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?s
+WHERE {
+  ?s rdfs:label "My test datatype"@EN .
+}`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "AND t0.object_string = 'My test datatype'")
+	require.Contains(t, query, "AND t0.object_language = 'en'")
+}
+
+func TestToSQLRejectsLangOnASubjectVariable(t *testing.T) {
+	_, err := ToSQL(`
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?s
+WHERE {
+  ?s rdfs:label ?label .
+  FILTER(LANG(?s) = "en")
+}`)
+
+	require.ErrorContains(t, err, "LANG(?s) is not defined: ?s is bound as a subject")
+}
+
+func TestToSQLRejectsLangMatchesWithoutALangCall(t *testing.T) {
+	_, err := ToSQL(`
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?s
+WHERE {
+  ?s rdfs:label ?label .
+  FILTER(langMatches(?label, "en"))
+}`)
+
+	require.ErrorContains(t, err, "the first argument of LANGMATCHES must be LANG(?variable)")
+}
+
+func TestToSQLStillRejectsAggregatesAndOtherProjectionExpressions(t *testing.T) {
+	_, err := ToSQL(`
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT (COUNT(?s) AS ?n)
+WHERE {
+  ?s rdfs:label ?label .
+}`)
+	require.ErrorContains(t, err, `SPARQL function "count" is not supported yet`)
+
+	_, err = ToSQL(`
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT (?s AS ?resource)
+WHERE {
+  ?s rdfs:label ?label .
+}`)
+	require.ErrorContains(t, err, "SPARQL projection expressions other than a function call")
+}
