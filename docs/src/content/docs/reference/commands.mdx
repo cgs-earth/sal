@@ -138,6 +138,7 @@ Important flags:
 - `--prefix-maps`: apply prefix mappings as `source=target` entries or source/target pairs.
 - `--format`: choose `iceberg` or `nq`; defaults to `iceberg`.
 - `--no-cache`: resolve every vocabulary from its source instead of from the versions pinned in `.sal/config.jsonld`.
+- `--yes` (`-y`): include a prefix whose namespace does not end in `/` or `#` without asking.
 
 `sal validate` reads the project's pinned vocabulary versions but never writes them; only `sal build` records a pin.
 Run outside a SAL project, it resolves vocabularies from their sources with nothing pinned at all.
@@ -145,6 +146,15 @@ Run outside a SAL project, it resolves vocabularies from their sources with noth
 An undefined term is reported with the file and the line number it appears on:
 
 ![sal validate passing on one directory and reporting an undefined term in another](/sal/demos/sal-validate.gif)
+
+The prefixes the source files declare are checked as well as the terms used from them:
+
+- A namespace that ends in neither `/` nor `#`, such as `<https://foo.com>`, is almost always a mistake, since a term is joined straight onto it (`https://foo.comname` rather than `https://foo.com/name`).
+  It is not invalid RDF, so validation warns, names the files that declare it, and asks whether to include it.
+  Answer `y` to include it as written, or pass `--yes` to include every such prefix without being asked; anything else fails the run.
+- The same vocabulary declared under two spellings that differ only by `http`/`https` or by a trailing `/` or `#`, such as `<http://schema.org/>` in one file and `<https://schema.org/>` in another, is an error.
+  Terms written against the two never compare equal, so the vocabulary would end up in the data product under two IRIs.
+  Declare the same namespace everywhere, or fold the spellings together with `--prefix-maps`.
 
 Validating a file that references a SAL module clones and builds that module so its vocabulary can be checked.
 `sal validate` does not run module tasks; only `sal run` does.
@@ -166,6 +176,7 @@ Important flags:
 - `--format`: choose `iceberg` or `nq`; defaults to `iceberg`.
 - `--force`: build even when the Git working tree has uncommitted changes.
 - `--no-cache`: resolve every vocabulary from its source again and re-pin it in `.sal/config.jsonld`.
+- `--yes` (`-y`): include a prefix whose namespace does not end in `/` or `#` without asking, as for [`sal validate`](#sal-validate).
 
 `sal build` pins the exact version of every vocabulary the project resolves against, so a later build validates against the same versions this one did.
 A build that pinned something new writes `.sal/config.jsonld`, which belongs in Git; commit it before the next build, which otherwise refuses to run against a dirty working tree.
