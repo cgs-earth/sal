@@ -38,6 +38,15 @@ concurrency:
     ${{ github.workflow }}-${{ github.ref_name }}-${{github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
+env:
+  # Pinned in both jobs below and installed from the GitHub release rather than
+  # the charm apt repo, which serves whatever is newest. v0.12.0 renders nothing:
+  # it cancels the recording context before running ffmpeg on it, so ffmpeg is
+  # killed at once, the failure is only logged, and vhs exits 0 with no GIF,
+  # which the upload step then reports as "No files were found". Bump this only
+  # after recording every tape with the new version and checking the GIFs.
+  VHS_VERSION: 0.11.0
+
 jobs:
   # The only job a branch push runs. Parsing the tapes needs the vhs binary but not
   # ttyd, ffmpeg, or sal, so this is a single small download rather than an apt
@@ -48,14 +57,13 @@ jobs:
       - name: Checkout the repository
         uses: actions/checkout@v4
 
-      # Pinned rather than taken from the charm apt repo: this needs one file, and
-      # apt would cost more than the check itself.
+      # This needs one file, and apt would cost more than the check itself.
       - name: Install VHS
         run: |
           curl -fsSL -o /tmp/vhs.tar.gz \
-            https://github.com/charmbracelet/vhs/releases/download/v0.11.0/vhs_0.11.0_Linux_x86_64.tar.gz
+            "https://github.com/charmbracelet/vhs/releases/download/v${VHS_VERSION}/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
           sudo tar -xzf /tmp/vhs.tar.gz --strip-components=1 -C /usr/local/bin \
-            vhs_0.11.0_Linux_x86_64/vhs
+            "vhs_${VHS_VERSION}_Linux_x86_64/vhs"
           vhs --version
 
       - name: Check the tapes parse
@@ -141,6 +149,10 @@ jobs:
       # happens to have, which changes the column count the tapes are sized against.
       # Chrome, which VHS renders through, is already on the runner image.
       #
+      # VHS itself is the pinned release the check job installs, not the charm apt
+      # package: apt serves the newest version, and a new one can stop the recordings
+      # without failing the step (see VHS_VERSION above).
+      #
       # Not charmbracelet/vhs-action: its ffmpeg installer looks for a
       # `ffmpeg-n5.1-*-linux64-gpl-5.1.tar.xz` asset in the latest BtbN/FFmpeg-Builds
       # release, and BtbN no longer publishes 5.1 builds, so it fails with "Failed to
@@ -148,11 +160,12 @@ jobs:
       # it wants is gone from the release it reads.
       - name: Install VHS and its dependencies
         run: |
-          sudo mkdir -p /etc/apt/keyrings
-          curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
-          echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
           sudo apt-get update
-          sudo apt-get install -y vhs ffmpeg ttyd fonts-jetbrains-mono
+          sudo apt-get install -y ffmpeg ttyd fonts-jetbrains-mono
+          curl -fsSL -o /tmp/vhs.tar.gz \
+            "https://github.com/charmbracelet/vhs/releases/download/v${VHS_VERSION}/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
+          sudo tar -xzf /tmp/vhs.tar.gz --strip-components=1 -C /usr/local/bin \
+            "vhs_${VHS_VERSION}_Linux_x86_64/vhs"
           vhs --version
           ttyd --version
 
@@ -166,6 +179,11 @@ jobs:
         env:
           SAL_DEMO_SKIP_BUILD: "1"
         run: ./docs/demos/generate.sh ${{ matrix.tape }}
+
+      # vhs exits 0 when ffmpeg fails, so a tape that recorded nothing would only
+      # surface as an empty artifact. Checking here names the tape instead.
+      - name: Check the GIF was written
+        run: test -s "docs/public/demos/sal-${{ matrix.tape }}.gif"
 
       # upload-artifact v4 artifacts are immutable, so each tape needs its own name.
       # push_pages.yml merges them back together with a `demo-gifs-*` pattern.
