@@ -84,6 +84,13 @@ Commands that need credentials or that block — `push`, `clone`, `pull`, `uploa
 - The demo project's Git remote is `https://github.com/cgs-earth/sal-demo.git`. SAL
   turns that remote into the base IRI for relative subjects, so it is visible in
   `sal query` output and is kept short on purpose.
+- CI pins VHS to the `VHS_VERSION` in `demos.yml` and installs it from the GitHub
+  release in both jobs, never from the charm apt repo, which serves whatever is newest.
+  VHS v0.12.0 records every tape and then writes no GIF: it cancels the recording
+  context before it runs ffmpeg on that context, so ffmpeg is killed at once, the
+  failure is only logged, and `vhs` still exits 0. The record job checks that each GIF
+  exists so a regression like that fails the tape rather than the artifact upload.
+  Record every tape locally and look at the GIFs before bumping the pin.
 - `vhs validate "docs/demos/*.tape"` checks tape syntax without recording anything.
 - Tapes wait for the prompt with `Wait` rather than sleeping for a guessed duration,
   so a slow runner cannot finish a command after its `Sleep` elapsed and record the
