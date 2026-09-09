@@ -173,3 +173,21 @@ export async function fetchExtent(signal?: AbortSignal): Promise<GeoJSONFeature>
   if (!response.ok) throw await failure(response)
   return (await response.json()) as GeoJSONFeature
 }
+
+/** Where `sal serve` answers with the STAC Collection `sal build` writes for the triples table. */
+export const STAC_COLLECTION_PATH = '/stac/triples/collection.json'
+
+/**
+ * The collection opened in the hosted STAC Browser, which reads any catalog it
+ * is handed under /external/ with the "://" of the URL collapsed to ":/", and
+ * `.asset` preselects the Iceberg metadata asset.
+ */
+export function stacViewerURL(origin: string): string {
+  return `https://browser.moregeo.it/external/${origin.replace('://', ':/')}${STAC_COLLECTION_PATH}?.asset=asset-iceberg`
+}
+
+/** Whether a STAC catalog has been built for the table, so links to it are offered only when it answers. */
+export async function hasStacCatalog(signal?: AbortSignal): Promise<boolean> {
+  const response = await fetch(STAC_COLLECTION_PATH, { method: 'HEAD', signal })
+  return response.ok
+}

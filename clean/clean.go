@@ -266,12 +266,36 @@ func wipe() error {
 		return err
 	}
 
+	stacDir, err := pkg.SalStacDir()
+	if err != nil {
+		return err
+	}
+	if err := removeStacCatalog(stacDir); err != nil {
+		return err
+	}
+
 	blobsDir, err := pkg.SalBlobsDir()
 	if err != nil {
 		return err
 	}
 
 	return removeProjectConfig(configPath, blobsDir)
+}
+
+// removeStacCatalog deletes the STAC catalog build wrote. It describes the
+// table by its current metadata file and snapshot, so it cannot outlive the
+// data product it describes.
+func removeStacCatalog(stacDir string) error {
+	if _, err := os.Stat(stacDir); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(stacDir); err != nil {
+		return err
+	}
+	slog.Info("Removed the STAC catalog at " + stacDir)
+	return nil
 }
 
 // removeProjectConfig deletes .sal/config.jsonld -- the project ontology and

@@ -267,9 +267,21 @@
   border-color: var(--surface2);
 }
 
-.button:disabled {
+.button:disabled,
+a.button[aria-disabled='true'] {
   color: var(--overlay0);
   cursor: not-allowed;
+}
+
+/* A link styled as a button, for a document that opens in another tab. */
+a.button {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+a.button[aria-disabled='true'] {
+  pointer-events: none;
 }
 
 .button.copied,
@@ -414,6 +426,16 @@ kbd {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+}
+
+.table-links {
+  display: flex;
+  gap: 6px;
+}
+
+.button.small {
+  padding: 3px 10px;
+  font-size: 12px;
 }
 
 .table-path code {

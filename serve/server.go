@@ -9,11 +9,13 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/cgs-earth/sal/build"
 	"github.com/cgs-earth/sal/pkg"
 	salsparql "github.com/cgs-earth/sal/query/sparql"
 	"github.com/cgs-earth/sal/salmodule"
@@ -35,11 +37,12 @@ type UIRunner interface {
 
 // Serve starts a read-only SPARQL Protocol HTTP endpoint backed by DuckDB, plus
 // the /blobs endpoint serving the vocabulary and imported ontology documents
-// pinned under blobDir.
-func Serve(ctx context.Context, addr string, runner salsparql.DuckDBRunner, blobDir string, withUI bool) error {
-	handler := NewEndpoint(runner, blobDir)
+// pinned under blobDir and the /stac endpoint serving the STAC catalog build
+// wrote under stacDir.
+func Serve(ctx context.Context, addr string, runner salsparql.DuckDBRunner, blobDir string, stacDir string, withUI bool) error {
+	handler := NewEndpoint(runner, blobDir, stacDir)
 	if withUI {
-		ui, err := NewEndpointWithUI(runner, blobDir)
+		ui, err := NewEndpointWithUI(runner, blobDir, stacDir)
 		if err != nil {
 			return err
 		}
@@ -56,9 +59,9 @@ func Serve(ctx context.Context, addr string, runner salsparql.DuckDBRunner, blob
 		}
 	}()
 	if withUI {
-		pkg.Infof("Serving the SAL UI at http://localhost%s/ and SPARQL endpoint at http://localhost%s/sparql\n", addr, addr)
+		pkg.Infof("Serving the SAL UI at http://localhost%s/, SPARQL endpoint at http://localhost%s/sparql, and STAC catalog at http://localhost%s/stac/catalog.json\n", addr, addr, addr)
 	} else {
-		pkg.Infof("Serving SPARQL endpoint at http://localhost%s/sparql\n", addr)
+		pkg.Infof("Serving SPARQL endpoint at http://localhost%s/sparql and STAC catalog at http://localhost%s/stac/catalog.json\n", addr, addr)
 	}
 	err := server.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
@@ -70,20 +73,25 @@ func Serve(ctx context.Context, addr string, runner salsparql.DuckDBRunner, blob
 // NewEndpoint returns an HTTP handler for the SPARQL Protocol query operation,
 // at /sparql for the current snapshot and at /v{snapshot}/sparql for an earlier
 // one, plus the /blobs endpoint serving the vocabulary and imported ontology
-// documents pinned under blobDir.
-func NewEndpoint(runner salsparql.SnapshotRunner, blobDir string) http.Handler {
+// documents pinned under blobDir and the /stac endpoint serving the STAC
+// catalog build wrote under stacDir.
+func NewEndpoint(runner salsparql.SnapshotRunner, blobDir string, stacDir string) http.Handler {
 	mux := http.NewServeMux()
 	handler := sparqlHandler{runner: runner}
 	mux.Handle("/", snapshotSparqlHandler{runner: runner, fallback: handler})
 	mux.Handle("/sparql", handler)
 	mux.Handle("/blobs/", blobHandler{dir: blobDir})
+	stac := stacHandler{dir: stacDir}
+	mux.Handle("/stac", stac)
+	mux.Handle("/stac/", stac)
 	return mux
 }
 
 // NewEndpointWithUI returns an HTTP handler serving the embedded SAL UI at / along
-// with the SPARQL endpoint, the JSON APIs the UI reads, and the /blobs endpoint
-// serving the vocabulary and imported ontology documents pinned under blobDir.
-func NewEndpointWithUI(runner UIRunner, blobDir string) (http.Handler, error) {
+// with the SPARQL endpoint, the JSON APIs the UI reads, the /blobs endpoint
+// serving the vocabulary and imported ontology documents pinned under blobDir,
+// and the /stac endpoint serving the STAC catalog under stacDir.
+func NewEndpointWithUI(runner UIRunner, blobDir string, stacDir string) (http.Handler, error) {
 	ui, err := uiHandler()
 	if err != nil {
 		return nil, err
@@ -103,6 +111,10 @@ func NewEndpointWithUI(runner UIRunner, blobDir string) (http.Handler, error) {
 	// Registered so that ServeMux answers the tab's own URL rather than redirecting
 	// it to /blobs/, which is the endpoint's prefix and not a tab.
 	mux.Handle("/blobs", browserRoute{api: blobs, ui: ui})
+	// The catalog has no UI tab, so it is the API whatever asked for it.
+	stac := stacHandler{dir: stacDir}
+	mux.Handle("/stac", stac)
+	mux.Handle("/stac/", stac)
 	// The versioned SPARQL route has no UI tab of its own, so it is the API
 	// whatever asked for it; everything else at the root is the app.
 	mux.Handle("/", snapshotSparqlHandler{runner: runner, fallback: ui})
@@ -155,6 +167,65 @@ func (h blobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// keeps http.ServeContent from sniffing the content and reporting it as
 	// text/plain
 	w.Header().Set("Content-Type", "application/octet-stream")
+	http.ServeContent(w, r, name, info.ModTime(), file)
+}
+
+// stacHandler serves the STAC catalog `sal build` writes under .sal/data/stac:
+// the catalog at /stac/catalog.json, which /stac and /stac/ also answer with,
+// and the collection of the triples table beneath it. The documents are served
+// as written, so the collection's iceberg:metadata_location is the file URL of
+// the table's metadata on the machine running the server, which a reader on the
+// same machine can pass straight to DuckDB's iceberg_scan(). CORS is open, the
+// same as the SPARQL endpoint, so a STAC browser on another origin can read it.
+type stacHandler struct {
+	dir string
+}
+
+func (h stacHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Accept")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD, OPTIONS")
+		http.Error(w, "the STAC endpoint only supports GET requests", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// path.Clean resolves any ".." against the endpoint's root, so nothing the
+	// client sends can name a file outside the catalog directory
+	name := strings.TrimPrefix(path.Clean("/"+strings.TrimPrefix(r.URL.Path, "/stac")), "/")
+	if name == "" {
+		name = build.StacCatalogFile
+	}
+	if path.Ext(name) != ".json" {
+		http.NotFound(w, r)
+		return
+	}
+
+	file, err := os.Open(filepath.Join(h.dir, filepath.FromSlash(name)))
+	if os.IsNotExist(err) {
+		http.Error(w, "no STAC catalog has been built for this data product; run `sal build` to write one", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer func() {
+		if err := file.Close(); err != nil {
+			slog.Error("failed to close STAC document", "error", err)
+		}
+	}()
+	info, err := file.Stat()
+	if err != nil || info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
 	http.ServeContent(w, r, name, info.ModTime(), file)
 }
 
