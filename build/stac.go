@@ -271,7 +271,7 @@ func stacCollectionOf(ctx context.Context, tbl *table.Table, project StacProject
 		StacExtensions: []string{stacProjectionExtension, stacTableExtension, StacIcebergExtension},
 		ID:             tbl.Identifier()[len(tbl.Identifier())-1],
 		Title:          project.Title,
-		Description:    fmt.Sprintf("Every RDF statement of %s as one row per triple, with the object split across one column per datatype, built by SAL from %s.", project.Name, project.Remote),
+		Description:    fmt.Sprintf("Every RDF statement of %s as one row per triple, with the object split across one column per datatype; built by SAL from %s", project.Name, project.Remote),
 		License:        "other",
 		Keywords:       []string{"rdf", "triples", "iceberg", "sal"},
 		Providers:      []stacProvider{{Name: project.Owner, Roles: []string{"producer"}, URL: project.Remote}},
