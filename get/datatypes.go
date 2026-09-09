@@ -6,15 +6,21 @@ import (
 	salsparql "github.com/cgs-earth/sal/query/sparql"
 )
 
-type datatypesCmd struct{}
+type datatypesCmd struct {
+	All bool `arg:"--all" help:"list datatypes from every namespace, not only the ones named under the project base"`
+}
 
 func (cmd *datatypesCmd) Run() error {
-	result, err := salsparql.RunLookup(salsparql.DatatypesSQL())
+	prefix, err := subjectPrefix(cmd.All)
+	if err != nil {
+		return err
+	}
+	result, err := salsparql.RunLookup(salsparql.DatatypesSQL(prefix))
 	if err != nil {
 		return err
 	}
 	if len(result.Rows) == 0 {
-		fmt.Println("no RDF datatypes found; the data product declares no rdfs:Datatype resources")
+		noneFound("RDF datatypes", "the data product declares no rdfs:Datatype resources", prefix)
 		return nil
 	}
 	header, rows := dropEmptyColumns(result.Header, result.Rows)

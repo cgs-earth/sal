@@ -265,6 +265,15 @@ Looks up the RDF resources inside a built data product.
 Where `sal query` is about the Iceberg table that stores the triples, `sal get` is about the RDF the table describes.
 `sal get vocabularies` is the exception: it reads the pinned vocabulary and project ontology nodes in `.sal/config.jsonld` rather than the built data product.
 
+By default, `classes`, `datatypes`, `instances`, `properties`, and `shapes` list only the resources the project itself defines: the subjects named under the project base, which comes from the Git remote the same way `sal build` resolves the project's own relative terms.
+An imported ontology or a module task contributes resources under its own namespace, and those are left out until `--all` is given:
+
+```sh
+sal get instances --all
+```
+
+`statements` and `vocabularies` always list every namespace and have no `--all` flag.
+
 ### `sal get classes`
 
 Lists every class the data product declares, with the annotations each one carries:
@@ -281,6 +290,7 @@ https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#Task         Task      
 
 A class is a subject declared to be an `rdfs:Class` or an `owl:Class`, so a data product that only types its resources with a vocabulary it does not itself carry lists none; `sal get instances` is what reports the classes resources are typed with.
 A class declared to be both is listed once.
+Only the classes named under the project base are listed unless `--all` is given, so the classes of an imported ontology, like the SAL module vocabulary above, only appear with `sal get classes --all`.
 `rdfs:label` and `rdfs:comment` are optional; a column that no class states is left out of the table entirely.
 
 ### `sal get datatypes`
@@ -298,6 +308,7 @@ https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#outbo...  Outbound Endp
 ```
 
 A datatype is a subject declared to be an `rdfs:Datatype`, so a data product that only holds instance data lists none.
+Only the datatypes named under the project base are listed unless `--all` is given, so the datatypes of an imported ontology, like the SAL module vocabulary above, only appear with `sal get datatypes --all`.
 `rdfs:label` and `rdfs:comment` are optional; a column that no datatype states is left out of the table entirely.
 
 Note that this lists the datatypes a data product *defines*, not the datatypes its literals are *tagged with*.
@@ -305,21 +316,35 @@ The built triples table stores the lexical value of a literal rather than its da
 
 ### `sal get instances`
 
-Lists every resource the data product instantiates, with the class it is typed with:
+Lists the resources the project instantiates, with the class each one is typed with:
 
 ```sh
 sal get instances
 ```
 
 ```
-instance                                        class
-https://geoconnex.us/ref/dams/1078              http://www.w3.org/ns/dcat#Dataset
-https://geoconnex.us/ref/dams/1079              http://www.w3.org/ns/dcat#Dataset
-https://example.org/org/reclamation             https://schema.org/Organization
+instance                                              class
+https://github.com/cgs-earth/sal-demo/Andrew          https://schema.org/Person
+https://github.com/cgs-earth/sal-demo/MyRandPeople    salmodule://github.com/cgs-earth/sample-salmodule/RandomPeople
 ```
 
 Where `sal get classes` lists the classes the data product defines, this lists the resources typed with a class, whether or not the class is defined in the data product.
 A resource typed with several classes is listed once per class.
+
+Only the resources named under the project base are listed by default.
+The resources a module task materialized, or an imported data product carries, are named under their own namespaces and only appear with `--all`:
+
+```sh
+sal get instances --all
+```
+
+```
+instance                                              class
+https://geoconnex.us/ref/states/66                    http://schema.org/State
+https://geoconnex.us/ref/states/69                    http://schema.org/State
+https://github.com/cgs-earth/sal-demo/Andrew          https://schema.org/Person
+https://github.com/cgs-earth/sal-demo/MyRandPeople    salmodule://github.com/cgs-earth/sample-salmodule/RandomPeople
+```
 
 The class is not required to be declared an `rdfs:Class` or an `owl:Class` in the data product, since a data product commonly types its resources with a vocabulary it does not itself carry.
 What is left out is the other direction: a subject that is itself an `rdfs:Class`, `owl:Class`, `rdf:Property`, `owl:ObjectProperty`, `owl:DatatypeProperty`, `owl:AnnotationProperty`, `rdfs:Datatype`, or `owl:Ontology` describes the schema rather than instantiating it, so it is not reported as an instance.
@@ -341,6 +366,7 @@ https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#...  http://www.w3.org/
 
 A property is a subject typed `rdf:Property`, `owl:ObjectProperty`, `owl:DatatypeProperty`, or `owl:AnnotationProperty`, so `type` is what the property was declared to be rather than something inferred from how it is used.
 A property declared to be more than one of them is listed once per type, the way `sal get instances` lists a resource once per class it is typed with.
+Only the properties named under the project base are listed unless `--all` is given, so the properties of an imported ontology, like the SAL module vocabulary above, only appear with `sal get properties --all`.
 
 Note that this lists the properties a data product *defines*, not the predicates its statements *use*, so a data product that only holds instance data lists none.
 It is also unrelated to `sal query --info properties`, which reports the properties of the Iceberg table rather than the RDF the table holds.
@@ -367,7 +393,7 @@ A shape is a subject typed `sh:NodeShape` or `sh:PropertyShape`, so `rdf:type` i
 A shape declared to be both is listed once per type, and a property shape written inline as a blank node is listed under the blank node identifier it was given.
 
 A shape the project defines itself is named under the project base, which comes from the Git remote, the same way `sal build` resolves any other relative term the project writes.
-A shape that arrives from an imported ontology keeps the namespace that ontology gave it.
+A shape that arrives from an imported ontology keeps the namespace that ontology gave it, and is listed only with `sal get shapes --all`.
 
 `rdfs:label`, `rdfs:comment`, and `sh:targetClass` are all optional; a column that no shape states is left out of the table entirely.
 `sh:targetClass` is the one a shape can state more than once, and a shape targeting several classes is listed once per class, the way `sal get instances` lists a resource once per class it is typed with.
