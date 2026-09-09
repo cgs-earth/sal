@@ -59,7 +59,10 @@ var vocabularyClassIRIs = slices.Concat(
 //
 // The annotation columns are named with the prefixed form of the predicate
 // each one reports, the way `sal get shapes` names its columns.
-func ClassesSQL() string {
+//
+// subjectPrefix restricts the listing to the classes named under it, the way
+// every lookup takes one; see subjectPrefixFilter.
+func ClassesSQL(subjectPrefix string) string {
 	return fmt.Sprintf(`
 SELECT
 	classes.subject AS class,
@@ -73,7 +76,7 @@ LEFT JOIN triples AS comments
 	ON comments.subject = classes.subject
 	AND comments.predicate = '%s'
 WHERE classes.predicate = '%s'
-	AND %s IN ('%s', '%s')
+	AND %s IN ('%s', '%s')%s
 GROUP BY class
 ORDER BY class`,
 		bindingExpr("labels", "object"),
@@ -83,7 +86,23 @@ ORDER BY class`,
 		RDFTypeIRI,
 		bindingExpr("classes", "object"),
 		RDFSClassIRI,
-		OWLClassIRI)
+		OWLClassIRI,
+		subjectPrefixFilter("classes", subjectPrefix))
+}
+
+// subjectPrefixFilter is the WHERE clause every resource lookup appends to
+// restrict the subjects it lists to the ones named under a prefix, which is
+// how `sal get` lists only the resources the project itself defines: its own
+// resources are named under the project base, and everything an import or a
+// module contributes keeps the namespace it arrived with. An empty prefix
+// means no filter, which is what a lookup's --all flag asks for. The prefix is
+// matched with starts_with rather than LIKE so an IRI containing % or _ is
+// matched literally.
+func subjectPrefixFilter(alias, subjectPrefix string) string {
+	if subjectPrefix == "" {
+		return ""
+	}
+	return fmt.Sprintf("\n\tAND starts_with(%s.subject, %s)", alias, sqlString(subjectPrefix))
 }
 
 // DatatypesSQL lists every resource the data product declares to be an
@@ -91,8 +110,9 @@ ORDER BY class`,
 // annotations are optional, so they are left joined and come back empty for a
 // datatype that does not state them. The annotation columns are named with the
 // prefixed form of the predicate each one reports, the way `sal get classes`
-// and `sal get shapes` name theirs.
-func DatatypesSQL() string {
+// and `sal get shapes` name theirs. subjectPrefix restricts the listing to the
+// datatypes named under it; see subjectPrefixFilter.
+func DatatypesSQL(subjectPrefix string) string {
 	return fmt.Sprintf(`
 SELECT
 	datatypes.subject AS datatype,
@@ -106,7 +126,7 @@ LEFT JOIN triples AS comments
 	ON comments.subject = datatypes.subject
 	AND comments.predicate = '%s'
 WHERE datatypes.predicate = '%s'
-	AND %s = '%s'
+	AND %s = '%s'%s
 GROUP BY datatype
 ORDER BY datatype`,
 		bindingExpr("labels", "object"),
@@ -115,7 +135,8 @@ ORDER BY datatype`,
 		RDFSCommentIRI,
 		RDFTypeIRI,
 		bindingExpr("datatypes", "object"),
-		RDFSDatatypeIRI)
+		RDFSDatatypeIRI,
+		subjectPrefixFilter("datatypes", subjectPrefix))
 }
 
 // StatementsSQL lists the statements of the data product one per row, with the
@@ -158,8 +179,9 @@ ORDER BY predicate, object`, bindingExpr("triples", "object"), sqlString(subject
 // commonly types its resources with a vocabulary it does not carry. What is
 // filtered out instead is the other direction: a subject that is itself a
 // class, property, datatype, or ontology describes the schema and is not an
-// instance of it.
-func InstancesSQL() string {
+// instance of it. subjectPrefix restricts the listing to the instances named
+// under it; see subjectPrefixFilter.
+func InstancesSQL(subjectPrefix string) string {
 	return fmt.Sprintf(`
 SELECT DISTINCT
 	instances.subject AS instance,
@@ -171,13 +193,14 @@ WHERE instances.predicate = '%s'
 		FROM triples AS vocabulary
 		WHERE vocabulary.predicate = '%s'
 			AND %s IN (%s)
-	)
+	)%s
 ORDER BY class, instance`,
 		bindingExpr("instances", "object"),
 		RDFTypeIRI,
 		RDFTypeIRI,
 		bindingExpr("vocabulary", "object"),
-		quotedIRIList(vocabularyClassIRIs))
+		quotedIRIList(vocabularyClassIRIs),
+		subjectPrefixFilter("instances", subjectPrefix))
 }
 
 // PropertiesSQL lists every resource the data product declares to be a
@@ -186,19 +209,22 @@ ORDER BY class, instance`,
 // owl:AnnotationProperty, so the type it is reported with is the object of that
 // statement; a property declared to be more than one of them is listed once per
 // type, the way `sal get instances` lists a resource once per class.
-func PropertiesSQL() string {
+// subjectPrefix restricts the listing to the properties named under it; see
+// subjectPrefixFilter.
+func PropertiesSQL(subjectPrefix string) string {
 	return fmt.Sprintf(`
 SELECT DISTINCT
 	properties.subject AS property,
 	%s AS type
 FROM triples AS properties
 WHERE properties.predicate = '%s'
-	AND %s IN (%s)
+	AND %s IN (%s)%s
 ORDER BY property, type`,
 		bindingExpr("properties", "object"),
 		RDFTypeIRI,
 		bindingExpr("properties", "object"),
-		quotedIRIList(propertyClassIRIs))
+		quotedIRIList(propertyClassIRIs),
+		subjectPrefixFilter("properties", subjectPrefix))
 }
 
 // quotedIRIList renders IRIs as the comma separated SQL string literals a
@@ -227,7 +253,10 @@ func quotedIRIList(iris []string) string {
 // named with the prefixed form of that predicate, so the table says which term
 // each value was read from rather than leaving `label` to stand for whichever
 // of the several labelling predicates a vocabulary offers.
-func ShapesSQL() string {
+//
+// subjectPrefix restricts the listing to the shapes named under it; see
+// subjectPrefixFilter.
+func ShapesSQL(subjectPrefix string) string {
 	return fmt.Sprintf(`
 SELECT
 	shapes.subject AS shape,
@@ -246,7 +275,7 @@ LEFT JOIN triples AS targets
 	ON targets.subject = shapes.subject
 	AND targets.predicate = '%s'
 WHERE shapes.predicate = '%s'
-	AND %s IN ('%s', '%s')
+	AND %s IN ('%s', '%s')%s
 GROUP BY shape, "rdf:type", "sh:targetClass"
 ORDER BY shape, "rdf:type", "sh:targetClass"`,
 		bindingExpr("labels", "object"),
@@ -259,5 +288,6 @@ ORDER BY shape, "rdf:type", "sh:targetClass"`,
 		RDFTypeIRI,
 		bindingExpr("shapes", "object"),
 		SHNodeShapeIRI,
-		SHPropertyShapeIRI)
+		SHPropertyShapeIRI,
+		subjectPrefixFilter("shapes", subjectPrefix))
 }

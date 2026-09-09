@@ -25,7 +25,7 @@ func objectNumeric(alias string) string {
 }
 
 func TestClassesSQLSelectsSubjectsTypedAsAClass(t *testing.T) {
-	sql := ClassesSQL()
+	sql := ClassesSQL("")
 	require.Contains(t, sql, "classes.subject AS class")
 	require.Contains(t, sql, "WHERE classes.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'")
 	require.Contains(t, sql, "AND "+objectText("classes")+" IN ("+
@@ -34,7 +34,7 @@ func TestClassesSQLSelectsSubjectsTypedAsAClass(t *testing.T) {
 }
 
 func TestClassesSQLLeftJoinsTheOptionalAnnotations(t *testing.T) {
-	sql := ClassesSQL()
+	sql := ClassesSQL("")
 	require.Contains(t, sql, "LEFT JOIN triples AS labels")
 	require.Contains(t, sql, "AND labels.predicate = 'http://www.w3.org/2000/01/rdf-schema#label'")
 	require.Contains(t, sql, "MIN("+objectText("labels")+`) AS "rdfs:label"`)
@@ -47,21 +47,21 @@ func TestClassesSQLLeftJoinsTheOptionalAnnotations(t *testing.T) {
 // lookup groups by the subject rather than reporting the type it was declared
 // with, and it no longer counts the resources typed with a class.
 func TestClassesSQLListsAClassOnceWithoutCountingItsInstances(t *testing.T) {
-	sql := ClassesSQL()
+	sql := ClassesSQL("")
 	require.Contains(t, sql, "GROUP BY class")
 	require.NotContains(t, sql, "COUNT(")
 	require.NotContains(t, sql, "AS instances")
 }
 
 func TestDatatypesSQLSelectsSubjectsTypedAsAnRDFSDatatype(t *testing.T) {
-	sql := DatatypesSQL()
+	sql := DatatypesSQL("")
 	require.Contains(t, sql, "datatypes.subject AS datatype")
 	require.Contains(t, sql, "WHERE datatypes.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'")
 	require.Contains(t, sql, "AND "+objectText("datatypes")+" = 'http://www.w3.org/2000/01/rdf-schema#Datatype'")
 }
 
 func TestDatatypesSQLLeftJoinsTheOptionalAnnotations(t *testing.T) {
-	sql := DatatypesSQL()
+	sql := DatatypesSQL("")
 	require.Contains(t, sql, "LEFT JOIN triples AS labels")
 	require.Contains(t, sql, "AND labels.predicate = 'http://www.w3.org/2000/01/rdf-schema#label'")
 	require.Contains(t, sql, "MIN("+objectText("labels")+`) AS "rdfs:label"`)
@@ -87,14 +87,14 @@ func TestStatementsSQLBoundsTheRowsToTheLimit(t *testing.T) {
 }
 
 func TestInstancesSQLPairsEachSubjectWithTheClassItIsTypedWith(t *testing.T) {
-	sql := InstancesSQL()
+	sql := InstancesSQL("")
 	require.Contains(t, sql, "instances.subject AS instance")
 	require.Contains(t, sql, objectText("instances")+" AS class")
 	require.Contains(t, sql, "WHERE instances.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'")
 }
 
 func TestInstancesSQLExcludesSubjectsThatAreThemselvesVocabulary(t *testing.T) {
-	sql := InstancesSQL()
+	sql := InstancesSQL("")
 	require.Contains(t, sql, "AND instances.subject NOT IN (")
 	require.Contains(t, sql, "SELECT vocabulary.subject")
 	require.Contains(t, sql, "AND "+objectText("vocabulary")+" IN ("+
@@ -109,7 +109,7 @@ func TestInstancesSQLExcludesSubjectsThatAreThemselvesVocabulary(t *testing.T) {
 }
 
 func TestShapesSQLSelectsSubjectsTypedAsASHACLShape(t *testing.T) {
-	sql := ShapesSQL()
+	sql := ShapesSQL("")
 	require.Contains(t, sql, "shapes.subject AS shape")
 	require.Contains(t, sql, objectText("shapes")+` AS "rdf:type"`)
 	require.Contains(t, sql, "WHERE shapes.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'")
@@ -119,7 +119,7 @@ func TestShapesSQLSelectsSubjectsTypedAsASHACLShape(t *testing.T) {
 }
 
 func TestShapesSQLLeftJoinsTheAnnotationsAndTheTargetClass(t *testing.T) {
-	sql := ShapesSQL()
+	sql := ShapesSQL("")
 	require.Contains(t, sql, "LEFT JOIN triples AS labels")
 	require.Contains(t, sql, "MIN("+objectText("labels")+`) AS "rdfs:label"`)
 	require.Contains(t, sql, "LEFT JOIN triples AS comments")
@@ -132,7 +132,7 @@ func TestShapesSQLLeftJoinsTheAnnotationsAndTheTargetClass(t *testing.T) {
 // Every column but the shape itself is named with the prefixed form of the
 // predicate it reports, so the table says which term each value was read from.
 func TestShapesSQLNamesEachPredicateColumnWithItsPrefixedTerm(t *testing.T) {
-	sql := ShapesSQL()
+	sql := ShapesSQL("")
 	require.Contains(t, sql, `AS "rdfs:label"`)
 	require.Contains(t, sql, `AS "rdfs:comment"`)
 	require.Contains(t, sql, `AS "rdf:type"`)
@@ -146,7 +146,7 @@ func TestShapesSQLNamesEachPredicateColumnWithItsPrefixedTerm(t *testing.T) {
 // A shape can state more than one sh:targetClass, so the target is grouped by
 // rather than aggregated and the shape is listed once per class it targets.
 func TestShapesSQLGroupsByTheTargetClassRatherThanAggregatingIt(t *testing.T) {
-	sql := ShapesSQL()
+	sql := ShapesSQL("")
 	require.Contains(t, sql, `GROUP BY shape, "rdf:type", "sh:targetClass"`)
 	require.NotContains(t, sql, "MIN("+objectText("targets")+")")
 }
@@ -164,7 +164,7 @@ func TestDescribeSQLEscapesQuotesInTheSubject(t *testing.T) {
 }
 
 func TestPropertiesSQLSelectsSubjectsTypedAsAProperty(t *testing.T) {
-	sql := PropertiesSQL()
+	sql := PropertiesSQL("")
 	require.Contains(t, sql, "properties.subject AS property")
 	require.Contains(t, sql, objectText("properties")+" AS type")
 	require.Contains(t, sql, "WHERE properties.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'")
@@ -173,4 +173,30 @@ func TestPropertiesSQLSelectsSubjectsTypedAsAProperty(t *testing.T) {
 		"'http://www.w3.org/2002/07/owl#ObjectProperty', "+
 		"'http://www.w3.org/2002/07/owl#DatatypeProperty', "+
 		"'http://www.w3.org/2002/07/owl#AnnotationProperty')")
+}
+
+// A lookup given the project base lists only the subjects named under it, so
+// that the resources an import or a module contributed under their own
+// namespaces stay out of the default listing.
+func TestLookupsRestrictSubjectsToThePrefix(t *testing.T) {
+	base := "https://github.com/cgs-earth/sal/"
+	require.Contains(t, ClassesSQL(base), "\n\tAND starts_with(classes.subject, 'https://github.com/cgs-earth/sal/')\nGROUP BY class")
+	require.Contains(t, DatatypesSQL(base), "\n\tAND starts_with(datatypes.subject, 'https://github.com/cgs-earth/sal/')\nGROUP BY datatype")
+	require.Contains(t, InstancesSQL(base), "\t)\n\tAND starts_with(instances.subject, 'https://github.com/cgs-earth/sal/')\nORDER BY class, instance")
+	require.Contains(t, PropertiesSQL(base), "\n\tAND starts_with(properties.subject, 'https://github.com/cgs-earth/sal/')\nORDER BY property, type")
+	require.Contains(t, ShapesSQL(base), "\n\tAND starts_with(shapes.subject, 'https://github.com/cgs-earth/sal/')\nGROUP BY shape")
+}
+
+// An empty prefix is what a lookup's --all flag passes, and it lists every namespace.
+func TestLookupsWithoutAPrefixListEveryNamespace(t *testing.T) {
+	for _, sql := range []string{ClassesSQL(""), DatatypesSQL(""), InstancesSQL(""), PropertiesSQL(""), ShapesSQL("")} {
+		require.NotContains(t, sql, "starts_with(")
+	}
+}
+
+// The prefix is a string literal, so a quote in it is escaped, and it is
+// matched with starts_with rather than LIKE so % and _ in an IRI are literal.
+func TestSubjectPrefixFilterQuotesThePrefixLiterally(t *testing.T) {
+	require.Equal(t, "\n\tAND starts_with(instances.subject, 'https://example.org/o''brien/100%_of/')", subjectPrefixFilter("instances", "https://example.org/o'brien/100%_of/"))
+	require.Empty(t, subjectPrefixFilter("instances", ""))
 }
