@@ -304,6 +304,14 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		return nil, err
 	}
 
+	// the catalog is written last, from the table as it now stands, so that
+	// what it records is the snapshot and metadata file this build produced
+	if cfg.Format == GraphExportFormatIceberg {
+		if err := WriteProjectStacCatalog(base); err != nil {
+			return nil, fmt.Errorf("build: write STAC catalog: %w", err)
+		}
+	}
+
 	return finalGraph, err
 }
 

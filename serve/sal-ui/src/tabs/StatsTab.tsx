@@ -1,4 +1,5 @@
-import type { TableStats } from '../api'
+import { useEffect, useState } from 'react'
+import { STAC_COLLECTION_PATH, hasStacCatalog, stacViewerURL, type TableStats } from '../api'
 import { ResultTable } from '../components/ResultTable'
 
 type StatsTabProps = {
@@ -11,6 +12,17 @@ type StatsTabProps = {
 const formatCount = (value: number) => new Intl.NumberFormat().format(value)
 
 export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
+  // A table built before sal wrote STAC catalogs has none to open, so the links
+  // are offered only once the collection has answered.
+  const [stacAvailable, setStacAvailable] = useState(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    hasStacCatalog(controller.signal)
+      .then(setStacAvailable)
+      .catch(() => setStacAvailable(false))
+    return () => controller.abort()
+  }, [stats])
+
   return (
     <div className="tab-body stats">
       <div className="toolbar">
@@ -30,6 +42,21 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
           <p className="table-path" title={stats.tablePath}>
             <span className="label">Table</span>
             <code>{stats.tablePath}</code>
+          </p>
+          <p className="table-path">
+            <span className="label">STAC</span>
+            <span className="table-links">
+              <StacLink href={STAC_COLLECTION_PATH} available={stacAvailable} title="The STAC Collection sal build wrote for this table">
+                JSON
+              </StacLink>
+              <StacLink
+                href={stacViewerURL(window.location.origin)}
+                available={stacAvailable}
+                title="Open the collection in the hosted STAC Browser"
+              >
+                Viewer
+              </StacLink>
+            </span>
           </p>
 
           <div className="stat-grid">
@@ -86,5 +113,29 @@ function Section({ title, caption, children }: { title: string; caption: string;
       </header>
       {children}
     </section>
+  )
+}
+
+type StacLinkProps = {
+  href: string
+  available: boolean
+  title: string
+  children: string
+}
+
+/** A link to a STAC document, disabled with a hint when no catalog has been built. */
+function StacLink({ href, available, title, children }: StacLinkProps) {
+  return (
+    <a
+      className="button small"
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      aria-disabled={!available}
+      tabIndex={available ? undefined : -1}
+      title={available ? title : 'No STAC catalog has been built for this table; run sal build to write one'}
+    >
+      {children}
+    </a>
   )
 }

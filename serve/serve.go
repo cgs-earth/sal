@@ -29,5 +29,9 @@ func (cmd *ServeCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	return Serve(ctx, ":8080", runner, blobDir, cmd.WithUI)
+	stacDir, err := pkg.SalStacDir()
+	if err != nil {
+		return err
+	}
+	return Serve(ctx, ":8080", runner, blobDir, stacDir, cmd.WithUI)
 }

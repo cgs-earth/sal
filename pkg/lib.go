@@ -208,6 +208,19 @@ func SalBlobsDir() (string, error) {
 	return filepath.Join(dataDir, "blobs"), nil
 }
 
+// SalStacDir returns the directory `sal build` writes the STAC catalog
+// describing the data product into. It sits under .sal/data rather than
+// beside .sal/config.jsonld because it is regenerated on every build and names
+// the table's current metadata file and snapshot, which would leave a
+// git-tracked file dirty after each build.
+func SalStacDir() (string, error) {
+	dataDir, err := SalDataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dataDir, "stac"), nil
+}
+
 // Return the path to the build iceberg data product in the .sal/data directory
 func SalBuiltDataProductPath() (string, error) {
 	salDataDir, err := SalDataDir()

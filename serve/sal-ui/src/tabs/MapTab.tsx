@@ -3,7 +3,7 @@ import maplibregl, { type GeoJSONSource, type LngLat } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { Feature, FeatureCollection } from 'geojson'
 import { fetchExtent, fetchGeometries, type BBox, type GeoJSONFeature } from '../api'
-import { boundsOf, boxAround, boxPolygon, featuresFromResult, type MapFeature } from '../geo'
+import { boundsOf, boxPolygon, featuresFromResult, type MapFeature } from '../geo'
 import { useResults, type ResultSource } from '../results'
 import { pathForTab, visit } from '../routing'
 
@@ -28,8 +28,8 @@ const persisted: {
   showExtent: boolean
 } = { source: null, inputs: null, showBox: true, showExtent: false }
 
-/** Width of the box a click draws, in degrees, before any grow or shrink. */
-const DEFAULT_BOX_SIZE = 1
+/** The padding, in pixels, fitBounds keeps around whatever it fits. */
+const FIT_PADDING = 48
 
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] }
 
@@ -125,6 +125,23 @@ function propertiesTable(properties: Record<string, unknown>): HTMLElement {
   return table
 }
 
+/**
+ * The box a click queries: centered on the point, a square on screen, and sized
+ * so that fitting it afterwards with FIT_PADDING leaves the zoom where it is.
+ * It is measured in pixels and unprojected rather than drawn in degrees, since
+ * a square in degrees is neither square on screen nor the same size at every
+ * zoom, and a box sized from the previous one grew past the viewport whenever
+ * that one was wider than it was tall.
+ */
+function viewportBox(map: maplibregl.Map, point: LngLat): BBox {
+  const { clientWidth, clientHeight } = map.getContainer()
+  const side = Math.max(Math.min(clientWidth, clientHeight) - 2 * FIT_PADDING, 32)
+  const center = map.project(point)
+  const southWest = map.unproject([center.x - side / 2, center.y + side / 2])
+  const northEast = map.unproject([center.x + side / 2, center.y - side / 2])
+  return [southWest.lng, Math.max(-90, southWest.lat), northEast.lng, Math.min(90, northEast.lat)]
+}
+
 function parseInputs(inputs: BBoxInputs): BBox | null {
   const numbers = inputs.map((value) => Number.parseFloat(value.trim()))
   if (numbers.some((n) => !Number.isFinite(n))) return null
@@ -200,12 +217,11 @@ export function MapTab() {
     }
   }, [])
 
-  // A click away from any feature centers a box of the current size there and
-  // queries it. Registered once on the map, so it reads the live box through a ref.
-  const onMapClick = useRef<(point: LngLat) => void>(() => {})
-  onMapClick.current = (point) => {
-    const size = box ? Math.max(box[2] - box[0], box[3] - box[1]) || DEFAULT_BOX_SIZE : DEFAULT_BOX_SIZE
-    const next = boxAround(point.lng, point.lat, size)
+  // A click away from any feature centers a box the size of the viewport there
+  // and queries it. Registered once on the map, so it goes through a ref.
+  const onMapClick = useRef<(map: maplibregl.Map, point: LngLat) => void>(() => {})
+  onMapClick.current = (map, point) => {
+    const next = viewportBox(map, point)
     setInputs(formatInputs(next))
     void queryBox(next)
   }
@@ -235,7 +251,7 @@ export function MapTab() {
       const hits = map.queryRenderedFeatures(event.point, { layers: FEATURE_LAYERS })
       popupRef.current?.remove()
       if (hits.length === 0) {
-        onMapClick.current(event.lngLat)
+        onMapClick.current(map, event.lngLat)
         return
       }
       popupRef.current = new maplibregl.Popup({ maxWidth: '420px', className: 'map-popup' })

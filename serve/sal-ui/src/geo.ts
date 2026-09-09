@@ -116,12 +116,6 @@ export function boundsOf(features: Feature[]): BBox | null {
   return bounds
 }
 
-/** A box of `size` degrees on each side centered on a point, kept inside the valid latitude range. */
-export function boxAround(lng: number, lat: number, size: number): BBox {
-  const half = size / 2
-  return [lng - half, Math.max(-90, lat - half), lng + half, Math.min(90, lat + half)]
-}
-
 /** A polygon feature outlining a box, for drawing it on the map. */
 export function boxPolygon([w, s, e, n]: BBox): Feature {
   return {

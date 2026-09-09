@@ -85,7 +85,7 @@ func (r *endpointUIRunner) Translate(query string) (string, error) {
 
 func newUIServer(t *testing.T, runner *endpointUIRunner) *httptest.Server {
 	t.Helper()
-	handler, err := NewEndpointWithUI(runner, "")
+	handler, err := NewEndpointWithUI(runner, "", "")
 	require.NoError(t, err)
 	return httptest.NewServer(handler)
 }
@@ -97,7 +97,7 @@ func TestEndpointAcceptsGETQueryAndReturnsSPARQLJSON(t *testing.T) {
 			{"https://example.org/alice", "Alice"},
 		},
 	}}
-	server := httptest.NewServer(NewEndpoint(runner, ""))
+	server := httptest.NewServer(NewEndpoint(runner, "", ""))
 	defer server.Close()
 
 	req, err := http.NewRequest(http.MethodGet, server.URL+"/sparql?query=SELECT+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+%7D", nil)
@@ -265,7 +265,7 @@ func TestEndpointWithUIStillServesBlobsToANonBrowser(t *testing.T) {
 	body := []byte("@prefix ex: <https://example.org/> .")
 	digest := writeBlob(t, dir, body)
 
-	handler, err := NewEndpointWithUI(&endpointUIRunner{}, dir)
+	handler, err := NewEndpointWithUI(&endpointUIRunner{}, dir, "")
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	defer server.Close()
@@ -290,7 +290,7 @@ func TestEndpointWithUIServesBlobsToTheUIsOwnFetch(t *testing.T) {
 	body := []byte("some vocabulary bytes")
 	digest := writeBlob(t, dir, body)
 
-	handler, err := NewEndpointWithUI(&endpointUIRunner{}, dir)
+	handler, err := NewEndpointWithUI(&endpointUIRunner{}, dir, "")
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	defer server.Close()
@@ -668,7 +668,7 @@ func TestSparqlJSONResultReportsWKTBindingsAsGeometryLiterals(t *testing.T) {
 
 func TestEndpointAcceptsFormPOSTQuery(t *testing.T) {
 	runner := &endpointRunner{result: salsparql.Result{Header: []string{"s"}}}
-	server := httptest.NewServer(NewEndpoint(runner, ""))
+	server := httptest.NewServer(NewEndpoint(runner, "", ""))
 	defer server.Close()
 
 	resp, err := http.Post(
@@ -687,7 +687,7 @@ func TestEndpointAcceptsFormPOSTQuery(t *testing.T) {
 
 func TestEndpointAcceptsSPARQLQueryPOSTBody(t *testing.T) {
 	runner := &endpointRunner{result: salsparql.Result{Header: []string{"s"}}}
-	server := httptest.NewServer(NewEndpoint(runner, ""))
+	server := httptest.NewServer(NewEndpoint(runner, "", ""))
 	defer server.Close()
 
 	req, err := http.NewRequest(http.MethodPost, server.URL+"/sparql", strings.NewReader("SELECT ?s WHERE { ?s ?p ?o }"))
@@ -704,7 +704,7 @@ func TestEndpointAcceptsSPARQLQueryPOSTBody(t *testing.T) {
 }
 
 func TestEndpointRejectsUnsupportedAcceptHeader(t *testing.T) {
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, ""))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, "", ""))
 	defer server.Close()
 
 	req, err := http.NewRequest(http.MethodGet, server.URL+"/sparql?query=SELECT+%3Fs+WHERE+%7B%7D", nil)
@@ -720,7 +720,7 @@ func TestEndpointRejectsUnsupportedAcceptHeader(t *testing.T) {
 }
 
 func TestEndpointRejectsMissingQuery(t *testing.T) {
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, ""))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, "", ""))
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/sparql")
@@ -733,7 +733,7 @@ func TestEndpointRejectsMissingQuery(t *testing.T) {
 }
 
 func TestEndpointRejectsUnsupportedPOSTMediaType(t *testing.T) {
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, ""))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, "", ""))
 	defer server.Close()
 
 	resp, err := http.Post(server.URL+"/sparql", "application/json", strings.NewReader(`{"query":"SELECT ?s WHERE {}"}`))
@@ -746,7 +746,7 @@ func TestEndpointRejectsUnsupportedPOSTMediaType(t *testing.T) {
 }
 
 func TestEndpointReturnsBadRequestForSPARQLError(t *testing.T) {
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{err: fmt.Errorf("parse SPARQL query")}, ""))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{err: fmt.Errorf("parse SPARQL query")}, "", ""))
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/sparql?query=ASK+%7B%7D")
@@ -774,7 +774,7 @@ func TestBlobEndpointServesAPinnedDocumentByDigest(t *testing.T) {
 	body := []byte("@prefix ex: <https://example.org/> .")
 	digest := writeBlob(t, dir, body)
 
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/blobs/" + digest)
@@ -795,7 +795,7 @@ func TestBlobEndpointStripsUrnSha256Prefix(t *testing.T) {
 	body := []byte("some vocabulary bytes")
 	digest := writeBlob(t, dir, body)
 
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/blobs/urn:sha256:" + digest)
@@ -825,7 +825,7 @@ func TestBlobEndpointServesAModuleOntologyByCommitHash(t *testing.T) {
 	body := []byte(`{"@context": {"@vocab": "salmodule://example.org/module/"}}`)
 	commit := writeModuleBlob(t, dir, body)
 
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/blobs/" + commit)
@@ -845,7 +845,7 @@ func TestBlobEndpointStripsUrnGitCommitHashPrefix(t *testing.T) {
 	body := []byte("module ontology bytes")
 	commit := writeModuleBlob(t, dir, body)
 
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/blobs/urn:git-commit-hash:" + commit)
@@ -862,7 +862,7 @@ func TestBlobEndpointStripsUrnGitCommitHashPrefix(t *testing.T) {
 
 func TestBlobEndpointReturnsNotFoundForUnknownDigest(t *testing.T) {
 	dir := t.TempDir()
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/blobs/" + strings.Repeat("0", 64))
@@ -876,7 +876,7 @@ func TestBlobEndpointReturnsNotFoundForUnknownDigest(t *testing.T) {
 
 func TestBlobEndpointReturnsNotFoundForMalformedDigest(t *testing.T) {
 	dir := t.TempDir()
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/blobs/not-a-valid-digest")
@@ -893,7 +893,7 @@ func TestBlobEndpointSupportsRangeRequests(t *testing.T) {
 	body := []byte("0123456789abcdef")
 	digest := writeBlob(t, dir, body)
 
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
 	defer server.Close()
 
 	req, err := http.NewRequest(http.MethodGet, server.URL+"/blobs/"+digest, nil)
@@ -916,7 +916,7 @@ func TestBlobEndpointRejectsUnsupportedMethod(t *testing.T) {
 	dir := t.TempDir()
 	digest := writeBlob(t, dir, []byte("body"))
 
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
 	defer server.Close()
 
 	req, err := http.NewRequest(http.MethodPost, server.URL+"/blobs/"+digest, nil)
@@ -949,7 +949,7 @@ func TestEndpointQueriesTheTableAtASnapshot(t *testing.T) {
 			Rows:   [][]string{{"https://example.org/alice"}},
 		},
 	}
-	server := httptest.NewServer(NewEndpoint(runner, ""))
+	server := httptest.NewServer(NewEndpoint(runner, "", ""))
 	defer server.Close()
 
 	resp := snapshotGet(t, server.URL, "/v1234/sparql")
@@ -969,7 +969,7 @@ func TestEndpointQueriesTheTableAtASnapshot(t *testing.T) {
 
 func TestEndpointAnswersNotFoundForAnUnknownSnapshot(t *testing.T) {
 	runner := &endpointRunner{snapshots: []int64{1234}}
-	server := httptest.NewServer(NewEndpoint(runner, ""))
+	server := httptest.NewServer(NewEndpoint(runner, "", ""))
 	defer server.Close()
 
 	resp := snapshotGet(t, server.URL, "/v99/sparql")
@@ -986,7 +986,7 @@ func TestEndpointAnswersNotFoundForAnUnknownSnapshot(t *testing.T) {
 
 func TestEndpointAnswersNotFoundForAPathThatIsNotASnapshotVersion(t *testing.T) {
 	runner := &endpointRunner{snapshots: []int64{1234}}
-	server := httptest.NewServer(NewEndpoint(runner, ""))
+	server := httptest.NewServer(NewEndpoint(runner, "", ""))
 	defer server.Close()
 
 	for _, path := range []string{"/v12abc/sparql", "/v-1/sparql", "/v0/sparql", "/v/sparql"} {
@@ -1016,7 +1016,7 @@ func TestEndpointWithUIStillServesTheAppBesideTheVersionedRoute(t *testing.T) {
 
 func TestEndpointReportsASnapshotLookupFailure(t *testing.T) {
 	runner := &endpointRunner{snapshotErr: fmt.Errorf("duckdb query failed: no such table")}
-	server := httptest.NewServer(NewEndpoint(runner, ""))
+	server := httptest.NewServer(NewEndpoint(runner, "", ""))
 	defer server.Close()
 
 	resp := snapshotGet(t, server.URL, "/v1234/sparql")
@@ -1033,7 +1033,7 @@ func TestEndpointReportsASnapshotLookupFailure(t *testing.T) {
 // A preflight is answered whatever the snapshot, so that a browser client gets
 // the 404 for an unknown one rather than a CORS failure.
 func TestEndpointAnswersPreflightForAnyVersionedSparqlPath(t *testing.T) {
-	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, ""))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, "", ""))
 	defer server.Close()
 
 	req, err := http.NewRequest(http.MethodOptions, server.URL+"/v99/sparql", nil)
@@ -1077,4 +1077,117 @@ func TestEndpointWithUIAnswersNotFoundForAnUnknownSnapshot(t *testing.T) {
 
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 	require.Contains(t, resp.Header.Get("Content-Type"), "text/plain")
+}
+
+// newStacDir writes the catalog and collection a build leaves under
+// .sal/data/stac into a temporary directory.
+func newStacDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "catalog.json"), []byte(`{"type":"Catalog","id":"widgets"}`), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "triples"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "triples", "collection.json"), []byte(`{"type":"Collection","id":"triples"}`), 0644))
+	return dir
+}
+
+func getStac(t *testing.T, server *httptest.Server, path string) (*http.Response, string) {
+	t.Helper()
+	resp, err := http.Get(server.URL + path)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return resp, string(body)
+}
+
+func TestStacEndpointServesTheCatalogAndItsCollection(t *testing.T) {
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, "", newStacDir(t)))
+	defer server.Close()
+
+	for _, path := range []string{"/stac", "/stac/", "/stac/catalog.json"} {
+		resp, body := getStac(t, server, path)
+		require.Equal(t, http.StatusOK, resp.StatusCode, path)
+		require.Equal(t, "application/json", resp.Header.Get("Content-Type"), path)
+		require.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"), path)
+		require.JSONEq(t, `{"type":"Catalog","id":"widgets"}`, body, path)
+	}
+
+	resp, body := getStac(t, server, "/stac/triples/collection.json")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.JSONEq(t, `{"type":"Collection","id":"triples"}`, body)
+}
+
+func TestStacEndpointSaysToBuildWhenThereIsNoCatalog(t *testing.T) {
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, "", filepath.Join(t.TempDir(), "missing")))
+	defer server.Close()
+
+	resp, body := getStac(t, server, "/stac/catalog.json")
+
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+	require.Contains(t, body, "sal build")
+}
+
+func TestStacEndpointServesOnlyJSONInsideTheCatalog(t *testing.T) {
+	dir := newStacDir(t)
+	secret := filepath.Join(filepath.Dir(dir), "secret.json")
+	require.NoError(t, os.WriteFile(secret, []byte(`{"secret":true}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("not a document"), 0644))
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, "", dir))
+	defer server.Close()
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+	for _, path := range []string{"/stac/../secret.json", "/stac/%2e%2e/secret.json", "/stac/notes.txt", "/stac/triples"} {
+		req, err := http.NewRequest(http.MethodGet, server.URL+path, nil)
+		require.NoError(t, err)
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		// ServeMux answers a path with ".." by redirecting to its cleaned form,
+		// so the refusal may be a redirect rather than a 404; either way the
+		// document outside the catalog is never served
+		require.NotEqual(t, http.StatusOK, resp.StatusCode, path)
+		require.NotContains(t, string(body), `"secret":true`, path)
+	}
+}
+
+func TestStacEndpointRefusesOtherMethods(t *testing.T) {
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, "", newStacDir(t)))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/stac/catalog.json", "application/json", strings.NewReader("{}"))
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+
+	req, err := http.NewRequest(http.MethodOptions, server.URL+"/stac/catalog.json", nil)
+	require.NoError(t, err)
+	resp, err = http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+	require.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
+}
+
+func TestEndpointWithUIServesTheStacCatalogRatherThanTheApp(t *testing.T) {
+	handler, err := NewEndpointWithUI(&endpointUIRunner{}, "", newStacDir(t))
+	require.NoError(t, err)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/stac/catalog.json", nil)
+	require.NoError(t, err)
+	// a browser following the Open as STAC link asks for HTML, and still gets the catalog
+	req.Header.Set("Accept", "text/html")
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+	require.JSONEq(t, `{"type":"Catalog","id":"widgets"}`, string(body))
 }

@@ -24,6 +24,10 @@ For the main triples table, SAL writes an Apache Iceberg table under the project
   data/
     blobs/
       <sha256-of-a-vocabulary-document>
+    stac/
+      catalog.json
+      triples/
+        collection.json
     <git-project-name>/
       triples/
         data/
@@ -35,6 +39,8 @@ The `data` directory contains the table's data files.
 
 The files named by a hash under `.sal/data/blobs` are the vocabulary documents the project pins.
 They are described in [Pinned vocabularies](#pinned-vocabularies) below. [`sal serve`](/sal/reference/commands/#sal-serve) serves them over HTTP at `/blobs/{sha256}`.
+
+`.sal/data/stac` is the STAC catalog the build writes last, describing the table it just committed; see [STAC catalog](#stac-catalog) below. `sal serve` serves it at `/stac/catalog.json`.
 
 ## RDF triples
 
@@ -162,6 +168,41 @@ https://schema.org/                         urn:sha256:c3a1e7c9c4b6f6b1a3f5e6d7c
 ```
 
 A vocabulary the project pins but does not import, one it only checks terms against, shows up here the same as an imported one; whether an ontology's own statements were merged into the table is a separate question from which version it validated against.
+
+## STAC catalog
+
+The last thing `sal build` does is describe the data product as a [STAC](https://stacspec.org/) catalog under `.sal/data/stac`, so that a STAC client can discover it and an Iceberg reader can open it from what the catalog records.
+`catalog.json` is a STAC Catalog named after the git project, listing one child, `triples/collection.json`.
+That collection describes the triples table with three extensions:
+
+- The [Table extension](https://github.com/stac-extensions/table): `table:columns` names every column of the table with its type, `table:row_count` is the number of triples, and `table:primary_geometry` is `object_geometry`.
+- The [Projection extension](https://github.com/stac-extensions/projection): `proj:code` is the CRS of the geometry column, `OGC:CRS84`.
+- The [Iceberg extension](https://github.com/portolan-sdi/stac-iceberg-extension), whose fields are how a reader opens the table:
+
+```json
+{
+  "iceberg:catalog_type": "static",
+  "iceberg:authorization_type": "none",
+  "iceberg:table_id": "<git-project-name>.triples",
+  "iceberg:metadata_location": "file:///path/to/project/.sal/data/<git-project-name>/triples/metadata/v3.metadata.json",
+  "iceberg:format_version": 3,
+  "iceberg:current_snapshot_id": "7847372623449923428",
+  "iceberg:partition_spec": [
+    { "name": "predicate_partition", "transform": "truncate[20]", "source-id": 2, "field-id": 1000 }
+  ]
+}
+```
+
+The same `metadata.json` is the collection's one asset, `iceberg`, with the media type `application/vnd.apache.iceberg+json` the extension gives Iceberg metadata.
+The catalog is `static`: there is no catalog server, and the metadata location is a `file://` URL on the machine the build ran on, which DuckDB's `iceberg_scan()` or PyIceberg's `StaticTable` can read directly there.
+
+Everything about the table is read from the table itself once it is written: the columns, partition spec, format version, and metadata location from its metadata, the snapshot ID from its current snapshot, and the row count and spatial extent from a scan of its geometry column.
+`extent.spatial.bbox` covers every geometry in the table, or the whole world when it holds none, since STAC requires a collection to state one.
+`extent.temporal.interval` runs from the earliest snapshot still in the table to the current one, which is when the data product was built.
+The collection's title is the project ontology's `dc:title` when [`sal import`](/sal/reference/commands/#sal-import) has recorded one, and the git project name otherwise, and its provider is the git project owner.
+
+The catalog is regenerated whole on every build, since it names the snapshot and metadata file that build produced, and it sits under `.sal/data` rather than beside `.sal/config.jsonld` for the same reason: it is a build artifact, not a source file, and writing it into Git would leave the working tree dirty after every build.
+[`sal clean --wipe`](/sal/reference/commands/#sal-clean) removes it with the rest of the data product.
 
 ## Published layout
 
