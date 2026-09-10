@@ -94,8 +94,17 @@ func TestImportsViewLabelsEveryRowWithTheViewItCameFrom(t *testing.T) {
 }
 
 func TestImportViewSQLQuotesTheViewName(t *testing.T) {
-	sql := importViewSQL(ImportedTable{View: "sal-water", Path: "/imports/sal-water/sal/triples"})
+	sql := importViewSQL(ImportedTable{View: "sal-water", Path: "/imports/sal-water/sal/triples"}, true)
 
 	require.Contains(t, sql, `CREATE OR REPLACE VIEW "sal-water" AS`)
 	require.Contains(t, sql, `iceberg_scan('/imports/sal-water/sal/triples', allow_moved_paths = true)`)
+}
+
+// An imported product built before the vocabulary column exists cannot filter
+// on it, so the view is registered without the filter as a fallback.
+func TestImportViewSQLFiltersVocabularyRowsUnlessAskedNotTo(t *testing.T) {
+	table := ImportedTable{View: "sal-water", Path: "/imports/sal-water/sal/triples"}
+
+	require.Contains(t, importViewSQL(table, true), "WHERE vocabulary IS NULL")
+	require.NotContains(t, importViewSQL(table, false), "vocabulary")
 }

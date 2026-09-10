@@ -38,7 +38,7 @@ func writeStacTestTable(t *testing.T, graph *rdflibgo.Graph) *table.Table {
 		Warehouse:          t.TempDir(),
 		Namespace:          stacTestProject.Name,
 	}
-	require.NoError(t, load.WriteGraphToIceberg(ctx, graph, cfg, map[string]string{"sal.hash": "abc"}))
+	require.NoError(t, load.WriteGraphToIceberg(ctx, graph, nil, cfg, map[string]string{"sal.hash": "abc"}))
 
 	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
@@ -118,6 +118,7 @@ func TestWriteStacCatalogDescribesTheTriplesTable(t *testing.T) {
 	require.Equal(t, "int32", columns["object_byte"])
 	require.Equal(t, "string", columns["subject"])
 	require.Equal(t, "timestamp", columns["object_time"])
+	require.Equal(t, "string", columns["vocabulary"])
 
 	// the Iceberg fields are what a reader needs to open the table
 	require.Equal(t, "static", collection["iceberg:catalog_type"])

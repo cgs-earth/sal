@@ -23,6 +23,23 @@ function readShowSql(): boolean {
   }
 }
 
+/**
+ * Where the reasoning choice is remembered between visits. Reasoning sends the
+ * endpoint's `reasoning=true`, which lets the RDFS schema predicates read the
+ * statements of the pinned vocabularies, so that a property path such as
+ * rdfs:subClassOf* can walk a hierarchy the project only validated against
+ * while every other pattern stays on the project's own data.
+ */
+const REASONING_KEY = 'sal-ui.sparql.reasoning'
+
+function readReasoning(): boolean {
+  try {
+    return localStorage.getItem(REASONING_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
 /** How long typing has to pause before the query is sent for translation. */
 const TRANSLATE_DEBOUNCE_MS = 250
 
@@ -34,12 +51,15 @@ type Sample = { name: string; query: string }
 
 /*
  * Starter queries. The `/sparql` endpoint translates SPARQL to DuckDB SQL and
- * only understands basic triple patterns, FILTER comparisons, the LANG and
- * DATATYPE accessors, DISTINCT, LIMIT, MINUS and FILTER [NOT] EXISTS, and a
- * SERVICE naming one of this server's own snapshot endpoints, so every sample
- * stays inside that subset. The snapshot samples need a snapshot ID only the
- * server knows, so they are built by snapshotSamples from the Stats listing
- * rather than listed here.
+ * only understands basic triple patterns, property paths, FILTER comparisons,
+ * the LANG and DATATYPE accessors, DISTINCT, LIMIT, MINUS and FILTER [NOT]
+ * EXISTS, and a SERVICE naming one of this server's own snapshot endpoints, so
+ * every sample stays inside that subset. The snapshot samples need a snapshot
+ * ID only the server knows, so they are built by snapshotSamples from the
+ * Stats listing rather than listed here. The inherited classes and label
+ * samples walk the class and property hierarchies a pinned vocabulary states,
+ * which they only see with the Reasoning toggle on; neither names a term of
+ * any particular vocabulary, so they work over whatever the dataset holds.
  */
 const SAMPLES: Sample[] = [
   {
@@ -97,6 +117,24 @@ SELECT ?class ?parent
 WHERE {
   ?class rdfs:subClassOf ?parent .
 }`,
+  },
+  {
+    name: 'Inherited classes in use',
+    query: `${PREFIXES}
+SELECT DISTINCT ?class
+WHERE {
+  ?subject rdf:type/rdfs:subClassOf+ ?class .
+}`,
+  },
+  {
+    name: 'Labels through subproperties',
+    query: `${PREFIXES}
+SELECT ?subject ?label
+WHERE {
+  ?subject ?property ?label .
+  ?property rdfs:subPropertyOf+ rdfs:label .
+}
+LIMIT 50`,
   },
   {
     name: 'Labels',
@@ -226,7 +264,16 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
   const [showSql, setShowSql] = useState(readShowSql)
   const showSqlRef = useRef(showSql)
   showSqlRef.current = showSql
+  // Reasoning is read through a ref for the same reason: Yasgui asks for the
+  // request's parameters as it sends each query, so toggling never rebuilds
+  // the editor.
+  const [reasoning, setReasoning] = useState(readReasoning)
+  const reasoningRef = useRef(reasoning)
+  reasoningRef.current = reasoning
   const [translation, setTranslation] = useState<Translation>({ status: 'empty' })
+  // The help note is closed until asked for and not remembered, since it only
+  // explains the header's controls.
+  const [showHelp, setShowHelp] = useState(false)
   const [editorHeight, setEditorHeight] = useState<number | null>(null)
   const translateTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const translateAbort = useRef<AbortController | null>(null)
@@ -247,7 +294,7 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
       }
       const controller = new AbortController()
       translateAbort.current = controller
-      translateSparql(query, controller.signal).then(
+      translateSparql(query, reasoningRef.current, controller.signal).then(
         (sql) => {
           if (!controller.signal.aborted) setTranslation({ status: 'ok', sql })
         },
@@ -270,13 +317,28 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
     if (next) scheduleTranslation()
   }
 
+  const toggleReasoning = (next: boolean) => {
+    setReasoning(next)
+    reasoningRef.current = next
+    try {
+      localStorage.setItem(REASONING_KEY, String(next))
+    } catch {
+      // Storage may be unavailable; the choice still holds for this visit.
+    }
+    scheduleTranslation()
+  }
+
   useEffect(() => {
     const parent = container.current
     if (!parent) return
 
     const endpoint = `${window.location.origin}/sparql`
     const instance = new Yasgui(parent, {
-      requestConfig: { endpoint, method: 'POST' },
+      requestConfig: {
+        endpoint,
+        method: 'POST',
+        args: () => (reasoningRef.current ? [{ name: 'reasoning', value: 'true' }] : []),
+      },
       copyEndpointOnNewTab: true,
     })
     yasgui.current = instance
@@ -382,18 +444,51 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
       <section className="panel yasgui-panel">
         <header className="panel-header">
           <h3>SPARQL</h3>
-          <p>
-            Queries run against the local <code>/sparql</code> endpoint, which translates SPARQL to DuckDB SQL. A{' '}
-            <code>SERVICE</code> naming <code>/v&#123;snapshot&#125;/sparql</code> reads the table at an earlier snapshot, and{' '}
-            <code>MINUS</code> subtracts one from the other, so one query can diff two.
-          </p>
           <div className="panel-header-actions">
+            <label
+              className="toggle reasoning-toggle"
+              title="Let the RDFS schema predicates read the pinned vocabularies (sends reasoning=true)"
+            >
+              <input type="checkbox" checked={reasoning} onChange={(event) => toggleReasoning(event.target.checked)} />
+              Reasoning
+            </label>
             <label className="toggle sql-toggle" title="Show the DuckDB SQL the query translates to">
               <input type="checkbox" checked={showSql} onChange={(event) => toggleShowSql(event.target.checked)} />
               Show SQL
             </label>
+            <button
+              type="button"
+              className={`button small help-button${showHelp ? ' active' : ''}`}
+              aria-label={showHelp ? 'Hide help' : 'Show help'}
+              aria-expanded={showHelp}
+              title="What this tab does"
+              onClick={() => setShowHelp((open) => !open)}
+            >
+              ?
+            </button>
           </div>
         </header>
+        {showHelp && (
+          <div className="help-panel" role="note">
+            <ul>
+              <li>
+                Queries run against the local <code>/sparql</code> endpoint, which translates SPARQL to DuckDB SQL rather
+                than evaluating it in a triplestore. <strong>Show SQL</strong> opens that translation beside the editor.
+              </li>
+              <li>
+                A <code>SERVICE</code> naming <code>/v&#123;snapshot&#125;/sparql</code> reads the table at an earlier
+                snapshot, and <code>MINUS</code> subtracts one from the other, so one query can diff two.
+              </li>
+              <li>
+                <strong>Reasoning</strong> lets <code>rdfs:subClassOf</code>, <code>rdfs:subPropertyOf</code>,{' '}
+                <code>rdfs:domain</code>, and <code>rdfs:range</code> read the pinned vocabularies, so a property path such
+                as <code>rdfs:subClassOf*</code> walks a class hierarchy the project only validated against; every other
+                pattern still reads the project&apos;s own data. The <em>Inherited classes in use</em> and{' '}
+                <em>Labels through subproperties</em> samples are written for it and answer nothing without it.
+              </li>
+            </ul>
+          </div>
+        )}
         <div className="chips">
           {samples.map((sample) => (
             <button key={sample.name} type="button" className="chip" onClick={() => loadSample(sample)}>

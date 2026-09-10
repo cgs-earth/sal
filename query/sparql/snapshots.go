@@ -14,36 +14,47 @@ type NamedQuery struct {
 	SQL  string `json:"sql"`
 }
 
+// snapshotScanSQL is the table at a snapshot, read inline since iceberg_scan
+// only takes a literal snapshot ID. It reads every row; whoever scans it adds
+// projectRowsFilter unless it means to read the pinned vocabularies too, so
+// that a snapshot and the `triples` view agree on what a triple is.
+func snapshotScanSQL(tablePath string, snapshotID int64) string {
+	return fmt.Sprintf("iceberg_scan('%s', allow_moved_paths = true, snapshot_from_id = %d)", escapeSQLLiteral(tablePath), snapshotID)
+}
+
 // SnapshotSQL reads the triples table as it stood at a snapshot, so an earlier
 // state can be inspected without rolling the table back to it.
 func SnapshotSQL(tablePath string, snapshotID int64) string {
 	return fmt.Sprintf(`
 SELECT *
-FROM iceberg_scan('%s', allow_moved_paths = true, snapshot_from_id = %d)
-ORDER BY triple_hash`, strings.ReplaceAll(tablePath, "'", "''"), snapshotID)
+FROM %s
+WHERE %s
+ORDER BY triple_hash`, snapshotScanSQL(tablePath, snapshotID), projectRowsFilter)
 }
 
 // SnapshotDiffSQL compares a snapshot to its parent by triple_hash and labels
 // rows as added or removed from the requested snapshot's point of view.
 func SnapshotDiffSQL(tablePath string, snapshotID int64, parentSnapshotID *int64) string {
-	escapedTablePath := strings.ReplaceAll(tablePath, "'", "''")
 	if parentSnapshotID == nil {
 		return fmt.Sprintf(`
 SELECT
 	'added' AS change_type,
 	snapshot_rows.*
-FROM iceberg_scan('%s', allow_moved_paths = true, snapshot_from_id = %d) AS snapshot_rows
-ORDER BY triple_hash`, escapedTablePath, snapshotID)
+FROM %s AS snapshot_rows
+WHERE %s
+ORDER BY triple_hash`, snapshotScanSQL(tablePath, snapshotID), projectRowsFilter)
 	}
 
 	return fmt.Sprintf(`
 WITH snapshot_rows AS (
 	SELECT *
-	FROM iceberg_scan('%s', allow_moved_paths = true, snapshot_from_id = %d)
+	FROM %s
+	WHERE %s
 ),
 parent_rows AS (
 	SELECT *
-	FROM iceberg_scan('%s', allow_moved_paths = true, snapshot_from_id = %d)
+	FROM %s
+	WHERE %s
 )
 SELECT
 	'added' AS change_type,
@@ -64,7 +75,7 @@ WHERE NOT EXISTS (
 	FROM snapshot_rows
 	WHERE snapshot_rows.triple_hash = parent_rows.triple_hash
 )
-ORDER BY change_type, triple_hash`, escapedTablePath, snapshotID, escapedTablePath, *parentSnapshotID)
+ORDER BY change_type, triple_hash`, snapshotScanSQL(tablePath, snapshotID), projectRowsFilter, snapshotScanSQL(tablePath, *parentSnapshotID), projectRowsFilter)
 }
 
 // snapshotQueries turns the snapshot listing into the statements the UI offers

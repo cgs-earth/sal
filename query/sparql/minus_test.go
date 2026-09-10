@@ -51,10 +51,10 @@ func TestToSQLCorrelatesAnObjectInMINUSByExactTerm(t *testing.T) {
 }
 
 func TestToSQLCorrelatesAWholeTripleByItsHash(t *testing.T) {
-	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate(addedSinceSnapshotQuery)
+	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate(addedSinceSnapshotQuery, false)
 
 	require.NoError(t, err)
-	require.Contains(t, sql, "FROM triples AS t0\nWHERE NOT EXISTS (SELECT 1\n  FROM iceberg_scan('/tmp/warehouse/sal/triples', allow_moved_paths = true, snapshot_from_id = 122) AS x0_0\n  WHERE x0_0.triple_hash = t0.triple_hash)")
+	require.Contains(t, sql, "FROM triples AS t0\nWHERE NOT EXISTS (SELECT 1\n  FROM iceberg_scan('/tmp/warehouse/sal/triples', allow_moved_paths = true, snapshot_from_id = 122) AS x0_0\n  WHERE x0_0.vocabulary IS NULL\n    AND x0_0.triple_hash = t0.triple_hash)")
 	require.NotContains(t, sql, "x0_0.subject", "a whole triple is compared by hash, not position by position")
 }
 
@@ -69,15 +69,15 @@ func TestToSQLDoesNotUseTheHashWhenPositionsAreSwapped(t *testing.T) {
 }
 
 func TestToSQLTranslatesTheRemovedSinceSnapshotQuery(t *testing.T) {
-	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate(removedSinceSnapshotQuery)
+	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate(removedSinceSnapshotQuery, false)
 
 	require.NoError(t, err)
-	require.Contains(t, sql, "FROM iceberg_scan('/tmp/warehouse/sal/triples', allow_moved_paths = true, snapshot_from_id = 122) AS t0\nWHERE NOT EXISTS (SELECT 1\n  FROM triples AS x0_0\n  WHERE x0_0.triple_hash = t0.triple_hash)")
+	require.Contains(t, sql, "FROM iceberg_scan('/tmp/warehouse/sal/triples', allow_moved_paths = true, snapshot_from_id = 122) AS t0\nWHERE t0.vocabulary IS NULL\n  AND NOT EXISTS (SELECT 1\n  FROM triples AS x0_0\n  WHERE x0_0.triple_hash = t0.triple_hash)")
 }
 
 func TestToSQLReadsAMINUSGroupFromTheSERVICEItIsWrittenIn(t *testing.T) {
 	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate(`
-SELECT ?s WHERE { SERVICE <http://localhost:8080/v7/sparql> { ?s <http://p> ?o . MINUS { ?s <http://q> ?z } } }`)
+SELECT ?s WHERE { SERVICE <http://localhost:8080/v7/sparql> { ?s <http://p> ?o . MINUS { ?s <http://q> ?z } } }`, false)
 
 	require.NoError(t, err)
 	require.Contains(t, sql, "FROM iceberg_scan('/tmp/warehouse/sal/triples', allow_moved_paths = true, snapshot_from_id = 7) AS t0")
@@ -87,7 +87,7 @@ SELECT ?s WHERE { SERVICE <http://localhost:8080/v7/sparql> { ?s <http://p> ?o .
 
 func TestToSQLReadsAnEXISTSGroupFromTheSERVICEItIsWrittenIn(t *testing.T) {
 	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate(`
-SELECT ?s WHERE { SERVICE <http://localhost:8080/v7/sparql> { ?s <http://p> ?o . FILTER(NOT EXISTS { ?s <http://q> ?z } || ?o = "y") } }`)
+SELECT ?s WHERE { SERVICE <http://localhost:8080/v7/sparql> { ?s <http://p> ?o . FILTER(NOT EXISTS { ?s <http://q> ?z } || ?o = "y") } }`, false)
 
 	require.NoError(t, err)
 	require.Contains(t, sql, "snapshot_from_id = 7) AS x0_0")

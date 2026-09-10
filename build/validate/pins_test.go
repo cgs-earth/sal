@@ -318,3 +318,12 @@ func TestLoadingAVersionThatIsNotAHashIsAnError(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "urn:sha256:")
 }
+
+func TestIDsListsEveryPinSorted(t *testing.T) {
+	pins := EphemeralVocabularies()
+	pins.Pin("https://vocab.test/z#", []byte("z"), "text/turtle", PinnedVersion{})
+	pins.Pin("https://vocab.test/a#", []byte("a"), "text/turtle", PinnedVersion{})
+
+	require.Equal(t, []string{"https://vocab.test/a#", "https://vocab.test/z#"}, pins.IDs())
+	require.Empty(t, EphemeralVocabularies().IDs())
+}

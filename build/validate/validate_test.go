@@ -161,3 +161,25 @@ func TestOneValidatorResolvesAVocabularyOnceAcrossFiles(t *testing.T) {
 
 	require.Equal(t, 1, fetches)
 }
+
+// A namespace ending in a fragment is served by the document without it, so
+// reading the pinned graph of a namespace dereferences the same URL validation
+// did rather than the namespace itself.
+func TestPinnedGraphDereferencesANamespaceThroughItsDocumentURL(t *testing.T) {
+	var requested []string
+	pins := EphemeralVocabularies()
+	pins.Fetch = func(source string) ([]byte, string, PinnedVersion, error) {
+		requested = append(requested, source)
+		return []byte(testVocabularyDocument), "text/turtle", PinnedVersion{}, nil
+	}
+
+	graph, err := PinnedGraph(pins, testVocabularyNamespace)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"https://vocab.test/things"}, requested)
+	require.True(t, graph.Contains(
+		rdflibgo.NewURIRefUnsafe(testVocabularyNamespace+"Widget"),
+		rdflibgo.RDF.Type,
+		rdflibgo.NewURIRefUnsafe(owlNamespaceIRI+"Class"),
+	))
+}
