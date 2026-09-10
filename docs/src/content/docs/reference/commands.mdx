@@ -563,6 +563,7 @@ A browser navigating to either gets the UI; anything else — `curl`, a SPARQL c
 The SQL and SPARQL tabs each have a **Copy link** button, next to `Run` on the SQL tab and at the right of the results header on the SPARQL tab.
 It copies a link to that tab with the editor's current query URL encoded into a `q` parameter, such as `http://localhost:8080/sql?q=SELECT%20*%20FROM%20triples`.
 Opening the link loads that query back into the editor — into a new **Shared query** tab on the SPARQL side, so it never overwrites what YASGUI restored.
+A SPARQL link also carries the **Reasoning** toggle's state in a `reasoning` parameter, `true` or `false`, and opening it sets the toggle to match, so the query runs for the reader the way it ran for whoever copied it.
 `q` is deliberately not the SPARQL Protocol's `query`, which stays reserved for callers of the endpoint.
 
 Enabling the UI also exposes the JSON endpoints it reads:
