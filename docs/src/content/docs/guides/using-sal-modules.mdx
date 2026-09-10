@@ -114,6 +114,12 @@ SAL injects the module ontology's `@context` into each node so that its keys res
 converts the result to RDF, and commits it on top of the last build as a new snapshot.
 Those triples land in the Iceberg table alongside the triples from your source files.
 
+A relative IRI in a task's output, such as `"@id": "person/bob"`, resolves against your project's namespace,
+not against the module's. What a task produces is instance data belonging to the project that configured and
+ran it; the module's `salmodule://` namespace names its vocabulary, not the data it emits.
+A module that needs its output under a particular namespace, for instance the authoritative source the data
+was pulled from, writes absolute IRIs, which are kept as written.
+
 If a task emits `salmodule:Error` nodes instead of data, the run fails with the messages the module reported.
 
 ## Importing a module's ontology

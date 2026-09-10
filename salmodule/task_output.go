@@ -23,7 +23,13 @@ func (e TaskError) Error() string {
 // GraphFromTaskOutput turns the newline delimited JSON a module task wrote to
 // stdout into RDF. A task emits plain JSON, so the module ontology's @context is
 // injected to resolve the keys against the module's vocabulary.
-func (o *ModuleOntology) GraphFromTaskOutput(output []byte) (*rdflibgo.Graph, error) {
+//
+// A relative IRI in the output resolves against base, the namespace of the
+// project the task was run for, not against the module's own namespace. What a
+// task produces is instance data belonging to the project that configured and
+// ran it; the module's namespace names its vocabulary, and a module that wants
+// its output under some other namespace writes absolute IRIs.
+func (o *ModuleOntology) GraphFromTaskOutput(output []byte, base string) (*rdflibgo.Graph, error) {
 	var nodes []json.RawMessage
 	for lineNumber, line := range strings.Split(string(output), "\n") {
 		line = strings.TrimSpace(line)
@@ -37,7 +43,7 @@ func (o *ModuleOntology) GraphFromTaskOutput(output []byte) (*rdflibgo.Graph, er
 		nodes = append(nodes, json.RawMessage(line))
 	}
 	if len(nodes) == 0 {
-		return rdflibgo.NewGraph(rdflibgo.WithBase(o.Namespace)), nil
+		return rdflibgo.NewGraph(rdflibgo.WithBase(base)), nil
 	}
 
 	document := map[string]any{"@graph": nodes}
@@ -49,8 +55,8 @@ func (o *ModuleOntology) GraphFromTaskOutput(output []byte) (*rdflibgo.Graph, er
 		return nil, fmt.Errorf("encode output of SAL module %s: %w", o.Namespace, err)
 	}
 
-	graph := rdflibgo.NewGraph(rdflibgo.WithBase(o.Namespace))
-	if err := jsonld.Parse(graph, bytes.NewReader(encoded), jsonld.WithBase(o.Namespace), jsonld.WithUnboundedLines()); err != nil {
+	graph := rdflibgo.NewGraph(rdflibgo.WithBase(base))
+	if err := jsonld.Parse(graph, bytes.NewReader(encoded), jsonld.WithBase(base), jsonld.WithUnboundedLines()); err != nil {
 		return nil, fmt.Errorf("parse output of SAL module %s: %w", o.Namespace, err)
 	}
 	if messages := errorMessages(graph); len(messages) > 0 {

@@ -190,6 +190,8 @@ $ docker run MYIMAGE sal run -e SALMODULE_TASK_INSTANCE="${SALMODULE_TASK_INSTAN
 $ 
 ```
 
+The output is instance data belonging to the SAL Project that ran the task, so the base IRI of the JSON-LD a task emits is the project's namespace. A relative IRI in the output resolves against the project, not against the module's `salmodule://` namespace, which names the module's vocabulary rather than what it produces. A module that needs to name its output under a specific namespace, such as the authoritative source the data comes from, emits absolute IRIs.
+
 ### SAL Module Protocol Scheme
 
 SAL Modules have a protocol scheme (`sal:moduleProtocolScheme`) to define how SAL Projects (de)reference SAL Module ontologies in their projects. The following diagram illustrates the process of dereferencing a SAL Module protocol scheme IRI referenced in a JSON-LD document to obtain it's ontology.
