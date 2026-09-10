@@ -17,9 +17,12 @@ type graphRecordReader struct {
 
 	schema    *arrow.Schema
 	pool      memory.Allocator
-	triples   []rdflibgo.Triple
+	tableRows []tableRow
 	hashes    map[string]struct{}
 	batchSize int
+
+	hashIndex       int
+	vocabularyIndex int
 
 	index   int
 	current arrow.RecordBatch
@@ -29,21 +32,20 @@ type graphRecordReader struct {
 
 // newGraphRecordReader snapshots graph triples and exposes them as Arrow record batches.
 func newGraphRecordReader(graph *rdflibgo.Graph, schema *arrow.Schema, batchSize int) *graphRecordReader {
-	return newFilteredGraphRecordReader(graph, schema, batchSize, nil)
+	return newFilteredGraphRecordReader(tableRows(graph, nil), schema, batchSize, nil)
 }
 
-// newFilteredGraphRecordReader writes only triples whose hash is present in hashes.
-func newFilteredGraphRecordReader(graph *rdflibgo.Graph, schema *arrow.Schema, batchSize int, hashes map[string]struct{}) *graphRecordReader {
+// newFilteredGraphRecordReader writes only rows whose hash is present in hashes.
+func newFilteredGraphRecordReader(rows []tableRow, schema *arrow.Schema, batchSize int, hashes map[string]struct{}) *graphRecordReader {
 	r := &graphRecordReader{
-		schema:    schema,
-		pool:      memory.NewGoAllocator(),
-		hashes:    hashes,
-		batchSize: batchSize,
+		schema:          schema,
+		pool:            memory.NewGoAllocator(),
+		tableRows:       rows,
+		hashes:          hashes,
+		batchSize:       batchSize,
+		hashIndex:       schema.FieldIndices("triple_hash")[0],
+		vocabularyIndex: schema.FieldIndices("vocabulary")[0],
 	}
-	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
-		r.triples = append(r.triples, triple)
-		return true
-	})
 	r.refCount.Store(1)
 	return r
 }
@@ -104,34 +106,38 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 	defer builder.Release()
 
 	count := 0
-	for count < r.batchSize && r.index < len(r.triples) {
-		triple := r.triples[r.index]
+	for count < r.batchSize && r.index < len(r.tableRows) {
+		row := r.tableRows[r.index]
 		r.index++
 
-		subject := storedSubject(triple.Subject)
-		predicate := triple.Predicate.String()
-		object := graphTripleObject(triple.Object)
-		hashValue := tripleHash(subject, predicate, object.o, object.oDatatype, object.oLanguage)
 		if r.hashes != nil {
-			if _, ok := r.hashes[hashValue]; !ok {
+			if _, ok := r.hashes[row.hash]; !ok {
 				continue
 			}
 		}
+		triple := row.triple
+		object := graphTripleObject(triple.Object)
 
-		builder.Field(0).(*array.StringBuilder).Append(subject)
-		builder.Field(1).(*array.StringBuilder).Append(predicate)
+		builder.Field(0).(*array.StringBuilder).Append(storedSubject(triple.Subject))
+		builder.Field(1).(*array.StringBuilder).Append(triple.Predicate.String())
 		if err := appendObjectFields(builder, object); err != nil {
 			return nil, fmt.Errorf("serialize object for %s %s: %w", triple.Subject.String(), triple.Predicate.String(), err)
 		}
-		// triple_hash is the final schema field. It is generated from the subject,
-		// predicate, and the object's lexical form, datatype, and language tag,
-		// before typed object columns are derived, so the storage representation
-		// (geometry WKB, float rendering) does not affect the row identity but the
-		// datatype and language do: two triples differing only in datatype or
-		// language are distinct rows, matching what object_type and
-		// object_language record.
-		lastIndex := r.schema.NumFields() - 1
-		builder.Field(lastIndex).(*array.StringBuilder).Append(hashValue)
+		// triple_hash is generated from the subject, predicate, and the object's
+		// lexical form, datatype, and language tag, before typed object columns
+		// are derived, so the storage representation (geometry WKB, float
+		// rendering) does not affect the row identity but the datatype and
+		// language do: two triples differing only in datatype or language are
+		// distinct rows, matching what object_type and object_language record.
+		// The vocabulary is not part of it either: the same statement is one row
+		// whether the project or a pinned vocabulary states it.
+		builder.Field(r.hashIndex).(*array.StringBuilder).Append(row.hash)
+		vocabulary := builder.Field(r.vocabularyIndex).(*array.StringBuilder)
+		if row.vocabulary == "" {
+			vocabulary.AppendNull()
+		} else {
+			vocabulary.Append(row.vocabulary)
+		}
 		count++
 		r.rows++
 	}

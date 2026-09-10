@@ -776,6 +776,42 @@ kbd {
   accent-color: var(--lavender);
 }
 
+/* The ? button and the note it opens under a panel header. */
+.help-button {
+  width: 26px;
+  padding-left: 0;
+  padding-right: 0;
+  border-radius: 50%;
+  text-align: center;
+}
+
+.help-button.active {
+  border-color: var(--lavender);
+  color: var(--lavender);
+}
+
+.help-panel {
+  flex: none;
+  padding: 10px 16px;
+  background: var(--mantle);
+  border-bottom: var(--border);
+  color: var(--subtext0);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.help-panel ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.help-panel code {
+  color: var(--teal);
+}
+
 .map-link {
   align-self: flex-start;
 }

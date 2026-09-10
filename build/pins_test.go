@@ -1,12 +1,16 @@
 package build
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/iceberg-go/catalog/hadoop"
+	"github.com/apache/iceberg-go/table"
 	"github.com/cgs-earth/sal/build/validate"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
@@ -161,4 +165,72 @@ func TestBuildFailsWhenADeclaredPrefixCannotBeResolved(t *testing.T) {
 	require.Contains(t, err.Error(), "https://vocab.test/unused#")
 	require.Contains(t, err.Error(), "404")
 	require.NoFileExists(t, filepath.Join(project, ".sal", "config.jsonld"))
+}
+
+// tableVocabularies scans the built triples table and reports the vocabulary
+// column of every row, keyed by subject and predicate; a row the project
+// states itself maps to "".
+func tableVocabularies(t *testing.T, project string) map[string]string {
+	t.Helper()
+	ctx := context.Background()
+	cat, err := hadoop.NewCatalog("local-catalog", filepath.Join(project, ".sal", "data"), nil)
+	require.NoError(t, err)
+	tbl, err := cat.LoadTable(ctx, table.Identifier{"sal-pins-test-project", "triples"})
+	require.NoError(t, err)
+	_, records, err := tbl.Scan(table.WithSelectedFields("subject", "predicate", "vocabulary")).ToArrowRecords(ctx)
+	require.NoError(t, err)
+
+	rows := map[string]string{}
+	for rec, err := range records {
+		require.NoError(t, err)
+		subjects := rec.Column(0).(*array.String)
+		predicates := rec.Column(1).(*array.String)
+		vocabularies := rec.Column(2).(*array.String)
+		for i := 0; i < int(rec.NumRows()); i++ {
+			vocabulary := ""
+			if vocabularies.IsValid(i) {
+				vocabulary = vocabularies.Value(i)
+			}
+			rows[subjects.Value(i)+" "+predicates.Value(i)] = vocabulary
+		}
+		rec.Release()
+	}
+	return rows
+}
+
+func TestBuildWritesPinnedVocabularyStatementsMarkedWithTheirNamespace(t *testing.T) {
+	project := newPinsTestProject(t)
+	servePinsTestVocabulary(t)
+
+	graph, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	require.NoError(t, err)
+
+	rows := tableVocabularies(t, project)
+	const rdfType = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+	// what the vocabulary states is marked as the vocabulary's
+	require.Equal(t, "https://vocab.test/things#", rows["https://vocab.test/things#Widget "+rdfType])
+	require.Equal(t, "https://vocab.test/things#", rows["https://vocab.test/things#label "+rdfType])
+	// what the project states, and the provenance of the pin, is not
+	require.Contains(t, rows, "https://github.com/cgs-earth/sal-pins-test-project/widgets/1 "+rdfType)
+	require.Equal(t, "", rows["https://github.com/cgs-earth/sal-pins-test-project/widgets/1 "+rdfType])
+	require.Equal(t, "", rows["https://vocab.test/things# http://www.w3.org/2002/07/owl#versionIRI"])
+	// the vocabulary's statements are not in the graph the build returns
+	require.False(t, graph.Contains(
+		rdflibgo.NewURIRefUnsafe("https://vocab.test/things#Widget"),
+		rdflibgo.RDF.Type,
+		rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"),
+	))
+}
+
+func TestBuildLeavesVocabularyStatementsOutOfTheNQuadsExport(t *testing.T) {
+	project := newPinsTestProject(t)
+	servePinsTestVocabulary(t)
+
+	_, err := (&BuildCmd{Format: GraphExportFormatNQuads}).Run()
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(filepath.Join(project, ".sal", "data", "sal-pins-test-project.nq"))
+	require.NoError(t, err)
+	require.Contains(t, string(content), "<https://github.com/cgs-earth/sal-pins-test-project/widgets/1>")
+	require.NotContains(t, string(content), "<https://vocab.test/things#Widget> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>")
 }

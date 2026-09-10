@@ -58,6 +58,12 @@ SAL builds RDF into rows representing triples, with the object split across one 
 - `object_type`: the datatype IRI the literal object was written with; `NULL` for an IRI or blank node object
 - `object_language`: the language tag of an `rdf:langString` literal object, such as `en` for `"hello"@en`; `NULL` for every other object
 - `triple_hash`
+- `vocabulary`: the namespace of the pinned vocabulary whose document states the triple, such as `https://schema.org/`; `NULL` for every triple the project itself asserts, imports, materializes from a module, or records as pin provenance
+
+Every statement of every pinned vocabulary is in the table, so that a query can walk a class or property hierarchy the project only validated against; see [Reasoning over pinned vocabularies](/sal/reference/sparql-engine/#reasoning-over-pinned-vocabularies).
+`vocabulary` is what tells those rows apart from the project's own: the `triples` view `sal query` and `sal serve` read through keeps only the rows where it is `NULL`, and the `triples_all` view holds every row, which a SPARQL query reads only through the RDFS schema predicates and only when it asks for reasoning.
+A statement the project asserts and a vocabulary also makes is one row, the project's, since `triple_hash` does not include the column; a build in which the project starts or stops asserting such a statement rewrites the row.
+The N-Quads export of `sal build --format nq` has no column to mark them in and leaves the vocabulary statements out.
 
 Exactly one of the object value columns is set on each row, chosen by the literal's declared datatype rather than by what its text happens to parse as. A typed literal whose lexical form does not fit its column — an out-of-range `xsd:byte`, a zoneless or sub-microsecond `xsd:dateTime` — is stored in `object_string`, and any datatype without a typed column (booleans, dates, custom types) lands there too. `object_type` keeps the exact datatype in every case, and `object_language` keeps the language tag of a language-tagged string, so exporting the table back to RDF ([`sal export`](/sal/reference/commands/#sal-export)) reproduces the original typed or tagged literal even when the value was stored as a string. The geometry column is what makes the table an Iceberg format version 3 table.
 
@@ -90,7 +96,7 @@ The first node in the graph, if the project has run `sal import` at least once, 
 }
 ```
 
-`dc:title` defaults to the Git project name and `--title` overrides it; `rdfs:comment` is always generated. Ontologies listed with `owl:imports` are merged at the version pinned for them; pinning a vocabulary does not import it, so a vocabulary the project validates against but does not import stays out of the triples table.
+`dc:title` defaults to the Git project name and `--title` overrides it; `rdfs:comment` is always generated. Ontologies listed with `owl:imports` are merged at the version pinned for them as the project's own statements. Pinning a vocabulary does not import it: a vocabulary the project validates against but does not import is in the triples table too, but marked with its namespace in the `vocabulary` column, which the `triples` view leaves out.
 
 ## Pinned vocabularies
 
@@ -167,7 +173,7 @@ http://www.opengis.net/ont/geosparql#       urn:sha256:6a55c78c2b38c077a31075363
 https://schema.org/                         urn:sha256:c3a1e7c9c4b6f6b1a3f5e6d7c8b9a0e1f2d3c4b5a6978869e6fa84d…  application/ld+json  2026-08-11T17:21:12Z
 ```
 
-A vocabulary the project pins but does not import, one it only checks terms against, shows up here the same as an imported one; whether an ontology's own statements were merged into the table is a separate question from which version it validated against.
+A vocabulary the project pins but does not import, one it only checks terms against, shows up here the same as an imported one; whether an ontology's own statements are the project's own rows or marked as the vocabulary's in the `vocabulary` column is a separate question from which version it validated against.
 
 ## STAC catalog
 
@@ -175,7 +181,7 @@ The last thing `sal build` does is describe the data product as a [STAC](https:/
 `catalog.json` is a STAC Catalog named after the git project, listing one child, `triples/collection.json`.
 That collection describes the triples table with three extensions:
 
-- The [Table extension](https://github.com/stac-extensions/table): `table:columns` names every column of the table with its type, `table:row_count` is the number of triples, and `table:primary_geometry` is `object_geometry`.
+- The [Table extension](https://github.com/stac-extensions/table): `table:columns` names every column of the table with its type, `table:row_count` is the number of rows, the statements of the pinned vocabularies included since the catalog describes the table itself, and `table:primary_geometry` is `object_geometry`.
 - The [Projection extension](https://github.com/stac-extensions/projection): `proj:code` is the CRS of the geometry column, `OGC:CRS84`.
 - The [Iceberg extension](https://github.com/portolan-sdi/stac-iceberg-extension), whose fields are how a reader opens the table:
 

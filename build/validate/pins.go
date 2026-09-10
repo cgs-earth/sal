@@ -229,6 +229,17 @@ func (p *PinnedVocabularies) Documents() []string {
 	return paths
 }
 
+// IDs is every vocabulary the project pins, sorted. An ID is the prefix
+// namespace or import IRI the pin was recorded under.
+func (p *PinnedVocabularies) IDs() []string {
+	ids := make([]string, 0, len(p.entries))
+	for id := range p.entries {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // AppendProvenance adds an owl:Ontology node for every vocabulary the project
 // pins to graph, carrying the same owl:versionIRI, dcterms:format,
 // dcterms:modified, and rdfs:comment a build writes to .sal/config.jsonld.
@@ -241,13 +252,7 @@ func (p *PinnedVocabularies) AppendProvenance(graph *rdflibgo.Graph) {
 	modified := rdflibgo.NewURIRefUnsafe(dctermsNamespaceIRI + "modified")
 	comment := rdflibgo.NewURIRefUnsafe(rdfsNamespaceIRI + "comment")
 
-	ids := make([]string, 0, len(p.entries))
-	for id := range p.entries {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-
-	for _, id := range ids {
+	for _, id := range p.IDs() {
 		entry := p.entries[id]
 		subject := rdflibgo.NewURIRefUnsafe(id)
 		graph.Add(subject, rdflibgo.RDF.Type, owlOntology)
@@ -376,12 +381,7 @@ type typedLiteral struct {
 // nodes renders every pinned vocabulary as a graph node, sorted by @id so a
 // rewrite is a stable diff.
 func (p *PinnedVocabularies) nodes() ([]json.RawMessage, error) {
-	ids := make([]string, 0, len(p.entries))
-	for id := range p.entries {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-
+	ids := p.IDs()
 	nodes := make([]json.RawMessage, 0, len(ids))
 	for _, id := range ids {
 		entry := p.entries[id]

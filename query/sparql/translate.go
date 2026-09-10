@@ -29,25 +29,93 @@ func ToSQL(input string) (string, error) {
 // a SERVICE clause names for a pattern inside one. Either is the `triples`
 // view for the current snapshot and an iceberg_scan of the table at an
 // earlier one, scanned inline rather than through a view of its own so the
-// translated SQL says which snapshot it reads.
+// translated SQL says which snapshot it reads. reasoning lets a pattern over
+// an RDFS schema predicate read the statements of the pinned vocabularies
+// too, through `triples_all` or the scan left unfiltered, so that a class or
+// property hierarchy a vocabulary states can be walked; every other pattern
+// reads the project's own statements whatever the setting, so a vocabulary's
+// terms reach a result only through such a hierarchy, never as data of their
+// own. It is one setting for the whole query, so a SERVICE inherits it.
 type tableSources struct {
 	tablePath  string
 	snapshotID int64
+	reasoning  bool
 }
 
-func (s tableSources) source(service string) (string, error) {
+// rdfsSchemaPredicates are the predicates reasoning reads from the pinned
+// vocabularies: the ones that relate classes and properties to each other.
+var rdfsSchemaPredicates = map[string]bool{
+	"http://www.w3.org/2000/01/rdf-schema#subClassOf":    true,
+	"http://www.w3.org/2000/01/rdf-schema#subPropertyOf": true,
+	"http://www.w3.org/2000/01/rdf-schema#domain":        true,
+	"http://www.w3.org/2000/01/rdf-schema#range":         true,
+}
+
+// schemaPattern reports whether a pattern reads an RDFS schema predicate: a
+// constant one, or a path step whose every predicate is one. A variable
+// predicate or a negated set is not, since either would let the vocabulary's
+// other statements through.
+func (t *translator) schemaPattern(triple patternTriple) (bool, error) {
+	if triple.step != nil {
+		if triple.step.negated || len(triple.step.predicates) == 0 {
+			return false, nil
+		}
+		for _, predicate := range triple.step.predicates {
+			if !rdfsSchemaPredicates[predicate] {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
+	if variableName(triple.Predicate) != "" {
+		return false, nil
+	}
+	term, err := parseSPARQLTerm(triple.Predicate, t.prefixes)
+	if err != nil {
+		return false, err
+	}
+	return term.kind == "iri" && rdfsSchemaPredicates[term.value], nil
+}
+
+// tableSource is what one pattern scans, and the clause that keeps the scan
+// to the project's own rows, empty when the source already does or when the
+// query reasons over the vocabularies.
+type tableSource struct {
+	from   string
+	filter string
+}
+
+// clause is the filter written against the alias the source is scanned under.
+func (s tableSource) clause(alias string) string {
+	if s.filter == "" {
+		return ""
+	}
+	return alias + "." + s.filter
+}
+
+// source is what a pattern scans; schema says the pattern reads an RDFS
+// schema predicate, which under reasoning is what reads the vocabularies.
+func (s tableSources) source(service string, schema bool) (tableSource, error) {
 	snapshotID := s.snapshotID
 	if service != "" {
 		id, err := serviceSnapshot(service)
 		if err != nil {
-			return "", err
+			return tableSource{}, err
 		}
 		snapshotID = id
 	}
+	vocabularies := s.reasoning && schema
 	if snapshotID == 0 {
-		return "triples", nil
+		if vocabularies {
+			return tableSource{from: AllTriplesView}, nil
+		}
+		return tableSource{from: TriplesView}, nil
 	}
-	return fmt.Sprintf("iceberg_scan('%s', allow_moved_paths = true, snapshot_from_id = %d)", escapeSQLLiteral(s.tablePath), snapshotID), nil
+	source := tableSource{from: snapshotScanSQL(s.tablePath, snapshotID)}
+	if !vocabularies {
+		source.filter = projectRowsFilter
+	}
+	return source, nil
 }
 
 // servicePath is the path of a SPARQL endpoint of this server: /sparql for the
@@ -82,7 +150,7 @@ func serviceSnapshot(service string) (int64, error) {
 // serviceMarker heads the IRI a SERVICE endpoint reaches the translator in.
 // goRDFlib rejects SERVICE outright but parses GRAPH, so rewriteService turns
 // `SERVICE <iri>` into `GRAPH <urn:x-sal-service:iri>` before parsing and
-// basicGraphPatternParts reads the marked GraphPattern back as a service. A
+// graphPatternParts reads the marked GraphPattern back as a service. A
 // GRAPH clause a query wrote itself carries no marker and stays unsupported.
 const serviceMarker = "urn:x-sal-service:"
 
@@ -97,10 +165,13 @@ func rewriteService(input string) string {
 }
 
 // patternTriple is a triple pattern with the SERVICE endpoint it was written
-// under, empty for one in the query's own WHERE clause.
+// under, empty for one in the query's own WHERE clause. A pattern written with
+// a property path carries the step the path reduced to instead of a
+// predicate, which says what its scan matches and in which direction.
 type patternTriple struct {
 	rdflibsparql.Triple
 	service string
+	step    *pathStep
 }
 
 // groupParts is a group graph pattern flattened into what the translator works
@@ -123,13 +194,15 @@ type minusGroup struct {
 }
 
 // translator carries what every part of one query's translation needs: the
-// query's prefixes, the tables its patterns scan, and a count of the EXISTS
+// query's prefixes, the tables its patterns scan, a count of the EXISTS
 // subqueries written so far so that each one aliases its scans apart from the
-// others and from the enclosing query.
+// others and from the enclosing query, and a count of the hidden variables
+// sequence paths have been chained through.
 type translator struct {
 	prefixes   map[string]string
 	sources    tableSources
 	subqueries int
+	hidden     int
 }
 
 // patternSQL is what a list of triple patterns translates to: one aliased scan
@@ -167,7 +240,8 @@ func toSQL(input string, sources tableSources) (string, error) {
 		return "", fmt.Errorf("SPARQL solution modifiers are not supported yet")
 	}
 
-	parts, err := basicGraphPatternParts(parsed.Where)
+	t := &translator{prefixes: parsed.Prefixes, sources: sources}
+	parts, err := t.graphPatternParts(parsed.Where)
 	if err != nil {
 		return "", err
 	}
@@ -175,7 +249,6 @@ func toSQL(input string, sources tableSources) (string, error) {
 		return "", fmt.Errorf("SPARQL query must include at least one triple pattern")
 	}
 
-	t := &translator{prefixes: parsed.Prefixes, sources: sources}
 	patterns, err := t.patternSQL(parts.triples, "t", nil)
 	if err != nil {
 		return "", err
@@ -238,24 +311,59 @@ func toSQL(input string, sources tableSources) (string, error) {
 // under aliasPrefix. A variable seen before in the same list becomes a join; one
 // bound by an enclosing query, in outer, becomes a correlation instead, so that
 // a MINUS or EXISTS group is evaluated per solution of the query it belongs to.
+// A path step scans the same source with its subject and object columns
+// swapped for an inverse, and a repeated step scans the closure of its edges
+// instead, a derived table whose start and finish the pattern's ends bind.
 func (t *translator) patternSQL(triples []patternTriple, aliasPrefix string, outer map[string]sqlBinding) (patternSQL, error) {
 	result := patternSQL{bindings: make(map[string]sqlBinding)}
 	for i, triple := range triples {
 		alias := fmt.Sprintf("%s%d", aliasPrefix, i)
-		source, err := t.sources.source(triple.service)
+		schema, err := t.schemaPattern(triple)
 		if err != nil {
 			return patternSQL{}, err
 		}
-		result.from = append(result.from, source+" AS "+alias)
-		var correlations []correlation
-		for _, part := range []struct {
+		source, err := t.sources.source(triple.service, schema)
+		if err != nil {
+			return patternSQL{}, err
+		}
+		type part struct {
 			term   string
 			column string
-		}{
-			{term: triple.Subject, column: "subject"},
-			{term: triple.Predicate, column: "predicate"},
-			{term: triple.Object, column: "object"},
-		} {
+		}
+		parts := []part{{triple.Subject, "subject"}, {triple.Predicate, "predicate"}, {triple.Object, "object"}}
+		switch {
+		case triple.step == nil:
+			result.from = append(result.from, source.from+" AS "+alias)
+		case triple.step.closure():
+			var identity string
+			var lateral bool
+			// only a zero-length match needs to know what it is the identity of
+			if triple.step.zero {
+				if identity, lateral, err = t.closureIdentity(triple, result.bindings, outer); err != nil {
+					return patternSQL{}, err
+				}
+			}
+			from := closureSQL(source, *triple.step, identity) + " AS " + alias
+			if lateral {
+				from = "LATERAL " + from
+			}
+			result.from = append(result.from, from)
+			parts = []part{{triple.Subject, "start"}, {triple.Object, "finish"}}
+		default:
+			result.from = append(result.from, source.from+" AS "+alias)
+			result.where = append(result.where, predicateClause(alias, *triple.step))
+			parts = []part{{triple.Subject, "subject"}, {triple.Object, "object"}}
+			if triple.step.inverse {
+				parts = []part{{triple.Subject, "object"}, {triple.Object, "subject"}}
+			}
+		}
+		if triple.step == nil || !triple.step.closure() {
+			if clause := source.clause(alias); clause != "" {
+				result.where = append(result.where, clause)
+			}
+		}
+		var correlations []correlation
+		for _, part := range parts {
 			if name := variableName(part.term); name != "" {
 				binding := sqlBinding{alias: alias, column: part.column}
 				if previous, ok := result.bindings[name]; ok {
@@ -266,7 +374,9 @@ func (t *translator) patternSQL(triples []patternTriple, aliasPrefix string, out
 					correlations = append(correlations, correlation{inner: binding, outer: enclosing})
 				} else {
 					result.bindings[name] = binding
-					result.discovered = append(result.discovered, name)
+					if !isHiddenVariable(name) {
+						result.discovered = append(result.discovered, name)
+					}
 				}
 				continue
 			}
@@ -279,6 +389,32 @@ func (t *translator) patternSQL(triples []patternTriple, aliasPrefix string, out
 		result.where = append(result.where, correlationSQL(alias, correlations)...)
 	}
 	return result, nil
+}
+
+// closureIdentity is what a zero-length path match is the identity of: the
+// endpoint the pattern already has a value for, as a constant or as the
+// expression an earlier scan or the enclosing query binds it to. lateral
+// reports that the expression names another scan, which the derived table
+// then has to be joined LATERAL to see. Nothing bound is "", and the closure
+// falls back to the nodes its edges touch.
+func (t *translator) closureIdentity(triple patternTriple, bindings map[string]sqlBinding, outer map[string]sqlBinding) (identity string, lateral bool, err error) {
+	for _, end := range []string{triple.Subject, triple.Object} {
+		if name := variableName(end); name != "" {
+			if binding, ok := bindings[name]; ok {
+				return binding.expr(), true, nil
+			}
+			if binding, ok := outer[name]; ok {
+				return binding.expr(), true, nil
+			}
+			continue
+		}
+		term, err := parseSPARQLTerm(end, t.prefixes)
+		if err != nil {
+			return "", false, err
+		}
+		return sqlString(term.value), false, nil
+	}
+	return "", false, nil
 }
 
 // correlation ties a variable a subquery's pattern binds to the binding the
@@ -362,7 +498,7 @@ func (t *translator) clauseSQL(parts groupParts, bindings map[string]sqlBinding)
 // enclosing solution substituted in, a MINUS group is evaluated on its own.
 // correlated reports whether the group shares a variable with outer at all.
 func (t *translator) subquerySQL(pattern rdflibsparql.Pattern, outer map[string]sqlBinding, seesOuter bool) (sql string, correlated bool, err error) {
-	parts, err := basicGraphPatternParts(pattern)
+	parts, err := t.graphPatternParts(pattern)
 	if err != nil {
 		return "", false, err
 	}
@@ -449,15 +585,23 @@ func objectNumericExpr(alias string) string {
 	return "COALESCE(" + alias + ".object_float, CAST(" + alias + ".object_integer AS DOUBLE), CAST(" + alias + ".object_byte AS DOUBLE))"
 }
 
-func basicGraphPatternParts(pattern rdflibsparql.Pattern) (groupParts, error) {
+// graphPatternParts flattens a group graph pattern into groupParts. A triple
+// pattern written with a property path is replaced by the patterns pathSteps
+// reduces it to.
+func (t *translator) graphPatternParts(pattern rdflibsparql.Pattern) (groupParts, error) {
 	switch p := pattern.(type) {
 	case *rdflibsparql.BGP:
 		parts := groupParts{triples: make([]patternTriple, 0, len(p.Triples))}
 		for _, triple := range p.Triples {
-			if triple.PredicatePath != nil {
-				return groupParts{}, fmt.Errorf("SPARQL property paths are not supported yet")
+			if triple.PredicatePath == nil {
+				parts.triples = append(parts.triples, patternTriple{Triple: triple})
+				continue
 			}
-			parts.triples = append(parts.triples, patternTriple{Triple: triple})
+			steps, err := t.pathSteps(triple.Subject, triple.PredicatePath, triple.Object, false)
+			if err != nil {
+				return groupParts{}, err
+			}
+			parts.triples = append(parts.triples, steps...)
 		}
 		return parts, nil
 	case *rdflibsparql.GraphPattern:
@@ -465,7 +609,7 @@ func basicGraphPatternParts(pattern rdflibsparql.Pattern) (groupParts, error) {
 		if !ok {
 			return groupParts{}, fmt.Errorf("only basic SPARQL triple patterns and FILTER expressions are supported yet")
 		}
-		parts, err := basicGraphPatternParts(p.Pattern)
+		parts, err := t.graphPatternParts(p.Pattern)
 		if err != nil {
 			return groupParts{}, err
 		}
@@ -486,11 +630,11 @@ func basicGraphPatternParts(pattern rdflibsparql.Pattern) (groupParts, error) {
 		}
 		return parts, nil
 	case *rdflibsparql.JoinPattern:
-		left, err := basicGraphPatternParts(p.Left)
+		left, err := t.graphPatternParts(p.Left)
 		if err != nil {
 			return groupParts{}, err
 		}
-		right, err := basicGraphPatternParts(p.Right)
+		right, err := t.graphPatternParts(p.Right)
 		if err != nil {
 			return groupParts{}, err
 		}
@@ -500,14 +644,14 @@ func basicGraphPatternParts(pattern rdflibsparql.Pattern) (groupParts, error) {
 			minuses: append(left.minuses, right.minuses...),
 		}, nil
 	case *rdflibsparql.FilterPattern:
-		parts, err := basicGraphPatternParts(p.Pattern)
+		parts, err := t.graphPatternParts(p.Pattern)
 		if err != nil {
 			return groupParts{}, err
 		}
 		parts.filters = append(parts.filters, p.Expr)
 		return parts, nil
 	case *rdflibsparql.MinusPattern:
-		left, err := basicGraphPatternParts(p.Left)
+		left, err := t.graphPatternParts(p.Left)
 		if err != nil {
 			return groupParts{}, err
 		}

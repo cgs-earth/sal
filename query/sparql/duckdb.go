@@ -40,9 +40,9 @@ type duckdbInstance struct {
 	imports []ImportedTable
 }
 
-// prepare returns the shared handle with the `triples` view over tablePath, a
-// view per imported data product, and, when the statement needs it, the spatial
-// extension loaded.
+// prepare returns the shared handle with the `triples` and `triples_all` views
+// over tablePath, a view per imported data product, and, when the statement
+// needs it, the spatial extension loaded.
 func (d *duckdbInstance) prepare(ctx context.Context, tablePath string, imports []ImportedTable, withSpatial bool) (*sql.DB, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -74,7 +74,7 @@ func (d *duckdbInstance) prepare(ctx context.Context, tablePath string, imports 
 
 	if tablePath != "" && tablePath != d.viewPath {
 		if _, err := d.db.ExecContext(ctx, viewSQL(tablePath)); err != nil {
-			return nil, fmt.Errorf("create the triples view over %s: %w", tablePath, err)
+			return nil, fmt.Errorf("create the triples views over %s: %w", tablePath, err)
 		}
 		d.viewPath = tablePath
 	}
@@ -92,7 +92,12 @@ func (d *duckdbInstance) registerImports(ctx context.Context, imports []Imported
 	}
 	registered := make([]ImportedTable, 0, len(imports))
 	for _, table := range imports {
-		if _, err := d.db.ExecContext(ctx, importViewSQL(table)); err != nil {
+		_, err := d.db.ExecContext(ctx, importViewSQL(table, true))
+		if err != nil {
+			// a product built before the vocabulary column has nothing to filter
+			_, err = d.db.ExecContext(ctx, importViewSQL(table, false))
+		}
+		if err != nil {
 			slog.Warn("skipping an unreadable imported data product", "view", table.View, "path", table.Path, "error", err)
 			continue
 		}
@@ -124,19 +129,44 @@ func InstallExtensions(ctx context.Context) error {
 	return nil
 }
 
-// viewSQL is the `triples` view every query runs against.
+const (
+	// TriplesView reads the statements the project itself makes: what its
+	// source files assert, what it imports, what its modules produced, and the
+	// provenance of its pins.
+	TriplesView = "triples"
+	// AllTriplesView also reads the statements the pinned vocabularies make,
+	// which the vocabulary column marks with the namespace each came from. A
+	// SPARQL query reads it when asked to reason over the vocabularies.
+	AllTriplesView = "triples_all"
+	// projectRowsFilter is the one definition of which rows the project itself
+	// states; snapshotScanSQL is the only other place it is written.
+	projectRowsFilter = "vocabulary IS NULL"
+)
+
+// viewSQL is the `triples_all` view over the whole table and the `triples`
+// view every query runs against unless it reasons over the vocabularies.
 func viewSQL(tablePath string) string {
-	return fmt.Sprintf(`CREATE OR REPLACE VIEW triples AS
+	return fmt.Sprintf(`CREATE OR REPLACE VIEW %s AS
 SELECT *
-FROM iceberg_scan('%s', allow_moved_paths = true)`, escapeSQLLiteral(tablePath))
+FROM iceberg_scan('%s', allow_moved_paths = true);
+CREATE OR REPLACE VIEW %s AS
+SELECT *
+FROM %s
+WHERE %s`, AllTriplesView, escapeSQLLiteral(tablePath), TriplesView, AllTriplesView, projectRowsFilter)
 }
 
 // importViewSQL is the view an imported data product is queried through. It is
 // the same scan the `triples` view is, under the name the import was given.
-func importViewSQL(table ImportedTable) string {
-	return fmt.Sprintf(`CREATE OR REPLACE VIEW %s AS
+// filtered leaves out the rows the product's own pinned vocabularies state,
+// which a product built before that column existed cannot be asked to do.
+func importViewSQL(table ImportedTable, filtered bool) string {
+	sql := fmt.Sprintf(`CREATE OR REPLACE VIEW %s AS
 SELECT *
 FROM iceberg_scan('%s', allow_moved_paths = true)`, quoteIdentifier(table.View), escapeSQLLiteral(table.Path))
+	if filtered {
+		sql += "\nWHERE " + projectRowsFilter
+	}
+	return sql
 }
 
 // RunSQL executes a DuckDB statement with the Iceberg triples table registered as the `triples` view.

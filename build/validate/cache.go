@@ -264,9 +264,11 @@ func extractVocabularyTermsFromGraph(g *rdflibgo.Graph) map[string]bool {
 // It is how build merges the ontologies a project's .sal/config.jsonld ontology node imports,
 // so that an import is carried at the exact version the project recorded. Terms
 // in the document that are written relative resolve against the document's own
-// IRI, not against the SAL project being built.
+// IRI, not against the SAL project being built. A vocabulary namespace is
+// dereferenced through the same document URL validation used, so a pin whose
+// document is missing on disk is fetched from where it came from.
 func PinnedGraph(pins *PinnedVocabularies, iri string) (*rdflibgo.Graph, error) {
-	body, contentType, _, err := pins.Document(iri, iri)
+	body, contentType, _, err := pins.Document(iri, vocabularyDocumentURL(iri))
 	if err != nil {
 		return nil, err
 	}

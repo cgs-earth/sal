@@ -70,3 +70,10 @@ func TestSnapshotForDiffRejectsInvalidIDs(t *testing.T) {
 	require.Nil(t, snapshot)
 	require.ErrorContains(t, err, "positive snapshot ID or 'latest'")
 }
+
+func TestQueryCmdRejectsReasoningWithoutSparql(t *testing.T) {
+	err := (&QueryCmd{Reasoning: true}).Run()
+
+	require.ErrorIs(t, err, errReasoningWithoutSPARQL)
+	require.ErrorContains(t, err, "triples_all")
+}

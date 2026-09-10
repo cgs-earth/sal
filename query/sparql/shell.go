@@ -26,8 +26,14 @@ type Result struct {
 	Message string     `json:"message"`
 }
 
+// Runner answers a SPARQL query. reasoning lets the RDFS schema predicates
+// read the statements of the pinned vocabularies, so that a property path
+// such as rdfs:subClassOf* can walk a hierarchy the project only validated
+// against; every other pattern reads the project's own statements. It is
+// passed per call rather than held by the runner, so one server answers both
+// kinds of request on the same runner.
 type Runner interface {
-	Run(ctx context.Context, query string) (Result, error)
+	Run(ctx context.Context, query string, reasoning bool) (Result, error)
 }
 
 type SQLRunner interface {
@@ -37,7 +43,7 @@ type SQLRunner interface {
 // SQLTranslator reports the SQL a SPARQL query would run as, without running
 // it. The SPARQL shell's SQL page and the web UI's SQL pane both show it.
 type SQLTranslator interface {
-	Translate(query string) (string, error)
+	Translate(query string, reasoning bool) (string, error)
 }
 
 type StatsRunner interface {
@@ -66,9 +72,11 @@ type DuckDBRunner struct {
 	SnapshotID int64
 }
 
-// RunShell opens an interactive SPARQL prompt against the Iceberg triples table.
-func RunShell(ctx context.Context, runner DuckDBRunner) error {
-	_, err := tea.NewProgram(newShellModel(ctx, runner)).Run()
+// RunShell opens an interactive SPARQL prompt against the Iceberg triples
+// table. reasoning lets every query walk the hierarchies the pinned
+// vocabularies state.
+func RunShell(ctx context.Context, runner DuckDBRunner, reasoning bool) error {
+	_, err := tea.NewProgram(newShellModel(ctx, runner, reasoning)).Run()
 	return err
 }
 
@@ -86,13 +94,15 @@ type sqlRunner struct {
 	runner SQLRunner
 }
 
-func (r sqlRunner) Run(ctx context.Context, query string) (Result, error) {
+// Run hands the statement to DuckDB as written; SQL names the `triples_all`
+// view itself when it wants the vocabularies, so reasoning means nothing here.
+func (r sqlRunner) Run(ctx context.Context, query string, _ bool) (Result, error) {
 	return r.runner.RunSQL(ctx, query)
 }
 
 // Run translates SPARQL to SQL and executes it through DuckDB.
-func (r DuckDBRunner) Run(ctx context.Context, query string) (Result, error) {
-	sql, err := r.Translate(query)
+func (r DuckDBRunner) Run(ctx context.Context, query string, reasoning bool) (Result, error) {
+	sql, err := r.Translate(query, reasoning)
 	if err != nil {
 		return Result{}, err
 	}
@@ -101,9 +111,11 @@ func (r DuckDBRunner) Run(ctx context.Context, query string) (Result, error) {
 
 // Translate is the SQL Run executes for a SPARQL query: the translation with
 // the runner's own row limit appended when the query does not state one, read
-// from the runner's snapshot when it has one.
-func (r DuckDBRunner) Translate(query string) (string, error) {
-	sql, err := toSQL(query, tableSources{tablePath: r.TablePath, snapshotID: r.SnapshotID})
+// from the runner's snapshot when it has one, and with its RDFS schema
+// patterns reading the `triples_all` view or the unfiltered snapshot scan
+// when reasoning is asked for.
+func (r DuckDBRunner) Translate(query string, reasoning bool) (string, error) {
+	sql, err := toSQL(query, tableSources{tablePath: r.TablePath, snapshotID: r.SnapshotID, reasoning: reasoning})
 	if err != nil {
 		return "", err
 	}
@@ -199,15 +211,20 @@ type shellModel struct {
 	showHelp           bool
 	page               shellPage
 	mode               shellMode
+	// reasoning lets every SPARQL query walk the hierarchies the pinned
+	// vocabularies state.
+	reasoning bool
 }
 
-func newShellModel(ctx context.Context, runner Runner) shellModel {
-	return newModeShellModel(ctx, runner, modeSPARQL, `PREFIX schema: <https://schema.org/>
+func newShellModel(ctx context.Context, runner Runner, reasoning bool) shellModel {
+	model := newModeShellModel(ctx, runner, modeSPARQL, `PREFIX schema: <https://schema.org/>
 
 SELECT ?s ?p ?o
 WHERE {
   ?s ?p ?o .
 }`)
+	model.reasoning = reasoning
+	return model
 }
 
 // newSQLShellModel opens the same shell over DuckDB SQL instead of SPARQL.
@@ -248,7 +265,7 @@ func (m shellModel) Init() tea.Cmd {
 	if m.mode != modeSQL || strings.TrimSpace(m.query) == "" {
 		return nil
 	}
-	return runQueryCmd(m.ctx, m.runner, strings.TrimSpace(m.query))
+	return runQueryCmd(m.ctx, m.runner, strings.TrimSpace(m.query), m.reasoning)
 }
 
 func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -361,7 +378,7 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = ""
 			m.running = true
 			return m, tea.Batch(
-				runQueryCmd(m.ctx, m.runner, m.submitted),
+				runQueryCmd(m.ctx, m.runner, m.submitted, m.reasoning),
 				saveHistoryCmd(m.historyDir, m.submitted),
 			)
 		}
@@ -547,6 +564,9 @@ func (m shellModel) View() tea.View {
 		)
 	} else {
 		title := "SAL SPARQL  Ctrl+H: help  F2: SQL View"
+		if m.reasoning {
+			title = "SAL SPARQL (reasoning on)  Ctrl+H: help  F2: SQL View"
+		}
 		if m.mode == modeSQL {
 			// SQL mode has no translation step, so there is no SQL page to switch to.
 			title = "SAL SQL  Ctrl+H: help"
@@ -913,9 +933,9 @@ func (m shellModel) resultsPanel() lipgloss.Style {
 	return resultPanelStyle
 }
 
-func runQueryCmd(ctx context.Context, runner Runner, query string) tea.Cmd {
+func runQueryCmd(ctx context.Context, runner Runner, query string, reasoning bool) tea.Cmd {
 	return func() tea.Msg {
-		result, err := runner.Run(ctx, query)
+		result, err := runner.Run(ctx, query, reasoning)
 		return queryResultMsg{result: result, err: err}
 	}
 }
