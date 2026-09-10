@@ -20,6 +20,8 @@ const TAB_PATHS: Record<TabName, string> = {
 
 /** The parameter a shared query is carried in. */
 const QUERY_PARAM = 'q'
+/** The parameter a shared SPARQL query carries the Reasoning toggle's state in. */
+const REASONING_PARAM = 'reasoning'
 /** The parameter the Blobs tab reads the digest to look up from. */
 const BLOB_PARAM = 'hash'
 /** The parameter that asks the Blobs tab to show a blob in the page instead of downloading it. */
@@ -38,10 +40,15 @@ export function tabForPath(pathname: string): TabName {
 /**
  * An absolute link that reopens tab with query already loaded into its editor.
  * The query rides in `q` rather than the SPARQL Protocol's own `query`, which
- * stays reserved for callers of the `/sparql` endpoint itself.
+ * stays reserved for callers of the `/sparql` endpoint itself. A SPARQL link
+ * also says whether Reasoning was on, since the same query answers differently
+ * either way; it is written explicitly in both states so the link opens the
+ * way it was copied rather than the way the reader last left the toggle.
  */
-export function shareLink(tab: TabName, query: string): string {
-  return `${window.location.origin}${pathForTab(tab)}?${QUERY_PARAM}=${encodeURIComponent(query)}`
+export function shareLink(tab: TabName, query: string, options: { reasoning?: boolean } = {}): string {
+  let search = `${QUERY_PARAM}=${encodeURIComponent(query)}`
+  if (options.reasoning !== undefined) search += `&${REASONING_PARAM}=${options.reasoning}`
+  return `${window.location.origin}${pathForTab(tab)}?${search}`
 }
 
 /**
@@ -71,10 +78,19 @@ export type Route = {
   tab: TabName
   /** The query a share link seeded this tab with, or null for a plain visit. */
   sharedQuery: string | null
+  /** The Reasoning state a SPARQL share link asked for, or null when the link did not say. */
+  sharedReasoning: boolean | null
   /** The digest the Blobs tab was opened on, or null for a plain visit. */
   blobHash: string | null
   /** Whether the Blobs tab was asked to render the blob in the page rather than download it. */
   renderBlob: boolean
+}
+
+/** `true` or `false` as written by shareLink; anything else, including an absent parameter, is null. */
+function readReasoningParam(value: string | null): boolean | null {
+  if (value === 'true') return true
+  if (value === 'false') return false
+  return null
 }
 
 function readLocation(): Route {
@@ -82,6 +98,7 @@ function readLocation(): Route {
   return {
     tab: tabForPath(window.location.pathname),
     sharedQuery: params.get(QUERY_PARAM),
+    sharedReasoning: readReasoningParam(params.get(REASONING_PARAM)),
     blobHash: params.get(BLOB_PARAM),
     renderBlob: params.get(RENDER_PARAM) === 'true',
   }
@@ -108,7 +125,7 @@ export function useRoute(): Route & { navigate: (tab: TabName) => void } {
     if (window.location.pathname !== path || window.location.search) {
       window.history.pushState(null, '', path)
     }
-    setRoute({ tab, sharedQuery: null, blobHash: null, renderBlob: false })
+    setRoute({ tab, sharedQuery: null, sharedReasoning: null, blobHash: null, renderBlob: false })
   }, [])
 
   return { ...route, navigate }

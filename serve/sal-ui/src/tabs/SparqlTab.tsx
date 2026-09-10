@@ -248,7 +248,15 @@ LIMIT 50`,
   ]
 }
 
-export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | null; snapshots: QueryResult | null }) {
+export function SparqlTab({
+  sharedQuery,
+  sharedReasoning,
+  snapshots,
+}: {
+  sharedQuery: string | null
+  sharedReasoning: boolean | null
+  snapshots: QueryResult | null
+}) {
   const samples = [...SAMPLES, ...snapshotSamples(snapshots)]
   const container = useRef<HTMLDivElement>(null)
   const yasgui = useRef<Yasgui | null>(null)
@@ -317,16 +325,21 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
     if (next) scheduleTranslation()
   }
 
-  const toggleReasoning = (next: boolean) => {
-    setReasoning(next)
-    reasoningRef.current = next
-    try {
-      localStorage.setItem(REASONING_KEY, String(next))
-    } catch {
-      // Storage may be unavailable; the choice still holds for this visit.
-    }
-    scheduleTranslation()
-  }
+  // Wrapped in useCallback so the Yasgui effect below can apply a shared
+  // link's Reasoning state without re-running on every render.
+  const toggleReasoning = useCallback(
+    (next: boolean) => {
+      setReasoning(next)
+      reasoningRef.current = next
+      try {
+        localStorage.setItem(REASONING_KEY, String(next))
+      } catch {
+        // Storage may be unavailable; the choice still holds for this visit.
+      }
+      scheduleTranslation()
+    },
+    [scheduleTranslation],
+  )
 
   useEffect(() => {
     const parent = container.current
@@ -340,6 +353,12 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
         args: () => (reasoningRef.current ? [{ name: 'reasoning', value: 'true' }] : []),
       },
       copyEndpointOnNewTab: true,
+      // Share links are this app's own (`q` and `reasoning`, read by routing.ts),
+      // so Yasgui must not read the address bar itself. Left on, it treats every
+      // parameter it does not know as a request argument and pushes it onto
+      // requestConfig.args, which is a function here, and crashes on any share
+      // link with "requestConfig.args.push is not a function".
+      populateFromUrl: false,
     })
     yasgui.current = instance
     // Seed a first-run tab; a restored tab keeps whatever the user last typed.
@@ -353,6 +372,10 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
     // from stacking up copies of it.
     if (sharedQuery) {
       instance.addTab(true, { name: 'Shared query', yasqe: { value: sharedQuery } }, { avoidDuplicateTabs: true })
+      // The link says how its query was meant to run, so the toggle follows it
+      // the same way as if the reader had set it, and it sticks like any other
+      // choice; a link that does not say leaves the toggle alone.
+      if (sharedReasoning !== null) toggleReasoning(sharedReasoning)
     }
 
     // appendChild moves the node, so the button follows the selected tab.
@@ -428,7 +451,7 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
       instance.destroy()
       parent.replaceChildren()
     }
-  }, [sharedQuery, shareHost, scheduleTranslation])
+  }, [sharedQuery, sharedReasoning, shareHost, scheduleTranslation, toggleReasoning])
 
   // Samples load into the active tab, which is also renamed so the tab strip
   // reads as the query it holds rather than "Query 1".
@@ -511,6 +534,7 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
             tab="SPARQL"
             className="button yasr-share"
             query={() => yasgui.current?.getTab()?.getQuery() ?? ''}
+            reasoning={() => reasoningRef.current}
           />,
           shareHost,
         )}
