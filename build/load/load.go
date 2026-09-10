@@ -44,54 +44,8 @@ type LoadConfig struct {
 	Namespace string
 }
 
-// VocabularyGraph is the statements of one pinned vocabulary, attributed to
-// the namespace the project pins it under.
-type VocabularyGraph struct {
-	Namespace string
-	Graph     *rdflibgo.Graph
-}
-
-// tableRow is one row the triples table mirrors: the triple, its identity,
-// and the vocabulary column, "" meaning NULL.
-type tableRow struct {
-	triple     rdflibgo.Triple
-	hash       string
-	vocabulary string
-}
-
-// tableRows flattens the asserted graph and the pinned vocabularies into the
-// rows the table mirrors. Every asserted triple is a row with no vocabulary;
-// then each vocabulary, in namespace order, contributes only the triples whose
-// hash no earlier row has, so an asserted statement always wins over one a
-// vocabulary states, and a statement two vocabularies share is attributed to
-// the first namespace in sorted order.
-func tableRows(graph *rdflibgo.Graph, vocabularies []VocabularyGraph) []tableRow {
-	var rows []tableRow
-	seen := map[string]struct{}{}
-	add := func(g *rdflibgo.Graph, vocabulary string) {
-		g.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
-			hash := tripleHashForTriple(triple)
-			if _, ok := seen[hash]; ok {
-				return true
-			}
-			seen[hash] = struct{}{}
-			rows = append(rows, tableRow{triple: triple, hash: hash, vocabulary: vocabulary})
-			return true
-		})
-	}
-	add(graph, "")
-	sorted := append([]VocabularyGraph(nil), vocabularies...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Namespace < sorted[j].Namespace })
-	for _, vocabulary := range sorted {
-		add(vocabulary.Graph, vocabulary.Namespace)
-	}
-	return rows
-}
-
-// WriteGraphToIceberg writes an RDF graph into the configured Iceberg triples
-// table, along with the statements of the pinned vocabularies, which are
-// marked with their namespace in the vocabulary column.
-func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, vocabularies []VocabularyGraph, cfg *LoadConfig, customMetadata map[string]string) error {
+// WriteGraphToIceberg writes an RDF graph into the configured Iceberg triples table.
+func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig, customMetadata map[string]string) error {
 	if graph == nil {
 		return fmt.Errorf("load graph: missing graph")
 	}
@@ -100,10 +54,6 @@ func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, vocabularie
 	}
 
 	graph = stabilizeBlankNodes(graph)
-	stabilized := make([]VocabularyGraph, 0, len(vocabularies))
-	for _, vocabulary := range vocabularies {
-		stabilized = append(stabilized, VocabularyGraph{Namespace: vocabulary.Namespace, Graph: stabilizeBlankNodes(vocabulary.Graph)})
-	}
 
 	arrowSchema, tableSchema, err := GetSchemas()
 	if err != nil {
@@ -124,7 +74,7 @@ func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, vocabularie
 		return err
 	}
 
-	err = processGraph(ctx, tableRows(graph, stabilized), cat, tbl.Identifier(), arrowSchema, cfg.BatchSize)
+	err = processGraph(ctx, graph, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize)
 	if err != nil {
 		return err
 	}
@@ -147,10 +97,10 @@ func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, vocabularie
 	return pkg.SetTagOfLatestSnapshot(tbl, cat)
 }
 
-// processGraph writes the rows the table should mirror to Iceberg data files, then commits them in one snapshot.
+// processGraph writes an RDF graph to Iceberg data files, then commits them in one snapshot.
 func processGraph(
 	ctx context.Context,
-	rows []tableRow,
+	graph *rdflibgo.Graph,
 	cat catalog.Catalog,
 	tableIdent table.Identifier,
 	arrowSchema *arrow.Schema,
@@ -161,7 +111,7 @@ func processGraph(
 		return fmt.Errorf("load table: %w", err)
 	}
 
-	diff, err := diffGraphAgainstTable(ctx, tbl, rows)
+	diff, err := diffGraphAgainstTable(ctx, tbl, graph)
 	if err != nil {
 		return err
 	}
@@ -171,23 +121,23 @@ func processGraph(
 	}
 	slog.Info("Applying Iceberg triple diff", "added", len(diff.toAdd), "removed", len(diff.toDrop), "unchanged", diff.unchanged)
 
-	dataFiles, written, err := writeGraph(ctx, tbl, rows, arrowSchema, batchSize, diff.toAdd)
+	dataFiles, rows, err := writeGraph(ctx, tbl, graph, arrowSchema, batchSize, diff.toAdd)
 	if err != nil {
 		return err
 	}
-	return commitGraphDelta(ctx, tbl, dataFiles, written, diff.toDrop)
+	return commitGraphDelta(ctx, tbl, dataFiles, rows, diff.toDrop)
 }
 
-// writeGraph writes the rows whose hash is in hashes to Iceberg data files without parallelism.
+// writeGraph writes all triples in graph to Iceberg data files without parallelism.
 func writeGraph(
 	ctx context.Context,
 	tbl *table.Table,
-	rows []tableRow,
+	graph *rdflibgo.Graph,
 	arrowSchema *arrow.Schema,
 	batchSize int,
 	hashes map[string]struct{},
 ) ([]iceberg.DataFile, int64, error) {
-	rdr := newFilteredGraphRecordReader(rows, arrowSchema, batchSize, hashes)
+	rdr := newFilteredGraphRecordReader(graph, arrowSchema, batchSize, hashes)
 	defer rdr.Release()
 
 	records := retainedRecordIterator(rdr)
@@ -214,7 +164,7 @@ func appendGraph(
 	batchSize int,
 	hashes map[string]struct{},
 ) error {
-	dataFiles, rows, err := writeGraph(ctx, tbl, tableRows(graph, nil), arrowSchema, batchSize, hashes)
+	dataFiles, rows, err := writeGraph(ctx, tbl, graph, arrowSchema, batchSize, hashes)
 	if err != nil {
 		return err
 	}
@@ -228,18 +178,12 @@ type graphTableDiff struct {
 }
 
 type existingTriple struct {
-	hash       string
-	predicate  string
-	vocabulary string
+	hash      string
+	predicate string
 }
 
-// diffGraphAgainstTable compares the rows the table should mirror against the
-// rows already in Iceberg. A row whose hash is in the table but whose
-// vocabulary differs, because the project started or stopped asserting a
-// statement a pinned vocabulary makes, is dropped and added again so the
-// column mirrors the graph; the equality delete and the re-added row share a
-// snapshot, and the delete applies only to data files sequenced before it.
-func diffGraphAgainstTable(ctx context.Context, tbl *table.Table, rows []tableRow) (*graphTableDiff, error) {
+// diffGraphAgainstTable compares new graph triple hashes against hashes already in Iceberg.
+func diffGraphAgainstTable(ctx context.Context, tbl *table.Table, graph *rdflibgo.Graph) (*graphTableDiff, error) {
 	existing, err := readExistingTriples(ctx, tbl)
 	if err != nil {
 		return nil, err
@@ -247,17 +191,16 @@ func diffGraphAgainstTable(ctx context.Context, tbl *table.Table, rows []tableRo
 
 	diff := &graphTableDiff{toAdd: map[string]struct{}{}}
 	newHashes := map[string]struct{}{}
-	for _, row := range rows {
-		newHashes[row.hash] = struct{}{}
-		if current, ok := existing[row.hash]; ok {
-			if current.vocabulary == row.vocabulary {
-				diff.unchanged++
-				continue
-			}
-			diff.toDrop = append(diff.toDrop, current)
+	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+		hash := tripleHashForTriple(triple)
+		newHashes[hash] = struct{}{}
+		if _, ok := existing[hash]; ok {
+			diff.unchanged++
+			return true
 		}
-		diff.toAdd[row.hash] = struct{}{}
-	}
+		diff.toAdd[hash] = struct{}{}
+		return true
+	})
 
 	for hash, triple := range existing {
 		if _, ok := newHashes[hash]; !ok {
@@ -276,7 +219,7 @@ func readExistingTriples(ctx context.Context, tbl *table.Table) (map[string]exis
 	}
 
 	_, records, err := tbl.Scan(
-		table.WithSelectedFields("triple_hash", "predicate", "vocabulary"),
+		table.WithSelectedFields("triple_hash", "predicate"),
 		table.WithCaseSensitive(true),
 	).ToArrowRecords(ctx)
 	if err != nil {
@@ -289,42 +232,40 @@ func readExistingTriples(ctx context.Context, tbl *table.Table) (map[string]exis
 		if rec == nil {
 			continue
 		}
-		columns, err := existingTripleColumns(rec.Schema())
+		hashIndex, predicateIndex, err := existingTripleColumnIndexes(rec.Schema())
 		if err != nil {
 			rec.Release()
 			return nil, err
 		}
-		hashColumn := rec.Column(columns["triple_hash"]).(*array.String)
-		predicateColumn := rec.Column(columns["predicate"]).(*array.String)
-		vocabularyColumn := rec.Column(columns["vocabulary"]).(*array.String)
+		hashColumn := rec.Column(hashIndex).(*array.String)
+		predicateColumn := rec.Column(predicateIndex).(*array.String)
 		for i := 0; i < int(rec.NumRows()); i++ {
 			if hashColumn.IsNull(i) || predicateColumn.IsNull(i) {
 				continue
 			}
 			hash := hashColumn.Value(i)
-			triple := existingTriple{hash: hash, predicate: predicateColumn.Value(i)}
-			if !vocabularyColumn.IsNull(i) {
-				triple.vocabulary = vocabularyColumn.Value(i)
-			}
-			triples[hash] = triple
+			triples[hash] = existingTriple{hash: hash, predicate: predicateColumn.Value(i)}
 		}
 		rec.Release()
 	}
 	return triples, nil
 }
 
-// existingTripleColumns is the index of each column the diff reads, by name.
-func existingTripleColumns(schema *arrow.Schema) (map[string]int, error) {
-	columns := map[string]int{}
+func existingTripleColumnIndexes(schema *arrow.Schema) (int, int, error) {
+	hashIndex := -1
+	predicateIndex := -1
 	for i, field := range schema.Fields() {
-		columns[field.Name] = i
-	}
-	for _, name := range []string{"triple_hash", "predicate", "vocabulary"} {
-		if _, ok := columns[name]; !ok {
-			return nil, fmt.Errorf("scan existing triple hashes: expected predicate, triple_hash and vocabulary columns")
+		switch field.Name {
+		case "triple_hash":
+			hashIndex = i
+		case "predicate":
+			predicateIndex = i
 		}
 	}
-	return columns, nil
+	if hashIndex < 0 || predicateIndex < 0 {
+		return 0, 0, fmt.Errorf("scan existing triple hashes: expected predicate and triple_hash columns")
+	}
+	return hashIndex, predicateIndex, nil
 }
 
 // readExistingTripleHashes scans triple hashes from the current Iceberg table.

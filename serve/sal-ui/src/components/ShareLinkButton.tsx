@@ -5,8 +5,6 @@ type ShareLinkButtonProps = {
   tab: TabName
   /** Read lazily, so the link always carries whatever the editor holds right now. */
   query: () => string
-  /** Read lazily too; set by the SPARQL tab so the link carries its Reasoning toggle. */
-  reasoning?: () => boolean
   className?: string
 }
 
@@ -15,7 +13,7 @@ type ShareLinkButtonProps = {
  * the link loads that query back into the editor, which is how a query is
  * handed to someone else without pasting the text itself.
  */
-export function ShareLinkButton({ tab, query, reasoning, className = 'button' }: ShareLinkButtonProps) {
+export function ShareLinkButton({ tab, query, className = 'button' }: ShareLinkButtonProps) {
   const [state, setState] = useState<'idle' | 'copied' | 'empty'>('idle')
 
   useEffect(() => {
@@ -30,7 +28,7 @@ export function ShareLinkButton({ tab, query, reasoning, className = 'button' }:
       setState('empty')
       return
     }
-    await navigator.clipboard.writeText(shareLink(tab, text, { reasoning: reasoning?.() }))
+    await navigator.clipboard.writeText(shareLink(tab, text))
     setState('copied')
   }
 

@@ -31,13 +31,10 @@ type endpointRunner struct {
 	// snapshot is the snapshot AtSnapshot was last asked for, zero when a query
 	// went to the current table.
 	snapshot int64
-	// reasoning is what the last query asked for.
-	reasoning bool
 }
 
-func (r *endpointRunner) Run(_ context.Context, query string, reasoning bool) (salsparql.Result, error) {
+func (r *endpointRunner) Run(_ context.Context, query string) (salsparql.Result, error) {
 	r.query = query
-	r.reasoning = reasoning
 	return r.result, r.err
 }
 
@@ -82,8 +79,8 @@ func (r *endpointUIRunner) Stats(_ context.Context) (salsparql.TableStats, error
 
 // Translate is the real translation, since it touches neither DuckDB nor the
 // table and the endpoint's job is to report what that translation produces.
-func (r *endpointUIRunner) Translate(query string, reasoning bool) (string, error) {
-	return salsparql.DuckDBRunner{}.Translate(query, reasoning)
+func (r *endpointUIRunner) Translate(query string) (string, error) {
+	return salsparql.DuckDBRunner{}.Translate(query)
 }
 
 func newUIServer(t *testing.T, runner *endpointUIRunner) *httptest.Server {
@@ -1193,105 +1190,4 @@ func TestEndpointWithUIServesTheStacCatalogRatherThanTheApp(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
 	require.JSONEq(t, `{"type":"Catalog","id":"widgets"}`, string(body))
-}
-
-func TestEndpointPassesReasoningFromAGETParameter(t *testing.T) {
-	runner := &endpointRunner{result: salsparql.Result{Header: []string{"s"}}}
-	server := httptest.NewServer(NewEndpoint(runner, "", ""))
-	defer server.Close()
-
-	resp, err := http.Get(server.URL + "/sparql?reasoning=true&query=SELECT+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+%7D")
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.True(t, runner.reasoning)
-	require.Equal(t, "SELECT ?s WHERE { ?s ?p ?o }", runner.query)
-
-	// absent, it is off
-	resp, err = http.Get(server.URL + "/sparql?query=SELECT+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+%7D")
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.False(t, runner.reasoning)
-}
-
-func TestEndpointPassesReasoningFromAFormField(t *testing.T) {
-	runner := &endpointRunner{result: salsparql.Result{Header: []string{"s"}}}
-	server := httptest.NewServer(NewEndpoint(runner, "", ""))
-	defer server.Close()
-
-	resp, err := http.Post(server.URL+"/sparql", "application/x-www-form-urlencoded",
-		strings.NewReader("query=SELECT+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+%7D&reasoning=true"))
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.True(t, runner.reasoning)
-}
-
-func TestEndpointPassesReasoningFromTheURLOfASparqlQueryPOST(t *testing.T) {
-	runner := &endpointRunner{result: salsparql.Result{Header: []string{"s"}}}
-	server := httptest.NewServer(NewEndpoint(runner, "", ""))
-	defer server.Close()
-
-	req, err := http.NewRequest(http.MethodPost, server.URL+"/sparql?reasoning=true", strings.NewReader("SELECT ?s WHERE { ?s ?p ?o }"))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/sparql-query")
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.True(t, runner.reasoning)
-	require.Equal(t, "SELECT ?s WHERE { ?s ?p ?o }", runner.query)
-}
-
-func TestEndpointRejectsAReasoningValueThatIsNotABoolean(t *testing.T) {
-	runner := &endpointRunner{result: salsparql.Result{Header: []string{"s"}}}
-	server := httptest.NewServer(NewEndpoint(runner, "", ""))
-	defer server.Close()
-
-	resp, err := http.Get(server.URL + "/sparql?reasoning=rdfs&query=SELECT+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+%7D")
-	require.NoError(t, err)
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	require.Contains(t, string(body), "the reasoning parameter must be true or false")
-	require.Empty(t, runner.query, "nothing must run")
-}
-
-func TestEndpointQueriesASnapshotWithReasoning(t *testing.T) {
-	runner := &endpointRunner{snapshots: []int64{1234}, result: salsparql.Result{Header: []string{"s"}}}
-	server := httptest.NewServer(NewEndpoint(runner, "", ""))
-	defer server.Close()
-
-	resp, err := http.Get(server.URL + "/v1234/sparql?reasoning=true&query=SELECT+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+%7D")
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Equal(t, int64(1234), runner.snapshot)
-	require.True(t, runner.reasoning)
-}
-
-func TestEndpointWithUITranslatesWithReasoning(t *testing.T) {
-	runner := &endpointUIRunner{}
-	server := newUIServer(t, runner)
-	defer server.Close()
-
-	resp, err := http.Post(server.URL+"/api/sparql/translate", "application/json",
-		strings.NewReader(`{"query":"SELECT ?s WHERE { ?s <http://www.w3.org/2000/01/rdf-schema#subClassOf> ?o } LIMIT 5","reasoning":true}`))
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, resp.Body.Close())
-	}()
-
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var body struct {
-		SQL string `json:"sql"`
-	}
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
-	require.Contains(t, body.SQL, "FROM triples_all AS t0")
 }

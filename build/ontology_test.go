@@ -44,7 +44,7 @@ func TestImportOntologiesDoesNothingWithoutAProjectOntology(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.jsonld")
 
 	fetched := false
-	_, err := importOntologies(graph, path, ontologyTestBase, func(string) (*rdflibgo.Graph, error) {
+	err := importOntologies(graph, path, ontologyTestBase, func(string) (*rdflibgo.Graph, error) {
 		fetched = true
 		return nil, nil
 	}, failOnPull(t))
@@ -82,11 +82,9 @@ func TestImportOntologiesMergesEveryImport(t *testing.T) {
 	}
 
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase(ontologyTestBase))
-	merged, err := importOntologies(graph, path, ontologyTestBase, fetch, failOnPull(t))
-	require.NoError(t, err)
+	require.NoError(t, importOntologies(graph, path, ontologyTestBase, fetch, failOnPull(t)))
 
 	require.Equal(t, []string{"https://example.com/onto1", "https://example.com/onto2"}, requested)
-	require.Equal(t, requested, merged)
 	// one statement per import; the project ontology's own statements arrive
 	// with it as a source file rather than from here
 	require.Equal(t, 2, graphTripleCount(graph))
@@ -138,7 +136,7 @@ func TestImportOntologiesReportsWhichImportCouldNotBeFetched(t *testing.T) {
 }`)
 
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase(ontologyTestBase))
-	_, err := importOntologies(graph, path, ontologyTestBase, func(string) (*rdflibgo.Graph, error) {
+	err := importOntologies(graph, path, ontologyTestBase, func(string) (*rdflibgo.Graph, error) {
 		return nil, fmt.Errorf("bad response status code: 404")
 	}, failOnPull(t))
 
@@ -177,12 +175,9 @@ func TestImportOntologiesPullsAnOciArtifactAndKeepsItOutOfTheGraph(t *testing.T)
 		return nil
 	}
 
-	merged, err := importOntologies(graph, path, ontologyTestBase, fetch, pull)
-	require.NoError(t, err)
+	require.NoError(t, importOntologies(graph, path, ontologyTestBase, fetch, pull))
 
 	require.Equal(t, []string{"oci://ghcr.io/cgs-earth/sal:e57e9af"}, pulled)
-	// the artifact is not an ontology document, so it is not among the merged ones
-	require.NotContains(t, merged, "oci://ghcr.io/cgs-earth/sal:e57e9af")
 	// the artifact reference is gone from the graph, while the ontology import
 	// sitting next to it in the same file is untouched and was merged
 	require.False(t, graph.Contains(project, imports, artifact))
@@ -217,8 +212,7 @@ func TestImportOntologiesMergesASalModuleOntology(t *testing.T) {
 	}
 
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase(ontologyTestBase))
-	_, err := importOntologies(graph, path, ontologyTestBase, fetch, failOnPull(t))
-	require.NoError(t, err)
+	require.NoError(t, importOntologies(graph, path, ontologyTestBase, fetch, failOnPull(t)))
 
 	require.Equal(t, []string{"salmodule://github.com/adplincinst/sample-salmodule-1"}, requested)
 	require.True(t, graph.Contains(
@@ -237,7 +231,7 @@ func TestImportOntologiesReportsWhichArtifactCouldNotBePulled(t *testing.T) {
 }`)
 
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase(ontologyTestBase))
-	_, err := importOntologies(graph, path, ontologyTestBase, nil, func(string) error {
+	err := importOntologies(graph, path, ontologyTestBase, nil, func(string) error {
 		return fmt.Errorf("unauthorized")
 	})
 

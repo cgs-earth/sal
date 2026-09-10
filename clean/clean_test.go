@@ -100,7 +100,7 @@ func createTableWithSnapshots(t *testing.T, count int) (*hadoop.Catalog, *table.
 	}
 
 	for i := 0; i < count; i++ {
-		require.NoError(t, load.WriteGraphToIceberg(ctx, graphForSnapshot(i), nil, cfg, map[string]string{"sal.test-snapshot": fmt.Sprintf("%d", i)}))
+		require.NoError(t, load.WriteGraphToIceberg(ctx, graphForSnapshot(i), cfg, map[string]string{"sal.test-snapshot": fmt.Sprintf("%d", i)}))
 	}
 
 	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)

@@ -19,7 +19,7 @@ WHERE {
 }`
 
 func TestTranslateJoinsTheCurrentTableToASnapshotNamedBySERVICE(t *testing.T) {
-	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate(compareSnapshotsQuery, false)
+	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate(compareSnapshotsQuery)
 
 	require.NoError(t, err)
 	require.Contains(t, sql, "FROM triples AS t0")
@@ -39,7 +39,7 @@ SELECT ?s ?o
 WHERE {
   ?s <https://schema.org/name> ?o .
   SERVICE <http://localhost:8080/sparql> { ?s <https://schema.org/name> ?o }
-}`, false)
+}`)
 
 	require.NoError(t, err)
 	require.Contains(t, sql, "FROM iceberg_scan('/tmp/warehouse/sal/triples', allow_moved_paths = true, snapshot_from_id = 122) AS t0")
@@ -54,7 +54,7 @@ WHERE {
     ?s <https://schema.org/name> ?name .
     FILTER(?name != "bob")
   }
-}`, false)
+}`)
 
 	require.NoError(t, err)
 	require.Contains(t, sql, "FROM iceberg_scan('/tmp/warehouse/sal/triples', allow_moved_paths = true, snapshot_from_id = 7) AS t0")
@@ -64,7 +64,7 @@ WHERE {
 
 func TestTranslateRejectsASERVICEThatIsNotAnEndpointOfThisServer(t *testing.T) {
 	_, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate(`
-SELECT ?s WHERE { SERVICE <https://query.wikidata.org/sparql/> { ?s ?p ?o } }`, false)
+SELECT ?s WHERE { SERVICE <https://query.wikidata.org/sparql/> { ?s ?p ?o } }`)
 
 	require.ErrorContains(t, err, "not a SPARQL endpoint of this server")
 	require.ErrorContains(t, err, "/v<snapshot id>/sparql")
@@ -72,7 +72,7 @@ SELECT ?s WHERE { SERVICE <https://query.wikidata.org/sparql/> { ?s ?p ?o } }`, 
 
 func TestTranslateRejectsASERVICEWithoutASnapshotID(t *testing.T) {
 	_, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate(`
-SELECT ?s WHERE { SERVICE <http://localhost:8080/v0/sparql> { ?s ?p ?o } }`, false)
+SELECT ?s WHERE { SERVICE <http://localhost:8080/v0/sparql> { ?s ?p ?o } }`)
 
 	require.ErrorContains(t, err, "does not name a snapshot ID")
 }

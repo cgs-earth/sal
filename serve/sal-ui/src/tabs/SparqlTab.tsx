@@ -23,23 +23,6 @@ function readShowSql(): boolean {
   }
 }
 
-/**
- * Where the reasoning choice is remembered between visits. Reasoning sends the
- * endpoint's `reasoning=true`, which lets the RDFS schema predicates read the
- * statements of the pinned vocabularies, so that a property path such as
- * rdfs:subClassOf* can walk a hierarchy the project only validated against
- * while every other pattern stays on the project's own data.
- */
-const REASONING_KEY = 'sal-ui.sparql.reasoning'
-
-function readReasoning(): boolean {
-  try {
-    return localStorage.getItem(REASONING_KEY) === 'true'
-  } catch {
-    return false
-  }
-}
-
 /** How long typing has to pause before the query is sent for translation. */
 const TRANSLATE_DEBOUNCE_MS = 250
 
@@ -57,9 +40,10 @@ type Sample = { name: string; query: string }
  * every sample stays inside that subset. The snapshot samples need a snapshot
  * ID only the server knows, so they are built by snapshotSamples from the
  * Stats listing rather than listed here. The inherited classes and label
- * samples walk the class and property hierarchies a pinned vocabulary states,
- * which they only see with the Reasoning toggle on; neither names a term of
- * any particular vocabulary, so they work over whatever the dataset holds.
+ * samples walk whatever class and property hierarchies the table holds, the
+ * project's own statements and the ontologies it imports with owl:imports;
+ * neither names a term of any particular vocabulary, so they work over
+ * whatever the dataset holds.
  */
 const SAMPLES: Sample[] = [
   {
@@ -248,15 +232,7 @@ LIMIT 50`,
   ]
 }
 
-export function SparqlTab({
-  sharedQuery,
-  sharedReasoning,
-  snapshots,
-}: {
-  sharedQuery: string | null
-  sharedReasoning: boolean | null
-  snapshots: QueryResult | null
-}) {
+export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | null; snapshots: QueryResult | null }) {
   const samples = [...SAMPLES, ...snapshotSamples(snapshots)]
   const container = useRef<HTMLDivElement>(null)
   const yasgui = useRef<Yasgui | null>(null)
@@ -272,12 +248,6 @@ export function SparqlTab({
   const [showSql, setShowSql] = useState(readShowSql)
   const showSqlRef = useRef(showSql)
   showSqlRef.current = showSql
-  // Reasoning is read through a ref for the same reason: Yasgui asks for the
-  // request's parameters as it sends each query, so toggling never rebuilds
-  // the editor.
-  const [reasoning, setReasoning] = useState(readReasoning)
-  const reasoningRef = useRef(reasoning)
-  reasoningRef.current = reasoning
   const [translation, setTranslation] = useState<Translation>({ status: 'empty' })
   // The help note is closed until asked for and not remembered, since it only
   // explains the header's controls.
@@ -302,7 +272,7 @@ export function SparqlTab({
       }
       const controller = new AbortController()
       translateAbort.current = controller
-      translateSparql(query, reasoningRef.current, controller.signal).then(
+      translateSparql(query, controller.signal).then(
         (sql) => {
           if (!controller.signal.aborted) setTranslation({ status: 'ok', sql })
         },
@@ -325,39 +295,18 @@ export function SparqlTab({
     if (next) scheduleTranslation()
   }
 
-  // Wrapped in useCallback so the Yasgui effect below can apply a shared
-  // link's Reasoning state without re-running on every render.
-  const toggleReasoning = useCallback(
-    (next: boolean) => {
-      setReasoning(next)
-      reasoningRef.current = next
-      try {
-        localStorage.setItem(REASONING_KEY, String(next))
-      } catch {
-        // Storage may be unavailable; the choice still holds for this visit.
-      }
-      scheduleTranslation()
-    },
-    [scheduleTranslation],
-  )
-
   useEffect(() => {
     const parent = container.current
     if (!parent) return
 
     const endpoint = `${window.location.origin}/sparql`
     const instance = new Yasgui(parent, {
-      requestConfig: {
-        endpoint,
-        method: 'POST',
-        args: () => (reasoningRef.current ? [{ name: 'reasoning', value: 'true' }] : []),
-      },
+      requestConfig: { endpoint, method: 'POST' },
       copyEndpointOnNewTab: true,
-      // Share links are this app's own (`q` and `reasoning`, read by routing.ts),
-      // so Yasgui must not read the address bar itself. Left on, it treats every
-      // parameter it does not know as a request argument and pushes it onto
-      // requestConfig.args, which is a function here, and crashes on any share
-      // link with "requestConfig.args.push is not a function".
+      // Share links are this app's own (`q`, read by routing.ts), so Yasgui
+      // must not read the address bar itself. Left on, it treats every
+      // parameter it does not know as a request argument, and would send `q`
+      // along to the endpoint with every query.
       populateFromUrl: false,
     })
     yasgui.current = instance
@@ -372,10 +321,6 @@ export function SparqlTab({
     // from stacking up copies of it.
     if (sharedQuery) {
       instance.addTab(true, { name: 'Shared query', yasqe: { value: sharedQuery } }, { avoidDuplicateTabs: true })
-      // The link says how its query was meant to run, so the toggle follows it
-      // the same way as if the reader had set it, and it sticks like any other
-      // choice; a link that does not say leaves the toggle alone.
-      if (sharedReasoning !== null) toggleReasoning(sharedReasoning)
     }
 
     // appendChild moves the node, so the button follows the selected tab.
@@ -451,7 +396,7 @@ export function SparqlTab({
       instance.destroy()
       parent.replaceChildren()
     }
-  }, [sharedQuery, sharedReasoning, shareHost, scheduleTranslation, toggleReasoning])
+  }, [sharedQuery, shareHost, scheduleTranslation])
 
   // Samples load into the active tab, which is also renamed so the tab strip
   // reads as the query it holds rather than "Query 1".
@@ -468,13 +413,6 @@ export function SparqlTab({
         <header className="panel-header">
           <h3>SPARQL</h3>
           <div className="panel-header-actions">
-            <label
-              className="toggle reasoning-toggle"
-              title="Let the RDFS schema predicates read the pinned vocabularies (sends reasoning=true)"
-            >
-              <input type="checkbox" checked={reasoning} onChange={(event) => toggleReasoning(event.target.checked)} />
-              Reasoning
-            </label>
             <label className="toggle sql-toggle" title="Show the DuckDB SQL the query translates to">
               <input type="checkbox" checked={showSql} onChange={(event) => toggleShowSql(event.target.checked)} />
               Show SQL
@@ -503,11 +441,10 @@ export function SparqlTab({
                 snapshot, and <code>MINUS</code> subtracts one from the other, so one query can diff two.
               </li>
               <li>
-                <strong>Reasoning</strong> lets <code>rdfs:subClassOf</code>, <code>rdfs:subPropertyOf</code>,{' '}
-                <code>rdfs:domain</code>, and <code>rdfs:range</code> read the pinned vocabularies, so a property path such
-                as <code>rdfs:subClassOf*</code> walks a class hierarchy the project only validated against; every other
-                pattern still reads the project&apos;s own data. The <em>Inherited classes in use</em> and{' '}
-                <em>Labels through subproperties</em> samples are written for it and answer nothing without it.
+                A property path such as <code>rdfs:subClassOf*</code> walks whatever hierarchy the table holds: the
+                project&apos;s own statements and the ontologies it imports with <code>owl:imports</code>. A vocabulary
+                the project only validates against is not in the table, so nothing is inferred from it. The{' '}
+                <em>Inherited classes in use</em> and <em>Labels through subproperties</em> samples are written for this.
               </li>
             </ul>
           </div>
@@ -534,7 +471,6 @@ export function SparqlTab({
             tab="SPARQL"
             className="button yasr-share"
             query={() => yasgui.current?.getTab()?.getQuery() ?? ''}
-            reasoning={() => reasoningRef.current}
           />,
           shareHost,
         )}

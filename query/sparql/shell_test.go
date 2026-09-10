@@ -21,15 +21,13 @@ func TestMain(m *testing.M) {
 }
 
 type fakeRunner struct {
-	result    Result
-	err       error
-	query     string
-	reasoning bool
+	result Result
+	err    error
+	query  string
 }
 
-func (r *fakeRunner) Run(_ context.Context, query string, reasoning bool) (Result, error) {
+func (r *fakeRunner) Run(_ context.Context, query string) (Result, error) {
 	r.query = query
-	r.reasoning = reasoning
 	return r.result, r.err
 }
 
@@ -99,7 +97,7 @@ func TestHighlightSQLStylesKeywordsAndStrings(t *testing.T) {
 }
 
 func TestShellViewDelineatesEditorAndResults(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	view := model.View().Content
 
 	require.Contains(t, view, "Editor")
@@ -112,7 +110,7 @@ func TestShellViewDelineatesEditorAndResults(t *testing.T) {
 }
 
 func TestShellViewEnablesMouseSelection(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	view := model.View()
 
 	require.Equal(t, tea.MouseModeCellMotion, view.MouseMode)
@@ -135,7 +133,7 @@ func TestShellHelpStylesKeyboardDescriptions(t *testing.T) {
 }
 
 func TestShellHelpLayerIsToggledWithCtrlH(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 
 	require.NotContains(t, model.View().Content, "toggle help")
 
@@ -147,7 +145,7 @@ func TestShellHelpLayerIsToggledWithCtrlH(t *testing.T) {
 }
 
 func TestRenderHistoryShowsCompactCountByDefault(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.history = []historyEntry{{Query: "SELECT ?s WHERE {}"}}
 	model.historyIndex = 0
 
@@ -159,7 +157,7 @@ func TestRenderHistoryShowsCompactCountByDefault(t *testing.T) {
 }
 
 func TestRenderHistoryUsesFocusedStyle(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.focus = focusHistory
 	model.history = []historyEntry{{Query: "SELECT ?s WHERE {}"}}
 	model.historyIndex = 0
@@ -174,7 +172,7 @@ func TestRenderHistoryUsesFocusedStyle(t *testing.T) {
 }
 
 func TestSQLRendersOnSeparatePageNotMainViewOrResults(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.result = Result{
 		SQL:     "SELECT t0.subject AS s FROM triples AS t0",
 		Header:  []string{"s"},
@@ -196,7 +194,7 @@ func TestSQLRendersOnSeparatePageNotMainViewOrResults(t *testing.T) {
 }
 
 func TestRenderSQLKeepsTitleAbovePanel(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.page = pageSQL
 	model.result = Result{SQL: "SELECT t0.subject AS s FROM triples AS t0"}
 
@@ -212,7 +210,7 @@ func TestRenderSQLKeepsTitleAbovePanel(t *testing.T) {
 }
 
 func TestRenderEditorKeepsStatusOutsideEditorBox(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	editor := model.renderEditor(80)
 
 	editorIndex := strings.Index(editor, "Editor")
@@ -223,7 +221,7 @@ func TestRenderEditorKeepsStatusOutsideEditorBox(t *testing.T) {
 }
 
 func TestRenderEditorUsesNeutralBorderWhenEditorIsBlurred(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT"
 	model.cursor = len(model.query)
 	model.focus = focusHistory
@@ -236,7 +234,7 @@ func TestRenderEditorUsesNeutralBorderWhenEditorIsBlurred(t *testing.T) {
 }
 
 func TestRenderEditorUsesThickBorderWhenFocused(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT"
 	model.cursor = len(model.query)
 
@@ -284,7 +282,7 @@ func TestMoveCursorVerticallyMovesBetweenLines(t *testing.T) {
 }
 
 func TestShellModelEditsAtCursor(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT  WHERE {}"
 	model.cursor = len("SELECT ")
 
@@ -296,7 +294,7 @@ func TestShellModelEditsAtCursor(t *testing.T) {
 }
 
 func TestShellModelSelectsAllWithCtrlA(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?s WHERE {}"
 	model.cursor = 0
 
@@ -309,7 +307,7 @@ func TestShellModelSelectsAllWithCtrlA(t *testing.T) {
 }
 
 func TestShellModelTabInsertsTabWhileEditorIsActive(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT  WHERE {}"
 	model.cursor = len("SELECT ")
 	model.result = Result{Header: []string{"s"}, Rows: [][]string{{"row"}}}
@@ -323,7 +321,7 @@ func TestShellModelTabInsertsTabWhileEditorIsActive(t *testing.T) {
 }
 
 func TestShellModelEscapeDoesNotChangeEditorState(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?s WHERE {}"
 	model.cursor = len("SELECT ?s")
 
@@ -336,7 +334,7 @@ func TestShellModelEscapeDoesNotChangeEditorState(t *testing.T) {
 }
 
 func TestShellModelShiftRightChangesFocusToResults(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.result = Result{Header: []string{"s"}, Rows: [][]string{{"row"}}}
 
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyRightShift})
@@ -346,7 +344,7 @@ func TestShellModelShiftRightChangesFocusToResults(t *testing.T) {
 }
 
 func TestShellModelShiftLeftBackToEditorReactivatesEditing(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT "
 	model.cursor = len(model.query)
 	model.result = Result{Header: []string{"s"}, Rows: [][]string{{"row"}}}
@@ -365,7 +363,7 @@ func TestShellModelShiftLeftBackToEditorReactivatesEditing(t *testing.T) {
 }
 
 func TestShellModelF2NavigatesToSQLPage(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.result = Result{SQL: "SELECT t0.subject AS s FROM triples AS t0"}
 
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyF2})
@@ -377,7 +375,7 @@ func TestShellModelF2NavigatesToSQLPage(t *testing.T) {
 }
 
 func TestShellModelF2ReturnsToMainPage(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.page = pageSQL
 	model.result = Result{SQL: "SELECT t0.subject AS s FROM triples AS t0"}
 
@@ -390,7 +388,7 @@ func TestShellModelF2ReturnsToMainPage(t *testing.T) {
 }
 
 func TestShellModelEscapeReturnsFromSQLPage(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.page = pageSQL
 
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
@@ -400,7 +398,7 @@ func TestShellModelEscapeReturnsFromSQLPage(t *testing.T) {
 }
 
 func TestShellModelHistoryIgnoresTextInput(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.focus = focusHistory
 	model.query = "SELECT "
 	model.cursor = len(model.query)
@@ -413,7 +411,7 @@ func TestShellModelHistoryIgnoresTextInput(t *testing.T) {
 }
 
 func TestShellModelMouseClickMovesEditorCursor(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?s WHERE {}"
 	model.cursor = 0
 	x, y, _, _ := model.editorBodyBounds()
@@ -429,7 +427,7 @@ func TestShellModelMouseClickMovesEditorCursor(t *testing.T) {
 }
 
 func TestShellModelMouseDragSelectsEditorText(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?s WHERE {}"
 	x, y, _, _ := model.editorBodyBounds()
 
@@ -447,7 +445,7 @@ func TestShellModelMouseDragSelectsEditorText(t *testing.T) {
 }
 
 func TestShellModelMouseReleaseFinishesEditorSelection(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?s\nWHERE {}"
 	x, y, _, _ := model.editorBodyBounds()
 
@@ -463,7 +461,7 @@ func TestShellModelMouseReleaseFinishesEditorSelection(t *testing.T) {
 }
 
 func TestShellModelMouseClickOutsideEditorDoesNotMoveCursor(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?s WHERE {}"
 	model.cursor = len(model.query)
 
@@ -475,7 +473,7 @@ func TestShellModelMouseClickOutsideEditorDoesNotMoveCursor(t *testing.T) {
 }
 
 func TestShellModelMouseClickBelowEditorDoesNotMoveCursor(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?s WHERE {}"
 	model.cursor = len(model.query)
 	x, y, _, height := model.editorBodyBounds()
@@ -488,7 +486,7 @@ func TestShellModelMouseClickBelowEditorDoesNotMoveCursor(t *testing.T) {
 }
 
 func TestShellModelIgnoresMetaA(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?s WHERE {}"
 	model.cursor = 0
 
@@ -501,7 +499,7 @@ func TestShellModelIgnoresMetaA(t *testing.T) {
 }
 
 func TestShellModelCopiesSelectedTextWithCtrlC(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?s WHERE {}"
 	model.selectionStart = len("SELECT ")
 	model.selectionEnd = len("SELECT ?s")
@@ -521,7 +519,7 @@ func TestShellModelCopiesSelectedTextWithCtrlC(t *testing.T) {
 }
 
 func TestShellModelClearsCopyFlash(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.copyFlash = "Copied to clipboard"
 	model.copyFlashID = 3
 
@@ -532,7 +530,7 @@ func TestShellModelClearsCopyFlash(t *testing.T) {
 }
 
 func TestShellModelIgnoresStaleCopyFlashClear(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.copyFlash = "Copied to clipboard"
 	model.copyFlashID = 3
 
@@ -543,7 +541,7 @@ func TestShellModelIgnoresStaleCopyFlashClear(t *testing.T) {
 }
 
 func TestShellModelIgnoresMetaC(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?s WHERE {}"
 	model.selectionStart = len("SELECT ")
 	model.selectionEnd = len("SELECT ?s")
@@ -555,7 +553,7 @@ func TestShellModelIgnoresMetaC(t *testing.T) {
 }
 
 func TestShellModelCopyShortcutDoesNotQuitWithoutSelection(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 
 	_, cmd := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 
@@ -563,7 +561,7 @@ func TestShellModelCopyShortcutDoesNotQuitWithoutSelection(t *testing.T) {
 }
 
 func TestShellModelRequestsClipboardWithCtrlV(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 
 	_, cmd := model.Update(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 
@@ -572,7 +570,7 @@ func TestShellModelRequestsClipboardWithCtrlV(t *testing.T) {
 }
 
 func TestShellModelSelectsAllResultsWithCtrlA(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.focus = focusResults
 	model.result = Result{
 		Header: []string{"s"},
@@ -588,7 +586,7 @@ func TestShellModelSelectsAllResultsWithCtrlA(t *testing.T) {
 }
 
 func TestShellModelCopiesSelectedResultRowWithCtrlC(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.focus = focusResults
 	model.selectedRow = 1
 	model.result = Result{
@@ -609,7 +607,7 @@ func TestShellModelCopiesSelectedResultRowWithCtrlC(t *testing.T) {
 }
 
 func TestShellModelCopiesAllSelectedResultsAsCSVWithCtrlC(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.focus = focusResults
 	model.resultsAllSelected = true
 	model.result = Result{
@@ -625,7 +623,7 @@ func TestShellModelCopiesAllSelectedResultsAsCSVWithCtrlC(t *testing.T) {
 }
 
 func TestShellModelCopiesSQLPageWithCtrlC(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.page = pageSQL
 	model.result = Result{SQL: "SELECT t0.subject AS s FROM triples AS t0"}
 
@@ -641,7 +639,7 @@ func TestShellModelCopiesSQLPageWithCtrlC(t *testing.T) {
 }
 
 func TestShellModelSQLPageCtrlCIgnoresEmptySQL(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.page = pageSQL
 
 	_, cmd := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
@@ -650,7 +648,7 @@ func TestShellModelSQLPageCtrlCIgnoresEmptySQL(t *testing.T) {
 }
 
 func TestShellModelMovingResultsClearsAllResultsSelection(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.focus = focusResults
 	model.resultsAllSelected = true
 	model.result = Result{
@@ -666,7 +664,7 @@ func TestShellModelMovingResultsClearsAllResultsSelection(t *testing.T) {
 }
 
 func TestShellModelPagesThroughResults(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.focus = focusResults
 	model.height = 12
 	model.result = Result{
@@ -686,7 +684,7 @@ func TestShellModelPagesThroughResults(t *testing.T) {
 }
 
 func TestShellModelPageResultsClearsAllResultsSelection(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.focus = focusResults
 	model.height = 12
 	model.resultsAllSelected = true
@@ -702,7 +700,7 @@ func TestShellModelPageResultsClearsAllResultsSelection(t *testing.T) {
 }
 
 func TestShellModelCtrlLClearsScreen(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 
 	_, cmd := model.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 
@@ -711,7 +709,7 @@ func TestShellModelCtrlLClearsScreen(t *testing.T) {
 }
 
 func TestShellModelQuitsWithCtrlD(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 
 	_, cmd := model.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 
@@ -719,7 +717,7 @@ func TestShellModelQuitsWithCtrlD(t *testing.T) {
 }
 
 func TestShellModelDoesNotQuitWithCtrlQ(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 
 	_, cmd := model.Update(tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl})
 
@@ -761,7 +759,7 @@ func TestSaveQueryHistoryKeepsOneHundredQueries(t *testing.T) {
 }
 
 func TestShellModelKeepsHistoryVisibleWhenEditorCursorMoves(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?s WHERE {}"
 	model.cursor = 0
 	model.history = []historyEntry{
@@ -782,7 +780,7 @@ func TestShellModelKeepsHistoryVisibleWhenEditorCursorMoves(t *testing.T) {
 }
 
 func TestShellModelDoesNotShowHistoryWhenUpMovesEditorCursor(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "abc\ndef"
 	model.cursor = len("abc\nd")
 	model.history = []historyEntry{{Query: "SELECT ?old WHERE {}"}}
@@ -795,7 +793,7 @@ func TestShellModelDoesNotShowHistoryWhenUpMovesEditorCursor(t *testing.T) {
 }
 
 func TestShellModelFocusesHistoryWithShiftLeftAndLoadsQueriesWithLeftRight(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?s WHERE {}"
 	model.cursor = 0
 	model.history = []historyEntry{
@@ -829,7 +827,7 @@ func TestShellModelFocusesHistoryWithShiftLeftAndLoadsQueriesWithLeftRight(t *te
 }
 
 func TestShellModelShiftRightReturnsFromHistoryToEditor(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.focus = focusHistory
 	model.history = []historyEntry{{Query: "SELECT ?old WHERE {}"}}
 
@@ -841,7 +839,7 @@ func TestShellModelShiftRightReturnsFromHistoryToEditor(t *testing.T) {
 
 func TestShellModelSavesSubmittedQueryToHistory(t *testing.T) {
 	runner := &fakeRunner{result: Result{Header: []string{"s"}, Rows: [][]string{{"a"}}, Message: "1 rows"}}
-	model := newShellModel(context.Background(), runner, false)
+	model := newShellModel(context.Background(), runner)
 	model.historyDir = t.TempDir()
 	model.query = "SELECT ?s WHERE {}"
 
@@ -873,7 +871,7 @@ func historyFiles(t *testing.T, dir string) []string {
 }
 
 func TestShellModelPastesClipboardAtCursor(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT  WHERE {}"
 	model.cursor = len("SELECT ")
 
@@ -885,7 +883,7 @@ func TestShellModelPastesClipboardAtCursor(t *testing.T) {
 }
 
 func TestShellModelPastesBracketedPasteAtCursor(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT  WHERE {}"
 	model.cursor = len("SELECT ")
 
@@ -897,7 +895,7 @@ func TestShellModelPastesBracketedPasteAtCursor(t *testing.T) {
 }
 
 func TestShellModelTypingReplacesSelection(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?s WHERE {}"
 	model.selectionStart = len("SELECT ")
 	model.selectionEnd = len("SELECT ?s")
@@ -913,7 +911,7 @@ func TestShellModelTypingReplacesSelection(t *testing.T) {
 }
 
 func TestShellModelBackspaceDeletesSelection(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?s WHERE {}"
 	model.selectionStart = len("SELECT ")
 	model.selectionEnd = len("SELECT ?s")
@@ -934,7 +932,7 @@ func TestDeleteWordBeforeCursorDeletesPreviousWord(t *testing.T) {
 }
 
 func TestShellModelDeletesWordWithCtrlBackspace(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?subject WHERE {}"
 	model.cursor = len("SELECT ?subject")
 
@@ -946,7 +944,7 @@ func TestShellModelDeletesWordWithCtrlBackspace(t *testing.T) {
 }
 
 func TestShellModelDeletesWordWithAltBackspace(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?subject WHERE {}"
 	model.cursor = len("SELECT ?subject")
 
@@ -958,7 +956,7 @@ func TestShellModelDeletesWordWithAltBackspace(t *testing.T) {
 }
 
 func TestShellModelMovesCursorWithArrows(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "abc\ndef"
 	model.cursor = 5
 
@@ -993,7 +991,7 @@ func TestDeleteCurrentLineDeletesLastLineAndPrecedingNewline(t *testing.T) {
 }
 
 func TestShellModelMovesCursorToLineBoundsWithHomeAndEnd(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "abc\ndefgh\nij"
 	model.cursor = 6
 
@@ -1007,7 +1005,7 @@ func TestShellModelMovesCursorToLineBoundsWithHomeAndEnd(t *testing.T) {
 }
 
 func TestShellModelDeletesCurrentLineWithCtrlU(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "abc\ndefgh\nij"
 	model.cursor = 6
 
@@ -1026,7 +1024,7 @@ func TestMoveCursorWordLeftAndRight(t *testing.T) {
 }
 
 func TestShellModelMovesCursorByWordWithPlatformModifier(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?subject WHERE"
 	model.cursor = len("SELECT ?subject")
 
@@ -1041,7 +1039,7 @@ func TestShellModelMovesCursorByWordWithPlatformModifier(t *testing.T) {
 }
 
 func TestShellModelMovesCursorByWordWithDedicatedModifiedArrowCodes(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?subject WHERE"
 	model.cursor = len("SELECT ?subject")
 
@@ -1059,7 +1057,7 @@ func TestShellModelMovesCursorByWordWithMacOptionBFEncoding(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("Option+B/F word navigation is macOS-specific")
 	}
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?subject WHERE"
 	model.cursor = len("SELECT ?subject")
 
@@ -1073,7 +1071,7 @@ func TestShellModelMovesCursorByWordWithMacOptionBFEncoding(t *testing.T) {
 }
 
 func TestShellModelIgnoresInactiveWordJumpModifier(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.query = "SELECT ?subject WHERE"
 	model.cursor = len("SELECT ?subject")
 
@@ -1099,7 +1097,7 @@ func wordJumpArrowCodes() (rune, rune) {
 }
 
 func TestShellModelTabsIntoResultsAndMovesFocusedRow(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.result = Result{
 		Header: []string{"s"},
 		Rows:   [][]string{{"a"}, {"b"}, {"c"}},
@@ -1129,7 +1127,7 @@ func TestShellModelTabsIntoResultsAndMovesFocusedRow(t *testing.T) {
 }
 
 func TestShellModelScrollsResultsWithFocusedRow(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.height = 10
 	model.focus = focusResults
 	model.result = Result{
@@ -1170,7 +1168,7 @@ func TestResultWindowKeepsSelectedRowVisible(t *testing.T) {
 }
 
 func TestRenderResultsFitsAvailableHeight(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.result = Result{
 		Header:  []string{"s"},
 		Rows:    [][]string{{"row 0"}, {"row 1"}, {"row 2"}, {"row 3"}},
@@ -1187,7 +1185,7 @@ func TestRenderResultsFitsAvailableHeight(t *testing.T) {
 }
 
 func TestShellModelFocusShortcutReturnsToEditor(t *testing.T) {
-	model := newShellModel(context.Background(), &fakeRunner{}, false)
+	model := newShellModel(context.Background(), &fakeRunner{})
 	model.result = Result{
 		Header: []string{"s"},
 		Rows:   [][]string{{"a"}},
@@ -1209,7 +1207,7 @@ func TestShellModelRunsQueryWithCtrlR(t *testing.T) {
 			Message: "1 rows",
 		},
 	}
-	model := newShellModel(context.Background(), runner, false)
+	model := newShellModel(context.Background(), runner)
 	model.historyDir = t.TempDir()
 	model.query = `PREFIX schema: <https://schema.org/>
 SELECT ?s WHERE { ?s schema:name "bob" . }`
@@ -1230,21 +1228,4 @@ SELECT ?s WHERE { ?s schema:name "bob" . }`
 	require.Empty(t, model.err)
 	require.Equal(t, model.query, runner.query)
 	require.Contains(t, model.View().Content, "https://example.org/alice")
-}
-
-func TestShellModelRunsQueryWithReasoningWhenAsked(t *testing.T) {
-	runner := &fakeRunner{result: Result{Header: []string{"s"}}}
-	model := newShellModel(context.Background(), runner, true)
-	model.query = "SELECT ?s WHERE { ?s ?p ?o }"
-
-	updated, cmd := model.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
-	model = updated.(shellModel)
-	require.NotNil(t, cmd)
-	for _, batchCmd := range cmd().(tea.BatchMsg) {
-		updated, _ = model.Update(batchCmd())
-		model = updated.(shellModel)
-	}
-
-	require.True(t, runner.reasoning)
-	require.Contains(t, model.View().Content, "reasoning on")
 }

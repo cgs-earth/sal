@@ -15,9 +15,7 @@ type NamedQuery struct {
 }
 
 // snapshotScanSQL is the table at a snapshot, read inline since iceberg_scan
-// only takes a literal snapshot ID. It reads every row; whoever scans it adds
-// projectRowsFilter unless it means to read the pinned vocabularies too, so
-// that a snapshot and the `triples` view agree on what a triple is.
+// only takes a literal snapshot ID.
 func snapshotScanSQL(tablePath string, snapshotID int64) string {
 	return fmt.Sprintf("iceberg_scan('%s', allow_moved_paths = true, snapshot_from_id = %d)", escapeSQLLiteral(tablePath), snapshotID)
 }
@@ -28,8 +26,7 @@ func SnapshotSQL(tablePath string, snapshotID int64) string {
 	return fmt.Sprintf(`
 SELECT *
 FROM %s
-WHERE %s
-ORDER BY triple_hash`, snapshotScanSQL(tablePath, snapshotID), projectRowsFilter)
+ORDER BY triple_hash`, snapshotScanSQL(tablePath, snapshotID))
 }
 
 // SnapshotDiffSQL compares a snapshot to its parent by triple_hash and labels
@@ -41,20 +38,17 @@ SELECT
 	'added' AS change_type,
 	snapshot_rows.*
 FROM %s AS snapshot_rows
-WHERE %s
-ORDER BY triple_hash`, snapshotScanSQL(tablePath, snapshotID), projectRowsFilter)
+ORDER BY triple_hash`, snapshotScanSQL(tablePath, snapshotID))
 	}
 
 	return fmt.Sprintf(`
 WITH snapshot_rows AS (
 	SELECT *
 	FROM %s
-	WHERE %s
 ),
 parent_rows AS (
 	SELECT *
 	FROM %s
-	WHERE %s
 )
 SELECT
 	'added' AS change_type,
@@ -75,7 +69,7 @@ WHERE NOT EXISTS (
 	FROM snapshot_rows
 	WHERE snapshot_rows.triple_hash = parent_rows.triple_hash
 )
-ORDER BY change_type, triple_hash`, snapshotScanSQL(tablePath, snapshotID), projectRowsFilter, snapshotScanSQL(tablePath, *parentSnapshotID), projectRowsFilter)
+ORDER BY change_type, triple_hash`, snapshotScanSQL(tablePath, snapshotID), snapshotScanSQL(tablePath, *parentSnapshotID))
 }
 
 // snapshotQueries turns the snapshot listing into the statements the UI offers

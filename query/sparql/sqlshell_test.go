@@ -47,7 +47,7 @@ func TestSQLShellFallsBackToAStarterStatement(t *testing.T) {
 }
 
 func TestSPARQLShellDoesNotRunAnythingOnOpen(t *testing.T) {
-	require.Nil(t, newShellModel(context.Background(), &fakeRunner{}, false).Init())
+	require.Nil(t, newShellModel(context.Background(), &fakeRunner{}).Init())
 }
 
 func TestSQLShellHasNoSQLPageToSwitchTo(t *testing.T) {

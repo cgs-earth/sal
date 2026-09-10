@@ -35,27 +35,27 @@ func projectOntologyContent(base string) ([]byte, error) {
 // .sal/config.jsonld lists with owl:imports, at the version the project pins
 // for it. An ontology document is merged into the graph being built, so that
 // an ontology a project depends on is carried by the data product as the
-// project's own statements rather than only referenced from it; a vocabulary
-// the project pins but does not import is carried too, but marked as the
-// vocabulary's, by PinnedVocabularyGraphs. A salmodule:// import is such a
-// document too; validate.PinnedGraph obtains it by cloning and building the
+// project's own statements rather than only referenced from it. That is also
+// what makes its class and property hierarchies walkable by a SPARQL property
+// path: a query reads only what the table holds, so a vocabulary the project
+// pins but does not import contributes no statements. A salmodule:// import
+// is such a document too; validate.PinnedGraph obtains it by cloning and building the
 // module rather than over HTTP. An OCI artifact is pulled to disk instead and
 // kept out of the table entirely. The statements the ontology node makes
 // about the project itself arrive separately, validated directly from
-// projectOntologyContent rather than through this function. It returns the
-// IRIs of the ontology documents it merged.
-func ImportOntologies(graph *rdflibgo.Graph, pins *validate.PinnedVocabularies) ([]string, error) {
+// projectOntologyContent rather than through this function.
+func ImportOntologies(graph *rdflibgo.Graph, pins *validate.PinnedVocabularies) error {
 	path, err := pkg.SalConfigPath()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	base, err := pkg.DefaultSalBase()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	importsDir, err := pkg.SalImportsDir()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	pull := func(iri string) error {
 		// build has no registry flags, so an artifact behind a private registry
@@ -68,20 +68,19 @@ func ImportOntologies(graph *rdflibgo.Graph, pins *validate.PinnedVocabularies) 
 	return importOntologies(graph, path, base, fetch, pull)
 }
 
-func importOntologies(graph *rdflibgo.Graph, path string, base string, fetch func(string) (*rdflibgo.Graph, error), pull func(string) error) ([]string, error) {
+func importOntologies(graph *rdflibgo.Graph, path string, base string, fetch func(string) (*rdflibgo.Graph, error), pull func(string) error) error {
 	ontology, err := importation.ReadOntology(path, base)
 	if err != nil {
-		return nil, fmt.Errorf("build: %w", err)
+		return fmt.Errorf("build: %w", err)
 	}
 	if ontology == nil {
-		return nil, nil
+		return nil
 	}
 
-	var merged []string
 	for _, iri := range ontology.Imports {
 		if importation.IsOciImport(iri) {
 			if err := pull(iri); err != nil {
-				return nil, fmt.Errorf("build: import %s: %w", iri, err)
+				return fmt.Errorf("build: import %s: %w", iri, err)
 			}
 			dropImportStatement(graph, iri)
 			continue
@@ -89,13 +88,12 @@ func importOntologies(graph *rdflibgo.Graph, path string, base string, fetch fun
 
 		imported, err := fetch(iri)
 		if err != nil {
-			return nil, fmt.Errorf("build: import %s: %w", iri, err)
+			return fmt.Errorf("build: import %s: %w", iri, err)
 		}
 		mergeGraph(graph, imported)
-		merged = append(merged, iri)
 		slog.Info(fmt.Sprintf("Imported %d triples from %s", graphTripleCount(imported), iri))
 	}
-	return merged, nil
+	return nil
 }
 
 // graphTripleCount counts the statements of a graph.

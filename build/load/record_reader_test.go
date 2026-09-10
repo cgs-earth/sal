@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/iceberg-go"
+	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/catalog/hadoop"
 	"github.com/apache/iceberg-go/table"
 	"github.com/stretchr/testify/require"
@@ -26,7 +28,7 @@ func TestGetSchemasSplitsObjectsByDatatype(t *testing.T) {
 	arrowSchema, icebergSchema, err := GetSchemas()
 	require.NoError(t, err)
 
-	names := []string{"subject", "predicate", "object_string", "object_iri", "object_geometry", "object_byte", "object_integer", "object_float", "object_time", "object_type", "object_language", "triple_hash", "vocabulary"}
+	names := []string{"subject", "predicate", "object_string", "object_iri", "object_geometry", "object_byte", "object_integer", "object_float", "object_time", "object_type", "object_language", "triple_hash"}
 	require.Equal(t, len(names), arrowSchema.NumFields())
 	require.Equal(t, len(names), len(icebergSchema.Fields()))
 	for i, name := range names {
@@ -34,9 +36,31 @@ func TestGetSchemasSplitsObjectsByDatatype(t *testing.T) {
 		require.Equal(t, name, icebergSchema.Field(i).Name)
 	}
 	require.Equal(t, []int{12}, icebergSchema.IdentifierFieldIDs)
-	// the vocabulary is NULL for everything the project states itself
-	require.True(t, arrowSchema.Field(12).Nullable)
-	require.False(t, icebergSchema.Field(12).Required)
+}
+
+// A table from the release that marked every pinned vocabulary's rows in a
+// column of their own holds rows this sal never writes, so it is refused
+// rather than diffed against a graph that can never account for them.
+func TestNewIcebergTableRefusesATableWithTheVocabularyColumn(t *testing.T) {
+	ctx := context.Background()
+	cfg := &LoadConfig{BatchSize: 10, ParquetCompression: "snappy", Warehouse: t.TempDir(), Namespace: "default"}
+	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
+	require.NoError(t, err)
+	require.NoError(t, cat.CreateNamespace(ctx, catalog.ToIdentifier("default"), nil))
+	older := iceberg.NewSchema(1,
+		iceberg.NestedField{ID: 1, Name: "subject", Type: iceberg.PrimitiveTypes.String, Required: true},
+		iceberg.NestedField{ID: 2, Name: "object_language", Type: iceberg.PrimitiveTypes.String, Required: false},
+		iceberg.NestedField{ID: 3, Name: "vocabulary", Type: iceberg.PrimitiveTypes.String, Required: false},
+	)
+	_, err = cat.CreateTable(ctx, catalog.ToIdentifier("default", "triples"), older)
+	require.NoError(t, err)
+
+	_, icebergSchema, err := GetSchemas()
+	require.NoError(t, err)
+	_, err = NewIcebergTableFromCfg(ctx, icebergSchema, cat, cfg)
+
+	require.ErrorContains(t, err, "wrote a vocabulary column")
+	require.ErrorContains(t, err, "sal clean --wipe")
 }
 
 func TestAppendGraphIngestsSimpleWKTGeometry(t *testing.T) {
@@ -92,7 +116,7 @@ func TestProcessGraphDiffAddsAndRemovesByTripleHash(t *testing.T) {
 	first := rdflibgo.NewGraph()
 	first.Add(rdflibgo.NewURIRefUnsafe("http://example.com/keep"), predicate, rdflibgo.NewLiteral("same"))
 	first.Add(rdflibgo.NewURIRefUnsafe("http://example.com/drop"), predicate, rdflibgo.NewLiteral("old"))
-	require.NoError(t, processGraph(ctx, tableRows(first, nil), cat, tbl.Identifier(), arrowSchema, cfg.BatchSize))
+	require.NoError(t, processGraph(ctx, first, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize))
 	loaded, err := cat.LoadTable(ctx, tbl.Identifier())
 	require.NoError(t, err)
 	firstSnapshotID := loaded.CurrentSnapshot().SnapshotID
@@ -100,7 +124,7 @@ func TestProcessGraphDiffAddsAndRemovesByTripleHash(t *testing.T) {
 	second := rdflibgo.NewGraph()
 	second.Add(rdflibgo.NewURIRefUnsafe("http://example.com/keep"), predicate, rdflibgo.NewLiteral("same"))
 	second.Add(rdflibgo.NewURIRefUnsafe("http://example.com/add"), predicate, rdflibgo.NewLiteral("new"))
-	require.NoError(t, processGraph(ctx, tableRows(second, nil), cat, tbl.Identifier(), arrowSchema, cfg.BatchSize))
+	require.NoError(t, processGraph(ctx, second, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize))
 
 	loaded, err = cat.LoadTable(ctx, tbl.Identifier())
 	require.NoError(t, err)
@@ -126,7 +150,7 @@ func TestWriteGraphToIcebergDoesNotRewriteEquivalentBlankNodeGraph(t *testing.T)
 		Namespace:          "default",
 	}
 
-	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("first"), nil, cfg, map[string]string{"sal.hash": "first"}))
+	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("first"), cfg, map[string]string{"sal.hash": "first"}))
 	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
 	tbl, err := cat.LoadTable(ctx, table.Identifier{"default", "triples"})
@@ -134,7 +158,7 @@ func TestWriteGraphToIcebergDoesNotRewriteEquivalentBlankNodeGraph(t *testing.T)
 	firstHashes, err := readExistingTripleHashes(ctx, tbl)
 	require.NoError(t, err)
 
-	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("second"), nil, cfg, map[string]string{"sal.hash": "second"}))
+	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("second"), cfg, map[string]string{"sal.hash": "second"}))
 	tbl, err = cat.LoadTable(ctx, table.Identifier{"default", "triples"})
 	require.NoError(t, err)
 	secondHashes, err := readExistingTripleHashes(ctx, tbl)
@@ -157,7 +181,7 @@ func TestWriteGraphToIcebergStoresBlankNodesWithNTriplesPrefix(t *testing.T) {
 		Namespace:          "default",
 	}
 
-	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("b1"), nil, cfg, map[string]string{"sal.hash": "h"}))
+	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("b1"), cfg, map[string]string{"sal.hash": "h"}))
 	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
 	tbl, err := cat.LoadTable(ctx, table.Identifier{"default", "triples"})

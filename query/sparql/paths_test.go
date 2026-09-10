@@ -16,36 +16,36 @@ PREFIX schema: <https://schema.org/>
 PREFIX ex: <https://example.test/>
 `
 
-// pathTable is a triples table shaped like the views, without the geometry
-// column so that nothing here needs the spatial extension. The class
-// hierarchy schema.org states is marked as its rows; the project's own rows
-// state a subclass of its own, a cycle, a list, and one instance of each class.
-const pathTable = `CREATE TABLE triples_all AS
+// pathTable is a triples table shaped like the view, without the geometry
+// column so that nothing here needs the spatial extension. It holds the class
+// hierarchy schema.org states, as a project that imports schema.org with
+// owl:imports would, beside the project's own rows: a subclass of its own, a
+// cycle, a list, and one instance of each class.
+const pathTable = `CREATE TABLE triples AS
 SELECT * FROM (VALUES
-	('https://schema.org/Organization', 'http://www.w3.org/2000/01/rdf-schema#subClassOf', 'https://schema.org/Thing', NULL, 'h1', 'https://schema.org/'),
-	('https://schema.org/NGO', 'http://www.w3.org/2000/01/rdf-schema#subClassOf', 'https://schema.org/Organization', NULL, 'h2', 'https://schema.org/'),
-	('https://schema.org/Corporation', 'http://www.w3.org/2000/01/rdf-schema#subClassOf', 'https://schema.org/Organization', NULL, 'h3', 'https://schema.org/'),
-	('https://example.test/Charity', 'http://www.w3.org/2000/01/rdf-schema#subClassOf', 'https://schema.org/NGO', NULL, 'h4', NULL),
-	('https://example.test/X', 'http://www.w3.org/2000/01/rdf-schema#subClassOf', 'https://example.test/Y', NULL, 'h5', NULL),
-	('https://example.test/Y', 'http://www.w3.org/2000/01/rdf-schema#subClassOf', 'https://example.test/X', NULL, 'h6', NULL),
-	('https://example.test/org', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', 'https://schema.org/Organization', NULL, 'h7', NULL),
-	('https://example.test/ngo', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', 'https://schema.org/NGO', NULL, 'h8', NULL),
-	('https://example.test/corp', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', 'https://schema.org/Corporation', NULL, 'h9', NULL),
-	('https://example.test/charity', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', 'https://example.test/Charity', NULL, 'h10', NULL),
-	('https://example.test/thing', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', 'https://schema.org/Thing', NULL, 'h11', NULL),
-	('https://example.test/x', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', 'https://example.test/X', NULL, 'h12', NULL),
-	('https://example.test/org', 'https://schema.org/name', NULL, 'Org Inc', 'h13', NULL),
-	('https://example.test/org', 'http://www.w3.org/2000/01/rdf-schema#label', NULL, 'The Org', 'h14', NULL),
-	('https://example.test/list', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#first', NULL, 'a', 'h15', NULL),
-	('https://example.test/list', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#rest', NULL, '_:b1', 'h16', NULL),
-	('_:b1', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#first', NULL, 'b', 'h17', NULL),
-	('_:b1', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#rest', NULL, '_:b2', 'h18', NULL),
-	('_:b2', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#first', NULL, 'c', 'h19', NULL),
-	('_:b2', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#rest', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#nil', NULL, 'h20', NULL)
-) AS rows(subject, predicate, object_iri, object_string, triple_hash, vocabulary),
+	('https://schema.org/Organization', 'http://www.w3.org/2000/01/rdf-schema#subClassOf', 'https://schema.org/Thing', NULL, 'h1'),
+	('https://schema.org/NGO', 'http://www.w3.org/2000/01/rdf-schema#subClassOf', 'https://schema.org/Organization', NULL, 'h2'),
+	('https://schema.org/Corporation', 'http://www.w3.org/2000/01/rdf-schema#subClassOf', 'https://schema.org/Organization', NULL, 'h3'),
+	('https://example.test/Charity', 'http://www.w3.org/2000/01/rdf-schema#subClassOf', 'https://schema.org/NGO', NULL, 'h4'),
+	('https://example.test/X', 'http://www.w3.org/2000/01/rdf-schema#subClassOf', 'https://example.test/Y', NULL, 'h5'),
+	('https://example.test/Y', 'http://www.w3.org/2000/01/rdf-schema#subClassOf', 'https://example.test/X', NULL, 'h6'),
+	('https://example.test/org', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', 'https://schema.org/Organization', NULL, 'h7'),
+	('https://example.test/ngo', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', 'https://schema.org/NGO', NULL, 'h8'),
+	('https://example.test/corp', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', 'https://schema.org/Corporation', NULL, 'h9'),
+	('https://example.test/charity', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', 'https://example.test/Charity', NULL, 'h10'),
+	('https://example.test/thing', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', 'https://schema.org/Thing', NULL, 'h11'),
+	('https://example.test/x', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type', 'https://example.test/X', NULL, 'h12'),
+	('https://example.test/org', 'https://schema.org/name', NULL, 'Org Inc', 'h13'),
+	('https://example.test/org', 'http://www.w3.org/2000/01/rdf-schema#label', NULL, 'The Org', 'h14'),
+	('https://example.test/list', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#first', NULL, 'a', 'h15'),
+	('https://example.test/list', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#rest', NULL, '_:b1', 'h16'),
+	('_:b1', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#first', NULL, 'b', 'h17'),
+	('_:b1', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#rest', NULL, '_:b2', 'h18'),
+	('_:b2', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#first', NULL, 'c', 'h19'),
+	('_:b2', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#rest', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#nil', NULL, 'h20')
+) AS rows(subject, predicate, object_iri, object_string, triple_hash),
 (SELECT NULL::DOUBLE AS object_float, NULL::BIGINT AS object_integer, NULL::INTEGER AS object_byte,
-	NULL::TIMESTAMP AS object_time, NULL::VARCHAR AS object_language, NULL::VARCHAR AS object_type);
-CREATE VIEW triples AS SELECT * FROM triples_all WHERE vocabulary IS NULL`
+	NULL::TIMESTAMP AS object_time, NULL::VARCHAR AS object_language, NULL::VARCHAR AS object_type)`
 
 func pathDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -55,11 +55,11 @@ func pathDB(t *testing.T) *sql.DB {
 	return db
 }
 
-// firstColumn runs a SPARQL query, with or without reasoning, through the same
-// wrapper queries run under, and returns its first column sorted.
-func firstColumn(t *testing.T, db *sql.DB, query string, reasoning bool) []string {
+// firstColumn runs a SPARQL query through the same wrapper queries run under
+// and returns its first column sorted.
+func firstColumn(t *testing.T, db *sql.DB, query string) []string {
 	t.Helper()
-	sql, err := toSQL(pathPrefixes+query, tableSources{reasoning: reasoning})
+	sql, err := toSQL(pathPrefixes+query, tableSources{})
 	require.NoError(t, err)
 	_, rows, err := queryRows(context.Background(), db, sql)
 	require.NoError(t, err, sql)
@@ -80,10 +80,7 @@ func TestPathZeroOrMoreFindsDirectAndInheritedInstances(t *testing.T) {
 		"https://example.test/corp",
 		"https://example.test/ngo",
 		"https://example.test/org",
-	}, firstColumn(t, db, query, true))
-	// without reasoning the hierarchy schema.org states is hidden, and only the
-	// identity of the class itself matches
-	require.Equal(t, []string{"https://example.test/org"}, firstColumn(t, db, query, false))
+	}, firstColumn(t, db, query))
 }
 
 func TestPathOneOrMoreExcludesTheIdentity(t *testing.T) {
@@ -93,7 +90,7 @@ func TestPathOneOrMoreExcludesTheIdentity(t *testing.T) {
 		"https://example.test/charity",
 		"https://example.test/corp",
 		"https://example.test/ngo",
-	}, firstColumn(t, db, `SELECT ?x WHERE { ?x rdf:type/rdfs:subClassOf+ schema:Organization }`, true))
+	}, firstColumn(t, db, `SELECT ?x WHERE { ?x rdf:type/rdfs:subClassOf+ schema:Organization }`))
 }
 
 func TestPathZeroOrOneStopsAfterOneStep(t *testing.T) {
@@ -103,13 +100,13 @@ func TestPathZeroOrOneStopsAfterOneStep(t *testing.T) {
 		"https://example.test/corp",
 		"https://example.test/ngo",
 		"https://example.test/org",
-	}, firstColumn(t, db, `SELECT ?x WHERE { ?x rdf:type/rdfs:subClassOf? schema:Organization }`, true))
+	}, firstColumn(t, db, `SELECT ?x WHERE { ?x rdf:type/rdfs:subClassOf? schema:Organization }`))
 }
 
 func TestPathClosureTerminatesOnACycle(t *testing.T) {
 	db := pathDB(t)
 
-	require.Equal(t, []string{"https://example.test/x"}, firstColumn(t, db, `SELECT ?x WHERE { ?x rdf:type/rdfs:subClassOf* ex:Y }`, false))
+	require.Equal(t, []string{"https://example.test/x"}, firstColumn(t, db, `SELECT ?x WHERE { ?x rdf:type/rdfs:subClassOf* ex:Y }`))
 }
 
 func TestPathInverseClosureWalksDownward(t *testing.T) {
@@ -119,22 +116,22 @@ func TestPathInverseClosureWalksDownward(t *testing.T) {
 		"https://example.test/Charity",
 		"https://schema.org/Corporation",
 		"https://schema.org/NGO",
-	}, firstColumn(t, db, `SELECT ?sub WHERE { schema:Organization (^rdfs:subClassOf)+ ?sub }`, true))
+	}, firstColumn(t, db, `SELECT ?sub WHERE { schema:Organization (^rdfs:subClassOf)+ ?sub }`))
 }
 
 func TestPathSequenceThroughBlankNodesFollowsRdfRest(t *testing.T) {
 	db := pathDB(t)
 
-	require.Equal(t, []string{"_:b1"}, firstColumn(t, db, `SELECT ?node WHERE { ex:list rdf:rest* ?node . ?node rdf:first "b" }`, false))
-	require.Equal(t, []string{"_:b1", "_:b2", "https://example.test/list"}, firstColumn(t, db, `SELECT ?node WHERE { ex:list rdf:rest* ?node . ?node rdf:first ?item }`, false))
+	require.Equal(t, []string{"_:b1"}, firstColumn(t, db, `SELECT ?node WHERE { ex:list rdf:rest* ?node . ?node rdf:first "b" }`))
+	require.Equal(t, []string{"_:b1", "_:b2", "https://example.test/list"}, firstColumn(t, db, `SELECT ?node WHERE { ex:list rdf:rest* ?node . ?node rdf:first ?item }`))
 }
 
 func TestPathAlternativeMatchesEitherPredicate(t *testing.T) {
 	db := pathDB(t)
 
-	require.Equal(t, []string{"https://example.test/org", "https://example.test/org"}, firstColumn(t, db, `SELECT ?s WHERE { ?s schema:name|rdfs:label ?o }`, false))
+	require.Equal(t, []string{"https://example.test/org", "https://example.test/org"}, firstColumn(t, db, `SELECT ?s WHERE { ?s schema:name|rdfs:label ?o }`))
 	// every subject with a predicate other than these two, that also has a name
-	require.Equal(t, []string{"https://example.test/org"}, firstColumn(t, db, `SELECT ?s WHERE { ?s !(rdf:type|rdfs:label) ?o . ?s schema:name ?n }`, false))
+	require.Equal(t, []string{"https://example.test/org"}, firstColumn(t, db, `SELECT ?s WHERE { ?s !(rdf:type|rdfs:label) ?o . ?s schema:name ?n }`))
 }
 
 // The identity of a repeated step bound by the enclosing query is read through
@@ -142,35 +139,23 @@ func TestPathAlternativeMatchesEitherPredicate(t *testing.T) {
 func TestPathClosureRunsInsideAnExistsSubquery(t *testing.T) {
 	db := pathDB(t)
 
-	require.Equal(t, []string{"https://example.test/thing", "https://example.test/x"}, firstColumn(t, db, `SELECT ?x WHERE { ?x rdf:type ?t . FILTER NOT EXISTS { ?t rdfs:subClassOf* schema:Organization } }`, true))
+	require.Equal(t, []string{"https://example.test/thing", "https://example.test/x"}, firstColumn(t, db, `SELECT ?x WHERE { ?x rdf:type ?t . FILTER NOT EXISTS { ?t rdfs:subClassOf* schema:Organization } }`))
 }
 
-func TestReasoningReadsTheHierarchyAndTheViewHidesIt(t *testing.T) {
-	db := pathDB(t)
-	const query = `SELECT ?sub WHERE { ?sub rdfs:subClassOf ?super }`
-
-	require.Len(t, firstColumn(t, db, query, true), 6)
-	require.Equal(t, []string{"https://example.test/Charity", "https://example.test/X", "https://example.test/Y"}, firstColumn(t, db, query, false))
-}
-
-// A vocabulary's own instances and class declarations never surface: with
-// reasoning on, the typed subjects are still only the project's, while the
-// classes they inherit come from the vocabulary.
-func TestReasoningKeepsTheVocabularysOwnDataOutOfResults(t *testing.T) {
+// Every statement in the table is walkable, the imported hierarchy and the
+// project's own alike: a class only the imported ontology names is reached
+// through the path, and asking for the hierarchy itself returns all of it.
+func TestPathReachesTheClassesAnImportedHierarchyNames(t *testing.T) {
 	db := pathDB(t)
 
-	require.Equal(t, []string{
-		"https://example.test/Charity",
-		"https://example.test/X",
-		"https://example.test/Y",
-	}, firstColumn(t, db, `SELECT DISTINCT ?class WHERE { ?class rdfs:subClassOf ?any . ?class ?p ?o }`, true))
 	require.Equal(t, []string{
 		"https://example.test/X",
 		"https://example.test/Y",
 		"https://schema.org/NGO",
 		"https://schema.org/Organization",
 		"https://schema.org/Thing",
-	}, firstColumn(t, db, `SELECT DISTINCT ?class WHERE { ?s rdf:type/rdfs:subClassOf+ ?class }`, true))
+	}, firstColumn(t, db, `SELECT DISTINCT ?class WHERE { ?s rdf:type/rdfs:subClassOf+ ?class }`))
+	require.Len(t, firstColumn(t, db, `SELECT ?sub WHERE { ?sub rdfs:subClassOf ?super }`), 6)
 }
 
 func TestToSQLTranslatesASequencePathThroughAHiddenVariable(t *testing.T) {
@@ -284,55 +269,29 @@ func TestToSQLUsesAConstantAsIdentityWithoutLateral(t *testing.T) {
 	require.Contains(t, sql, "t0.start = 'https://schema.org/NGO'")
 }
 
-func TestToSQLFiltersASnapshotScanInsideAClosure(t *testing.T) {
-	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples", SnapshotID: 122}.Translate(pathPrefixes+`SELECT ?b WHERE { schema:NGO rdfs:subClassOf* ?b }`, false)
+func TestToSQLScansTheSnapshotInsideAClosure(t *testing.T) {
+	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples", SnapshotID: 122}.Translate(pathPrefixes + `SELECT ?b WHERE { schema:NGO rdfs:subClassOf* ?b }`)
 
 	require.NoError(t, err)
-	require.Contains(t, sql, "FROM iceberg_scan('/tmp/warehouse/sal/triples', allow_moved_paths = true, snapshot_from_id = 122) AS edge\n    WHERE edge.vocabulary IS NULL\n      AND edge.predicate")
-	require.NotContains(t, sql, "t0.vocabulary")
+	require.Contains(t, sql, "FROM iceberg_scan('/tmp/warehouse/sal/triples', allow_moved_paths = true, snapshot_from_id = 122) AS edge\n    WHERE edge.predicate")
 }
 
-// Under reasoning only the RDFS schema patterns read the vocabularies: the
-// rdf:type step stays on the project's own rows, so a vocabulary's terms reach
-// a result only through the hierarchy the closure walks.
-func TestTranslateReadsTriplesAllForSchemaPatternsWhenReasoning(t *testing.T) {
-	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate(pathPrefixes+`SELECT ?x WHERE { ?x rdf:type/rdfs:subClassOf* schema:Organization }`, true)
+// Every pattern reads the same rows whatever its predicate: the schema
+// predicates are not routed to a wider source than the rest of the query.
+func TestTranslateReadsEveryPatternFromTheSameSource(t *testing.T) {
+	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate(pathPrefixes + `
+SELECT ?s WHERE { ?s rdf:type ?t . ?t rdfs:subClassOf ?c . SERVICE <http://localhost:8080/v7/sparql> { ?s rdfs:subPropertyOf ?o } }`)
 
 	require.NoError(t, err)
 	require.Contains(t, sql, "FROM triples AS t0")
-	require.Contains(t, sql, "FROM triples_all AS edge")
-}
-
-func TestTranslateReadsTheProjectsRowsForOtherPatternsWhenReasoning(t *testing.T) {
-	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate(pathPrefixes+`SELECT ?class WHERE { ?class rdf:type rdfs:Class . ?s ?p ?o . ?s !(rdfs:subClassOf) ?z . ?a rdfs:subClassOf|rdfs:label ?b }`, true)
-
-	require.NoError(t, err)
+	require.Contains(t, sql, "CROSS JOIN triples AS t1")
+	require.Contains(t, sql, "snapshot_from_id = 7) AS t2")
 	require.NotContains(t, sql, "triples_all")
 }
 
-func TestTranslateReadsTheUnfilteredSnapshotScanForSchemaPatternsWhenReasoning(t *testing.T) {
-	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples", SnapshotID: 122}.Translate(pathPrefixes+"SELECT ?s WHERE { ?s rdf:type ?t . ?t rdfs:subClassOf ?c }", true)
-
-	require.NoError(t, err)
-	require.Contains(t, sql, "snapshot_from_id = 122) AS t0")
-	require.Contains(t, sql, "t0.vocabulary IS NULL")
-	require.Contains(t, sql, "snapshot_from_id = 122) AS t1")
-	require.NotContains(t, sql, "t1.vocabulary")
-}
-
-func TestTranslateReadsASERVICEWithReasoningFromTheUnfilteredSnapshot(t *testing.T) {
-	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate(pathPrefixes+`
-SELECT ?s WHERE { ?s rdfs:subPropertyOf ?o . SERVICE <http://localhost:8080/v7/sparql> { ?s rdfs:subPropertyOf ?o } }`, true)
-
-	require.NoError(t, err)
-	require.Contains(t, sql, "FROM triples_all AS t0")
-	require.Contains(t, sql, "snapshot_from_id = 7) AS t1")
-	require.NotContains(t, sql, "vocabulary")
-}
-
 func TestToSQLReadsAPathInsideAMINUSFromTheSameSource(t *testing.T) {
-	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate(pathPrefixes+`
-SELECT ?x WHERE { ?x rdf:type ?t . MINUS { SERVICE <http://localhost:8080/v7/sparql> { ?t rdfs:subClassOf+ schema:Thing } } }`, false)
+	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate(pathPrefixes + `
+SELECT ?x WHERE { ?x rdf:type ?t . MINUS { SERVICE <http://localhost:8080/v7/sparql> { ?t rdfs:subClassOf+ schema:Thing } } }`)
 
 	require.NoError(t, err)
 	require.Contains(t, sql, "NOT EXISTS (SELECT 1\n  FROM (WITH RECURSIVE edges AS (")

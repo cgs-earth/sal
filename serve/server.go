@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -349,8 +348,7 @@ func (h translateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	var request struct {
-		Query     string `json:"query"`
-		Reasoning bool   `json:"reasoning"`
+		Query string `json:"query"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("parse SPARQL translate request: %v", err))
@@ -361,7 +359,7 @@ func (h translateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sql, err := h.translator.Translate(request.Query, request.Reasoning)
+	sql, err := h.translator.Translate(request.Query)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
@@ -476,12 +474,12 @@ func (h sparqlHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query, reasoning, err := queryFromRequest(r)
+	query, err := queryFromRequest(r)
 	if err != nil {
 		http.Error(w, err.Error(), statusForQueryRequestError(err))
 		return
 	}
-	result, err := h.runner.Run(r.Context(), query, reasoning)
+	result, err := h.runner.Run(r.Context(), query)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -587,17 +585,13 @@ func intQueryParam(r *http.Request, name string, fallback int) int {
 	return parsed
 }
 
-// queryFromRequest reads the query a SPARQL Protocol request carries, and
-// whether it asks to reason over the pinned vocabularies, which the
-// `reasoning` parameter says: in the URL of a GET or a direct POST, and in
-// the URL or the body of a form POST.
-func queryFromRequest(r *http.Request) (string, bool, error) {
-	var query string
-	var values url.Values
+// queryFromRequest reads the query a SPARQL Protocol request carries: the
+// `query` parameter of a GET, the body of a direct POST, or the `query` field
+// of a form POST.
+func queryFromRequest(r *http.Request) (string, error) {
 	switch r.Method {
 	case http.MethodGet:
-		values = r.URL.Query()
-		query = values.Get("query")
+		return requiredQuery(r.URL.Query().Get("query"))
 	case http.MethodPost:
 		contentType := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))
 		switch contentType {
@@ -609,44 +603,20 @@ func queryFromRequest(r *http.Request) (string, bool, error) {
 			}()
 			b, err := io.ReadAll(r.Body)
 			if err != nil {
-				return "", false, fmt.Errorf("read SPARQL query body: %w", err)
+				return "", fmt.Errorf("read SPARQL query body: %w", err)
 			}
-			values = r.URL.Query()
-			query = string(b)
+			return requiredQuery(string(b))
 		case "application/x-www-form-urlencoded", "":
 			if err := r.ParseForm(); err != nil {
-				return "", false, fmt.Errorf("parse SPARQL form request: %w", err)
+				return "", fmt.Errorf("parse SPARQL form request: %w", err)
 			}
-			values = r.Form
-			query = values.Get("query")
+			return requiredQuery(r.Form.Get("query"))
 		default:
-			return "", false, errUnsupportedMediaType
+			return "", errUnsupportedMediaType
 		}
 	default:
-		return "", false, fmt.Errorf("unsupported method %s", r.Method)
+		return "", fmt.Errorf("unsupported method %s", r.Method)
 	}
-	query, err := requiredQuery(query)
-	if err != nil {
-		return "", false, err
-	}
-	reasoning, err := reasoningParam(values)
-	if err != nil {
-		return "", false, err
-	}
-	return query, reasoning, nil
-}
-
-// reasoningParam reads the `reasoning` parameter, false when absent.
-func reasoningParam(values url.Values) (bool, error) {
-	value := strings.TrimSpace(values.Get("reasoning"))
-	if value == "" {
-		return false, nil
-	}
-	reasoning, err := strconv.ParseBool(value)
-	if err != nil {
-		return false, fmt.Errorf("the reasoning parameter must be true or false, not %q", value)
-	}
-	return reasoning, nil
 }
 
 var errUnsupportedMediaType = errors.New("POST requests must use application/sparql-query or application/x-www-form-urlencoded")
