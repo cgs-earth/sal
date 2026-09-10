@@ -167,70 +167,50 @@ func TestBuildFailsWhenADeclaredPrefixCannotBeResolved(t *testing.T) {
 	require.NoFileExists(t, filepath.Join(project, ".sal", "config.jsonld"))
 }
 
-// tableVocabularies scans the built triples table and reports the vocabulary
-// column of every row, keyed by subject and predicate; a row the project
-// states itself maps to "".
-func tableVocabularies(t *testing.T, project string) map[string]string {
+// tableStatements scans the built triples table and reports every row as
+// "subject predicate".
+func tableStatements(t *testing.T, project string) map[string]struct{} {
 	t.Helper()
 	ctx := context.Background()
 	cat, err := hadoop.NewCatalog("local-catalog", filepath.Join(project, ".sal", "data"), nil)
 	require.NoError(t, err)
 	tbl, err := cat.LoadTable(ctx, table.Identifier{"sal-pins-test-project", "triples"})
 	require.NoError(t, err)
-	_, records, err := tbl.Scan(table.WithSelectedFields("subject", "predicate", "vocabulary")).ToArrowRecords(ctx)
+	_, records, err := tbl.Scan(table.WithSelectedFields("subject", "predicate")).ToArrowRecords(ctx)
 	require.NoError(t, err)
 
-	rows := map[string]string{}
+	rows := map[string]struct{}{}
 	for rec, err := range records {
 		require.NoError(t, err)
 		subjects := rec.Column(0).(*array.String)
 		predicates := rec.Column(1).(*array.String)
-		vocabularies := rec.Column(2).(*array.String)
 		for i := 0; i < int(rec.NumRows()); i++ {
-			vocabulary := ""
-			if vocabularies.IsValid(i) {
-				vocabulary = vocabularies.Value(i)
-			}
-			rows[subjects.Value(i)+" "+predicates.Value(i)] = vocabulary
+			rows[subjects.Value(i)+" "+predicates.Value(i)] = struct{}{}
 		}
 		rec.Release()
 	}
 	return rows
 }
 
-func TestBuildWritesPinnedVocabularyStatementsMarkedWithTheirNamespace(t *testing.T) {
+// A vocabulary the project only validates against is pinned and recorded as
+// provenance, but its own statements never reach the table: a query reasons
+// over what the project asserts or imports, nothing more.
+func TestBuildWritesThePinButNotTheStatementsOfAVocabularyItDoesNotImport(t *testing.T) {
 	project := newPinsTestProject(t)
 	servePinsTestVocabulary(t)
 
 	graph, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
 	require.NoError(t, err)
 
-	rows := tableVocabularies(t, project)
+	rows := tableStatements(t, project)
 	const rdfType = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
-	// what the vocabulary states is marked as the vocabulary's
-	require.Equal(t, "https://vocab.test/things#", rows["https://vocab.test/things#Widget "+rdfType])
-	require.Equal(t, "https://vocab.test/things#", rows["https://vocab.test/things#label "+rdfType])
-	// what the project states, and the provenance of the pin, is not
 	require.Contains(t, rows, "https://github.com/cgs-earth/sal-pins-test-project/widgets/1 "+rdfType)
-	require.Equal(t, "", rows["https://github.com/cgs-earth/sal-pins-test-project/widgets/1 "+rdfType])
-	require.Equal(t, "", rows["https://vocab.test/things# http://www.w3.org/2002/07/owl#versionIRI"])
-	// the vocabulary's statements are not in the graph the build returns
+	require.Contains(t, rows, "https://vocab.test/things# http://www.w3.org/2002/07/owl#versionIRI")
+	require.NotContains(t, rows, "https://vocab.test/things#Widget "+rdfType)
+	require.NotContains(t, rows, "https://vocab.test/things#label "+rdfType)
 	require.False(t, graph.Contains(
 		rdflibgo.NewURIRefUnsafe("https://vocab.test/things#Widget"),
 		rdflibgo.RDF.Type,
 		rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"),
 	))
-}
-
-func TestBuildLeavesVocabularyStatementsOutOfTheNQuadsExport(t *testing.T) {
-	project := newPinsTestProject(t)
-	servePinsTestVocabulary(t)
-
-	_, err := (&BuildCmd{Format: GraphExportFormatNQuads}).Run()
-	require.NoError(t, err)
-
-	content, err := os.ReadFile(filepath.Join(project, ".sal", "data", "sal-pins-test-project.nq"))
-	require.NoError(t, err)
-	require.Contains(t, string(content), "<https://github.com/cgs-earth/sal-pins-test-project/widgets/1>")
-	require.NotContains(t, string(content), "<https://vocab.test/things#Widget> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>")
 }

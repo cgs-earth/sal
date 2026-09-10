@@ -14,7 +14,7 @@ const SparqlTab = lazy(() => import('./tabs/SparqlTab').then((module) => ({ defa
 const MapTab = lazy(() => import('./tabs/MapTab').then((module) => ({ default: module.MapTab })))
 
 export function App() {
-  const { tab: active, sharedQuery, sharedReasoning, blobHash, renderBlob, navigate } = useRoute()
+  const { tab: active, sharedQuery, blobHash, renderBlob, navigate } = useRoute()
   const [stats, setStats] = useState<TableStats | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -85,7 +85,7 @@ export function App() {
         {/* YASGUI restores its own query state from localStorage, so remounting is safe. */}
         {active === 'SPARQL' && (
           <Suspense fallback={<p className="empty">Loading the SPARQL editor…</p>}>
-            <SparqlTab sharedQuery={sharedQuery} sharedReasoning={sharedReasoning} snapshots={stats?.snapshots ?? null} />
+            <SparqlTab sharedQuery={sharedQuery} snapshots={stats?.snapshots ?? null} />
           </Suspense>
         )}
         {active === 'Modules' && <ModulesTab modules={stats?.modules ?? null} />}

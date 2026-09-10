@@ -25,10 +25,7 @@ import (
 // is stored in a typed column (or when no typed column fits and it is stored
 // as a string). object_language keeps the language tag of an rdf:langString
 // literal, and is NULL for every other object, so a language-tagged literal
-// round-trips too. vocabulary names the pinned vocabulary whose document states
-// the row, and is NULL for everything the project itself asserts, imports,
-// materializes, or records as provenance; it is not part of the row identity
-// triple_hash carries, so the same statement is one row whoever states it.
+// round-trips too.
 func GetSchemas() (*arrow.Schema, *iceberg.Schema, error) {
 	geoCRS, err := json.Marshal("OGC:CRS84")
 	if err != nil {
@@ -55,7 +52,6 @@ func GetSchemas() (*arrow.Schema, *iceberg.Schema, error) {
 			{Name: "object_type", Type: arrow.BinaryTypes.String, Nullable: true},
 			{Name: "object_language", Type: arrow.BinaryTypes.String, Nullable: true},
 			{Name: "triple_hash", Type: arrow.BinaryTypes.String, Nullable: false},
-			{Name: "vocabulary", Type: arrow.BinaryTypes.String, Nullable: true},
 		},
 		nil,
 	)
@@ -78,7 +74,6 @@ func GetSchemas() (*arrow.Schema, *iceberg.Schema, error) {
 		iceberg.NestedField{ID: 10, Name: "object_type", Type: iceberg.PrimitiveTypes.String, Required: false},
 		iceberg.NestedField{ID: 11, Name: "object_language", Type: iceberg.PrimitiveTypes.String, Required: false},
 		iceberg.NestedField{ID: 12, Name: "triple_hash", Type: iceberg.PrimitiveTypes.String, Required: true},
-		iceberg.NestedField{ID: 13, Name: "vocabulary", Type: iceberg.PrimitiveTypes.String, Required: false},
 	)
 
 	return arrowSchema, icebergSchema, nil
@@ -101,10 +96,14 @@ func NewIcebergTableFromCfg(ctx context.Context, tableSchema *iceberg.Schema, ca
 
 	tableIdent := catalog.ToIdentifier(cfg.Namespace, "triples")
 	if tbl, err := cat.LoadTable(ctx, tableIdent); err == nil {
-		// the newest column is the one checked, since a table lacking an older
-		// one lacks this one too
-		if _, ok := tbl.Schema().FindFieldByName("vocabulary"); !ok {
-			return nil, fmt.Errorf("the existing triples table was built by an older sal without the vocabulary column; run `sal clean --wipe` and `sal build` to rebuild it")
+		if _, ok := tbl.Schema().FindFieldByName("object_language"); !ok {
+			return nil, fmt.Errorf("the existing triples table was built by an older sal without the object_language column; run `sal clean --wipe` and `sal build` to rebuild it")
+		}
+		// one release carried the statements of every pinned vocabulary in a
+		// column of their own; a table with that column holds rows this sal
+		// never writes and cannot be diffed against the graph it builds
+		if _, ok := tbl.Schema().FindFieldByName("vocabulary"); ok {
+			return nil, fmt.Errorf("the existing triples table was built by a sal that wrote a vocabulary column, which this version does not; run `sal clean --wipe` and `sal build` to rebuild it")
 		}
 		slog.Info("Loaded existing Iceberg table")
 		return tbl, nil

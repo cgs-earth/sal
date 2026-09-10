@@ -29,93 +29,28 @@ func ToSQL(input string) (string, error) {
 // a SERVICE clause names for a pattern inside one. Either is the `triples`
 // view for the current snapshot and an iceberg_scan of the table at an
 // earlier one, scanned inline rather than through a view of its own so the
-// translated SQL says which snapshot it reads. reasoning lets a pattern over
-// an RDFS schema predicate read the statements of the pinned vocabularies
-// too, through `triples_all` or the scan left unfiltered, so that a class or
-// property hierarchy a vocabulary states can be walked; every other pattern
-// reads the project's own statements whatever the setting, so a vocabulary's
-// terms reach a result only through such a hierarchy, never as data of their
-// own. It is one setting for the whole query, so a SERVICE inherits it.
+// translated SQL says which snapshot it reads. Every pattern reads the same
+// rows, so a property path over rdfs:subClassOf or rdfs:subPropertyOf walks
+// exactly the hierarchy the project asserted or imported with owl:imports.
 type tableSources struct {
 	tablePath  string
 	snapshotID int64
-	reasoning  bool
 }
 
-// rdfsSchemaPredicates are the predicates reasoning reads from the pinned
-// vocabularies: the ones that relate classes and properties to each other.
-var rdfsSchemaPredicates = map[string]bool{
-	"http://www.w3.org/2000/01/rdf-schema#subClassOf":    true,
-	"http://www.w3.org/2000/01/rdf-schema#subPropertyOf": true,
-	"http://www.w3.org/2000/01/rdf-schema#domain":        true,
-	"http://www.w3.org/2000/01/rdf-schema#range":         true,
-}
-
-// schemaPattern reports whether a pattern reads an RDFS schema predicate: a
-// constant one, or a path step whose every predicate is one. A variable
-// predicate or a negated set is not, since either would let the vocabulary's
-// other statements through.
-func (t *translator) schemaPattern(triple patternTriple) (bool, error) {
-	if triple.step != nil {
-		if triple.step.negated || len(triple.step.predicates) == 0 {
-			return false, nil
-		}
-		for _, predicate := range triple.step.predicates {
-			if !rdfsSchemaPredicates[predicate] {
-				return false, nil
-			}
-		}
-		return true, nil
-	}
-	if variableName(triple.Predicate) != "" {
-		return false, nil
-	}
-	term, err := parseSPARQLTerm(triple.Predicate, t.prefixes)
-	if err != nil {
-		return false, err
-	}
-	return term.kind == "iri" && rdfsSchemaPredicates[term.value], nil
-}
-
-// tableSource is what one pattern scans, and the clause that keeps the scan
-// to the project's own rows, empty when the source already does or when the
-// query reasons over the vocabularies.
-type tableSource struct {
-	from   string
-	filter string
-}
-
-// clause is the filter written against the alias the source is scanned under.
-func (s tableSource) clause(alias string) string {
-	if s.filter == "" {
-		return ""
-	}
-	return alias + "." + s.filter
-}
-
-// source is what a pattern scans; schema says the pattern reads an RDFS
-// schema predicate, which under reasoning is what reads the vocabularies.
-func (s tableSources) source(service string, schema bool) (tableSource, error) {
+// source is the FROM expression a pattern scans.
+func (s tableSources) source(service string) (string, error) {
 	snapshotID := s.snapshotID
 	if service != "" {
 		id, err := serviceSnapshot(service)
 		if err != nil {
-			return tableSource{}, err
+			return "", err
 		}
 		snapshotID = id
 	}
-	vocabularies := s.reasoning && schema
 	if snapshotID == 0 {
-		if vocabularies {
-			return tableSource{from: AllTriplesView}, nil
-		}
-		return tableSource{from: TriplesView}, nil
+		return TriplesView, nil
 	}
-	source := tableSource{from: snapshotScanSQL(s.tablePath, snapshotID)}
-	if !vocabularies {
-		source.filter = projectRowsFilter
-	}
-	return source, nil
+	return snapshotScanSQL(s.tablePath, snapshotID), nil
 }
 
 // servicePath is the path of a SPARQL endpoint of this server: /sparql for the
@@ -318,11 +253,7 @@ func (t *translator) patternSQL(triples []patternTriple, aliasPrefix string, out
 	result := patternSQL{bindings: make(map[string]sqlBinding)}
 	for i, triple := range triples {
 		alias := fmt.Sprintf("%s%d", aliasPrefix, i)
-		schema, err := t.schemaPattern(triple)
-		if err != nil {
-			return patternSQL{}, err
-		}
-		source, err := t.sources.source(triple.service, schema)
+		source, err := t.sources.source(triple.service)
 		if err != nil {
 			return patternSQL{}, err
 		}
@@ -333,7 +264,7 @@ func (t *translator) patternSQL(triples []patternTriple, aliasPrefix string, out
 		parts := []part{{triple.Subject, "subject"}, {triple.Predicate, "predicate"}, {triple.Object, "object"}}
 		switch {
 		case triple.step == nil:
-			result.from = append(result.from, source.from+" AS "+alias)
+			result.from = append(result.from, source+" AS "+alias)
 		case triple.step.closure():
 			var identity string
 			var lateral bool
@@ -350,16 +281,11 @@ func (t *translator) patternSQL(triples []patternTriple, aliasPrefix string, out
 			result.from = append(result.from, from)
 			parts = []part{{triple.Subject, "start"}, {triple.Object, "finish"}}
 		default:
-			result.from = append(result.from, source.from+" AS "+alias)
+			result.from = append(result.from, source+" AS "+alias)
 			result.where = append(result.where, predicateClause(alias, *triple.step))
 			parts = []part{{triple.Subject, "subject"}, {triple.Object, "object"}}
 			if triple.step.inverse {
 				parts = []part{{triple.Subject, "object"}, {triple.Object, "subject"}}
-			}
-		}
-		if triple.step == nil || !triple.step.closure() {
-			if clause := source.clause(alias); clause != "" {
-				result.where = append(result.where, clause)
 			}
 		}
 		var correlations []correlation

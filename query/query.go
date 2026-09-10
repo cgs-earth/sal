@@ -16,15 +16,11 @@ type QueryCmd struct {
 	Info         string `help:"Retrieve quick info about the data product. Options: head, snapshots, column-stats properties" default:"head"`
 	SnapshotDiff string `arg:"--snapshot-diff" help:"Show rows added and removed by the specified Iceberg snapshot ID. Specify 'latest' for the latest snapshot."`
 	SPARQL       bool   `arg:"--sparql" help:"Open an interactive read-only SPARQL shell against the triples table"`
-	Reasoning    bool   `arg:"--reasoning" help:"With --sparql, let rdfs:subClassOf, rdfs:subPropertyOf, rdfs:domain, and rdfs:range read the pinned vocabularies, so that a property path such as rdfs:subClassOf* walks the hierarchies they state"`
 }
 
 func (cmd *QueryCmd) Run() error {
 	if cmd == nil {
 		return fmt.Errorf("query: missing arguments")
-	}
-	if cmd.Reasoning && !cmd.SPARQL {
-		return errReasoningWithoutSPARQL
 	}
 	ctx := context.Background()
 	table, err := salsparql.LocateTriplesTable()
@@ -37,7 +33,7 @@ func (cmd *QueryCmd) Run() error {
 	}
 
 	if cmd.SPARQL {
-		return salsparql.RunShell(ctx, runner, cmd.Reasoning)
+		return salsparql.RunShell(ctx, runner)
 	}
 
 	// The shell opens on the requested info query, so `sal query --info snapshots`
@@ -53,8 +49,6 @@ func (cmd *QueryCmd) Run() error {
 	}
 	return salsparql.RunSQLShell(ctx, runner, infoQuery)
 }
-
-var errReasoningWithoutSPARQL = fmt.Errorf("--reasoning applies to the SPARQL shell; in SQL, query the %s view to read the pinned vocabularies", salsparql.AllTriplesView)
 
 // InstallExtensionsCmd downloads the DuckDB extensions sal queries load.
 //

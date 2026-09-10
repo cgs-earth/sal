@@ -37,7 +37,7 @@ flowchart LR
 1. **Parse.** The query text is parsed by `goRDFlib`'s SPARQL parser. A query that is not a `SELECT`, or that uses a solution modifier the translator cannot express, is rejected here.
 2. **Flatten the pattern.** The `WHERE` clause is walked and reduced to a flat list of triple patterns, a list of `FILTER` expressions, and the groups a `MINUS` subtracts. A pattern written with a property path is replaced by the patterns it reduces to; see [Property paths](#property-paths). A pattern inside a `SERVICE` clause is kept with the endpoint it was written under. A group pattern that is none of these, such as `OPTIONAL` or `UNION`, ends the walk with an error.
 3. **Translate.** Each triple pattern becomes one self-join of the `triples` view; constants become `WHERE` equalities and shared variables become join conditions. This is described in [The translation](#the-translation) below.
-4. **Execute.** DuckDB runs the statement against the Iceberg table through the `triples` view, reading the current snapshot. The view holds the statements the project itself makes; the ones its pinned vocabularies make are in the table too, marked in the `vocabulary` column, and only a pattern over an RDFS schema predicate in a query that asks for reasoning reads them, see [Reasoning over pinned vocabularies](#reasoning-over-pinned-vocabularies). A query sent to `sal serve`'s `/v{snapshot}/sparql` route scans the table at that snapshot instead: each triple pattern becomes an `iceberg_scan(..., snapshot_from_id = {snapshot})` in place of the view, filtered the same way, so the translated SQL says which snapshot it reads. DuckDB is linked into the `sal` binary, so no external database or `duckdb` CLI is involved.
+4. **Execute.** DuckDB runs the statement against the Iceberg table through the `triples` view, reading the current snapshot. A query sent to `sal serve`'s `/v{snapshot}/sparql` route scans the table at that snapshot instead: each triple pattern becomes an `iceberg_scan(..., snapshot_from_id = {snapshot})` in place of the view, so the translated SQL says which snapshot it reads. DuckDB is linked into the `sal` binary, so no external database or `duckdb` CLI is involved.
 5. **Render.** Every column is rendered to text by DuckDB itself, then printed as a table by the shell or encoded as SPARQL JSON by the endpoint.
 
 The DuckDB handle, its extensions, and the `triples` view are opened once per process and reused, so `sal serve` pays that cost on the first request rather than on every one.
@@ -270,27 +270,30 @@ Two things to know about this translation:
 
 A path inside a `MINUS` or `EXISTS` group translates the same way, inside the subquery.
 
-## Reasoning over pinned vocabularies
+## Reasoning over the graph
 
-Every vocabulary a project [pins](/sal/reference/data-layout/#pinned-vocabularies) is written into the triples table by `sal build`, so that a query can walk a class or property hierarchy the project only validated against.
-The rows are marked with the namespace they came from in the `vocabulary` column, and the `triples` view every query runs against leaves them out: `?x rdf:type schema:Organization` answers what the project asserted and nothing else.
+RDFS reasoning is accomplished by writing a property path in the query.
+`sal build` does not add inferred triples to the table, keep a separate index of class or property hierarchies, or expand a query behind the scenes; the closure of `rdfs:subClassOf` is computed by DuckDB when the query runs, from the rows the table holds.
+Those rows are what the project's own RDF asserts and every ontology it imports with `owl:imports`, which [`sal build`](/sal/reference/commands/#sal-build) merges into the data product.
 
-A query reads them by asking to reason over the vocabularies.
-Reasoning is confined to the RDFS schema predicates: a pattern whose predicate is `rdfs:subClassOf`, `rdfs:subPropertyOf`, `rdfs:domain`, or `rdfs:range`, or a path step made only of those, scans the `triples_all` view instead, whether it is written in the query's own `WHERE` clause, inside a `MINUS` or `EXISTS`, or under a `SERVICE`.
-Every other pattern keeps reading the project's own statements, a variable predicate and a negated set included, so a vocabulary's terms reach a result only through a hierarchy: `?class rdf:type rdfs:Class` still answers the classes the project declares, not the hundreds schema.org does, while `?x rdf:type/rdfs:subClassOf* schema:Organization` finds the project's instances of every class schema.org puts below it.
-A query that asks for the hierarchy itself, `?a rdfs:subClassOf ?b`, gets the vocabulary's statements, since that is what the schema predicates hold.
+For example, a project that imports schema.org can ask for the instances of every class below `schema:Organization`:
 
-Reasoning is switched on per query:
+```sparql
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX schema: <https://schema.org/>
 
-- `sal serve`: `reasoning=true` as a parameter of `/sparql`, `/v{snapshot}/sparql`, and `/api/sparql/translate`, in the URL of a `GET` or a direct `POST` and in the body of a form `POST`. Any other value than `true` or `false` answers `400`.
-- `sal query --sparql --reasoning`.
-- The **Reasoning** toggle of the SPARQL tab of `sal serve --with-ui`.
+SELECT ?x
+WHERE {
+  ?x rdf:type/rdfs:subClassOf* schema:Organization .
+}
+```
 
-With it on, the example above finds every instance of every class schema.org declares below `schema:Organization`, whether or not the project ever mentioned those classes.
-Nothing is inferred and no rules run: the vocabulary's schema statements are ordinary rows, and a query walks them with a path.
-`rdfs:domain` and `rdfs:range` are walked the same way, `?x ?p ?o . ?p rdfs:domain/rdfs:subClassOf* schema:Organization`, so the RDFS entailments a project needs are written out in the query rather than switched on as a regime.
+`rdfs:subPropertyOf`, `rdfs:domain`, and `rdfs:range` are walked the same way, `?x ?p ?o . ?p rdfs:domain/rdfs:subClassOf* schema:Organization`, so the RDFS entailments a project needs are written in the query rather than switched on as a regime.
 
-SQL reads the same rows from the `triples_all` view whenever it names it; nothing else is switched.
+A vocabulary the project only validates against, one it declares a prefix for but never imports, has no statements in the table, only the provenance node recording which version was pinned.
+The path above finds nothing through it: a hierarchy has to be imported before a query can walk it.
+That keeps a query answerable from the data product alone, and keeps a vocabulary's own instances and class declarations, hundreds of them in schema.org, out of every result unless the project chose to carry them.
 
 ## Diffing snapshots with SERVICE and MINUS
 

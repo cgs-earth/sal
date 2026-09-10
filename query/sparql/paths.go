@@ -151,16 +151,12 @@ func predicateClause(alias string, step pathStep) string {
 // edge touches, which is where this translation narrows what SPARQL defines
 // as every term of the graph. UNION rather than UNION ALL in the recursion is
 // what stops it on a cycle.
-func closureSQL(source tableSource, step pathStep, identity string) string {
+func closureSQL(source string, step pathStep, identity string) string {
 	from, to := "edge.subject", bindingExpr("edge", "object")
 	if step.inverse {
 		from, to = to, from
 	}
-	edges := "SELECT " + from + " AS start, " + to + " AS finish\n    FROM " + source.from + " AS edge\n    WHERE "
-	if clause := source.clause("edge"); clause != "" {
-		edges += clause + "\n      AND "
-	}
-	edges += predicateClause("edge", step)
+	edges := "SELECT " + from + " AS start, " + to + " AS finish\n    FROM " + source + " AS edge\n    WHERE " + predicateClause("edge", step)
 
 	var body string
 	if step.more {

@@ -25,10 +25,7 @@ const (
 // Export graph takes in a rdflib format graph struct and
 // serializes it to disk in the specified format. modules are the SAL modules
 // the build downloaded, which are recorded in the Iceberg table metadata.
-// vocabularies are the statements of the pinned vocabularies; the Iceberg
-// table carries them marked with their namespace, while the N-Quads file,
-// which has no column to mark them in, leaves them out.
-func ExportGraph(graph *rdflibgo.Graph, vocabularies []load.VocabularyGraph, format GraphExportFormat, hash string, modules []string) error {
+func ExportGraph(graph *rdflibgo.Graph, format GraphExportFormat, hash string, modules []string) error {
 
 	switch format {
 	case "nq":
@@ -64,7 +61,7 @@ func ExportGraph(graph *rdflibgo.Graph, vocabularies []load.VocabularyGraph, for
 		if err != nil {
 			return err
 		}
-		err = load.WriteGraphToIceberg(context.Background(), graph, vocabularies, &load.LoadConfig{
+		err = load.WriteGraphToIceberg(context.Background(), graph, &load.LoadConfig{
 			BatchSize:          131072,
 			ParquetCompression: "snappy",
 			Warehouse:          dataDir,

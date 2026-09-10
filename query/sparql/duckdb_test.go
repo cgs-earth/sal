@@ -50,15 +50,6 @@ func TestViewSQLScansTheTablePath(t *testing.T) {
 	require.Contains(t, viewSQL("/tmp/table"), "iceberg_scan('/tmp/table', allow_moved_paths = true)")
 }
 
-// The whole table is one view and the project's own rows another over it, so
-// that the filter is defined once and a SQL user can still reach every row.
-func TestViewSQLRegistersTheFilteredAndUnfilteredViews(t *testing.T) {
-	sql := viewSQL("/tmp/table")
-
-	require.Contains(t, sql, "CREATE OR REPLACE VIEW triples_all AS\nSELECT *\nFROM iceberg_scan('/tmp/table', allow_moved_paths = true);")
-	require.Contains(t, sql, "CREATE OR REPLACE VIEW triples AS\nSELECT *\nFROM triples_all\nWHERE vocabulary IS NULL")
-}
-
 func TestViewSQLEscapesSingleQuotesInTheTablePath(t *testing.T) {
 	require.Contains(t, viewSQL("/tmp/o'brien/triples"), "iceberg_scan('/tmp/o''brien/triples'")
 }

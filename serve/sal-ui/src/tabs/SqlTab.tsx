@@ -39,14 +39,6 @@ function samplesFor(tablePath: string | null, sampleQueries: NamedQuery[] | null
     { name: 'Head', sql: DEFAULT_SQL },
     { name: 'Schema', sql: 'DESCRIBE triples' },
     {
-      name: 'Vocabulary statements',
-      sql: `SELECT vocabulary, COUNT(*) AS statements
-FROM triples_all
-WHERE vocabulary IS NOT NULL
-GROUP BY vocabulary
-ORDER BY statements DESC`,
-    },
-    {
       name: 'Predicate counts',
       sql: 'SELECT\n\tpredicate,\n\tCOUNT(*) AS count\nFROM triples\nGROUP BY predicate\nORDER BY count DESC',
     },

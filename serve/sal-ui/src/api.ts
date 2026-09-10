@@ -111,15 +111,13 @@ export async function runSQL(sql: string, signal?: AbortSignal): Promise<QueryRe
  * The DuckDB SQL the `/sparql` endpoint would run a SPARQL query as. Nothing is
  * run; the SPARQL tab shows this beside the editor to explain what a query does
  * under the hood. A query the translator does not support rejects with the
- * same message `/sparql` would answer with. reasoning is the endpoint's
- * `reasoning=true`: the query also reads the statements of the pinned
- * vocabularies, and the SQL says so by scanning `triples_all`.
+ * same message `/sparql` would answer with.
  */
-export async function translateSparql(query: string, reasoning: boolean, signal?: AbortSignal): Promise<string> {
+export async function translateSparql(query: string, signal?: AbortSignal): Promise<string> {
   const response = await fetch('/api/sparql/translate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, reasoning }),
+    body: JSON.stringify({ query }),
     signal,
   })
   if (!response.ok) throw await failure(response)

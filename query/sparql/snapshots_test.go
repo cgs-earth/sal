@@ -94,7 +94,7 @@ SELECT ?s ?name
 WHERE {
   ?s schema:name ?name .
   ?s schema:age 42 .
-}`, false)
+}`)
 
 	require.NoError(t, err)
 	require.Contains(t, sql, "FROM iceberg_scan('/tmp/warehouse/sal/triples', allow_moved_paths = true, snapshot_from_id = 122) AS t0")
@@ -104,7 +104,7 @@ WHERE {
 }
 
 func TestTranslateScansTheTriplesViewWithoutASnapshot(t *testing.T) {
-	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate("SELECT ?s WHERE { ?s ?p ?o }", false)
+	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples"}.Translate("SELECT ?s WHERE { ?s ?p ?o }")
 
 	require.NoError(t, err)
 	require.Contains(t, sql, "FROM triples AS t0")
@@ -112,7 +112,7 @@ func TestTranslateScansTheTriplesViewWithoutASnapshot(t *testing.T) {
 }
 
 func TestTranslateEscapesQuotesInTheSnapshotTablePath(t *testing.T) {
-	sql, err := DuckDBRunner{TablePath: "/tmp/o'brien/sal/triples", SnapshotID: 1}.Translate("SELECT ?s WHERE { ?s ?p ?o }", false)
+	sql, err := DuckDBRunner{TablePath: "/tmp/o'brien/sal/triples", SnapshotID: 1}.Translate("SELECT ?s WHERE { ?s ?p ?o }")
 
 	require.NoError(t, err)
 	require.Contains(t, sql, "iceberg_scan('/tmp/o''brien/sal/triples', allow_moved_paths = true, snapshot_from_id = 1) AS t0")
@@ -121,7 +121,7 @@ func TestTranslateEscapesQuotesInTheSnapshotTablePath(t *testing.T) {
 func TestSnapshotSourceDoesNotForceTheSpatialExtension(t *testing.T) {
 	// The scan of a snapshot must not read as an ST_ call or a star projection,
 	// or every snapshot query would load the spatial extension for nothing.
-	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples", SnapshotID: 122}.Translate("SELECT ?s WHERE { ?s ?p ?o }", false)
+	sql, err := DuckDBRunner{TablePath: "/tmp/warehouse/sal/triples", SnapshotID: 122}.Translate("SELECT ?s WHERE { ?s ?p ?o }")
 
 	require.NoError(t, err)
 	require.False(t, needsSpatial(sql))

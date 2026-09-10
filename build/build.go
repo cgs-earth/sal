@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/cgs-earth/sal/build/load"
 	"github.com/cgs-earth/sal/build/validate"
 	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/salmodule"
@@ -270,21 +269,8 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		slog.Warn("Exporting as NQuads. Note this will create a larger and less efficient file than iceberg")
 	}
 
-	imported, err := ImportOntologies(finalGraph, pins)
-	if err != nil {
+	if err := ImportOntologies(finalGraph, pins); err != nil {
 		return nil, err
-	}
-
-	// every pinned vocabulary is committed alongside the data, marked as the
-	// vocabulary's own so that a query leaves it out unless asked to reason
-	// over it; it is read here, after the RDFS checks and the uncommitted
-	// changes check, in the same place imports are merged, and kept out of the
-	// graph itself so that neither the checks nor an N-Quads export see it
-	var vocabularies []load.VocabularyGraph
-	if cfg.Format == GraphExportFormatIceberg {
-		if vocabularies, err = PinnedVocabularyGraphs(pins, imported); err != nil {
-			return nil, err
-		}
 	}
 
 	// the pins are written only once the build is known to be committable, so
@@ -314,7 +300,7 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 
 	// every module downloaded so far, both the ones validation dereferenced for
 	// their vocabulary and the ones materialization ran, is recorded in the table
-	if err := ExportGraph(finalGraph, vocabularies, cfg.Format, hash, resolver.Downloaded()); err != nil {
+	if err := ExportGraph(finalGraph, cfg.Format, hash, resolver.Downloaded()); err != nil {
 		return nil, err
 	}
 
