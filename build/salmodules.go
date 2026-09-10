@@ -82,7 +82,9 @@ func findSalModuleTasks(graph *rdflibgo.Graph) ([]salModuleTask, error) {
 
 // MaterializeSalModules runs every SAL module task instance the graph declares
 // and merges the RDF each module produced back into the graph, reporting how
-// many tasks it ran.
+// many tasks it ran. A relative IRI a task emits resolves against the graph's
+// base, which is the project namespace, so what a module materializes is named
+// as the project's own instance data unless the module wrote absolute IRIs.
 func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver *salmodule.Resolver) (int, error) {
 	tasks, err := findSalModuleTasks(graph)
 	if err != nil {
@@ -107,7 +109,7 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 
 		slog.Info("Running SAL module task " + task.classIRI)
 		output, runErr := resolver.RunTask(ctx, task.ref, ontology.TaskInstanceEnvVar, taskInstance)
-		moduleGraph, err := ontology.GraphFromTaskOutput(output)
+		moduleGraph, err := ontology.GraphFromTaskOutput(output, graph.Base())
 		// a failing task reports why it failed as salmodule:Error nodes before it
 		// exits, so those messages are preferred over the container's exit status
 		var taskErr salmodule.TaskError

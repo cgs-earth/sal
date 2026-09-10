@@ -215,7 +215,9 @@ sal run
 For each module's referenced task instance(s), `sal run` clones the module's repository, builds the `Dockerfile` in its repository root,
 and invokes the module's run command with the task instance serialized from the instance's RDF properties.
 The newline delimited JSON the module writes to stdout is converted to triples and committed on top of the
-last build. See [Using SAL Modules](/sal/guides/using-sal-modules/).
+last build. A relative IRI in that output resolves against the project's namespace, not the module's, so a task's
+output is named as the project's own data unless the module wrote absolute IRIs.
+See [Using SAL Modules](/sal/guides/using-sal-modules/).
 
 `sal run` refuses to run anything unless the data product matches the sources as they stand:
 
@@ -335,8 +337,9 @@ https://github.com/cgs-earth/sal-demo/MyRandPeople    salmodule://github.com/cgs
 Where `sal get classes` lists the classes the data product defines, this lists the resources typed with a class, whether or not the class is defined in the data product.
 A resource typed with several classes is listed once per class.
 
-Only the resources named under the project base are listed by default.
-The resources a module task materialized, or an imported data product carries, are named under their own namespaces and only appear with `--all`:
+Only the resources named under the project base are listed by default, which includes whatever a module task
+materialized under relative IRIs. The resources a module task named with absolute IRIs, or an imported data
+product carries, are named under other namespaces and only appear with `--all`:
 
 ```sh
 sal get instances --all

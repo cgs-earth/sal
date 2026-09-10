@@ -135,6 +135,23 @@ func TestMaterializeSalModulesMergesTaskOutput(t *testing.T) {
 	require.True(t, graphHasTriple(graph, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
 }
 
+// TestMaterializeSalModulesNamesRelativeOutputUnderTheProject checks that a
+// relative IRI a task emits resolves against the project namespace rather than
+// the module's, since what a task produces is the project's own instance data.
+func TestMaterializeSalModulesNamesRelativeOutputUnderTheProject(t *testing.T) {
+	graph := parseTestProject(t, testProject)
+	runner := &testContainerRunner{
+		ontology:  testModuleOntology,
+		runOutput: `{"@id":"person/bob","@type":"schema:Person","schema:name":"Bob"}`,
+	}
+
+	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
+
+	require.NoError(t, err)
+	require.True(t, graphHasTriple(graph, "https://example.test/project/person/bob", "https://schema.org/name", "Bob"))
+	require.False(t, graphHasTriple(graph, testModuleNamespace+"person/bob", "https://schema.org/name", "Bob"))
+}
+
 // TestMaterializeSalModulesPassesTheInstanceConfiguredInRDF checks that the task
 // instance the module receives is built from the instance's RDF properties, and
 // that only the properties the module's own vocabulary defines are passed on.
