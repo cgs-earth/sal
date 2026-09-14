@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/cgs-earth/sal/salmodule"
@@ -31,11 +32,11 @@ func (testModuleRunner) BuildImage(context.Context, string, string) error { retu
 
 func (testModuleRunner) ImageExists(context.Context, string) (bool, error) { return false, nil }
 
-func (testModuleRunner) RunContainer(_ context.Context, _ string, _ []string, cmd []string) ([]byte, []byte, error) {
+func (testModuleRunner) RunContainer(ctx context.Context, _ string, _ []string, cmd []string, consume salmodule.ContainerOutputConsumer) ([]byte, error) {
 	if cmd[len(cmd)-1] == salmodule.OntologyCommand {
-		return []byte(testModuleOntology), nil, nil
+		return nil, consume(ctx, strings.NewReader(testModuleOntology), nil)
 	}
-	return nil, nil, fmt.Errorf("unexpected command %v", cmd)
+	return nil, fmt.Errorf("unexpected command %v", cmd)
 }
 
 // useFakeSalModule points the shared module resolver at test doubles so that

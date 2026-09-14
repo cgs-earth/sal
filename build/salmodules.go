@@ -85,7 +85,10 @@ func findSalModuleTasks(graph *rdflibgo.Graph) ([]salModuleTask, error) {
 // many tasks it ran. A relative IRI a task emits resolves against the graph's
 // base, which is the project namespace, so what a module materializes is named
 // as the project's own instance data unless the module wrote absolute IRIs.
-func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver *salmodule.Resolver) (int, error) {
+// A file a task names with a file:/// IRI object is copied out of the
+// container into blobDir under its SHA-256 digest, and the graph refers to the
+// copy as urn:sha256:<digest> in place of the container path.
+func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver *salmodule.Resolver, blobDir string) (int, error) {
 	tasks, err := findSalModuleTasks(graph)
 	if err != nil {
 		return 0, err
@@ -108,8 +111,8 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 		}
 
 		slog.Info("Running SAL module task " + task.classIRI)
-		output, runErr := resolver.RunTask(ctx, task.ref, ontology.TaskInstanceEnvVar, taskInstance)
-		moduleGraph, err := ontology.GraphFromTaskOutput(output, graph.Base())
+		result, runErr := resolver.RunTask(ctx, task.ref, ontology.TaskInstanceEnvVar, taskInstance, blobDir)
+		moduleGraph, err := ontology.GraphFromTaskOutput(result.Output, graph.Base())
 		// a failing task reports why it failed as salmodule:Error nodes before it
 		// exits, so those messages are preferred over the container's exit status
 		var taskErr salmodule.TaskError
@@ -121,6 +124,9 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 		case err != nil:
 			return tasksRun, fmt.Errorf("run: %w", err)
 		}
+		if err := salmodule.LinkCopiedFiles(moduleGraph, result.Files); err != nil {
+			return tasksRun, fmt.Errorf("run: %w", err)
+		}
 
 		var materialized int
 		moduleGraph.Triples(nil, nil, nil)(func(rdflibgo.Triple) bool {
@@ -130,6 +136,7 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 		mergeGraph(graph, moduleGraph)
 		tasksRun++
 		slog.Info(fmt.Sprintf("Materialized %d triples from %s", materialized, task.classIRI))
+		slog.Info(fmt.Sprintf("Copied %d files from %s into %s", len(result.Files), task.classIRI, blobDir))
 	}
 	return tasksRun, nil
 }

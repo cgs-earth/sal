@@ -122,6 +122,38 @@ was pulled from, writes absolute IRIs, which are kept as written.
 
 If a task emits `salmodule:Error` nodes instead of data, the run fails with the messages the module reported.
 
+### Files a task produces
+
+A task can hand over files as well as triples. Any IRI object in its output written with the `file:///` scheme
+names a file inside the container, and `sal run` copies that file out of the container while the task is still
+running, the way `docker cp` would:
+
+```json
+{"@id": "https://example.org/dataset/2024", "schema:hasPart": {"@id": "file:///tmp/test.txt"}}
+```
+
+The copy lands in `.sal/data/blobs` named by the SHA-256 digest of its contents, so it is content addressable
+and stored once however many tasks produce it. The triple that named the file is rewritten to refer to the copy,
+and the copy is described the same way a pinned vocabulary is: its file name as `rdfs:label`, when it was
+written inside the container as `dcterms:modified`, and its digest as `owl:versionIRI`. The example above commits:
+
+```turtle
+<https://example.org/dataset/2024> schema:hasPart <urn:sha256:9f86d0…> .
+<urn:sha256:9f86d0…> rdfs:label "test.txt" ;
+    dcterms:modified "2026-09-10T14:26:05Z"^^xsd:dateTime ;
+    owl:versionIRI <urn:sha256:9f86d0…> .
+```
+
+[`sal serve`](/sal/reference/commands/#sal-serve) serves the copy at `/blobs/{sha256}`, the same as a pinned
+vocabulary document.
+
+Files are copied concurrently with the task writing its output, so a module must finish writing a file before
+it prints the line that names it; a file named before it is complete is copied incomplete. Each file is copied
+once: a second reference to the same path is warned about and skipped, and both references point at the same
+copy. The container is kept until every copy has finished, and the run fails if a named file does not exist
+or is a directory. A `file:///` path written as a plain string rather than an IRI object is not a file
+reference; `sal run` warns about one and discards it. After each task the log says how many files it copied.
+
 ## Importing a module's ontology
 
 Referencing a module checks its terms and lets `sal run` run its tasks, but the vocabulary itself stays outside the data

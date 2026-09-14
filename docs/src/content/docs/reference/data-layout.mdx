@@ -37,8 +37,10 @@ For the main triples table, SAL writes an Apache Iceberg table under the project
 The `metadata` directory contains Iceberg table metadata, manifest lists, manifests, and `version-hint.text`.
 The `data` directory contains the table's data files.
 
-The files named by a hash under `.sal/data/blobs` are the vocabulary documents the project pins.
-They are described in [Pinned vocabularies](#pinned-vocabularies) below. [`sal serve`](/sal/reference/commands/#sal-serve) serves them over HTTP at `/blobs/{sha256}`.
+The files named by a hash under `.sal/data/blobs` are the vocabulary documents the project pins, described in
+[Pinned vocabularies](#pinned-vocabularies) below, and the files SAL module tasks produce, which
+[`sal run`](/sal/reference/commands/#sal-run) copies out of the module's container under the SHA-256 digest of
+their contents. [`sal serve`](/sal/reference/commands/#sal-serve) serves both over HTTP at `/blobs/{sha256}`.
 
 `.sal/data/stac` is the STAC catalog the build writes last, describing the table it just committed; see [STAC catalog](#stac-catalog) below. `sal serve` serves it at `/stac/catalog.json`.
 
@@ -119,6 +121,7 @@ Vocabularies are resolved per project rather than from a shared cache on the mac
     {
       "@id": "https://schema.org/",
       "@type": "owl:Ontology",
+      "rdfs:label": "https://schema.org/",
       "owl:versionIRI": { "@id": "urn:sha256:c3a1…" },
       "dcterms:format": "application/ld+json",
       "dcterms:modified": { "@value": "2026-08-11T17:21:12Z", "@type": "xsd:dateTime" },
@@ -129,6 +132,7 @@ Vocabularies are resolved per project rather than from a shared cache on the mac
 ```
 
 The document behind each pin is stored under `.sal/data/blobs` named by that same SHA-256.
+Each pinned node carries the vocabulary's namespace IRI as its `rdfs:label`, the human readable name it is known by, and the same node is committed into the triples table as provenance on every build.
 `config.jsonld` belongs in Git; the documents it names do not, since `sal init` adds `.sal/data` to `.gitignore` and they travel with the data product instead.
 
 On each build, SAL:

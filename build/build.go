@@ -289,7 +289,11 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 	// against the module's ontology, but only `sal run` invokes their run
 	// commands; the configuration itself is committed like any other RDF
 	if cfg.runModules {
-		tasksRun, err := MaterializeSalModules(context.Background(), finalGraph, resolver)
+		blobDir, err := pkg.SalBlobsDir()
+		if err != nil {
+			return nil, err
+		}
+		tasksRun, err := MaterializeSalModules(context.Background(), finalGraph, resolver, blobDir)
 		if err != nil {
 			return nil, err
 		}

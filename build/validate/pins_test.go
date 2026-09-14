@@ -70,6 +70,7 @@ func TestSaveWritesTheDocumentUnderItsHashAndPinsThatVersion(t *testing.T) {
 	require.Equal(t, owlNamespaceIRI, doc.Context["owl"])
 	require.Equal(t, testVocabularyNamespace, node.ID)
 	require.Equal(t, "owl:Ontology", node.Type)
+	require.Equal(t, testVocabularyNamespace, node.Label)
 	require.Equal(t, "urn:sha256:"+digest, node.VersionIRI.ID)
 	require.Equal(t, "text/turtle", node.Format)
 	require.NotNil(t, node.Modified)
@@ -281,6 +282,7 @@ func TestAppendProvenanceAddsAnOntologyNodeForEveryPin(t *testing.T) {
 
 	subject := rdflibgo.NewURIRefUnsafe(testVocabularyNamespace)
 	require.True(t, graph.Contains(subject, rdflibgo.RDF.Type, rdflibgo.NewURIRefUnsafe(owlNamespaceIRI+"Ontology")))
+	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(rdfsNamespaceIRI+"label"), rdflibgo.NewLiteral(testVocabularyNamespace)))
 	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(owlNamespaceIRI+"versionIRI"), rdflibgo.NewURIRefUnsafe("urn:sha256:"+digest)))
 	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(dctermsNamespaceIRI+"format"), rdflibgo.NewLiteral(mediaType)))
 

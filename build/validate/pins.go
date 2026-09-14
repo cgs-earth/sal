@@ -241,7 +241,7 @@ func (p *PinnedVocabularies) IDs() []string {
 }
 
 // AppendProvenance adds an owl:Ontology node for every vocabulary the project
-// pins to graph, carrying the same owl:versionIRI, dcterms:format,
+// pins to graph, carrying the same rdfs:label, owl:versionIRI, dcterms:format,
 // dcterms:modified, and rdfs:comment a build writes to .sal/config.jsonld.
 // This is what makes a pinned vocabulary's exact version queryable alongside
 // the data it validated, rather than only recorded in the lockfile on disk.
@@ -251,11 +251,14 @@ func (p *PinnedVocabularies) AppendProvenance(graph *rdflibgo.Graph) {
 	format := rdflibgo.NewURIRefUnsafe(dctermsNamespaceIRI + "format")
 	modified := rdflibgo.NewURIRefUnsafe(dctermsNamespaceIRI + "modified")
 	comment := rdflibgo.NewURIRefUnsafe(rdfsNamespaceIRI + "comment")
+	label := rdflibgo.NewURIRefUnsafe(rdfsNamespaceIRI + "label")
 
 	for _, id := range p.IDs() {
 		entry := p.entries[id]
 		subject := rdflibgo.NewURIRefUnsafe(id)
 		graph.Add(subject, rdflibgo.RDF.Type, owlOntology)
+		// the namespace IRI is the name a vocabulary is known by
+		graph.Add(subject, label, rdflibgo.NewLiteral(id))
 		graph.Add(subject, versionIRI, rdflibgo.NewURIRefUnsafe(entry.Scheme+entry.Version))
 		if entry.MediaType != "" {
 			graph.Add(subject, format, rdflibgo.NewLiteral(entry.MediaType))
@@ -361,8 +364,11 @@ func documentDigest(body []byte) string {
 // in .sal/config.jsonld. It is generated on every build that pins something
 // new, so a hand edit to one does not survive.
 type pinnedVocabularyNode struct {
-	ID         string        `json:"@id"`
-	Type       string        `json:"@type"`
+	ID   string `json:"@id"`
+	Type string `json:"@type"`
+	// Label is the human readable name of the vocabulary, which is its
+	// namespace IRI, the same as ID.
+	Label      string        `json:"rdfs:label,omitempty"`
 	VersionIRI iriValue      `json:"owl:versionIRI"`
 	Format     string        `json:"dcterms:format,omitempty"`
 	Modified   *typedLiteral `json:"dcterms:modified,omitempty"`
@@ -388,6 +394,7 @@ func (p *PinnedVocabularies) nodes() ([]json.RawMessage, error) {
 		node := pinnedVocabularyNode{
 			ID:         id,
 			Type:       "owl:Ontology",
+			Label:      id,
 			VersionIRI: iriValue{ID: entry.Scheme + entry.Version},
 			Format:     entry.MediaType,
 		}

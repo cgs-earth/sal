@@ -2,6 +2,7 @@ package salmodule
 
 import (
 	"archive/tar"
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -65,4 +66,34 @@ func TestReportBuildProgressAcceptsSuccessfulBuilds(t *testing.T) {
 	stream := strings.NewReader(`{"stream":"Step 1/1 : FROM scratch"}` + "\n" + `{"stream":"Successfully tagged sal-module-test:latest"}`)
 
 	require.NoError(t, reportBuildProgress(stream, "sal-module-test:latest"))
+}
+
+// dockerCopyArchive builds the tar stream the daemon's copy endpoint answers
+// with: the named entry alone, headed by its base name.
+func dockerCopyArchive(t *testing.T, name string, typeflag byte, content string) io.Reader {
+	t.Helper()
+	var buf bytes.Buffer
+	archive := tar.NewWriter(&buf)
+	require.NoError(t, archive.WriteHeader(&tar.Header{Name: name, Typeflag: typeflag, Mode: 0644, Size: int64(len(content)), ModTime: testFileModified}))
+	_, err := io.WriteString(archive, content)
+	require.NoError(t, err)
+	require.NoError(t, archive.Close())
+	return &buf
+}
+
+func TestExtractFileFromArchiveWritesTheFilesContents(t *testing.T) {
+	var out bytes.Buffer
+
+	modified, err := extractFileFromArchive(dockerCopyArchive(t, "test.txt", tar.TypeReg, "hello"), "/tmp/test.txt", &out)
+
+	require.NoError(t, err)
+	require.Equal(t, "hello", out.String())
+	require.True(t, testFileModified.Equal(modified))
+}
+
+func TestExtractFileFromArchiveRefusesADirectory(t *testing.T) {
+	_, err := extractFileFromArchive(dockerCopyArchive(t, "out/", tar.TypeDir, ""), "/tmp/out", io.Discard)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "only a regular file can be copied")
 }
