@@ -9,21 +9,6 @@ This repository is currently a work in progress.
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/cgs-earth/sal)
 - A test deployment can be found at: https://sal-demo-779026943077.us-central1.run.app/
 
-## Agent skills
-
-The [`skills/`](skills/) directory holds skills that teach a coding agent how to work with SAL projects and write SAL modules. Install them into Claude Code as a plugin:
-
-```
-/plugin marketplace add cgs-earth/sal
-/plugin install sal@sal
-```
-
-or into Claude Code, Codex, and other agents with the `skills` CLI:
-
-```sh
-npx skills add cgs-earth/sal
-```
-
 ## Installation
 
 To install the latest version of SAL, run the following command:

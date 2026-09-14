@@ -3,6 +3,23 @@
 # and serves it, useful for the cloudbuild demo deployment.
 ARG DEMO=false
 
+FROM golang:1.25-bookworm AS imports
+
+WORKDIR /app
+COPY . .
+
+# Writes the list of packages the project imports from its dependencies, one per
+# line, so the go-builder stage below can compile them in a layer of their own.
+# `go list -e` reads the imports out of the project's own source without needing
+# the dependencies to be present, and GOPROXY=off keeps it from fetching them.
+# The first path element of a standard library package never contains a dot, so
+# the grep keeps only third party imports, minus the project's own packages.
+RUN GOPROXY=off go list -e -f '{{join .Imports "\n"}}' ./... 2>/dev/null \
+    | grep '^[^/]*\.' \
+    | grep -v "^$(go list -m)/" \
+    | sort -u > /imports.txt
+
+
 # DuckDB is a C++ library linked into the sal binary, so this build needs cgo and
 # a toolchain for the architecture it is producing. Building natively on the
 # target platform is what keeps that simple: BuildKit runs this stage under
@@ -12,8 +29,17 @@ FROM golang:1.25-bookworm AS go-builder
 
 WORKDIR /app
 
+# Nearly all of the compile time is the dependencies, and cgo compiling the
+# DuckDB binding is the bulk of that, so they are compiled first in a layer keyed
+# only on go.mod, go.sum, and the import list: `go build` of those packages
+# downloads their modules and leaves everything compiled in the Go build cache,
+# which the build of the project below then reuses. The layer is reused across
+# builds until a dependency changes, so a commit that only touches sal's own
+# code compiles sal's own packages and links, a few seconds' work. The build
+# flags must match the final build's, since they are part of the cache key.
 COPY go.mod go.sum ./
-RUN go mod download
+COPY --from=imports /imports.txt /imports.txt
+RUN CGO_ENABLED=1 go build -trimpath $(cat /imports.txt)
 
 COPY . .
 

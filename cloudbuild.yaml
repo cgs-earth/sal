@@ -2,50 +2,36 @@
 # SPDX-License-Identifier: MIT
 
 steps:
-  - name: gcr.io/cloud-builders/docker
-    env:
-    - DOCKER_BUILDKIT=1
+  # The official docker image rather than gcr.io/cloud-builders/docker, which
+  # Google now recommends migrating to; it is what guarantees buildx is present.
+  - name: docker:28-cli
+    id: Build and push
+    entrypoint: sh
+    # $$ escapes the shell variable so Cloud Build leaves it for the shell
     args:
       - "-c"
-      # Pull the cache image if available. The first build of a service has no
-      # cache tag to pull, so only pass --cache-from when the pull succeeded.
-      # BUILDKIT_INLINE_CACHE writes the cache metadata into the image being
-      # built; without it BuildKit finds nothing to reuse in the pulled tag.
-      # $$ escapes the shell variable so Cloud Build leaves it for bash
       - |
         set -e
         IMAGE="$_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME"
-        CACHE_FROM=""
-        if docker pull "$$IMAGE:cache"; then
-          CACHE_FROM="--cache-from=$$IMAGE:cache"
-        else
-          echo "No cache image at $$IMAGE:cache; building without cache."
-        fi
-        docker build \
-          $$CACHE_FROM \
+        # A BuildKit builder of its own, since the daemon's default one cannot
+        # export a cache to a registry.
+        docker buildx create --name sal --driver docker-container --use
+        # The cache lives in the registry next to the image, under the :cache
+        # tag, with mode=max so that the layers of the intermediate stages are
+        # kept too. The inline cache used before only kept the final image's
+        # layers, so every deployment downloaded and compiled sal's Go
+        # dependencies from scratch. A first build has no cache to import;
+        # buildx warns and carries on. --push sends the image straight from
+        # the builder, so no separate push step or `images:` entry is needed.
+        docker buildx build \
           --progress=plain \
-          --build-arg BUILDKIT_INLINE_CACHE=1 \
           --build-arg DEMO=true \
+          --cache-from "type=registry,ref=$$IMAGE:cache" \
+          --cache-to "type=registry,ref=$$IMAGE:cache,mode=max,image-manifest=true,oci-mediatypes=true" \
           --tag "$$IMAGE:$COMMIT_SHA" \
-          --tag "$$IMAGE:cache" \
+          --push \
           -f Dockerfile \
           .
-    id: Build
-    entrypoint: bash
-  - name: gcr.io/cloud-builders/docker
-    args:
-      - push
-      - >-
-        $_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA
-    id: Push
-  - name: gcr.io/cloud-builders/docker
-    # The cache tag is written by the build step above; this only publishes it so
-    # the next build can pull it
-    args:
-      - push
-      - >-
-        $_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME:cache
-    id: Push Cache
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
     # `run deploy` rather than `run services update` so the first build of a new
     # service creates it instead of failing on a service that isn't there yet
@@ -62,12 +48,12 @@ steps:
       - "--quiet"
     id: Deploy
     entrypoint: gcloud
-images:
-  - >-
-    $_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA
 options:
   substitutionOption: MUST_MATCH
   logging: CLOUD_LOGGING_ONLY
+  # Compiling Go parallelizes across cores, and the default machine has few of
+  # them. Billed per build minute at a higher rate, but the build is short.
+  machineType: E2_HIGHCPU_8
 timeout: 1800s
 tags:
   - gcp-cloud-build-deploy-cloud-run
