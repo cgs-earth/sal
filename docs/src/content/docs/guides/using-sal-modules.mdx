@@ -70,7 +70,12 @@ The rules SAL follows when writing it:
   `@context` binds it to.
 - A typed literal becomes a `{"@value": ..., "@type": ...}` object and a language-tagged literal becomes a
   `{"@value": ..., "@language": ...}` object. A plain string is written as a string.
-- A property used more than once becomes an array.
+- A property used more than once becomes an array, ordered by the encoding of its values, since RDF gives
+  repeated properties no order.
+- An RDF list, written `( ... )` in Turtle, becomes a JSON array in the order written, with blank nodes in it
+  inlined as objects and lists in those inlined in turn. Use one wherever order matters, such as a list of
+  sources to run in sequence or the arguments of a command; a module declares such a term with
+  `"@container": "@list"` in its `@context`. An empty list becomes `[]`.
 - A blank node is inlined as a nested object, so structured configuration can be expressed with the usual
   turtle `[ ... ]` syntax. A named node stays a `{"@id": ...}` reference.
 
@@ -205,6 +210,9 @@ and path, together with whatever else the task said about the `file:///` IRI:
 
 `sal serve` serves each file in the directory at `/blobs/out/catalog/{file}` and the directory whole as a zip
 archive at `/blobs/urn:sha256:3f9a…`, resolved through `prov.jsonld`, or at `/blobs/out/catalog/`. A directory
+whose `catalog.json` is a STAC Catalog or Collection is also linked as a child of the data product's own
+[STAC catalog](/sal/reference/data-layout/#stac-catalog), so a STAC client that opens `.sal/data/stac/catalog.json`
+finds the module's catalog beneath the triples table. A directory
 copied again lands at the same path and replaces the earlier copy, and its `prov.jsonld` node is replaced with it;
 the digest is what tells the versions apart, so an earlier `urn:sha256:` in the table no longer resolves once the
 path holds a newer copy.

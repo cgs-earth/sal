@@ -177,13 +177,17 @@ export async function fetchExtent(signal?: AbortSignal): Promise<GeoJSONFeature>
 /** Where `sal serve` answers with the STAC Collection `sal build` writes for the triples table. */
 export const STAC_COLLECTION_PATH = '/stac/triples/collection.json'
 
+/** The root of the STAC catalog sal build wrote: the triples table and every catalog a SAL module produced. */
+export const STAC_CATALOG_PATH = '/stac/'
+
 /**
- * The collection opened in the hosted STAC Browser, which reads any catalog it
- * is handed under /external/ with the "://" of the URL collapsed to ":/", and
- * `.asset` preselects the Iceberg metadata asset.
+ * The catalog opened in the Portolan STAC Browser, which reads any catalog it
+ * is handed under #/external/ with the "://" of the URL collapsed to ":/". The
+ * root is opened rather than the table's collection so that the catalogs SAL
+ * modules handed over are in view beside it.
  */
 export function stacViewerURL(origin: string): string {
-  return `https://browser.moregeo.it/external/${origin.replace('://', ':/')}${STAC_COLLECTION_PATH}?.asset=asset-iceberg`
+  return `https://browser.portolan-sdi.org/#/external/${origin.replace('://', ':/')}${STAC_CATALOG_PATH}`
 }
 
 /** Whether a STAC catalog has been built for the table, so links to it are offered only when it answers. */

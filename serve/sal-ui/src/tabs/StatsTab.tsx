@@ -52,7 +52,7 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
               <StacLink
                 href={stacViewerURL(window.location.origin)}
                 available={stacAvailable}
-                title="Open the collection in the hosted STAC Browser"
+                title="Open the catalog in the Portolan STAC Browser"
               >
                 Viewer
               </StacLink>

@@ -2,6 +2,7 @@ package validate
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -26,16 +27,34 @@ func (e undefinedPrefixError) Error() string {
 	return fmt.Sprintf("%s:%d: undefined term %s: prefix %s is not defined", e.Path, e.Line, e.Term, e.Prefix)
 }
 
+// vocabularyLookupError is a term that could not be checked because its
+// vocabulary could not be, reported at the first line the vocabulary is used
+// on. OtherLines are the later lines the same failure affects, so that one
+// broken vocabulary reads as one problem rather than one per use.
 type vocabularyLookupError struct {
-	Path string
-	Line int
-	Term string
-	Err  error
+	Path       string
+	Line       int
+	Term       string
+	Err        error
+	OtherLines []int
 }
 
-func (e vocabularyLookupError) Error() string {
-	return fmt.Sprintf("%s:%d: failed to check vocabulary for %s: %v", e.Path, e.Line, e.Term, e.Err)
+func (e *vocabularyLookupError) Error() string {
+	message := fmt.Sprintf("%s:%d: failed to check vocabulary for %s: %v", e.Path, e.Line, e.Term, e.Err)
+	if len(e.OtherLines) == 0 {
+		return message
+	}
+	lines := make([]string, len(e.OtherLines))
+	for i, line := range e.OtherLines {
+		lines[i] = strconv.Itoa(line)
+	}
+	if len(lines) == 1 {
+		return fmt.Sprintf("%s (also affects line %s)", message, lines[0])
+	}
+	return fmt.Sprintf("%s (also affects lines %s)", message, strings.Join(lines, ", "))
 }
+
+func (e *vocabularyLookupError) Unwrap() error { return e.Err }
 
 type missingTypeError struct {
 	Path string

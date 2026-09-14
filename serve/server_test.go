@@ -1347,3 +1347,28 @@ func TestEndpointWithUIServesAFileInACopiedDirectoryToABrowser(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
 }
+
+// A STAC browser on another origin follows the data product's catalog into the
+// catalogs module tasks handed over, so the blob endpoint answers cross-origin
+// the same as the STAC endpoint does, preflight included.
+func TestBlobEndpointAllowsCrossOriginReads(t *testing.T) {
+	dir := t.TempDir()
+	writeDirectoryBlob(t, dir)
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/blobs/out/catalog/catalog.json")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
+
+	preflight, err := http.NewRequest(http.MethodOptions, server.URL+"/blobs/out/catalog/catalog.json", nil)
+	require.NoError(t, err)
+	resp, err = http.DefaultClient.Do(preflight)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+	require.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
+	require.Contains(t, resp.Header.Get("Access-Control-Allow-Methods"), "GET")
+}

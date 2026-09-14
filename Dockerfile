@@ -1,6 +1,9 @@
-# Selects which of the two runtime stages below becomes the final image. `false`
+# Selects which of the runtime stages below becomes the final image. `false`
 # ships the bare CLI; `true` adds the sample data and the entrypoint that builds
-# and serves it, useful for the cloudbuild demo deployment.
+# and serves it; `baked` is `true` with the demo project already built and
+# copied in, which is what the cloudbuild demo deployment ships, since the
+# sample data includes a SAL module task and Cloud Run has no docker daemon to
+# run it with.
 ARG DEMO=false
 
 FROM golang:1.25-bookworm AS imports
@@ -87,9 +90,13 @@ ENTRYPOINT [ "/app/sal" ]
 
 # DEMO=true: the entrypoint builds the RDF copied in here into a sample table on
 # startup, so a `sal serve` deployment has something to explore on a first visit.
+# portolan_export.ttl declares a SAL module task that pulls a few ArcGIS layers
+# in as STAC catalogs; the entrypoint runs it when it can reach a docker daemon
+# and leaves it out otherwise.
 FROM runtime AS runtime-true
 
 COPY build/testdata/correct/ /app/demo-data/
+COPY build/testdata/reference/portolan_export.ttl /app/demo-data/
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
@@ -97,6 +104,18 @@ EXPOSE 8080
 
 ENTRYPOINT [ "/app/entrypoint.sh" ]
 CMD [ "serve", "--with-ui" ]
+
+
+# DEMO=baked: the demo project the entrypoint would build on startup, built
+# ahead of time where a docker daemon was available and handed in as the `demo`
+# build context (`--build-context demo=<dir>`). It sits at the path the
+# entrypoint builds into, so the entrypoint finds the built data and serves it
+# rather than building again; the table's recorded paths are right because the
+# project was built at this same path. Only evaluated when DEMO=baked, so a
+# build without the context is unaffected.
+FROM runtime-true AS runtime-baked
+
+COPY --from=demo / /app/demo/
 
 
 # ENTRYPOINT cannot be made conditional on its own, so the DEMO build arg picks

@@ -16,6 +16,10 @@
 #   SAL_DEMO_DIR     where the demo project is created (default /app/demo)
 #   SAL_DEMO_SOURCE  RDF copied into that project (default /app/demo-data)
 #   SAL_DEMO_REMOTE  git remote sal derives the base IRI from
+#   DOCKER_HOST      the docker daemon `sal run` builds and runs SAL modules on;
+#                    /var/run/docker.sock is used when it is mounted and this is
+#                    unset. Without either, the sample data's module task is
+#                    left out rather than failing the build.
 set -euo pipefail
 
 # sal init and the vocabulary cache both write under $HOME, and the DuckDB
@@ -31,6 +35,14 @@ DEMO_DATA="${SAL_DEMO_DATA:-1}"
 
 log() { printf '==> %s\n' "$*" >&2; }
 
+# Whether sal can reach a docker daemon to build and run SAL modules on. Even
+# validating RDF that references a module needs one, since the module's ontology
+# comes from running its container, so without a daemon the module task's RDF
+# cannot be part of the build at all.
+docker_reachable() {
+	[ -n "${DOCKER_HOST:-}" ] || [ -S /var/run/docker.sock ]
+}
+
 # Recreates the demo project from the RDF baked into the image and builds it into
 # an Iceberg table that `sal serve` can read.
 build_demo_data() {
@@ -38,6 +50,12 @@ build_demo_data() {
 	rm -rf "$DEMO_DIR"
 	mkdir -p "$DEMO_DIR/data"
 	cp -R "$DEMO_SOURCE/." "$DEMO_DIR/data/"
+	# portolan_export.ttl configures a SAL module task; see the end of this
+	# function. It is only kept when the module can actually be built and run.
+	if ! docker_reachable; then
+		log "no docker daemon reachable, so the SAL module task in portolan_export.ttl is left out of the sample data"
+		rm -f "$DEMO_DIR/data/portolan_export.ttl"
+	fi
 
 	cd "$DEMO_DIR"
 	# sal requires a git repository with a remote: init refuses to run without
@@ -69,6 +87,18 @@ build_demo_data() {
 	git add -A
 	git commit -qm "Rename Example Organization 001 to Test Change"
 	/app/sal build data/
+
+	# The SAL module task in portolan_export.ttl pulls a few public ArcGIS layers
+	# in through the sal-portolan module and hands them over as STAC catalogs,
+	# which the last build links into the data product's own catalog. Running it
+	# clones and builds the module on the docker daemon and runs its container
+	# there, so it is the step the demo image cannot do on a platform without
+	# one; cloudbuild.yaml runs this whole function where it can and bakes the
+	# result in.
+	if docker_reachable; then
+		log "running the SAL module task in portolan_export.ttl to pull the sample STAC catalogs in"
+		/app/sal run data/
+	fi
 }
 
 case "$DEMO_DATA" in

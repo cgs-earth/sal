@@ -140,14 +140,27 @@ func NewEndpointWithUI(runner UIRunner, blobDir string, stacDir string) (http.Ha
 // with a content type from its extension, and a Zarr store or STAC catalog
 // reads in place. The directory itself, asked for by that path or by the
 // digest prov.jsonld records for it, is served whole as a zip archive. Range
-// requests are honored via http.ServeContent for a file.
+// requests are honored via http.ServeContent for a file. CORS is open, the same
+// as the STAC endpoint, so a STAC browser on another origin can follow the data
+// product's catalog into a module's.
 type blobHandler struct {
 	dir string
 }
 
 func (h blobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// CORS is open, the same as the STAC endpoint, since a STAC browser on
+	// another origin follows the data product's catalog into the catalogs
+	// module tasks handed over, which are served from here
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Accept, Range")
+	w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Content-Range")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
+		w.Header().Set("Allow", "GET, HEAD, OPTIONS")
 		http.Error(w, "the blob endpoint only supports GET requests", http.StatusMethodNotAllowed)
 		return
 	}

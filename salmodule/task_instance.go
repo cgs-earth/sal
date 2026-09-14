@@ -75,8 +75,18 @@ func (o *ModuleOntology) nodeObject(graph *rdflibgo.Graph, subject rdflibgo.Subj
 }
 
 // instanceValue turns the object of a task instance property into its JSON-LD
-// representation.
+// representation. An RDF list, which Turtle writes as ( ... ), becomes a JSON
+// array of its items in order, which is what a module's @context declares a
+// list-valued term as with @container: @list.
 func (o *ModuleOntology) instanceValue(graph *rdflibgo.Graph, object rdflibgo.Term, seen map[string]bool) any {
+	if list, ok := object.(rdflibgo.Subject); ok && isList(graph, object) {
+		items := []any{}
+		rdflibgo.NewCollection(graph, list).Iter()(func(item rdflibgo.Term) bool {
+			items = append(items, o.instanceValue(graph, item, seen))
+			return true
+		})
+		return items
+	}
 	switch object := object.(type) {
 	case rdflibgo.Literal:
 		switch {
@@ -95,6 +105,24 @@ func (o *ModuleOntology) instanceValue(graph *rdflibgo.Graph, object rdflibgo.Te
 		return map[string]any{"@id": o.compact(object.Value())}
 	}
 	return nil
+}
+
+// isList reports whether term is the head of an RDF list: rdf:nil, the empty
+// list, or a node carrying rdf:first.
+func isList(graph *rdflibgo.Graph, term rdflibgo.Term) bool {
+	if term.Equal(rdflibgo.RDF.Nil) {
+		return true
+	}
+	head, ok := term.(rdflibgo.Subject)
+	if !ok {
+		return false
+	}
+	found := false
+	graph.Triples(head, &rdflibgo.RDF.First, nil)(func(rdflibgo.Triple) bool {
+		found = true
+		return false
+	})
+	return found
 }
 
 // compact shortens an IRI the way the module's own ontology writes it: a term of

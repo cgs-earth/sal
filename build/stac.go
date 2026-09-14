@@ -3,7 +3,9 @@ package build
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/url"
 	"os"
@@ -159,7 +161,11 @@ func WriteProjectStacCatalog(base string) error {
 	if err != nil {
 		return err
 	}
-	if err := writeStacCatalog(context.Background(), tbl, dir, project); err != nil {
+	blobDir, err := pkg.SalBlobsDir()
+	if err != nil {
+		return err
+	}
+	if err := writeStacCatalog(context.Background(), tbl, dir, project, blobDir); err != nil {
 		return err
 	}
 	slog.Info("Saved the STAC catalog describing the data product", "path", filepath.Join(dir, StacCatalogFile))
@@ -193,11 +199,13 @@ func stacProjectInfo(base string) (StacProject, error) {
 	return project, nil
 }
 
-// writeStacCatalog replaces whatever catalog dir held with a catalog of tbl. The
-// directory is rewritten whole rather than updated in place, since a build is
-// the only thing that writes it and a stale collection from an earlier layout
-// would otherwise be left listed by nothing.
-func writeStacCatalog(ctx context.Context, tbl *table.Table, dir string, project StacProject) error {
+// writeStacCatalog replaces whatever catalog dir held with a catalog of tbl,
+// and of every STAC catalog a SAL module task produced under blobDir, so that
+// the data product is one catalog tree whichever part of it a client starts
+// from. The directory is rewritten whole rather than updated in place, since a
+// build is the only thing that writes it and a stale collection from an
+// earlier layout would otherwise be left listed by nothing.
+func writeStacCatalog(ctx context.Context, tbl *table.Table, dir string, project StacProject, blobDir string) error {
 	collection, err := stacCollectionOf(ctx, tbl, project)
 	if err != nil {
 		return err
@@ -207,12 +215,20 @@ func writeStacCatalog(ctx context.Context, tbl *table.Table, dir string, project
 		StacVersion: stacVersion,
 		ID:          project.Name,
 		Title:       project.Title,
-		Description: fmt.Sprintf("The SAL data product built from %s: the Apache Iceberg tables it is made of, and how to open them.", project.Remote),
+		Description: fmt.Sprintf("The SAL data product built from %s: the Apache Iceberg tables it is made of, how to open them, and the STAC catalogs its SAL modules produced.", project.Remote),
 		Links: []stacLink{
 			{Rel: "root", Href: "./" + StacCatalogFile, Type: stacMediaType},
 			{Rel: "self", Href: "./" + StacCatalogFile, Type: stacMediaType},
 			{Rel: "child", Href: "./" + StacCollectionFile, Type: stacMediaType, Title: collection.Title},
 		},
+	}
+	moduleCatalogs, err := moduleStacCatalogs(blobDir, dir)
+	if err != nil {
+		return err
+	}
+	catalog.Links = append(catalog.Links, moduleCatalogs...)
+	if len(moduleCatalogs) > 0 {
+		slog.Info(fmt.Sprintf("Linked %d STAC catalogs produced by SAL modules into the data product's catalog", len(moduleCatalogs)))
 	}
 
 	if err := os.RemoveAll(dir); err != nil {
@@ -222,6 +238,56 @@ func writeStacCatalog(ctx context.Context, tbl *table.Table, dir string, project
 		return err
 	}
 	return writeStacJSON(filepath.Join(dir, filepath.FromSlash(StacCollectionFile)), collection)
+}
+
+// moduleStacCatalogs finds the STAC catalogs SAL module tasks handed over as
+// directories under blobDir, and returns a child link to each for the catalog
+// written under stacDir. A directory is a catalog when it holds a catalog.json
+// that is a STAC Catalog or Collection; its own children are its to list, so
+// nothing beneath it is looked at. The catalog files are left where the copy
+// put them, since their links name their neighbours by relative path, and the
+// link written here is relative too, so it resolves wherever .sal/data is:
+// on disk, under `sal serve`, or in a bucket the data product was uploaded
+// to. A blob store with no directories, or none at all, links nothing.
+func moduleStacCatalogs(blobDir string, stacDir string) ([]stacLink, error) {
+	var links []stacLink
+	err := filepath.WalkDir(blobDir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			if path == blobDir && errors.Is(err, fs.ErrNotExist) {
+				return filepath.SkipAll
+			}
+			return err
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		catalogPath := filepath.Join(path, StacCatalogFile)
+		content, err := os.ReadFile(catalogPath)
+		if err != nil {
+			return nil
+		}
+		var document struct {
+			Type        string `json:"type"`
+			StacVersion string `json:"stac_version"`
+			ID          string `json:"id"`
+			Title       string `json:"title"`
+		}
+		if json.Unmarshal(content, &document) != nil || document.StacVersion == "" || (document.Type != "Catalog" && document.Type != "Collection") {
+			slog.Warn(catalogPath + " is not a STAC Catalog or Collection, so it is not linked from the data product's catalog")
+			return nil
+		}
+		href, err := filepath.Rel(stacDir, catalogPath)
+		if err != nil {
+			return err
+		}
+		title := document.Title
+		if title == "" {
+			title = document.ID
+		}
+		links = append(links, stacLink{Rel: "child", Href: filepath.ToSlash(href), Type: stacMediaType, Title: title})
+		return filepath.SkipDir
+	})
+	return links, err
 }
 
 func writeStacJSON(path string, document any) error {

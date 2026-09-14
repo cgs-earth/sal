@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,7 +73,7 @@ func TestWriteStacCatalogDescribesTheTriplesTable(t *testing.T) {
 	tbl := writeStacTestTable(t, stacTestGraph(true))
 	dir := filepath.Join(t.TempDir(), "stac")
 
-	require.NoError(t, writeStacCatalog(context.Background(), tbl, dir, stacTestProject))
+	require.NoError(t, writeStacCatalog(context.Background(), tbl, dir, stacTestProject, filepath.Join(t.TempDir(), "blobs")))
 
 	catalog := readStacJSON(t, filepath.Join(dir, "catalog.json"))
 	require.Equal(t, "Catalog", catalog["type"])
@@ -152,7 +153,7 @@ func TestWriteStacCatalogUsesTheWorldExtentWithoutGeometries(t *testing.T) {
 	tbl := writeStacTestTable(t, stacTestGraph(false))
 	dir := filepath.Join(t.TempDir(), "stac")
 
-	require.NoError(t, writeStacCatalog(context.Background(), tbl, dir, stacTestProject))
+	require.NoError(t, writeStacCatalog(context.Background(), tbl, dir, stacTestProject, filepath.Join(t.TempDir(), "blobs")))
 
 	collection := readStacJSON(t, filepath.Join(dir, "triples", "collection.json"))
 	bbox := collection["extent"].(map[string]any)["spatial"].(map[string]any)["bbox"].([]any)[0]
@@ -167,7 +168,7 @@ func TestWriteStacCatalogReplacesAnEarlierCatalog(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(stale), 0755))
 	require.NoError(t, os.WriteFile(stale, []byte("{}"), 0644))
 
-	require.NoError(t, writeStacCatalog(context.Background(), tbl, dir, stacTestProject))
+	require.NoError(t, writeStacCatalog(context.Background(), tbl, dir, stacTestProject, filepath.Join(t.TempDir(), "blobs")))
 
 	require.NoFileExists(t, stale)
 	require.FileExists(t, filepath.Join(dir, "catalog.json"))
@@ -238,4 +239,50 @@ func TestBuildWritesTheStacCatalogLast(t *testing.T) {
 	require.Greater(t, collection["table:row_count"], 2.0)
 	catalog := readStacJSON(t, filepath.Join(project, ".sal", "data", "stac", "catalog.json"))
 	require.Equal(t, "sal-pins-test-project", catalog["id"])
+}
+
+// writeModuleStacCatalog lays a STAC catalog out under blobs the way a module
+// task's directory copy lands, with a sub-catalog beneath it.
+func writeModuleStacCatalog(t *testing.T, dir string, id string, title string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub"), 0755))
+	catalog := fmt.Sprintf(`{"type": "Catalog", "stac_version": "1.1.0", "id": %q, "title": %q, "links": [{"rel": "child", "href": "./sub/catalog.json"}]}`, id, title)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "catalog.json"), []byte(catalog), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "catalog.json"), []byte(`{"type": "Catalog", "stac_version": "1.1.0", "id": "sub"}`), 0644))
+}
+
+// A STAC catalog a module task handed over as a directory is linked from the
+// data product's catalog as a child, by a relative path that resolves wherever
+// .sal/data is, so the two are one catalog tree. The module catalog's own
+// sub-catalogs are its to list, so they are not linked again.
+func TestWriteStacCatalogLinksTheCatalogsModulesProduced(t *testing.T) {
+	tbl := writeStacTestTable(t, stacTestGraph(false))
+	data := t.TempDir()
+	dir := filepath.Join(data, "stac")
+	blobDir := filepath.Join(data, "blobs")
+	writeModuleStacCatalog(t, filepath.Join(blobDir, "out", "stations"), "stations", "Station catalog")
+	writeModuleStacCatalog(t, filepath.Join(blobDir, "elevation"), "elevation", "")
+	require.NoError(t, os.WriteFile(filepath.Join(blobDir, strings.Repeat("a", 64)), []byte("a pinned vocabulary"), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(blobDir, "zarr_test"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(blobDir, "zarr_test", "catalog.json"), []byte(`{"not": "stac"}`), 0644))
+
+	require.NoError(t, writeStacCatalog(context.Background(), tbl, dir, stacTestProject, blobDir))
+
+	catalog := readStacJSON(t, filepath.Join(dir, "catalog.json"))
+	var children []map[string]any
+	for _, link := range catalog["links"].([]any) {
+		if link := link.(map[string]any); link["rel"] == "child" {
+			children = append(children, link)
+		}
+	}
+	require.Len(t, children, 3)
+	require.Equal(t, "./triples/collection.json", children[0]["href"])
+	require.Equal(t, "../blobs/elevation/catalog.json", children[1]["href"])
+	require.Equal(t, "elevation", children[1]["title"])
+	require.Equal(t, "application/json", children[1]["type"])
+	require.Equal(t, "../blobs/out/stations/catalog.json", children[2]["href"])
+	require.Equal(t, "Station catalog", children[2]["title"])
+	// the module catalogs stay where the copy put them
+	require.FileExists(t, filepath.Join(blobDir, "out", "stations", "sub", "catalog.json"))
+	require.NoDirExists(t, filepath.Join(dir, "blobs"))
 }
