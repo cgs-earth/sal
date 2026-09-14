@@ -5,7 +5,7 @@ sal_cli
 *.nq.gz
 .sal
 sal-cli
-sal
+/sal
 .sal/data
 .env
 .venv/

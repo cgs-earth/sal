@@ -1,0 +1,13 @@
+{
+  "name": "sal",
+  "description": "Skills for working with SAL, the semantic accessibility layer CLI: create, validate, build, run, query, and publish SAL projects, and write and test SAL modules.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Center for Geospatial Solutions",
+    "url": "https://github.com/cgs-earth"
+  },
+  "homepage": "https://cgs-earth.github.io/sal/",
+  "repository": "https://github.com/cgs-earth/sal",
+  "license": "Apache-2.0",
+  "keywords": ["sal", "rdf", "iceberg", "sparql", "salmodule", "linked-data"]
+}

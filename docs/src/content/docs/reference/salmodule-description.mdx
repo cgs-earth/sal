@@ -192,6 +192,8 @@ $
 
 The output is instance data belonging to the SAL Project that ran the task, so the base IRI of the JSON-LD a task emits is the project's namespace. A relative IRI in the output resolves against the project, not against the module's `salmodule://` namespace, which names the module's vocabulary rather than what it produces. A module that needs to name its output under a specific namespace, such as the authoritative source the data comes from, emits absolute IRIs.
 
+A task may also produce files. An IRI object written with the `file:///` scheme, such as `{"@id": "file:///tmp/test.txt"}`, names a file inside the container that the SAL Project copies out while the task runs, stores by the SHA-256 digest of its contents, and refers to as `urn:sha256:<digest>` in place of the path, with the file's name recorded as `rdfs:label`, its modification time as `dcterms:modified`, and its digest as `owl:versionIRI`. Since the copy happens as soon as the line naming the file is read from stdout, a task must write a file completely before it prints the node that refers to it. Each file is copied once; further references to the same path are skipped.
+
 ### SAL Module Protocol Scheme
 
 SAL Modules have a protocol scheme (`sal:moduleProtocolScheme`) to define how SAL Projects (de)reference SAL Module ontologies in their projects. The following diagram illustrates the process of dereferencing a SAL Module protocol scheme IRI referenced in a JSON-LD document to obtain it's ontology.

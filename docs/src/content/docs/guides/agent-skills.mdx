@@ -1,0 +1,50 @@
+---
+title: Agent Skills
+description: Install the skills that teach a coding agent how to build SAL projects and write SAL modules.
+---
+
+The SAL repository ships two [Agent Skills](https://agentskills.io) under
+[`skills/`](https://github.com/cgs-earth/sal/tree/main/skills). A skill is a `SKILL.md` file a coding
+agent such as Claude Code or Codex loads when a task matches its description, so an agent with these
+installed knows the SAL workflow and the SAL Module contract without being told.
+
+- **`sal`** covers a project: initializing, writing RDF that validates, importing ontologies, referencing
+  a module, building, running, querying, and publishing, plus the fixes for the errors people hit most.
+- **`salmodule`** covers writing a module: the `salmodule ontology` and `salmodule run` commands, what the
+  ontology document must declare, how the task instance arrives, the newline delimited JSON output
+  contract, error nodes, handing over files with `file:///` IRIs, and how to test the image locally.
+
+## Install as a Claude Code plugin
+
+The repository publishes a plugin marketplace, so inside Claude Code:
+
+```
+/plugin marketplace add cgs-earth/sal
+/plugin install sal@sal
+```
+
+`/plugin update sal@sal` picks up a newer release. The plugin carries only the two skills, with no
+hooks, agents, or MCP servers.
+
+## Install with the `skills` CLI
+
+The [`skills`](https://github.com/vercel-labs/skills) CLI installs into whichever agents it finds on the
+machine, Claude Code and Codex among them:
+
+```sh
+npx skills add cgs-earth/sal
+```
+
+## Install by hand
+
+Copy the two directories into an agent's skills folder, either for one project or for the user:
+
+```sh
+git clone --depth 1 https://github.com/cgs-earth/sal /tmp/sal
+cp -r /tmp/sal/skills/sal /tmp/sal/skills/salmodule .claude/skills/   # Claude Code; or ~/.claude/skills/
+cp -r /tmp/sal/skills/sal /tmp/sal/skills/salmodule .codex/skills/    # Codex; or ~/.codex/skills/
+```
+
+The skills describe the CLI as it stands in the same commit, so an update to one lands in the same
+pull request as the behavior it describes. Report a gap or a stale instruction as an issue against the
+`skills/` directory.

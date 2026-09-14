@@ -1,8 +1,12 @@
 package salmodule
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -103,7 +107,12 @@ func (r *Resolver) Ontology(ctx context.Context, ref ModuleRef) (*ModuleOntology
 		return cached, nil
 	}
 
-	stdout, err := r.runModuleCommand(ctx, ref, nil, OntologyCommand)
+	var stdout []byte
+	err := r.runModuleCommand(ctx, ref, nil, OntologyCommand, func(_ context.Context, output io.Reader, _ ContainerFiles) error {
+		var err error
+		stdout, err = io.ReadAll(output)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -121,36 +130,74 @@ func (r *Resolver) Ontology(ctx context.Context, ref ModuleRef) (*ModuleOntology
 	return ontology, nil
 }
 
+// TaskResult is what running a module task produced: the newline delimited
+// JSON it wrote to stdout, and the files it named with file:/// IRIs, copied
+// out of the container into the blob store.
+type TaskResult struct {
+	Output []byte
+	Files  []CopiedFile
+}
+
 // RunTask invokes the module's run command with taskInstance supplied through
 // the environment variable the module's ontology declares, and returns the
-// newline delimited JSON the task wrote to stdout.
+// newline delimited JSON the task wrote to stdout together with the files it
+// named with file:/// IRIs, which are copied out of the container into blobDir
+// as the output arrives and named by their SHA-256 digest. The container is
+// kept until every copy has finished.
 //
 // Whatever the task wrote is returned even when the container fails, because a
 // task reports its own failures as salmodule:Error nodes on stdout before
 // exiting non-zero; those messages describe the failure far better than the
 // container's exit status does.
-func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, envVar string, taskInstance string) ([]byte, error) {
-	return r.runModuleCommand(ctx, ref, []string{envVar + "=" + taskInstance}, RunCommand)
+func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, envVar string, taskInstance string, blobDir string) (TaskResult, error) {
+	var result TaskResult
+	err := r.runModuleCommand(ctx, ref, []string{envVar + "=" + taskInstance}, RunCommand, func(ctx context.Context, stdout io.Reader, files ContainerFiles) error {
+		copier := &fileCopier{dir: blobDir, files: files}
+		var output bytes.Buffer
+		reader := bufio.NewReader(stdout)
+		for {
+			line, err := reader.ReadBytes('\n')
+			output.Write(line)
+			if trimmed := bytes.TrimSpace(line); len(trimmed) > 0 {
+				copier.observe(ctx, trimmed)
+			}
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("read output of %s: %w", ref.Namespace, err)
+			}
+		}
+		result.Output = output.Bytes()
+
+		copied, err := copier.wait()
+		if err != nil {
+			return fmt.Errorf("copy files from %s: %w", ref.Namespace, err)
+		}
+		result.Files = copied
+		return nil
+	})
+	return result, err
 }
 
-func (r *Resolver) runModuleCommand(ctx context.Context, ref ModuleRef, env []string, subcommand string) ([]byte, error) {
+func (r *Resolver) runModuleCommand(ctx context.Context, ref ModuleRef, env []string, subcommand string, consume ContainerOutputConsumer) error {
 	image, err := r.image(ctx, ref)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	runner, err := r.containerRunner()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	stdout, stderr, err := runner.RunContainer(ctx, image, env, []string{BaseCommand, subcommand})
+	stderr, err := runner.RunContainer(ctx, image, env, []string{BaseCommand, subcommand}, consume)
 	if len(stderr) > 0 {
 		slog.Warn(ref.Namespace + " wrote to stderr: " + strings.TrimSpace(string(stderr)))
 	}
 	if err != nil {
-		return stdout, fmt.Errorf("run %s %s for %s: %w", BaseCommand, subcommand, ref.Namespace, err)
+		return fmt.Errorf("run %s %s for %s: %w", BaseCommand, subcommand, ref.Namespace, err)
 	}
-	return stdout, nil
+	return nil
 }
 
 // image clones and builds the module the first time it is referenced and

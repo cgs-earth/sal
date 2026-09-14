@@ -3,15 +3,21 @@ package salmodule
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
 const testModuleCommitHash = "abc123def456abc123def456abc123def456abc"
+
+// testFileModified is when the fake container reports its files were written.
+var testFileModified = time.Date(2026, 9, 10, 14, 26, 5, 0, time.UTC)
 
 type recordedRun struct {
 	image string
@@ -24,10 +30,26 @@ type recordedRun struct {
 type fakeRunner struct {
 	ontology  string
 	runOutput string
+	// runErr is what the run command's container fails with, after its output.
+	runErr error
+	// containerFiles are the files, by absolute path, a task can name for copying.
+	containerFiles map[string]string
 	// existingImages are the tags ImageExists reports as already on the daemon.
 	existingImages []string
 	builds         []string
 	runs           []recordedRun
+	copies         []string
+}
+
+// CopyFile serves a fake container's files and records each path asked for.
+func (f *fakeRunner) CopyFile(_ context.Context, path string, w io.Writer) (time.Time, error) {
+	f.copies = append(f.copies, path)
+	content, ok := f.containerFiles[path]
+	if !ok {
+		return time.Time{}, fmt.Errorf("no such file %s", path)
+	}
+	_, err := io.WriteString(w, content)
+	return testFileModified, err
 }
 
 func (f *fakeRunner) BuildImage(_ context.Context, _ string, tag string) error {
@@ -39,15 +61,18 @@ func (f *fakeRunner) ImageExists(_ context.Context, tag string) (bool, error) {
 	return slices.Contains(f.existingImages, tag), nil
 }
 
-func (f *fakeRunner) RunContainer(_ context.Context, image string, env []string, cmd []string) ([]byte, []byte, error) {
+func (f *fakeRunner) RunContainer(ctx context.Context, image string, env []string, cmd []string, consume ContainerOutputConsumer) ([]byte, error) {
 	f.runs = append(f.runs, recordedRun{image: image, env: env, cmd: cmd})
 	switch cmd[len(cmd)-1] {
 	case OntologyCommand:
-		return []byte(f.ontology), nil, nil
+		return nil, consume(ctx, strings.NewReader(f.ontology), f)
 	case RunCommand:
-		return []byte(f.runOutput), nil, nil
+		if err := consume(ctx, strings.NewReader(f.runOutput), f); err != nil {
+			return nil, err
+		}
+		return nil, f.runErr
 	}
-	return nil, nil, fmt.Errorf("unexpected command %v", cmd)
+	return nil, fmt.Errorf("unexpected command %v", cmd)
 }
 
 // fakeClone populates the clone destination the way git would, so the resolver
@@ -88,7 +113,7 @@ func TestResolverBuildsEachModuleOnlyOnce(t *testing.T) {
 	require.NoError(t, err)
 	_, err = resolver.Ontology(context.Background(), ref)
 	require.NoError(t, err)
-	_, err = resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}")
+	_, err = resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir())
 	require.NoError(t, err)
 
 	require.Len(t, runner.builds, 1)
@@ -207,7 +232,7 @@ func TestResolverRunTaskPassesTaskInstanceThroughEnvironment(t *testing.T) {
 	ref, err := ParseModuleIRI(testModuleNamespace)
 	require.NoError(t, err)
 
-	_, err = newTestResolver(runner).RunTask(context.Background(), ref, "MODULE_TASK", `{"@id":"x"}`)
+	_, err = newTestResolver(runner).RunTask(context.Background(), ref, "MODULE_TASK", `{"@id":"x"}`, t.TempDir())
 
 	require.NoError(t, err)
 	require.Equal(t, []string{`MODULE_TASK={"@id":"x"}`}, runner.runs[0].env)

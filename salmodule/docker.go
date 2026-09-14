@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/pkg/stdcopy"
@@ -26,7 +27,24 @@ type ContainerRunner interface {
 	// ImageExists reports whether the daemon already holds an image under tag,
 	// which is how a module built by a previous invocation is found and reused.
 	ImageExists(ctx context.Context, tag string) (bool, error)
-	RunContainer(ctx context.Context, image string, env []string, cmd []string) (stdout []byte, stderr []byte, err error)
+	// RunContainer runs cmd in a container built from image. What the container
+	// writes to stdout is handed to consume as it is written, together with a
+	// handle that copies files out of the container; the container is kept
+	// until consume returns, so a file may still be copied after the container
+	// has exited. Whatever the container wrote to stderr is returned whole.
+	RunContainer(ctx context.Context, image string, env []string, cmd []string, consume ContainerOutputConsumer) (stderr []byte, err error)
+}
+
+// ContainerOutputConsumer reads a running container's stdout until it ends,
+// which happens when the container exits, and may copy files out of the
+// container through files until it returns.
+type ContainerOutputConsumer func(ctx context.Context, stdout io.Reader, files ContainerFiles) error
+
+// ContainerFiles copies files out of a container RunContainer created.
+type ContainerFiles interface {
+	// CopyFile writes the contents of the regular file at path inside the
+	// container to w and reports when the file was last modified there.
+	CopyFile(ctx context.Context, path string, w io.Writer) (time.Time, error)
 }
 
 type dockerRunner struct {
@@ -102,14 +120,14 @@ func reportBuildProgress(body io.Reader, tag string) error {
 	}
 }
 
-// RunContainer runs cmd in a container built from image and returns whatever the
-// container wrote to stdout and stderr.
-func (d *dockerRunner) RunContainer(ctx context.Context, image string, env []string, cmd []string) ([]byte, []byte, error) {
+// RunContainer runs cmd in a container built from image, streaming its stdout
+// to consume while it runs, and returns whatever the container wrote to stderr.
+func (d *dockerRunner) RunContainer(ctx context.Context, image string, env []string, cmd []string, consume ContainerOutputConsumer) ([]byte, error) {
 	created, err := d.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config: &container.Config{Image: image, Cmd: cmd, Env: env},
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("create container for %s: %w", image, err)
+		return nil, fmt.Errorf("create container for %s: %w", image, err)
 	}
 	defer func() {
 		if _, err := d.client.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{Force: true}); err != nil {
@@ -121,7 +139,7 @@ func (d *dockerRunner) RunContainer(ctx context.Context, image string, env []str
 	// exiting immediately is not missed
 	wait := d.client.ContainerWait(ctx, created.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
 	if _, err := d.client.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
-		return nil, nil, fmt.Errorf("start container for %s: %w", image, err)
+		return nil, fmt.Errorf("start container for %s: %w", image, err)
 	}
 
 	// the log stream is followed rather than read once the container has exited;
@@ -129,7 +147,7 @@ func (d *dockerRunner) RunContainer(ctx context.Context, image string, env []str
 	// empty. Following replays what the container has already written.
 	logs, err := d.client.ContainerLogs(ctx, created.ID, client.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Follow: true})
 	if err != nil {
-		return nil, nil, fmt.Errorf("follow output of container for %s: %w", image, err)
+		return nil, fmt.Errorf("follow output of container for %s: %w", image, err)
 	}
 	defer func() {
 		if err := logs.Close(); err != nil {
@@ -137,25 +155,86 @@ func (d *dockerRunner) RunContainer(ctx context.Context, image string, env []str
 		}
 	}()
 
-	// the followed stream ends when the container exits
-	var stdout, stderr bytes.Buffer
-	if _, err := stdcopy.StdCopy(&stdout, &stderr, logs); err != nil {
-		return nil, nil, fmt.Errorf("read output of container for %s: %w", image, err)
+	// the multiplexed log stream is demuxed into a pipe the consumer reads
+	// stdout from as the container writes it; the followed stream, and so the
+	// pipe, ends when the container exits
+	var stderr bytes.Buffer
+	stdoutReader, stdoutWriter := io.Pipe()
+	demuxed := make(chan error, 1)
+	go func() {
+		_, err := stdcopy.StdCopy(stdoutWriter, &stderr, logs)
+		_ = stdoutWriter.CloseWithError(err)
+		demuxed <- err
+	}()
+
+	consumeErr := consume(ctx, stdoutReader, containerFiles{client: d.client, id: created.ID})
+	// a consumer that stopped reading early must not leave the demuxer blocked
+	// on the pipe
+	_ = stdoutReader.Close()
+	if err := <-demuxed; err != nil && consumeErr == nil {
+		return stderr.Bytes(), fmt.Errorf("read output of container for %s: %w", image, err)
+	}
+	if consumeErr != nil {
+		return stderr.Bytes(), consumeErr
 	}
 
 	var exitCode int64
 	select {
 	case err := <-wait.Error:
-		return stdout.Bytes(), stderr.Bytes(), fmt.Errorf("wait for container %s: %w", image, err)
+		return stderr.Bytes(), fmt.Errorf("wait for container %s: %w", image, err)
 	case result := <-wait.Result:
 		exitCode = result.StatusCode
 	case <-ctx.Done():
-		return stdout.Bytes(), stderr.Bytes(), ctx.Err()
+		return stderr.Bytes(), ctx.Err()
 	}
 	if exitCode != 0 {
-		return stdout.Bytes(), stderr.Bytes(), fmt.Errorf("container %s exited with status %d: %s", image, exitCode, strings.TrimSpace(stderr.String()))
+		return stderr.Bytes(), fmt.Errorf("container %s exited with status %d: %s", image, exitCode, strings.TrimSpace(stderr.String()))
 	}
-	return stdout.Bytes(), stderr.Bytes(), nil
+	return stderr.Bytes(), nil
+}
+
+// containerFiles copies files out of one container through the daemon's copy
+// endpoint, which is what `docker cp` uses.
+type containerFiles struct {
+	client *client.Client
+	id     string
+}
+
+// CopyFile fetches the file at path from the container as the single-entry tar
+// archive the daemon serves it as and writes its contents to w.
+func (c containerFiles) CopyFile(ctx context.Context, path string, w io.Writer) (time.Time, error) {
+	result, err := c.client.CopyFromContainer(ctx, c.id, client.CopyFromContainerOptions{SourcePath: path})
+	if err != nil {
+		return time.Time{}, fmt.Errorf("copy %s from container: %w", path, err)
+	}
+	defer func() {
+		if err := result.Content.Close(); err != nil {
+			slog.Warn("failed to close copy stream for " + path + ": " + err.Error())
+		}
+	}()
+	return extractFileFromArchive(result.Content, path, w)
+}
+
+// extractFileFromArchive writes the contents of the one regular file in a
+// `docker cp` archive to w and returns the modification time its entry
+// carries. The daemon archives whatever path names, so a directory arrives as
+// many entries and is refused rather than flattened.
+func extractFileFromArchive(archive io.Reader, path string, w io.Writer) (time.Time, error) {
+	reader := tar.NewReader(archive)
+	header, err := reader.Next()
+	if err != nil {
+		return time.Time{}, fmt.Errorf("read copy of %s from container: %w", path, err)
+	}
+	if header.Typeflag != tar.TypeReg {
+		return time.Time{}, fmt.Errorf("copy %s from container: only a regular file can be copied, not a directory or link", path)
+	}
+	if _, err := io.Copy(w, reader); err != nil {
+		return time.Time{}, fmt.Errorf("read copy of %s from container: %w", path, err)
+	}
+	if _, err := reader.Next(); !errors.Is(err, io.EOF) {
+		return time.Time{}, fmt.Errorf("copy %s from container: expected a single file but the container returned more than one entry", path)
+	}
+	return header.ModTime, nil
 }
 
 // tarDirectory packs dir into the tar stream that the docker build endpoint

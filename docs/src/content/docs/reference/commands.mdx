@@ -220,7 +220,10 @@ and invokes the module's run command with the task instance serialized from the 
 The newline delimited JSON the module writes to stdout is converted to triples and committed on top of the
 last build. A relative IRI in that output resolves against the project's namespace, not the module's, so a task's
 output is named as the project's own data unless the module wrote absolute IRIs.
-See [Using SAL Modules](/sal/guides/using-sal-modules/).
+A `file:///` IRI object in that output names a file inside the container; `sal run` copies it into `.sal/data/blobs`
+under its SHA-256 digest while the task runs, rewrites the reference to `urn:sha256:{digest}`, and describes the
+copy with its file name as `rdfs:label`, its modification time as `dcterms:modified`, and its digest as `owl:versionIRI`. See [Using SAL Modules](/sal/guides/using-sal-modules/), including
+[Files a task produces](/sal/guides/using-sal-modules/#files-a-task-produces).
 
 `sal run` refuses to run anything unless the data product matches the sources as they stand:
 

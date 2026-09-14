@@ -1,0 +1,21 @@
+{
+  "name": "sal",
+  "owner": {
+    "name": "Center for Geospatial Solutions",
+    "url": "https://github.com/cgs-earth"
+  },
+  "metadata": {
+    "description": "The SAL plugin: skills for creating SAL projects and SAL modules.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "sal",
+      "source": "./",
+      "description": "Skills for creating SAL projects and SAL modules with the sal CLI.",
+      "version": "0.1.0",
+      "category": "development",
+      "keywords": ["sal", "rdf", "iceberg", "sparql", "salmodule"]
+    }
+  ]
+}

@@ -3,11 +3,15 @@ package build
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cgs-earth/sal/salmodule"
 	"github.com/stretchr/testify/require"
@@ -18,6 +22,9 @@ import (
 const testModuleNamespace = "salmodule://www.github.com/test/history-getter/"
 
 const testModuleCommitHash = "abc123def456abc123def456abc123def456abc"
+
+// testFileModified is when the fake container reports its files were written.
+var testFileModified = time.Date(2026, 9, 10, 14, 26, 5, 0, time.UTC)
 
 const testModuleOntology = `{
 	"@context": {
@@ -60,22 +67,37 @@ type testContainerRunner struct {
 	// runEnv is the environment the run command was last invoked with, which is
 	// how the task instance reaches the module.
 	runEnv []string
+	// containerFiles are the files, by absolute path, a task can name for copying.
+	containerFiles map[string]string
+}
+
+// CopyFile serves the fake container's files.
+func (r *testContainerRunner) CopyFile(_ context.Context, path string, w io.Writer) (time.Time, error) {
+	content, ok := r.containerFiles[path]
+	if !ok {
+		return time.Time{}, fmt.Errorf("no such file %s", path)
+	}
+	_, err := io.WriteString(w, content)
+	return testFileModified, err
 }
 
 func (r *testContainerRunner) BuildImage(context.Context, string, string) error { return nil }
 
 func (r *testContainerRunner) ImageExists(context.Context, string) (bool, error) { return false, nil }
 
-func (r *testContainerRunner) RunContainer(_ context.Context, _ string, env []string, cmd []string) ([]byte, []byte, error) {
+func (r *testContainerRunner) RunContainer(ctx context.Context, _ string, env []string, cmd []string, consume salmodule.ContainerOutputConsumer) ([]byte, error) {
 	switch cmd[len(cmd)-1] {
 	case salmodule.OntologyCommand:
-		return []byte(r.ontology), nil, nil
+		return nil, consume(ctx, strings.NewReader(r.ontology), r)
 	case salmodule.RunCommand:
 		r.runs++
 		r.runEnv = env
-		return []byte(r.runOutput), nil, r.runErr
+		if err := consume(ctx, strings.NewReader(r.runOutput), r); err != nil {
+			return nil, err
+		}
+		return nil, r.runErr
 	}
-	return nil, nil, fmt.Errorf("unexpected command %v", cmd)
+	return nil, fmt.Errorf("unexpected command %v", cmd)
 }
 
 func testResolver(runner salmodule.ContainerRunner) *salmodule.Resolver {
@@ -127,7 +149,7 @@ func TestMaterializeSalModulesMergesTaskOutput(t *testing.T) {
 		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
 	}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
+	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -145,7 +167,7 @@ func TestMaterializeSalModulesNamesRelativeOutputUnderTheProject(t *testing.T) {
 		runOutput: `{"@id":"person/bob","@type":"schema:Person","schema:name":"Bob"}`,
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
+	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.True(t, graphHasTriple(graph, "https://example.test/project/person/bob", "https://schema.org/name", "Bob"))
@@ -158,7 +180,7 @@ func TestMaterializeSalModulesNamesRelativeOutputUnderTheProject(t *testing.T) {
 func TestMaterializeSalModulesPassesTheInstanceConfiguredInRDF(t *testing.T) {
 	runner := &testContainerRunner{ontology: testModuleOntology}
 
-	_, err := MaterializeSalModules(context.Background(), parseTestProject(t, testProject), testResolver(runner))
+	_, err := MaterializeSalModules(context.Background(), parseTestProject(t, testProject), testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Len(t, runner.runEnv, 1)
@@ -181,7 +203,7 @@ func TestMaterializeSalModulesSkipsClassesThatAreNotTasks(t *testing.T) {
 	`)
 	runner := &testContainerRunner{ontology: testModuleOntology}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
+	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Equal(t, 0, tasksRun)
@@ -195,7 +217,7 @@ func TestMaterializeSalModulesFailsWhenTheModuleReportsAnError(t *testing.T) {
 		runOutput: `{"@type":"salmodule:Error","rdfs:comment":"reference feature server is unreachable"}`,
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
+	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reference feature server is unreachable")
@@ -210,7 +232,7 @@ func TestMaterializeSalModulesPrefersTheModuleErrorOverTheContainerExitStatus(t 
 		runErr:    fmt.Errorf("container exited with status 1"),
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
+	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reference feature server is unreachable")
@@ -223,10 +245,55 @@ func TestMaterializeSalModulesReportsContainerFailuresWithoutModuleErrors(t *tes
 		runErr:   fmt.Errorf("container exited with status 137"),
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner))
+	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "container exited with status 137")
+}
+
+// TestMaterializeSalModulesCopiesTheFilesATaskNames checks that a file a task
+// names with a file:/// IRI object is copied into the blob store under its
+// digest, that the graph refers to the copy rather than the container path,
+// and that the copy's name is recorded.
+func TestMaterializeSalModulesCopiesTheFilesATaskNames(t *testing.T) {
+	graph := parseTestProject(t, testProject)
+	blobDir := filepath.Join(t.TempDir(), "blobs")
+	runner := &testContainerRunner{
+		ontology:       testModuleOntology,
+		runOutput:      `{"@id":"https://example.test/dataset","schema:hasPart":{"@id":"file:///tmp/test.txt"}}`,
+		containerFiles: map[string]string{"/tmp/test.txt": "hello\n"},
+	}
+
+	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, tasksRun)
+	digest := sha256.Sum256([]byte("hello\n"))
+	copyIRI := "urn:sha256:" + hex.EncodeToString(digest[:])
+	require.FileExists(t, filepath.Join(blobDir, hex.EncodeToString(digest[:])))
+	require.True(t, graphHasTriple(graph, copyIRI, "http://www.w3.org/2000/01/rdf-schema#label", "test.txt"))
+	require.True(t, graphHasTriple(graph, copyIRI, "http://purl.org/dc/terms/modified", "2026-09-10T14:26:05Z"))
+	var partIRIs []string
+	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+		if triple.Predicate.Value() == "https://schema.org/hasPart" {
+			partIRIs = append(partIRIs, triple.Object.String())
+		}
+		return true
+	})
+	require.Equal(t, []string{copyIRI}, partIRIs)
+}
+
+func TestMaterializeSalModulesFailsWhenANamedFileIsMissingFromTheContainer(t *testing.T) {
+	graph := parseTestProject(t, testProject)
+	runner := &testContainerRunner{
+		ontology:  testModuleOntology,
+		runOutput: `{"@id":"https://example.test/dataset","schema:hasPart":{"@id":"file:///tmp/missing.txt"}}`,
+	}
+
+	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no such file /tmp/missing.txt")
 }
 
 func graphHasTriple(graph *rdflibgo.Graph, subject, predicate, object string) bool {
