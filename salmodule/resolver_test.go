@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,49 @@ func (f *fakeRunner) CopyFile(_ context.Context, path string, w io.Writer) (time
 	}
 	_, err := io.WriteString(w, content)
 	return testFileModified, err
+}
+
+// CopyDirectory serves the fake container's files beneath path, which ends in
+// a slash, as the entries of a directory copy, in whatever order the map
+// yields them.
+func (f *fakeRunner) CopyDirectory(_ context.Context, path string, visit ContainerEntryVisitor) error {
+	f.copies = append(f.copies, path)
+	return copyFakeDirectory(f.containerFiles, path, visit)
+}
+
+// copyFakeDirectory visits every file in files under the directory at path,
+// and each directory between, the way a docker copy archive lists them. A
+// path with no files beneath it is not a directory the container has.
+func copyFakeDirectory(files map[string]string, path string, visit ContainerEntryVisitor) error {
+	var paths []string
+	for containerPath := range files {
+		if strings.HasPrefix(containerPath, path) {
+			paths = append(paths, containerPath)
+		}
+	}
+	if len(paths) == 0 {
+		return fmt.Errorf("no such directory %s", path)
+	}
+	sort.Strings(paths)
+	visitedDirs := map[string]bool{}
+	for _, containerPath := range paths {
+		relative := strings.TrimPrefix(containerPath, path)
+		segments := strings.Split(relative, "/")
+		for i := 1; i < len(segments); i++ {
+			dir := strings.Join(segments[:i], "/")
+			if visitedDirs[dir] {
+				continue
+			}
+			visitedDirs[dir] = true
+			if err := visit(dir, true, testFileModified, nil); err != nil {
+				return err
+			}
+		}
+		if err := visit(relative, false, testFileModified, strings.NewReader(files[containerPath])); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (f *fakeRunner) BuildImage(_ context.Context, _ string, tag string) error {

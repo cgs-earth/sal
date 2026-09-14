@@ -22,31 +22,48 @@ import (
 )
 
 // fileIRIPrefix heads the IRI a task uses to name a file inside its container
-// that should be copied out. The path is absolute, so the IRI has no host.
+// that should be copied out. The path is absolute, so the IRI has no host. A
+// path ending in a slash names a directory, copied whole.
 const fileIRIPrefix = "file:///"
 
-// the predicates a copied file is described with, the same ones a pinned
-// vocabulary's provenance node carries
+// the predicates a copied file is described with: the ones a pinned
+// vocabulary's provenance node carries, plus the path the copy sits at under
+// the blob store
 const (
-	rdfsLabelIRI       = "http://www.w3.org/2000/01/rdf-schema#label"
-	dctermsModifiedIRI = "http://purl.org/dc/terms/modified"
-	owlVersionIRI      = "http://www.w3.org/2002/07/owl#versionIRI"
+	rdfsLabelIRI         = "http://www.w3.org/2000/01/rdf-schema#label"
+	dctermsModifiedIRI   = "http://purl.org/dc/terms/modified"
+	dctermsIdentifierIRI = "http://purl.org/dc/terms/identifier"
+	owlVersionIRI        = "http://www.w3.org/2002/07/owl#versionIRI"
 )
 
-// CopiedFile is a file a task named with a file:/// IRI in its output and that
-// was copied out of the container into the blob store, named by its digest so
-// that it is content addressable.
+// CopiedFile is a file or directory a task named with a file:/// IRI in its
+// output and that was copied out of the container into the blob store. A file
+// is stored under its digest so that it is content addressable; a directory is
+// stored verbatim under the path it had in the container, so that whatever
+// reads it, a Zarr or STAC client for instance, finds the layout it expects,
+// and its digest is recorded in the blob store's prov.jsonld instead.
 type CopiedFile struct {
-	// ContainerPath is the absolute path the file had inside the container.
+	// ContainerPath is the absolute path the file had inside the container,
+	// ending in a slash for a directory.
 	ContainerPath string
-	// Name is the file name at the end of ContainerPath, recorded as rdfs:label.
+	// Directory reports whether the copy is a whole directory rather than one
+	// file.
+	Directory bool
+	// Name is the file or directory name at the end of ContainerPath,
+	// recorded as rdfs:label.
 	Name string
-	// Modified is when the file was last written inside the container,
-	// recorded as dcterms:modified.
+	// Modified is when the file was last written inside the container, or the
+	// newest such time of any file in a directory, recorded as
+	// dcterms:modified.
 	Modified time.Time
-	// Digest is the hex SHA-256 of the file's contents, which is also its file
-	// name in the blob store.
+	// Digest is the hex SHA-256 of the file's contents, or of a directory's
+	// tree (see treeDigest). It names a file in the blob store.
 	Digest string
+	// BlobPath is where the copy sits relative to the blob store, recorded as
+	// dcterms:identifier: the digest for a file, the container path without
+	// its leading slash for a directory. It is also the path the copy is
+	// served at under /blobs/.
+	BlobPath string
 	// Path is where the copy landed on disk.
 	Path string
 }
@@ -57,17 +74,26 @@ type CopiedFile struct {
 func (f CopiedFile) IRI() string { return "urn:sha256:" + f.Digest }
 
 // containerFilePath returns the absolute path inside the container that a
-// file:/// IRI names. Any other file IRI, one with a host or a relative path,
-// is an error, since there is nothing to copy it from.
-func containerFilePath(iri string) (string, error) {
+// file:/// IRI names, and whether it names a directory, which a trailing slash
+// marks. Any other file IRI, one with a host or a relative path, is an error,
+// since there is nothing to copy it from.
+func containerFilePath(iri string) (containerPath string, isDir bool, err error) {
 	parsed, err := url.Parse(iri)
 	if err != nil || parsed.Scheme != "file" {
-		return "", fmt.Errorf("%s is not a file:/// IRI", iri)
+		return "", false, fmt.Errorf("%s is not a file:/// IRI", iri)
 	}
 	if parsed.Host != "" || !strings.HasPrefix(parsed.Path, "/") {
-		return "", fmt.Errorf("%s does not name an absolute path inside the container; a file to copy is written as file:///absolute/path", iri)
+		return "", false, fmt.Errorf("%s does not name an absolute path inside the container; a file to copy is written as file:///absolute/path, a directory as file:///absolute/path/", iri)
 	}
-	return path.Clean(parsed.Path), nil
+	isDir = strings.HasSuffix(parsed.Path, "/")
+	containerPath = path.Clean(parsed.Path)
+	if isDir {
+		if containerPath == "/" {
+			return "", false, fmt.Errorf("%s names the root of the container, which cannot be copied", iri)
+		}
+		containerPath += "/"
+	}
+	return containerPath, isDir, nil
 }
 
 // fileCopier copies the files a task names with file:/// IRIs out of the
@@ -89,7 +115,7 @@ type fileCopier struct {
 // copying any it has not seen. Every string value is looked at, whichever key
 // it sits under, since the line is plain JSON whose coercions are only known
 // once the module's @context is applied; a value that turns out not to be an
-// IRI object is discarded again when the graph is linked.
+// IRI at all is discarded again when the graph is linked.
 func (c *fileCopier) observe(ctx context.Context, line []byte) {
 	var node any
 	if err := json.Unmarshal(line, &node); err != nil {
@@ -97,13 +123,13 @@ func (c *fileCopier) observe(ctx context.Context, line []byte) {
 		return
 	}
 	for _, iri := range fileIRIs(node) {
-		containerPath, err := containerFilePath(iri)
+		containerPath, isDir, err := containerFilePath(iri)
 		if err != nil {
 			// reported when the graph is linked, where it is known whether the
-			// value is an IRI object at all
+			// value is an IRI at all
 			continue
 		}
-		c.start(ctx, containerPath)
+		c.start(ctx, containerPath, isDir)
 	}
 }
 
@@ -130,7 +156,7 @@ func fileIRIs(value any) []string {
 
 // start begins copying containerPath unless it already has, in which case the
 // repeated reference is warned about.
-func (c *fileCopier) start(ctx context.Context, containerPath string) {
+func (c *fileCopier) start(ctx context.Context, containerPath string, isDir bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, seen := c.copied[containerPath]; seen {
@@ -140,13 +166,18 @@ func (c *fileCopier) start(ctx context.Context, containerPath string) {
 	if c.copied == nil {
 		c.copied = map[string]*CopiedFile{}
 	}
-	copied := &CopiedFile{ContainerPath: containerPath, Name: path.Base(containerPath)}
+	copied := &CopiedFile{ContainerPath: containerPath, Directory: isDir, Name: path.Base(containerPath)}
 	c.copied[containerPath] = copied
 
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
-		err := c.copy(ctx, copied)
+		var err error
+		if isDir {
+			err = c.copyDirectory(ctx, copied)
+		} else {
+			err = c.copyFile(ctx, copied)
+		}
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		if err != nil {
@@ -155,10 +186,11 @@ func (c *fileCopier) start(ctx context.Context, containerPath string) {
 	}()
 }
 
-// copy streams one file out of the container into the blob directory, hashing
-// it on the way, and names the result by its digest once it is complete so a
-// partially copied file is never left under a content addressed name.
-func (c *fileCopier) copy(ctx context.Context, copied *CopiedFile) error {
+// copyFile streams one file out of the container into the blob directory,
+// hashing it on the way, and names the result by its digest once it is
+// complete so a partially copied file is never left under a content addressed
+// name.
+func (c *fileCopier) copyFile(ctx context.Context, copied *CopiedFile) error {
 	if err := os.MkdirAll(c.dir, 0755); err != nil {
 		return fmt.Errorf("create blob directory for copied files: %w", err)
 	}
@@ -187,11 +219,107 @@ func (c *fileCopier) copy(ctx context.Context, copied *CopiedFile) error {
 	}
 	copied.Modified = modified.UTC()
 	copied.Digest = hex.EncodeToString(hash.Sum(nil))
+	copied.BlobPath = copied.Digest
 	copied.Path = filepath.Join(c.dir, copied.Digest)
 	if err := os.Rename(temp.Name(), copied.Path); err != nil {
 		return fmt.Errorf("store copy of %s: %w", copied.ContainerPath, err)
 	}
 	return nil
+}
+
+// copyDirectory streams a whole directory out of the container into a
+// temporary directory in the blob store, hashing each file on the way, and
+// moves it to its place under the container's own path only once every entry
+// has arrived, so a partially copied tree is never found where a complete one
+// is expected. A directory already there from an earlier copy is replaced,
+// since a path names the current copy rather than one version of it; the
+// digest is what tells versions apart.
+func (c *fileCopier) copyDirectory(ctx context.Context, copied *CopiedFile) error {
+	if err := os.MkdirAll(c.dir, 0755); err != nil {
+		return fmt.Errorf("create blob directory for copied files: %w", err)
+	}
+	temp, err := os.MkdirTemp(c.dir, ".copying-*")
+	if err != nil {
+		return fmt.Errorf("create directory for copy of %s: %w", copied.ContainerPath, err)
+	}
+	defer func() {
+		// the temporary directory only still exists when the copy failed
+		_ = os.RemoveAll(temp)
+	}()
+
+	var modified time.Time
+	var entries []treeEntry
+	err = c.files.CopyDirectory(ctx, copied.ContainerPath, func(relative string, isDir bool, entryModified time.Time, content io.Reader) error {
+		if !filepath.IsLocal(relative) {
+			return fmt.Errorf("copy %s from container: entry %q escapes the directory", copied.ContainerPath, relative)
+		}
+		destination := filepath.Join(temp, filepath.FromSlash(relative))
+		if isDir {
+			return os.MkdirAll(destination, 0755)
+		}
+		if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
+			return err
+		}
+		file, err := os.Create(destination)
+		if err != nil {
+			return fmt.Errorf("write copy of %s%s: %w", copied.ContainerPath, relative, err)
+		}
+		hash := sha256.New()
+		_, copyErr := io.Copy(io.MultiWriter(file, hash), content)
+		if err := file.Close(); err != nil && copyErr == nil {
+			copyErr = err
+		}
+		if copyErr != nil {
+			return fmt.Errorf("write copy of %s%s: %w", copied.ContainerPath, relative, copyErr)
+		}
+		if entryModified.After(modified) {
+			modified = entryModified
+		}
+		entries = append(entries, treeEntry{path: relative, digest: hex.EncodeToString(hash.Sum(nil))})
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	if modified.IsZero() {
+		modified = time.Now()
+	}
+	copied.Modified = modified.UTC()
+	copied.Digest = treeDigest(entries)
+	copied.BlobPath = strings.TrimPrefix(copied.ContainerPath, "/")
+	copied.Path = filepath.Join(c.dir, filepath.FromSlash(strings.TrimSuffix(copied.BlobPath, "/")))
+	if err := os.MkdirAll(filepath.Dir(copied.Path), 0755); err != nil {
+		return fmt.Errorf("store copy of %s: %w", copied.ContainerPath, err)
+	}
+	if err := os.RemoveAll(copied.Path); err != nil {
+		return fmt.Errorf("replace the earlier copy of %s: %w", copied.ContainerPath, err)
+	}
+	if err := os.Rename(temp, copied.Path); err != nil {
+		return fmt.Errorf("store copy of %s: %w", copied.ContainerPath, err)
+	}
+	return nil
+}
+
+// treeEntry is one regular file of a copied directory, by its path relative
+// to the directory and the digest of its contents.
+type treeEntry struct {
+	path   string
+	digest string
+}
+
+// treeDigest is the SHA-256 of a directory's contents: one line per regular
+// file, sorted by path, of the path, a NUL, and the file's own SHA-256 in
+// hex, the way a git tree object hashes what it holds. It depends only on the
+// paths and contents, so a directory copied again unchanged hashes the same
+// whatever the modification times or the order the container listed it in.
+func treeDigest(entries []treeEntry) string {
+	sort.Slice(entries, func(i, j int) bool { return entries[i].path < entries[j].path })
+	hash := sha256.New()
+	for _, entry := range entries {
+		hash.Write([]byte(entry.path + "\x00" + entry.digest + "\n"))
+	}
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 // wait blocks until every copy has finished and returns the files copied,
@@ -211,16 +339,20 @@ func (c *fileCopier) wait() ([]CopiedFile, error) {
 	return files, nil
 }
 
-// LinkCopiedFiles rewrites every file:/// object in a task's graph to the
-// urn:sha256: IRI of the copy that was made of it and describes each copy the
-// way a pinned vocabulary's provenance node is described: its file name as
-// rdfs:label, when it was written as dcterms:modified, and its digest as
-// owl:versionIRI. The data product then refers to the copies it holds rather
-// than to paths inside a container that no longer exists. A file:// object
-// that was not copied is an error. A copy nothing refers to as an IRI object,
-// because the task wrote the path as a literal, is removed again and warned
-// about.
-func LinkCopiedFiles(graph *rdflibgo.Graph, files []CopiedFile) error {
+// LinkCopiedFiles rewrites every file:/// IRI in a task's graph, as subject or
+// object, to the urn:sha256: IRI of the copy that was made of it and describes
+// each copy the way a pinned vocabulary's provenance node is described: its
+// name as rdfs:label, when it was written as dcterms:modified, and its digest
+// as owl:versionIRI, plus where it sits under the blob store as
+// dcterms:identifier. Whatever else the task said about the file:/// IRI
+// stays with it under its new name. The data product then refers to the
+// copies it holds rather than to paths inside a container that no longer
+// exists. A file:// IRI that was not copied is an error. A copy nothing
+// refers to as an IRI, because the task wrote the path as a literal, is
+// removed again and warned about. Every directory that is kept is recorded in
+// the blob store's prov.jsonld under blobDir, which is how its digest is
+// resolved back to the directory.
+func LinkCopiedFiles(graph *rdflibgo.Graph, files []CopiedFile, blobDir string) error {
 	byPath := map[string]CopiedFile{}
 	for _, file := range files {
 		byPath[file.ContainerPath] = file
@@ -228,40 +360,70 @@ func LinkCopiedFiles(graph *rdflibgo.Graph, files []CopiedFile) error {
 
 	var fileTriples []rdflibgo.Triple
 	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
-		if object, ok := triple.Object.(rdflibgo.URIRef); ok && strings.HasPrefix(object.Value(), "file:") {
+		if isFileIRI(triple.Subject) || isFileIRI(triple.Object) {
 			fileTriples = append(fileTriples, triple)
 		}
 		return true
 	})
 
 	referenced := map[string]bool{}
-	for _, triple := range fileTriples {
-		iri := triple.Object.(rdflibgo.URIRef).Value()
-		containerPath, err := containerFilePath(iri)
+	link := func(term rdflibgo.Term) (rdflibgo.Term, error) {
+		if !isFileIRI(term) {
+			return term, nil
+		}
+		iri := term.(rdflibgo.URIRef).Value()
+		containerPath, _, err := containerFilePath(iri)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		file, ok := byPath[containerPath]
 		if !ok {
-			return fmt.Errorf("%s was not copied from the container", iri)
+			return nil, fmt.Errorf("%s was not copied from the container", iri)
 		}
-		referenced[file.Digest] = true
 		copy := rdflibgo.NewURIRefUnsafe(file.IRI())
+		if !referenced[containerPath] {
+			referenced[containerPath] = true
+			graph.Add(copy, rdflibgo.NewURIRefUnsafe(rdfsLabelIRI), rdflibgo.NewLiteral(file.Name))
+			graph.Add(copy, rdflibgo.NewURIRefUnsafe(dctermsModifiedIRI), rdflibgo.NewLiteral(file.Modified.Format(time.RFC3339), rdflibgo.WithDatatype(rdflibgo.XSDDateTime)))
+			graph.Add(copy, rdflibgo.NewURIRefUnsafe(dctermsIdentifierIRI), rdflibgo.NewLiteral(file.BlobPath))
+			graph.Add(copy, rdflibgo.NewURIRefUnsafe(owlVersionIRI), copy)
+		}
+		return copy, nil
+	}
+	for _, triple := range fileTriples {
+		subject, err := link(triple.Subject)
+		if err != nil {
+			return err
+		}
+		object, err := link(triple.Object)
+		if err != nil {
+			return err
+		}
 		graph.Remove(triple.Subject, &triple.Predicate, triple.Object)
-		graph.Add(triple.Subject, triple.Predicate, copy)
-		graph.Add(copy, rdflibgo.NewURIRefUnsafe(rdfsLabelIRI), rdflibgo.NewLiteral(file.Name))
-		graph.Add(copy, rdflibgo.NewURIRefUnsafe(dctermsModifiedIRI), rdflibgo.NewLiteral(file.Modified.Format(time.RFC3339), rdflibgo.WithDatatype(rdflibgo.XSDDateTime)))
-		graph.Add(copy, rdflibgo.NewURIRefUnsafe(owlVersionIRI), copy)
+		graph.Add(subject.(rdflibgo.Subject), triple.Predicate, object)
 	}
 
+	var directories []CopiedFile
 	for _, file := range files {
-		if referenced[file.Digest] {
+		if !referenced[file.ContainerPath] {
+			slog.Warn(fileIRIPrefix + strings.TrimPrefix(file.ContainerPath, "/") + " was copied but nothing in the SAL module's output refers to it as an IRI, so the copy was discarded; write it as {\"@id\": \"file:///...\"} to keep it")
+			if err := os.RemoveAll(file.Path); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("discard unreferenced copy of %s: %w", file.ContainerPath, err)
+			}
 			continue
 		}
-		slog.Warn(fileIRIPrefix + strings.TrimPrefix(file.ContainerPath, "/") + " was copied but nothing in the SAL module's output refers to it as an IRI object, so the copy was discarded; write it as {\"@id\": \"file:///...\"} to keep it")
-		if err := os.Remove(file.Path); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("discard unreferenced copy of %s: %w", file.ContainerPath, err)
+		if file.Directory {
+			directories = append(directories, file)
 		}
 	}
-	return nil
+	if len(directories) == 0 {
+		return nil
+	}
+	return recordDirectories(blobDir, directories)
+}
+
+// isFileIRI reports whether term is an IRI with the file scheme.
+func isFileIRI(term rdflibgo.Term) bool {
+	iri, ok := term.(rdflibgo.URIRef)
+	return ok && strings.HasPrefix(iri.Value(), "file:")
 }

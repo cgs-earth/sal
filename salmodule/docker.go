@@ -45,7 +45,17 @@ type ContainerFiles interface {
 	// CopyFile writes the contents of the regular file at path inside the
 	// container to w and reports when the file was last modified there.
 	CopyFile(ctx context.Context, path string, w io.Writer) (time.Time, error)
+	// CopyDirectory walks the directory at path inside the container and calls
+	// visit once per entry beneath it, with the entry's path relative to the
+	// directory. A directory entry is visited with a nil reader; a regular file
+	// is visited with a reader over its contents that is only valid during the
+	// call. Walking stops at the first error visit returns.
+	CopyDirectory(ctx context.Context, path string, visit ContainerEntryVisitor) error
 }
+
+// ContainerEntryVisitor receives one entry of a directory copied out of a
+// container. content is nil for a directory entry.
+type ContainerEntryVisitor func(relativePath string, isDir bool, modified time.Time, content io.Reader) error
 
 type dockerRunner struct {
 	client *client.Client
@@ -235,6 +245,63 @@ func extractFileFromArchive(archive io.Reader, path string, w io.Writer) (time.T
 		return time.Time{}, fmt.Errorf("copy %s from container: expected a single file but the container returned more than one entry", path)
 	}
 	return header.ModTime, nil
+}
+
+// CopyDirectory fetches the directory at path from the container as the tar
+// archive the daemon serves it as and visits each entry in it. The daemon
+// archives the directory under its own base name, so that leading component
+// is stripped to leave paths relative to the directory itself.
+func (c containerFiles) CopyDirectory(ctx context.Context, path string, visit ContainerEntryVisitor) error {
+	result, err := c.client.CopyFromContainer(ctx, c.id, client.CopyFromContainerOptions{SourcePath: path})
+	if err != nil {
+		return fmt.Errorf("copy %s from container: %w", path, err)
+	}
+	defer func() {
+		if err := result.Content.Close(); err != nil {
+			slog.Warn("failed to close copy stream for " + path + ": " + err.Error())
+		}
+	}()
+	return walkDirectoryArchive(result.Content, path, visit)
+}
+
+// walkDirectoryArchive visits every entry of a `docker cp` archive of a
+// directory, with paths made relative to the directory by dropping the base
+// name the daemon prefixes them with. The first entry must be the directory
+// itself, which is how a path naming a file rather than a directory is told
+// apart and refused. Anything other than a regular file or directory, such as
+// a symbolic link, is an error rather than silently left out of the copy.
+func walkDirectoryArchive(archive io.Reader, path string, visit ContainerEntryVisitor) error {
+	reader := tar.NewReader(archive)
+	header, err := reader.Next()
+	if err != nil {
+		return fmt.Errorf("read copy of %s from container: %w", path, err)
+	}
+	if header.Typeflag != tar.TypeDir {
+		return fmt.Errorf("copy %s from container: it is not a directory; a directory to copy is written as file:///absolute/path/ with a trailing slash", path)
+	}
+	prefix := strings.TrimSuffix(header.Name, "/") + "/"
+	for {
+		header, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read copy of %s from container: %w", path, err)
+		}
+		relative := strings.TrimSuffix(strings.TrimPrefix(header.Name, prefix), "/")
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := visit(relative, true, header.ModTime, nil); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := visit(relative, false, header.ModTime, reader); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("copy %s from container: %s is neither a regular file nor a directory and cannot be copied", path, header.Name)
+		}
+	}
 }
 
 // tarDirectory packs dir into the tar stream that the docker build endpoint

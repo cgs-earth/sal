@@ -1,6 +1,8 @@
 package serve
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -1190,4 +1192,158 @@ func TestEndpointWithUIServesTheStacCatalogRatherThanTheApp(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
 	require.JSONEq(t, `{"type":"Catalog","id":"widgets"}`, string(body))
+}
+
+// writeDirectoryBlob lays out a copied directory under dir the way a SAL
+// module task's directory copy lands: verbatim under its own path, recorded in
+// prov.jsonld under a digest. It returns that digest.
+func writeDirectoryBlob(t *testing.T, dir string) string {
+	t.Helper()
+	digest := strings.Repeat("ab", 32)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "out", "catalog", "items"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "out", "catalog", "catalog.json"), []byte(`{"links":[{"rel":"item","href":"./items/a.json"}]}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "out", "catalog", "items", "a.json"), []byte(`{"id":"a"}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, salmodule.ProvFile), []byte(`{
+		"@context": {"owl": "http://www.w3.org/2002/07/owl#"},
+		"@graph": [{"@id": "out/catalog/", "rdfs:label": "catalog", "owl:versionIRI": {"@id": "urn:sha256:`+digest+`"}}]
+	}`), 0644))
+	return digest
+}
+
+func TestBlobEndpointServesAFileInsideACopiedDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeDirectoryBlob(t, dir)
+
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/blobs/out/catalog/items/a.json")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, `{"id":"a"}`, string(got))
+}
+
+func TestBlobEndpointServesTheProvenanceDocument(t *testing.T) {
+	dir := t.TempDir()
+	writeDirectoryBlob(t, dir)
+
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/blobs/" + salmodule.ProvFile)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "application/ld+json", resp.Header.Get("Content-Type"))
+}
+
+// readZip reads the entries of a zip response body, by name, with their contents.
+func readZip(t *testing.T, resp *http.Response) map[string]string {
+	t.Helper()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	archive, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	require.NoError(t, err)
+	entries := map[string]string{}
+	for _, file := range archive.File {
+		reader, err := file.Open()
+		require.NoError(t, err)
+		content, err := io.ReadAll(reader)
+		require.NoError(t, err)
+		require.NoError(t, reader.Close())
+		entries[file.Name] = string(content)
+	}
+	return entries
+}
+
+func TestBlobEndpointServesACopiedDirectoryAsAZipByItsDigest(t *testing.T) {
+	dir := t.TempDir()
+	digest := writeDirectoryBlob(t, dir)
+
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/blobs/urn:sha256:" + digest)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "application/zip", resp.Header.Get("Content-Type"))
+	require.Equal(t, `attachment; filename="catalog.zip"`, resp.Header.Get("Content-Disposition"))
+	require.Equal(t, map[string]string{
+		"catalog/":             "",
+		"catalog/catalog.json": `{"links":[{"rel":"item","href":"./items/a.json"}]}`,
+		"catalog/items/":       "",
+		"catalog/items/a.json": `{"id":"a"}`,
+	}, readZip(t, resp))
+}
+
+func TestBlobEndpointServesACopiedDirectoryAsAZipByItsPath(t *testing.T) {
+	dir := t.TempDir()
+	writeDirectoryBlob(t, dir)
+
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/blobs/out/catalog/")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "application/zip", resp.Header.Get("Content-Type"))
+	require.Contains(t, readZip(t, resp), "catalog/items/a.json")
+}
+
+func TestBlobEndpointDoesNotServeOutsideTheBlobStore(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "blobs")
+	writeDirectoryBlob(t, dir)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "secret.txt"), []byte("outside"), 0644))
+
+	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
+	defer server.Close()
+
+	for _, target := range []string{"/blobs/../secret.txt", "/blobs/out/../../secret.txt", "/blobs/"} {
+		req, err := http.NewRequest(http.MethodGet, server.URL+target, nil)
+		require.NoError(t, err)
+		// the request path is sent as written so the server, not the client, cleans it
+		req.URL = &url.URL{Scheme: req.URL.Scheme, Host: req.URL.Host, Opaque: target}
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.NotEqual(t, http.StatusOK, resp.StatusCode, target)
+	}
+}
+
+// A browser following a link into a copied directory, a STAC catalog for
+// instance, gets the file; only /blobs itself is the UI tab.
+func TestEndpointWithUIServesAFileInACopiedDirectoryToABrowser(t *testing.T) {
+	dir := t.TempDir()
+	writeDirectoryBlob(t, dir)
+	handler, err := NewEndpointWithUI(&endpointUIRunner{}, dir, "")
+	require.NoError(t, err)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	resp := browserGet(t, server.URL+"/blobs/out/catalog/catalog.json")
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
 }

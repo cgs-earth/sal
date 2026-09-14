@@ -131,8 +131,8 @@ func (r *Resolver) Ontology(ctx context.Context, ref ModuleRef) (*ModuleOntology
 }
 
 // TaskResult is what running a module task produced: the newline delimited
-// JSON it wrote to stdout, and the files it named with file:/// IRIs, copied
-// out of the container into the blob store.
+// JSON it wrote to stdout, and the files and directories it named with
+// file:/// IRIs, copied out of the container into the blob store.
 type TaskResult struct {
 	Output []byte
 	Files  []CopiedFile
@@ -142,7 +142,8 @@ type TaskResult struct {
 // the environment variable the module's ontology declares, and returns the
 // newline delimited JSON the task wrote to stdout together with the files it
 // named with file:/// IRIs, which are copied out of the container into blobDir
-// as the output arrives and named by their SHA-256 digest. The container is
+// as the output arrives: a file named by its SHA-256 digest, a directory
+// (a path ending in a slash) verbatim under its own path. The container is
 // kept until every copy has finished.
 //
 // Whatever the task wrote is returned even when the container fails, because a

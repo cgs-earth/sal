@@ -97,10 +97,23 @@ To deliver a file, write it completely inside the container, then reference it a
 ```
 
 `sal` copies the file out while the task is still running, so the write must be finished before the
-line naming it is printed. The path must be absolute (`file:///`). Each file is copied once; a second
+line naming it is printed. The path must be absolute (`file:///`). Each path is copied once; a second
 reference is skipped with a warning. In the project the reference becomes `urn:sha256:<digest>` with
-`rdfs:label` (file name), `dcterms:modified`, and `owl:versionIRI` attached, and the copy sits in
-`.sal/data/blobs`. A directory cannot be handed over; archive it first.
+`rdfs:label` (file name), `dcterms:modified`, `dcterms:identifier` (its path under `.sal/data/blobs`),
+and `owl:versionIRI` attached, and the copy sits in `.sal/data/blobs` under its digest.
+
+To deliver a whole directory, a Zarr store or a STAC catalog for instance, end the path with a slash. It is
+copied verbatim under its own path (`.sal/data/blobs/out/catalog/`), so what reads it finds the layout it
+expects, and its `urn:sha256:` is the digest of its contents, recorded in `.sal/data/blobs/prov.jsonld`.
+Anything else the task says about the `file:///` IRI stays attached to it:
+
+```json
+{"@id": "https://example.org/project/dataset", "schema:hasPart": {"@id": "file:///out/catalog/"}}
+{"@id": "file:///out/catalog/", "schema:name": "Station STAC catalog"}
+```
+
+Every file in the directory must be written before the line naming the directory is printed, and it may hold
+only regular files and directories, not symbolic links.
 
 ## 3. Dockerfile
 
@@ -141,5 +154,5 @@ checkout to confirm the triples and files land.
 - [ ] Every configuration property is declared in the ontology.
 - [ ] `salmodule run` reads `SALMODULE_TASK_INSTANCE`, writes NDJSON to stdout, logs to stderr.
 - [ ] Failures print a `salmodule:Error` node and exit non-zero.
-- [ ] Files are fully written before the line that references them with `file:///`.
+- [ ] Files, or every file in a directory, are fully written before the line that references them with `file:///`.
 - [ ] Repository is pushed; `sal salmodule inspect` succeeds against it.

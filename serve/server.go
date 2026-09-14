@@ -1,12 +1,15 @@
 package serve
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"path"
@@ -107,7 +110,11 @@ func NewEndpointWithUI(runner UIRunner, blobDir string, stacDir string) (http.Ha
 	mux.Handle("/api/sparql/translate", translateHandler{translator: runner})
 	mux.Handle("/api/stats", statsHandler{runner: runner})
 	mux.Handle("/api/salmodule", salmoduleHandler{inspect: salmodule.Inspect})
-	mux.Handle("/blobs/", browserRoute{api: blobs, ui: ui})
+	// The tab is /blobs alone; a path beneath it names a blob, and a browser
+	// following a link to a file in a copied directory wants that file rather
+	// than the tab.
+	mux.Handle("/blobs/{blob...}", blobs)
+	mux.Handle("/blobs/{$}", browserRoute{api: blobs, ui: ui})
 	// Registered so that ServeMux answers the tab's own URL rather than redirecting
 	// it to /blobs/, which is the endpoint's prefix and not a tab.
 	mux.Handle("/blobs", browserRoute{api: blobs, ui: ui})
@@ -121,13 +128,19 @@ func NewEndpointWithUI(runner UIRunner, blobDir string, stacDir string) (http.Ha
 	return mux, nil
 }
 
-// blobHandler serves the vocabulary and imported ontology documents a project
-// has pinned under .sal/data/blobs. PinnedVocabularies names a document by its
-// SHA-256 digest, or, for a salmodule:// vocabulary, by the git commit hash of
-// the module repository it was read from. A request may give either name bare
-// or headed by the scheme its owl:versionIRI carries, "urn:sha256:" or
-// "urn:git-commit-hash:"; the prefix is stripped before it is looked up. Range
-// requests are honored via http.ServeContent.
+// blobHandler serves what a project holds under .sal/data/blobs: the
+// vocabulary and imported ontology documents it has pinned and the files and
+// directories its SAL module tasks produced. PinnedVocabularies and a copied
+// file are named by their SHA-256 digest, or, for a salmodule:// vocabulary,
+// by the git commit hash of the module repository it was read from. A request
+// may give either name bare or headed by the scheme its owl:versionIRI
+// carries, "urn:sha256:" or "urn:git-commit-hash:"; the prefix is stripped
+// before it is looked up. A copied directory sits under the path it had in
+// the container, so /blobs/<path>/<file> serves each file in it directly,
+// with a content type from its extension, and a Zarr store or STAC catalog
+// reads in place. The directory itself, asked for by that path or by the
+// digest prov.jsonld records for it, is served whole as a zip archive. Range
+// requests are honored via http.ServeContent for a file.
 type blobHandler struct {
 	dir string
 }
@@ -142,32 +155,171 @@ func (h blobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/blobs/")
 	name = strings.TrimPrefix(name, "urn:sha256:")
 	name = strings.TrimPrefix(name, "urn:git-commit-hash:")
-	if !isBlobName(name) {
-		http.NotFound(w, r)
+	if isBlobName(name) {
+		h.serveNamed(w, r, name)
 		return
 	}
+	h.servePath(w, r, name)
+}
 
+// serveNamed answers a request for a blob by hash: the file stored under that
+// name, or, when there is none, the directory prov.jsonld records under that
+// digest, as a zip.
+func (h blobHandler) serveNamed(w http.ResponseWriter, r *http.Request, name string) {
 	file, err := os.Open(filepath.Join(h.dir, name))
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			slog.Error("failed to close blob file", "error", err)
+	if err == nil {
+		defer closeBlob(file)
+		info, err := file.Stat()
+		if err != nil {
+			http.NotFound(w, r)
+			return
 		}
-	}()
+		// a blob is an opaque pinned document, not necessarily text; setting this
+		// keeps http.ServeContent from sniffing the content and reporting it as
+		// text/plain
+		w.Header().Set("Content-Type", "application/octet-stream")
+		http.ServeContent(w, r, name, info.ModTime(), file)
+		return
+	}
 
-	info, err := file.Stat()
+	provenance, err := salmodule.LoadProvenance(h.dir)
+	if err != nil {
+		slog.Error("failed to read the blob store's "+salmodule.ProvFile, "error", err)
+		http.NotFound(w, r)
+		return
+	}
+	directory, ok := provenance.DirectoryPath(name)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	h.serveZip(w, r, directory)
+}
+
+// servePath answers a request for something under the blob store by path: a
+// file inside a copied directory, or prov.jsonld itself, as it is, and a
+// directory as a zip. The path is confined to the blob store; one that would
+// step out of it is not found.
+func (h blobHandler) servePath(w http.ResponseWriter, r *http.Request, name string) {
+	cleaned := path.Clean("/" + name)
+	if cleaned == "/" || !fs.ValidPath(strings.TrimPrefix(cleaned, "/")) {
+		http.NotFound(w, r)
+		return
+	}
+	local := filepath.Join(h.dir, filepath.FromSlash(cleaned))
+	info, err := os.Stat(local)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	// a blob is an opaque pinned document, not necessarily text; setting this
-	// keeps http.ServeContent from sniffing the content and reporting it as
-	// text/plain
-	w.Header().Set("Content-Type", "application/octet-stream")
-	http.ServeContent(w, r, name, info.ModTime(), file)
+	if info.IsDir() {
+		h.serveZip(w, r, strings.TrimPrefix(cleaned, "/")+"/")
+		return
+	}
+	file, err := os.Open(local)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer closeBlob(file)
+	contentType := blobContentType(path.Ext(cleaned))
+	w.Header().Set("Content-Type", contentType)
+	http.ServeContent(w, r, path.Base(cleaned), info.ModTime(), file)
+}
+
+// blobContentTypes are the content types of the extensions a copied directory
+// is likely to hold that the operating system's mime.types may not know, RDF
+// and STAC documents chiefly. Go's mime package answers from the system table,
+// which differs between Linux and macOS, so these are fixed here so that a
+// file is served the same wherever sal runs.
+var blobContentTypes = map[string]string{
+	".json":    "application/json",
+	".jsonld":  "application/ld+json",
+	".geojson": "application/geo+json",
+	".ttl":     "text/turtle",
+	".nt":      "application/n-triples",
+	".nq":      "application/n-quads",
+	".rdf":     "application/rdf+xml",
+	".parquet": "application/vnd.apache.parquet",
+	".zarr":    "application/octet-stream",
+}
+
+// blobContentType is the content type a file in the blob store is served
+// with, by extension: sal's own table first, then the operating system's,
+// then a plain byte stream.
+func blobContentType(extension string) string {
+	if contentType, ok := blobContentTypes[strings.ToLower(extension)]; ok {
+		return contentType
+	}
+	if contentType := mime.TypeByExtension(extension); contentType != "" {
+		return contentType
+	}
+	return "application/octet-stream"
+}
+
+// serveZip streams the directory at the given blob store path, relative and
+// ending in a slash, as a zip archive whose entries sit under the directory's
+// own name, the way a directory zipped by hand is laid out.
+func (h blobHandler) serveZip(w http.ResponseWriter, r *http.Request, directory string) {
+	root := filepath.Join(h.dir, filepath.FromSlash(strings.TrimSuffix(directory, "/")))
+	base := path.Base(strings.TrimSuffix(directory, "/"))
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+base+`.zip"`)
+	if r.Method == http.MethodHead {
+		return
+	}
+	archive := zip.NewWriter(w)
+	err := filepath.WalkDir(root, func(local string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(root, local)
+		if err != nil {
+			return err
+		}
+		name := path.Join(base, filepath.ToSlash(relative))
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return err
+		}
+		header.Name = name
+		if entry.IsDir() {
+			header.Name += "/"
+			_, err := archive.CreateHeader(header)
+			return err
+		}
+		header.Method = zip.Deflate
+		writer, err := archive.CreateHeader(header)
+		if err != nil {
+			return err
+		}
+		file, err := os.Open(local)
+		if err != nil {
+			return err
+		}
+		defer closeBlob(file)
+		_, err = io.Copy(writer, file)
+		return err
+	})
+	if err != nil {
+		// the status line has already been sent with the first entry, so the
+		// failure can only be logged and the archive left truncated
+		slog.Error("failed to zip "+directory+" from the blob store", "error", err)
+		return
+	}
+	if err := archive.Close(); err != nil {
+		slog.Error("failed to finish the zip of "+directory+" from the blob store", "error", err)
+	}
+}
+
+func closeBlob(file *os.File) {
+	if err := file.Close(); err != nil {
+		slog.Error("failed to close blob file", "error", err)
+	}
 }
 
 // stacHandler serves the STAC catalog `sal build` writes under .sal/data/stac:
@@ -230,9 +382,7 @@ func (h stacHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // isBlobName reports whether s is a hex string of the length a blob is named
-// by: 64 characters for a SHA-256 digest, 40 for a git commit hash. This also
-// guards against a request path escaping the blob directory, since a bare hex
-// string has no path separators.
+// by: 64 characters for a SHA-256 digest, 40 for a git commit hash.
 func isBlobName(s string) bool {
 	if len(s) != 64 && len(s) != 40 {
 		return false
