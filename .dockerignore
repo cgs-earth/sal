@@ -11,3 +11,8 @@ examples/**
 docs/**
 **/.astro
 .claude/**
+
+# Local build products that are never part of the image: the go build output
+# at the repo root and the pyspark integration test's virtualenv.
+sal
+**/.venv
