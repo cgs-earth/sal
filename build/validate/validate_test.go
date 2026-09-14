@@ -183,3 +183,31 @@ func TestPinnedGraphDereferencesANamespaceThroughItsDocumentURL(t *testing.T) {
 		rdflibgo.NewURIRefUnsafe(owlNamespaceIRI+"Class"),
 	))
 }
+
+// A vocabulary that cannot be checked at all fails every term used from it in
+// the same way, so it is reported once, at its first use, with the other lines
+// it affects listed, rather than once per use.
+func TestAVocabularyThatCannotBeCheckedIsReportedOnce(t *testing.T) {
+	pins := EphemeralVocabularies()
+	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
+		return nil, "", PinnedVersion{}, fmt.Errorf("bad response status code: 404")
+	}
+	path := writeTurtleTestFileNamed(t, "gone.ttl", `
+		@prefix gone: <https://vocab.test/gone#> .
+
+		<widgets/1> a gone:Widget ;
+			gone:size "large" ;
+			gone:color "red" .
+		<widgets/2> a gone:Widget ;
+			gone:size "small" .
+	`)
+
+	validator := NewValidator(pins, testBase, nil)
+	_, err := validator.ValidateFile(path)
+
+	require.Error(t, err)
+	var errs MultiError
+	require.ErrorAs(t, err, &errs)
+	require.Len(t, errs, 1)
+	require.Equal(t, path+":4: failed to check vocabulary for gone:Widget: bad response status code: 404 (also affects lines 5, 6, 7, 8)", errs[0].Error())
+}

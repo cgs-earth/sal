@@ -187,8 +187,16 @@ A vocabulary the project pins but does not import, one it only checks terms agai
 ## STAC catalog
 
 The last thing `sal build` does is describe the data product as a [STAC](https://stacspec.org/) catalog under `.sal/data/stac`, so that a STAC client can discover it and an Iceberg reader can open it from what the catalog records.
-`catalog.json` is a STAC Catalog named after the git project, listing one child, `triples/collection.json`.
-That collection describes the triples table with three extensions:
+`catalog.json` is a STAC Catalog named after the git project, listing `triples/collection.json` as a child, and
+after it every STAC catalog a SAL module task handed over as a directory (see
+[Files a task produces](/sal/guides/using-sal-modules/#files-a-task-produces)): a directory under `.sal/data/blobs`
+whose `catalog.json` is a STAC Catalog or Collection is linked as a child by relative path, such as
+`../blobs/out/catalog/catalog.json`, titled by the catalog's own `title` or `id`. The module's files are left
+where the copy put them, since their own links name their neighbours by relative path, and the link is relative
+too, so the data product is one catalog tree on disk, under `sal serve`, and in a bucket it is uploaded to.
+A sub-catalog inside a linked catalog is that catalog's to list and is not linked again; a `catalog.json` that is
+not STAC is warned about and skipped.
+The `triples/collection.json` collection describes the triples table with three extensions:
 
 - The [Table extension](https://github.com/stac-extensions/table): `table:columns` names every column of the table with its type, `table:row_count` is the number of rows, the statements of the pinned vocabularies included since the catalog describes the table itself, and `table:primary_geometry` is `object_geometry`.
 - The [Projection extension](https://github.com/stac-extensions/projection): `proj:code` is the CRS of the geometry column, `OGC:CRS84`.

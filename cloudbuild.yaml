@@ -21,11 +21,37 @@ steps:
         # kept too. The inline cache used before only kept the final image's
         # layers, so every deployment downloaded and compiled sal's Go
         # dependencies from scratch. A first build has no cache to import;
-        # buildx warns and carries on. --push sends the image straight from
-        # the builder, so no separate push step or `images:` entry is needed.
+        # buildx warns and carries on.
+        #
+        # The image is built twice. The first build is the demo image as it is,
+        # loaded into this step's daemon so that it can be run here to build the
+        # demo project: the sample data includes a SAL module task, and running
+        # it needs a docker daemon to build and run the module's container on,
+        # which this step has and Cloud Run does not. The container is handed
+        # the daemon's socket, so the module is built and run beside it, and
+        # exits once `sal --help` returns; the project it built is copied out.
         docker buildx build \
           --progress=plain \
           --build-arg DEMO=true \
+          --cache-from "type=registry,ref=$$IMAGE:cache" \
+          --tag sal-demo-builder \
+          --load \
+          -f Dockerfile \
+          .
+        docker run --name sal-demo-project \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          sal-demo-builder --help
+        docker cp sal-demo-project:/app/demo /workspace/demo
+        docker rm sal-demo-project
+        # The second build bakes that project into the image at the path the
+        # entrypoint looks for it, so a Cloud Run instance serves it straight
+        # away. Everything but the last layer is cached from the first build.
+        # --push sends the image straight from the builder, so no separate push
+        # step or `images:` entry is needed.
+        docker buildx build \
+          --progress=plain \
+          --build-arg DEMO=baked \
+          --build-context demo=/workspace/demo \
           --cache-from "type=registry,ref=$$IMAGE:cache" \
           --cache-to "type=registry,ref=$$IMAGE:cache,mode=max,image-manifest=true,oci-mediatypes=true" \
           --tag "$$IMAGE:$COMMIT_SHA" \

@@ -2,7 +2,6 @@ package validate
 
 import (
 	"fmt"
-	"log/slog"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -286,7 +285,11 @@ func (v *Validator) validateTerms(path string, terms []UsedTermsInFile, rdfPrefi
 	vocabs := &v.vocabs
 
 	var errs MultiError
-	loggedVocabularyErrors := map[string]bool{}
+	// A vocabulary that cannot be checked at all, because its document failed
+	// to fetch or parse, fails every term used from it in the same way. That is
+	// one problem, so it is reported once, at the first use, with the other
+	// lines it affects listed, rather than once per use.
+	lookupFailures := map[string]*vocabularyLookupError{}
 	for _, term := range terms {
 		display, ok := displayTerm(term.iri, rdfPrefixes)
 		if !ok {
@@ -294,12 +297,15 @@ func (v *Validator) validateTerms(path string, terms []UsedTermsInFile, rdfPrefi
 		}
 		defined, err := vocabs.isDefined(term.iri, rdfPrefixes)
 		if err != nil {
-			logKey := term.iri + "\x00" + err.Error()
-			if !loggedVocabularyErrors[logKey] {
-				slog.Error("Failed to check vocabulary definition", "path", path, "term", term.iri, "error", err)
-				loggedVocabularyErrors[logKey] = true
+			if failure, seen := lookupFailures[err.Error()]; seen {
+				if term.line != failure.Line && !slices.Contains(failure.OtherLines, term.line) {
+					failure.OtherLines = append(failure.OtherLines, term.line)
+				}
+				continue
 			}
-			errs = append(errs, vocabularyLookupError{Path: path, Line: term.line, Term: display, Err: err})
+			failure := &vocabularyLookupError{Path: path, Line: term.line, Term: display, Err: err}
+			lookupFailures[err.Error()] = failure
+			errs = append(errs, failure)
 			continue
 		}
 		if defined {

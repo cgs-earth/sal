@@ -158,3 +158,39 @@ func TestTaskInstanceForAnInstanceWithoutConfiguration(t *testing.T) {
 		"@type": "EducationalHistoryFinder"
 	}`, instance)
 }
+
+// An RDF list, written ( ... ) in Turtle, is ordered configuration: a list of
+// sources to run in order, or the arguments of a command. It becomes a JSON
+// array in that order, nested objects and all, which is what a module's
+// @context declares a list-valued term as with @container: @list.
+func TestTaskInstanceWritesAnRDFListAsAnOrderedArray(t *testing.T) {
+	instance := taskInstanceFor(t, testInstancePrefixes+`
+		<Finder> a history:EducationalHistoryFinder ;
+			history:credentials (
+				[ history:user "zoe" ; history:label ( "--verbose" "--retries" "3" ) ]
+				[ history:user "adam" ; history:school <https://example.org/school> ]
+			) .
+	`)
+
+	require.JSONEq(t, `{
+		"@id": "https://example.test/project/Finder",
+		"@type": "EducationalHistoryFinder",
+		"credentials": [
+			{"user": "zoe", "label": ["--verbose", "--retries", "3"]},
+			{"user": "adam", "school": {"@id": "https://example.org/school"}}
+		]
+	}`, instance)
+}
+
+func TestTaskInstanceWritesAnEmptyRDFListAsAnEmptyArray(t *testing.T) {
+	instance := taskInstanceFor(t, testInstancePrefixes+`
+		<Finder> a history:EducationalHistoryFinder ;
+			history:credentials ( ) .
+	`)
+
+	require.JSONEq(t, `{
+		"@id": "https://example.test/project/Finder",
+		"@type": "EducationalHistoryFinder",
+		"credentials": []
+	}`, instance)
+}
