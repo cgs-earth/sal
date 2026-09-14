@@ -220,9 +220,12 @@ and invokes the module's run command with the task instance serialized from the 
 The newline delimited JSON the module writes to stdout is converted to triples and committed on top of the
 last build. A relative IRI in that output resolves against the project's namespace, not the module's, so a task's
 output is named as the project's own data unless the module wrote absolute IRIs.
-A `file:///` IRI object in that output names a file inside the container; `sal run` copies it into `.sal/data/blobs`
+A `file:///` IRI in that output names a file inside the container; `sal run` copies it into `.sal/data/blobs`
 under its SHA-256 digest while the task runs, rewrites the reference to `urn:sha256:{digest}`, and describes the
-copy with its file name as `rdfs:label`, its modification time as `dcterms:modified`, and its digest as `owl:versionIRI`. See [Using SAL Modules](/sal/guides/using-sal-modules/), including
+copy with its file name as `rdfs:label`, its modification time as `dcterms:modified`, its digest as `owl:versionIRI`,
+and its path under `.sal/data/blobs` as `dcterms:identifier`. A `file:///` IRI ending in a slash names a directory,
+copied whole under its own path so that it can be read in place, with the digest of its contents recorded in
+`.sal/data/blobs/prov.jsonld`. See [Using SAL Modules](/sal/guides/using-sal-modules/), including
 [Files a task produces](/sal/guides/using-sal-modules/#files-a-task-produces).
 
 `sal run` refuses to run anything unless the data product matches the sources as they stand:
@@ -530,7 +533,9 @@ It accepts the same requests and answers the same way as `/sparql`, but every tr
 A snapshot the table does not have, or a version that is not a snapshot ID at all, answers `404` saying so; the snapshot is checked on every request, so one committed while the server is running is queryable without a restart.
 A query can also name one of these endpoints in a `SERVICE` clause and subtract it with `MINUS`, which is how two snapshots are diffed in one query; see [Diffing snapshots with SERVICE and MINUS](/sal/reference/sparql-engine/#diffing-snapshots-with-service-and-minus).
 
-It also serves the vocabulary and imported ontology documents the project has pinned at `GET /blobs/{hash}`, where `{hash}` is the name a document is stored by under `.sal/data/blobs`: the SHA-256 digest of the document, or the git commit hash of the module for a `salmodule://` vocabulary. Either may be given bare or headed by the scheme its `owl:versionIRI` carries, `urn:sha256:` or `urn:git-commit-hash:`, which is stripped. A hash with no matching document answers `404`. The endpoint supports HTTP range requests, so a client can fetch part of a document without downloading the whole thing. This route is available with or without `--with-ui`; the UI's own Blobs tab, described below, is a thin form over it.
+It also serves the vocabulary and imported ontology documents the project has pinned, and the files SAL module tasks produced, at `GET /blobs/{hash}`, where `{hash}` is the name a document is stored by under `.sal/data/blobs`: the SHA-256 digest of the document, or the git commit hash of the module for a `salmodule://` vocabulary. Either may be given bare or headed by the scheme its `owl:versionIRI` carries, `urn:sha256:` or `urn:git-commit-hash:`, which is stripped. A hash with no matching document answers `404`. The endpoint supports HTTP range requests, so a client can fetch part of a document without downloading the whole thing. This route is available with or without `--with-ui`; the UI's own Blobs tab, described below, is a thin form over it.
+
+A directory a SAL module task produced sits under `.sal/data/blobs` at its own path rather than under a hash, so `GET /blobs/{path}` serves each file in it as it is, with a content type from its extension, and a STAC or Zarr client pointed at `/blobs/{path}/` reads it in place. The directory itself is served as a zip archive, either at its path with a trailing slash or at the `urn:sha256:` digest `.sal/data/blobs/prov.jsonld` records for it, and `/blobs/prov.jsonld` serves that record. A path that would step outside `.sal/data/blobs` answers `404`. With `--with-ui`, only `/blobs` itself is the Blobs tab; a browser following a link to `/blobs/{path}` gets the file.
 
 The STAC catalog `sal build` writes is served at `GET /stac/catalog.json`, which `/stac` and `/stac/` also answer with, and its collection at `GET /stac/triples/collection.json`.
 The documents are served exactly as they were written, so the collection's `iceberg:metadata_location` is a `file://` URL on the machine running the server, which a reader on that machine can pass straight to DuckDB's `iceberg_scan()`; see [STAC catalog](/sal/reference/data-layout/#stac-catalog).

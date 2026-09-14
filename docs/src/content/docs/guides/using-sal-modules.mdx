@@ -124,7 +124,7 @@ If a task emits `salmodule:Error` nodes instead of data, the run fails with the 
 
 ### Files a task produces
 
-A task can hand over files as well as triples. Any IRI object in its output written with the `file:///` scheme
+A task can hand over files as well as triples. Any IRI in its output written with the `file:///` scheme
 names a file inside the container, and `sal run` copies that file out of the container while the task is still
 running, the way `docker cp` would:
 
@@ -133,26 +133,90 @@ running, the way `docker cp` would:
 ```
 
 The copy lands in `.sal/data/blobs` named by the SHA-256 digest of its contents, so it is content addressable
-and stored once however many tasks produce it. The triple that named the file is rewritten to refer to the copy,
-and the copy is described the same way a pinned vocabulary is: its file name as `rdfs:label`, when it was
-written inside the container as `dcterms:modified`, and its digest as `owl:versionIRI`. The example above commits:
+and stored once however many tasks produce it. Every triple that named the file, as its subject or its object, is
+rewritten to refer to the copy, and the copy is described the same way a pinned vocabulary is: its file name as
+`rdfs:label`, when it was written inside the container as `dcterms:modified`, its digest as `owl:versionIRI`, and
+where it sits under `.sal/data/blobs` as `dcterms:identifier`. The example above commits:
 
 ```turtle
 <https://example.org/dataset/2024> schema:hasPart <urn:sha256:9f86d0…> .
 <urn:sha256:9f86d0…> rdfs:label "test.txt" ;
     dcterms:modified "2026-09-10T14:26:05Z"^^xsd:dateTime ;
+    dcterms:identifier "9f86d0…" ;
     owl:versionIRI <urn:sha256:9f86d0…> .
 ```
 
 [`sal serve`](/sal/reference/commands/#sal-serve) serves the copy at `/blobs/{sha256}`, the same as a pinned
 vocabulary document.
 
-Files are copied concurrently with the task writing its output, so a module must finish writing a file before
-it prints the line that names it; a file named before it is complete is copied incomplete. Each file is copied
-once: a second reference to the same path is warned about and skipped, and both references point at the same
-copy. The container is kept until every copy has finished, and the run fails if a named file does not exist
-or is a directory. A `file:///` path written as a plain string rather than an IRI object is not a file
-reference; `sal run` warns about one and discards it. After each task the log says how many files it copied.
+#### Directories
+
+Some outputs are only useful as a whole directory: a Zarr store, a STAC catalog whose `href` links name the
+files beside it. A `file:///` IRI ending in a slash names a directory, and `sal run` copies the whole directory
+out of the container instead of one file:
+
+```json
+{"@id": "https://example.org/dataset/2024", "schema:hasPart": {"@id": "file:///out/catalog/"}}
+{"@id": "file:///out/catalog/", "schema:name": "The 2024 STAC catalog"}
+```
+
+A directory is not stored by its digest, since renaming its files would break whatever reads them. It lands
+verbatim under the path it had in the container, `.sal/data/blobs/out/catalog/` here, so that a Zarr or STAC
+client pointed at that path, on disk, at `/blobs/out/catalog/` under `sal serve`, or in the bucket
+[`sal upload`](/sal/reference/commands/#sal-upload) copies `.sal/data` to, reads it with no rewriting or lookup.
+The digest is the SHA-256 of the directory's contents (one line per file, sorted by path, of the relative path,
+a NUL, and the file's own SHA-256), so a directory copied again unchanged hashes the same, and it is recorded in
+`.sal/data/blobs/prov.jsonld`, one node per copied directory in the shape `.sal/config.jsonld` records a pinned
+vocabulary in:
+
+```json
+{
+  "@context": {
+    "dcterms": "http://purl.org/dc/terms/",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#"
+  },
+  "@graph": [
+    {
+      "@id": "out/catalog/",
+      "rdfs:label": "catalog",
+      "owl:versionIRI": { "@id": "urn:sha256:3f9a…" },
+      "dcterms:modified": { "@value": "2026-09-10T14:26:05Z", "@type": "xsd:dateTime" },
+      "rdfs:comment": "Represents the directory out/catalog/ a SAL module task copied out of its container as of 2026-09-10T14:26:05Z. urn:sha256:3f9a… is the SHA-256 of its contents, and the directory is served whole as a zip archive under that digest."
+    }
+  ]
+}
+```
+
+The node's `@id` is the directory's path relative to the blob store, so it resolves against wherever
+`prov.jsonld` is read from to the directory itself. The graph refers to the directory as `urn:sha256:3f9a…`
+the same way it does a file, described with its name, modification time (the newest of any file in it), digest,
+and path, together with whatever else the task said about the `file:///` IRI:
+
+```turtle
+<https://example.org/dataset/2024> schema:hasPart <urn:sha256:3f9a…> .
+<urn:sha256:3f9a…> rdfs:label "catalog" ;
+    dcterms:modified "2026-09-10T14:26:05Z"^^xsd:dateTime ;
+    dcterms:identifier "out/catalog/" ;
+    owl:versionIRI <urn:sha256:3f9a…> ;
+    schema:name "The 2024 STAC catalog" .
+```
+
+`sal serve` serves each file in the directory at `/blobs/out/catalog/{file}` and the directory whole as a zip
+archive at `/blobs/urn:sha256:3f9a…`, resolved through `prov.jsonld`, or at `/blobs/out/catalog/`. A directory
+copied again lands at the same path and replaces the earlier copy, and its `prov.jsonld` node is replaced with it;
+the digest is what tells the versions apart, so an earlier `urn:sha256:` in the table no longer resolves once the
+path holds a newer copy.
+
+Files are copied concurrently with the task writing its output, so a module must finish writing a file, or every
+file in a directory, before it prints the line that names it; one named before it is complete is copied
+incomplete. Each path is copied once: a second reference to the same path is warned about and skipped, and both
+references point at the same copy. The container is kept until every copy has finished, and the run fails if a
+named path does not exist, if a path without a trailing slash is a directory, if a path with one is a file, or
+if a directory holds anything other than regular files and directories, such as a symbolic link. A `file:///`
+path written as a plain string rather than an IRI is not a file reference; `sal run` warns about one and
+discards it. After each task the log says how many files it copied.
 
 ## Importing a module's ontology
 

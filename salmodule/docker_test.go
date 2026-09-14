@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -96,4 +97,70 @@ func TestExtractFileFromArchiveRefusesADirectory(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "only a regular file can be copied")
+}
+
+// dockerDirectoryArchive builds the tar stream the daemon's copy endpoint
+// answers with for a directory: the directory itself first, headed by its base
+// name, then everything beneath it.
+func dockerDirectoryArchive(t *testing.T, entries ...*tar.Header) io.Reader {
+	t.Helper()
+	var buf bytes.Buffer
+	archive := tar.NewWriter(&buf)
+	for _, header := range entries {
+		content := header.PAXRecords["content"]
+		header.PAXRecords = nil
+		header.Size = int64(len(content))
+		header.ModTime = testFileModified
+		require.NoError(t, archive.WriteHeader(header))
+		_, err := io.WriteString(archive, content)
+		require.NoError(t, err)
+	}
+	require.NoError(t, archive.Close())
+	return &buf
+}
+
+func tarFile(name string, content string) *tar.Header {
+	return &tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0644, PAXRecords: map[string]string{"content": content}}
+}
+
+func tarDir(name string) *tar.Header {
+	return &tar.Header{Name: name, Typeflag: tar.TypeDir, Mode: 0755}
+}
+
+func TestWalkDirectoryArchiveVisitsEntriesRelativeToTheDirectory(t *testing.T) {
+	archive := dockerDirectoryArchive(t, tarDir("zarr_test/"), tarFile("zarr_test/a.txt", "a"), tarDir("zarr_test/sub/"), tarFile("zarr_test/sub/b.txt", "b"))
+	var visited []string
+
+	err := walkDirectoryArchive(archive, "/out/zarr_test/", func(relative string, isDir bool, modified time.Time, content io.Reader) error {
+		require.True(t, testFileModified.Equal(modified))
+		if isDir {
+			require.Nil(t, content)
+			visited = append(visited, relative+"/")
+			return nil
+		}
+		body, err := io.ReadAll(content)
+		require.NoError(t, err)
+		visited = append(visited, relative+"="+string(body))
+		return nil
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"a.txt=a", "sub/", "sub/b.txt=b"}, visited)
+}
+
+func TestWalkDirectoryArchiveRefusesAFile(t *testing.T) {
+	err := walkDirectoryArchive(dockerCopyArchive(t, "test.txt", tar.TypeReg, "hello"), "/tmp/test.txt/", func(string, bool, time.Time, io.Reader) error { return nil })
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not a directory")
+}
+
+func TestWalkDirectoryArchiveRefusesALink(t *testing.T) {
+	link := &tar.Header{Name: "out/link", Typeflag: tar.TypeSymlink, Linkname: "a.txt"}
+	archive := dockerDirectoryArchive(t, tarDir("out/"), link)
+
+	err := walkDirectoryArchive(archive, "/out/", func(string, bool, time.Time, io.Reader) error { return nil })
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "neither a regular file nor a directory")
 }

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -79,6 +80,27 @@ func (r *testContainerRunner) CopyFile(_ context.Context, path string, w io.Writ
 	}
 	_, err := io.WriteString(w, content)
 	return testFileModified, err
+}
+
+// CopyDirectory serves the fake container's files beneath path as one
+// directory copy.
+func (r *testContainerRunner) CopyDirectory(_ context.Context, path string, visit salmodule.ContainerEntryVisitor) error {
+	var paths []string
+	for containerPath := range r.containerFiles {
+		if strings.HasPrefix(containerPath, path) {
+			paths = append(paths, containerPath)
+		}
+	}
+	if len(paths) == 0 {
+		return fmt.Errorf("no such directory %s", path)
+	}
+	sort.Strings(paths)
+	for _, containerPath := range paths {
+		if err := visit(strings.TrimPrefix(containerPath, path), false, testFileModified, strings.NewReader(r.containerFiles[containerPath])); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *testContainerRunner) BuildImage(context.Context, string, string) error { return nil }
@@ -308,4 +330,44 @@ func graphHasTriple(graph *rdflibgo.Graph, subject, predicate, object string) bo
 		return true
 	})
 	return found
+}
+
+// A directory a task names with a trailing slash is copied whole under its own
+// path, so what reads it finds the layout it expects, and recorded in the blob
+// store's prov.jsonld under the digest the graph refers to it by.
+func TestMaterializeSalModulesCopiesADirectoryATaskNames(t *testing.T) {
+	graph := parseTestProject(t, testProject)
+	blobDir := filepath.Join(t.TempDir(), "blobs")
+	runner := &testContainerRunner{
+		ontology: testModuleOntology,
+		runOutput: `{"@id":"https://example.test/dataset","schema:hasPart":{"@id":"file:///out/catalog/"}}` + "\n" +
+			`{"@id":"file:///out/catalog/","schema:name":"a STAC catalog"}`,
+		containerFiles: map[string]string{
+			"/out/catalog/catalog.json": `{"links":[]}`,
+			"/out/catalog/items/a.json": `{"id":"a"}`,
+		},
+	}
+
+	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, tasksRun)
+	require.FileExists(t, filepath.Join(blobDir, "out", "catalog", "catalog.json"))
+	require.FileExists(t, filepath.Join(blobDir, "out", "catalog", "items", "a.json"))
+	provenance, err := salmodule.LoadProvenance(blobDir)
+	require.NoError(t, err)
+	var copyIRI string
+	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+		if triple.Predicate.Value() == "https://schema.org/hasPart" {
+			copyIRI = triple.Object.String()
+		}
+		return true
+	})
+	require.True(t, strings.HasPrefix(copyIRI, "urn:sha256:"), copyIRI)
+	recorded, ok := provenance.DirectoryPath(copyIRI)
+	require.True(t, ok)
+	require.Equal(t, "out/catalog/", recorded)
+	require.True(t, graphHasTriple(graph, copyIRI, "http://www.w3.org/2000/01/rdf-schema#label", "catalog"))
+	require.True(t, graphHasTriple(graph, copyIRI, "http://purl.org/dc/terms/identifier", "out/catalog/"))
+	require.True(t, graphHasTriple(graph, copyIRI, "https://schema.org/name", "a STAC catalog"))
 }

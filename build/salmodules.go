@@ -85,9 +85,11 @@ func findSalModuleTasks(graph *rdflibgo.Graph) ([]salModuleTask, error) {
 // many tasks it ran. A relative IRI a task emits resolves against the graph's
 // base, which is the project namespace, so what a module materializes is named
 // as the project's own instance data unless the module wrote absolute IRIs.
-// A file a task names with a file:/// IRI object is copied out of the
-// container into blobDir under its SHA-256 digest, and the graph refers to the
-// copy as urn:sha256:<digest> in place of the container path.
+// A file a task names with a file:/// IRI is copied out of the container
+// into blobDir under its SHA-256 digest, a directory named with a trailing
+// slash is copied whole under its own path and recorded in blobDir's
+// prov.jsonld, and the graph refers to either as urn:sha256:<digest> in place
+// of the container path.
 func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver *salmodule.Resolver, blobDir string) (int, error) {
 	tasks, err := findSalModuleTasks(graph)
 	if err != nil {
@@ -124,7 +126,7 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 		case err != nil:
 			return tasksRun, fmt.Errorf("run: %w", err)
 		}
-		if err := salmodule.LinkCopiedFiles(moduleGraph, result.Files); err != nil {
+		if err := salmodule.LinkCopiedFiles(moduleGraph, result.Files, blobDir); err != nil {
 			return tasksRun, fmt.Errorf("run: %w", err)
 		}
 
