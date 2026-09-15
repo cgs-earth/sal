@@ -18,7 +18,7 @@ const testModuleCommitHash = "abc123def456abc123def456abc123def456abc"
 const testModuleOntology = `{
 	"@context": {
 		"owl": "http://www.w3.org/2002/07/owl#",
-		"salmodule": "https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#"
+		"salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
 	},
 	"@graph": [
 		{"@id": "EducationalHistoryFinder", "@type": "owl:Class", "rdfs:subClassOf": {"@id": "salmodule:Task"}},

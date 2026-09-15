@@ -68,7 +68,7 @@ a `salmodule://[HOST/]OWNER/REPO/` prefix, which must end in a slash, and type a
 class from the module's ontology plus a task base class:
 
 ```turtle
-@prefix salmodule: <https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#> .
+@prefix salmodule: <https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#> .
 @prefix states: <salmodule://github.com/cgs-earth/python-geoconnex/> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 

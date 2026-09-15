@@ -32,7 +32,7 @@ const testModuleOntology = `{
 		"schema": "https://schema.org/",
 		"owl": "http://www.w3.org/2002/07/owl#",
 		"xsd": "http://www.w3.org/2001/XMLSchema#",
-		"salmodule": "https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#"
+		"salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
 	},
 	"@graph": [
 		{"@id": ".", "@type": "owl:Ontology"},
@@ -50,7 +50,7 @@ const testModuleOntology = `{
 const testProject = `
 	@base <https://example.test/project/> .
 	@prefix history: <salmodule://www.github.com/test/history-getter/> .
-	@prefix salmodule: <https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#> .
+	@prefix salmodule: <https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#> .
 	@prefix schema: <https://schema.org/> .
 	@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 

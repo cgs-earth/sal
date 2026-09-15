@@ -1,4 +1,4 @@
-@prefix salmodule: <https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#> .
+@prefix salmodule: <https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#> .
 @prefix dc: <http://purl.org/dc/elements/1.1/> .
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -8,7 +8,7 @@
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
 
 
-<https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#> a owl:Ontology ;
+<https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#> a owl:Ontology ;
                                                              dc:creator "Andrew Padilla" ;
                                                              dc:date "2024-06-01"^^xsd:date ;
                                                              dc:description "This is the SAL Module vocabulary for implementing the SAL Module protocol in containerized application logic orchestrated within SAL projects"@en ;
@@ -27,14 +27,14 @@
 #    Ontology properties
 #################################################################
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#baseCommand
+###  https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#baseCommand
 salmodule:baseCommand a owl:OntologyProperty ;
                       rdfs:comment "The base command for all containerized applications that adhere to the SAL Module protocol"@en ;
                       rdfs:label "Base Command"@en ;
                       skos:example "docker run SAL_MODULE_IMAGE <salmodule:baseCommand> <salmodule:ontologyCommand|salmodule:runCommand>" .
 
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#ontologyCommand
+###  https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#ontologyCommand
 salmodule:ontologyCommand a owl:OntologyProperty ;
                           rdfs:comment "Subcommand of <salmodule:baseCommand> used to invoke printing of a SAL Module's ontology to stdout in JSON-LD format."@en ;
                           rdfs:label "Ontology Command"@en ;
@@ -44,7 +44,7 @@ salmodule:ontologyCommand a owl:OntologyProperty ;
                           skos:note "invoked when user requests (dereferences) SAL Module ontology via the salmodule protocol scheme."@en .
 
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#protocolScheme
+###  https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#protocolScheme
 salmodule:protocolScheme a owl:OntologyProperty ;
                          rdfs:comment "The protocol scheme used to identify SAL Module resources."@en ;
                          rdfs:label "Protocol Scheme"@en ;
@@ -55,7 +55,7 @@ salmodule:protocolScheme a owl:OntologyProperty ;
     the base repository directory and 3) run the container using the salmodule:ontologyCommand subcommand."""@en .
 
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#runCommand
+###  https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#runCommand
 salmodule:runCommand a owl:OntologyProperty ;
                      rdfs:comment "Subcommand of <salmodule:baseCommand>. Invokes the salmodule:Task subclass instance identified by the environment variable <salmodule:taskInstanceEnvVar>."@en ;
                      rdfs:label "Run Command"@en ;
@@ -66,7 +66,7 @@ salmodule:runCommand a owl:OntologyProperty ;
                      skos:note "The environment variable <salmodule:taskInstanceEnvVar> must be set to a JSON-LD representation of the salmodule:Task subclass instance to be invoked."@en .
 
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#taskInstanceEnvVar
+###  https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#taskInstanceEnvVar
 salmodule:taskInstanceEnvVar a owl:OntologyProperty ;
                              rdfs:comment "Environment variable that identifies the instance of a salmodule:Task subclass defined in the SAL Module ontology to be invoked by the salmodule:runCommand."@en ;
                              rdfs:label "Task Instance Environment Variable"@en ;
@@ -78,7 +78,7 @@ salmodule:taskInstanceEnvVar a owl:OntologyProperty ;
 #    Datatypes
 #################################################################
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#inboundListener
+###  https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#inboundListener
 salmodule:inboundListener a rdfs:Datatype ;
                           rdfs:comment "Literal representing a [host:]<port> describing a desired inbound connection to the SAL Module"@en ;
                           rdfs:label "Inbound Listener"@en ;
@@ -87,7 +87,7 @@ salmodule:inboundListener a rdfs:Datatype ;
                           skos:note "Use this datatype on literals that describe desired inbound connections to the SAL Module."@en .
 
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#outboundEndpoint
+###  https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#outboundEndpoint
 salmodule:outboundEndpoint a rdfs:Datatype ;
                            rdfs:comment "Literal representing a URL or <host>:<port> format describing a desired outbound connection from the SAL Module"@en ;
                            rdfs:label "Outbound Endpoint"@en ;
@@ -100,7 +100,7 @@ salmodule:outboundEndpoint a rdfs:Datatype ;
 #    Annotation Properties
 #################################################################
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#stdinShape
+###  https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#stdinShape
 salmodule:stdinShape a owl:AnnotationProperty ;
                 rdfs:range sh:NodeShape ;
                 rdfs:comment "An annotation property representing the required SHACL sh:NodeShape(s) of the newline delimited JSON node input stream from stdin to a salmodule:Task within a SAL Module containerized application."@en ;
@@ -109,7 +109,7 @@ salmodule:stdinShape a owl:AnnotationProperty ;
                           "The input stream accepts newline delimited JSON objects (not JSON-LD)."@en .
 
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#stdoutShape
+###  https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#stdoutShape
 salmodule:stdoutShape a owl:AnnotationProperty ;
                  rdfs:range sh:NodeShape ;
                  rdfs:comment "An annotation property representing the required SHACL sh:NodeShape(s) of the newline delimited JSON node output stream to stdout from a salmodule:Task subclass instance within a SAL Module containerized application."@en ;
@@ -117,7 +117,7 @@ salmodule:stdoutShape a owl:AnnotationProperty ;
                  skos:note "The output stream must produce newline delimited JSON nodes that conform to the specified sh:NodeShape(s) when injected with the JSON-LD @context object defined within the salmodule's ontology."@en .
 
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#taskShape
+###  https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#taskShape
 salmodule:taskShape a owl:AnnotationProperty ;
                rdfs:range sh:NodeShape ;
                rdfs:comment "An annotation property representing the required shape of the salmodule:Task subclass instance itself."@en ;
@@ -128,7 +128,7 @@ salmodule:taskShape a owl:AnnotationProperty ;
 #    Classes
 #################################################################
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#Task
+###  https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#Task
 salmodule:Task a owl:Class ;
                rdfs:comment "A class representing an operational task within a SAL Module containerized application."@en ;
                rdfs:label "Task"@en ;
@@ -148,7 +148,7 @@ salmodule:Task a owl:Class ;
 
 
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#Error
+###  https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#Error
 salmodule:Error a owl:Class ;
                 rdfs:comment "A class representing an error condition within a salmodule:Task at runtime."@en ;
                 rdfs:label "Error"@en ;
@@ -157,7 +157,7 @@ salmodule:Error a owl:Class ;
                 skos:note "Instances of salmodule:Error represent error conditions that occur during the execution of a salmodule:Task within a SAL Module containerized application."@en .
 
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#NodeConsumer
+###  https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#NodeConsumer
 salmodule:NodeConsumer a owl:Class ;
                        owl:equivalentClass [ owl:intersectionOf ( salmodule:Task
                                                                   [ a owl:Restriction ;
@@ -171,7 +171,7 @@ salmodule:NodeConsumer a owl:Class ;
                        rdfs:label "Node Consumer"@en .
 
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#NodeProcessor
+###  https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#NodeProcessor
 salmodule:NodeProcessor a owl:Class ;
                         owl:equivalentClass [ owl:intersectionOf ( salmodule:Task
                                                                    [ a owl:Restriction ;
@@ -189,7 +189,7 @@ salmodule:NodeProcessor a owl:Class ;
                         rdfs:label "Node Processor"@en .
 
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#NodeProducer
+###  https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#NodeProducer
 salmodule:NodeProducer a owl:Class ;
                        owl:equivalentClass [ owl:intersectionOf ( salmodule:Task
                                                                   [ a owl:Restriction ;

@@ -1,5 +1,5 @@
 @prefix history: <salmodule://www.github.com/test/history-getter/> .
-@prefix sal: <https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#> .
+@prefix sal: <https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
 # Define a new term

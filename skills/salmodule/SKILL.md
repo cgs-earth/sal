@@ -48,7 +48,7 @@ Print one JSON-LD document to stdout and exit 0. Requirements:
     "owl": "http://www.w3.org/2002/07/owl#",
     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
     "xsd": "http://www.w3.org/2001/XMLSchema#",
-    "salmodule": "https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#"
+    "salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
   },
   "@graph": [
     {"@id": ".", "@type": "owl:Ontology", "rdfs:label": "Weather stations"},
