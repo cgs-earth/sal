@@ -22,7 +22,7 @@
             "rdfs:label": "SAL Run Entry Point",
             "rdfs:comment": "Represents the the SAL 'run' subcommand as a salmodule:Task.",
             "rdfs:subClassOf": "salmodule:Task",
-            "salmodule:self": {
+            "salmodule:taskShape": {
                 "@type": "sh:NodeShape",
                 "rdfs:comment": "a dummy property for example purposes. TBD what properties we want here",
                 "sh:property": [

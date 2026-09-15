@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/cgs-earth/sal/build/validate"
@@ -302,6 +303,14 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		}
 	}
 
+	// every directory a module task has ever handed over is described in the
+	// blob store's prov.jsonld; carrying its record into the graph the way a
+	// pinned vocabulary's is means a table built again from source still
+	// describes every copy the blob store holds, not only the ones this run made
+	if err := appendBlobProvenance(finalGraph); err != nil {
+		return nil, err
+	}
+
 	// every module downloaded so far, both the ones validation dereferenced for
 	// their vocabulary and the ones materialization ran, is recorded in the table
 	if err := ExportGraph(finalGraph, cfg.Format, hash, resolver.Downloaded()); err != nil {
@@ -317,6 +326,28 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 	}
 
 	return finalGraph, err
+}
+
+// appendBlobProvenance adds the record of every directory a SAL module task
+// copied into the project's blob store, as .sal/data/blobs/prov.jsonld holds
+// it, to the graph being built. RDF built outside a SAL project has no blob
+// store, so there is nothing to describe.
+func appendBlobProvenance(graph *rdflibgo.Graph) error {
+	blobDir, err := pkg.SalBlobsDir()
+	if errors.Is(err, pkg.ErrSalDirNotFound) || errors.Is(err, pkg.ErrCantMakeSalDirInHome) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	provenance, err := salmodule.LoadProvenance(blobDir)
+	if err != nil {
+		return fmt.Errorf("build: read copied directory provenance: %w", err)
+	}
+	if described := provenance.AppendProvenance(graph); described > 0 {
+		slog.Info(fmt.Sprintf("Recorded %d directories copied by SAL modules from %s as provenance", described, filepath.Join(blobDir, salmodule.ProvFile)))
+	}
+	return nil
 }
 
 // projectVocabularies opens the vocabulary versions the SAL project being built

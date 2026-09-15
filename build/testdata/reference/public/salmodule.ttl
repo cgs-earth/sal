@@ -1,4 +1,4 @@
-@prefix : <https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#> .
+@prefix salmodule: <https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#> .
 @prefix dc: <http://purl.org/dc/elements/1.1/> .
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -7,9 +7,7 @@
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
-@prefix schema: <https://schema.org/> .
-@prefix salmodule: <https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#> .
-@base <https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#> .
+
 
 <https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#> a owl:Ontology ;
                                                              dc:creator "Andrew Padilla" ;
@@ -103,28 +101,28 @@ salmodule:outboundEndpoint a rdfs:Datatype ;
 #    Annotation Properties
 #################################################################
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#input
-salmodule:input a owl:AnnotationProperty ;
+###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#stdinShape
+salmodule:stdinShape a owl:AnnotationProperty ;
                 rdfs:range sh:NodeShape ;
-                rdfs:comment "A property representing the required SHACL sh:NodeShape(s) of the newline delimited JSON node input stream from stdin to a salmodule:Task within a SAL Module containerized application."@en ;
-                rdfs:label "JSON(-LD) Node Input"@en ;
+                rdfs:comment "An annotation property representing the required SHACL sh:NodeShape(s) of the newline delimited JSON node input stream from stdin to a salmodule:Task within a SAL Module containerized application."@en ;
+                rdfs:label "JSON(-LD) Node stdin SHACL Shape"@en ;
                 skos:note "It is the responsibility of the salmodule:Task subclass implementation to inject its ontology's JSON-LD @context into the JSON input node to resolve to its vocabulary."@en ,
                           "The input stream accepts newline delimited JSON objects (not JSON-LD)."@en .
 
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#output
-salmodule:output a owl:AnnotationProperty ;
+###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#stdoutShape
+salmodule:stdoutShape a owl:AnnotationProperty ;
                  rdfs:range sh:NodeShape ;
-                 rdfs:comment "A property representing the required SHACL sh:NodeShape(s) of the newline delimited JSON node output stream to stdout from a salmodule:Task subclass instance within a SAL Module containerized application."@en ;
-                 rdfs:label "JSON(-LD) Node Output"@en ;
+                 rdfs:comment "An annotation property representing the required SHACL sh:NodeShape(s) of the newline delimited JSON node output stream to stdout from a salmodule:Task subclass instance within a SAL Module containerized application."@en ;
+                 rdfs:label "JSON(-LD) Node stdout SHACL Shape"@en ;
                  skos:note "The output stream must produce newline delimited JSON nodes that conform to the specified sh:NodeShape(s) when injected with the JSON-LD @context object defined within the salmodule's ontology."@en .
 
 
-###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#self
-salmodule:self a owl:AnnotationProperty ;
+###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#taskShape
+salmodule:taskShape a owl:AnnotationProperty ;
                rdfs:range sh:NodeShape ;
-               rdfs:comment "A property representing the required shape of the salmodule:Task subclass instance itself."@en ;
-               rdfs:label "Self"@en .
+               rdfs:comment "An annotation property representing the required shape of the salmodule:Task subclass instance itself."@en ;
+               rdfs:label "JSON(-LD) Node Task SHACL Shape"@en .
 
 
 #################################################################
@@ -142,7 +140,8 @@ salmodule:Task a owl:Class ;
                                                 sh:minCount 1 ;
                                                 sh:path rdfs:comment
                                               ] ,
-                                              [ sh:message "An rdfs:label is optional for salmodule:Error instances and can be used for display purposes"@en ;
+                                              [ sh:message "An rdfs:label is required for salmodule:Error instances"@en ;
+                                                sh:minCount 1 ;
                                                 sh:path rdfs:label
                                               ] ;
                                   sh:targetClass salmodule:Error

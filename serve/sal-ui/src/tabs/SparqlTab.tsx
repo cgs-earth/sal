@@ -184,6 +184,22 @@ WHERE {
   ?ontology dcterms:modified ?modified .
 }`,
   },
+  {
+    name: 'Pinned blobs',
+    query: `PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+# Every blob the table refers to, the same listing the Blobs tab shows:
+# a pinned vocabulary is labelled with its namespace, a file a SAL module
+# task handed over with its name, and a directory with its name and a
+# trailing slash. Paste a hash into the Blobs tab to download it.
+SELECT ?name ?hash
+WHERE {
+  ?blob owl:versionIRI ?hash .
+  ?blob rdfs:label ?name .
+}
+LIMIT 100`,
+  },
 ]
 
 /**

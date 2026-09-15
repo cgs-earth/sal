@@ -367,7 +367,7 @@ func TestMaterializeSalModulesCopiesADirectoryATaskNames(t *testing.T) {
 	recorded, ok := provenance.DirectoryPath(copyIRI)
 	require.True(t, ok)
 	require.Equal(t, "out/catalog/", recorded)
-	require.True(t, graphHasTriple(graph, copyIRI, "http://www.w3.org/2000/01/rdf-schema#label", "catalog"))
+	require.True(t, graphHasTriple(graph, copyIRI, "http://www.w3.org/2000/01/rdf-schema#label", "catalog/"))
 	require.True(t, graphHasTriple(graph, copyIRI, "http://purl.org/dc/terms/identifier", "out/catalog/"))
 	require.True(t, graphHasTriple(graph, copyIRI, "https://schema.org/name", "a STAC catalog"))
 }

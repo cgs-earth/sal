@@ -655,6 +655,67 @@ kbd {
   color: var(--teal);
 }
 
+/* The listing is a native disclosure: a details element cannot be laid out as a
+   flex column the way a panel is, so it is a block with the panel's frame and
+   its summary wears the panel header. */
+.blob-list {
+  display: block;
+}
+
+.blob-list-summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.blob-list-summary::-webkit-details-marker {
+  display: none;
+}
+
+.blob-list-summary h3::before {
+  display: inline-block;
+  width: 1em;
+  color: var(--overlay1);
+  content: '▸';
+  transition: transform 120ms ease;
+}
+
+.blob-list[open] > .blob-list-summary h3::before {
+  transform: rotate(90deg);
+}
+
+.blob-list-summary:hover h3 {
+  color: var(--blue);
+}
+
+.blob-list-summary:focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: -2px;
+}
+
+.blob-list-hint {
+  padding-top: 12px;
+}
+
+.blob-list-hint a {
+  color: var(--sky);
+}
+
+.blob-list-scroll {
+  max-height: 420px;
+}
+
+.blob-list .result-table td.blob-load {
+  width: 1%;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+.blob-list .result-table td.blob-load .button {
+  padding: 2px 10px;
+  font-size: 12px;
+}
+
 /* the digest is the heading, so it keeps its case and wraps rather than overflowing */
 .blob-view-header > div {
   display: flex;

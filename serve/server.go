@@ -36,7 +36,13 @@ type UIRunner interface {
 	salsparql.SQLRunner
 	salsparql.SQLTranslator
 	salsparql.StatsRunner
+	salsparql.BlobRunner
 }
+
+// defaultBlobListing is how many blobs /api/blobs lists when the request does
+// not say; the Blobs tab shows this many and points at the query tabs for the
+// rest.
+const defaultBlobListing = 100
 
 // Serve starts a read-only SPARQL Protocol HTTP endpoint backed by DuckDB, plus
 // the /blobs endpoint serving the vocabulary and imported ontology documents
@@ -109,6 +115,7 @@ func NewEndpointWithUI(runner UIRunner, blobDir string, stacDir string) (http.Ha
 	mux.Handle("/api/sql", sqlHandler{runner: runner})
 	mux.Handle("/api/sparql/translate", translateHandler{translator: runner})
 	mux.Handle("/api/stats", statsHandler{runner: runner})
+	mux.Handle("/api/blobs", blobListHandler{runner: runner})
 	mux.Handle("/api/salmodule", salmoduleHandler{inspect: salmodule.Inspect})
 	// The tab is /blobs alone; a path beneath it names a blob, and a browser
 	// following a link to a file in a copied directory wants that file rather
@@ -548,6 +555,34 @@ func (h statsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, stats)
+}
+
+// blobListHandler answers GET /api/blobs?limit=N with the first N blobs the
+// table refers to, every pinned vocabulary and every file or directory a SAL
+// module task handed over, so that the Blobs tab can offer them without the
+// user having to know a hash. The limit is capped at maxUIRows like the other
+// listings; a caller that wants more runs the listing's SQL itself.
+type blobListHandler struct {
+	runner salsparql.BlobRunner
+}
+
+func (h blobListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "the blob listing endpoint only supports GET requests", http.StatusMethodNotAllowed)
+		return
+	}
+	limit := intQueryParam(r, "limit", defaultBlobListing)
+	if limit < 1 {
+		limit = defaultBlobListing
+	}
+	limit = min(limit, maxUIRows)
+	listing, err := h.runner.Blobs(r.Context(), limit)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, listing)
 }
 
 func writeJSON(w http.ResponseWriter, body any) {

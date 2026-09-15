@@ -252,7 +252,7 @@ func TestRunTaskCopiesADirectoryVerbatimUnderItsOwnPath(t *testing.T) {
 	require.Equal(t, []CopiedFile{{
 		ContainerPath: "/out/zarr_test/",
 		Directory:     true,
-		Name:          "zarr_test",
+		Name:          "zarr_test/",
 		Modified:      testFileModified,
 		Digest:        testTreeDigest(t, map[string]string{"a.txt": "a", "sub/b.txt": "b"}),
 		BlobPath:      "out/zarr_test/",
@@ -329,7 +329,7 @@ func TestLinkCopiedFilesRewritesAFileSubjectAndKeepsItsProperties(t *testing.T) 
 	`)
 	blobDir := t.TempDir()
 	digest := testTreeDigest(t, map[string]string{"a.txt": "a"})
-	dir := CopiedFile{ContainerPath: "/out/zarr_test/", Directory: true, Name: "zarr_test", Modified: testFileModified, Digest: digest, BlobPath: "out/zarr_test/", Path: filepath.Join(blobDir, "out", "zarr_test")}
+	dir := CopiedFile{ContainerPath: "/out/zarr_test/", Directory: true, Name: "zarr_test/", Modified: testFileModified, Digest: digest, BlobPath: "out/zarr_test/", Path: filepath.Join(blobDir, "out", "zarr_test")}
 
 	require.NoError(t, LinkCopiedFiles(graph, []CopiedFile{dir}, blobDir))
 
@@ -337,7 +337,7 @@ func TestLinkCopiedFilesRewritesAFileSubjectAndKeepsItsProperties(t *testing.T) 
 	require.ElementsMatch(t, []string{
 		"https://example.test/project/dataset https://schema.org/hasPart " + copyIRI,
 		copyIRI + ` https://schema.org/name "Test zarr project"`,
-		copyIRI + ` http://www.w3.org/2000/01/rdf-schema#label "zarr_test"`,
+		copyIRI + ` http://www.w3.org/2000/01/rdf-schema#label "zarr_test/"`,
 		copyIRI + ` http://purl.org/dc/terms/modified "2026-09-10T14:26:05Z"`,
 		copyIRI + ` http://purl.org/dc/terms/identifier "out/zarr_test/"`,
 		copyIRI + " http://www.w3.org/2002/07/owl#versionIRI " + copyIRI,
@@ -368,7 +368,7 @@ func TestLinkCopiedFilesRecordsADirectoryInProvenance(t *testing.T) {
 	`)
 	blobDir := t.TempDir()
 	digest := testTreeDigest(t, map[string]string{"a.txt": "a"})
-	dir := CopiedFile{ContainerPath: "/zarr_test/", Directory: true, Name: "zarr_test", Modified: testFileModified, Digest: digest, BlobPath: "zarr_test/", Path: filepath.Join(blobDir, "zarr_test")}
+	dir := CopiedFile{ContainerPath: "/zarr_test/", Directory: true, Name: "zarr_test/", Modified: testFileModified, Digest: digest, BlobPath: "zarr_test/", Path: filepath.Join(blobDir, "zarr_test")}
 
 	require.NoError(t, LinkCopiedFiles(graph, []CopiedFile{dir}, blobDir))
 
@@ -383,7 +383,7 @@ func TestLinkCopiedFilesRecordsADirectoryInProvenance(t *testing.T) {
 		},
 		"@graph": [{
 			"@id": "zarr_test/",
-			"rdfs:label": "zarr_test",
+			"rdfs:label": "zarr_test/",
 			"owl:versionIRI": {"@id": "urn:sha256:`+digest+`"},
 			"dcterms:modified": {"@value": "2026-09-10T14:26:05Z", "@type": "xsd:dateTime"},
 			"rdfs:comment": "Represents the directory zarr_test/ a SAL module task copied out of its container as of 2026-09-10T14:26:05Z. urn:sha256:`+digest+` is the SHA-256 of its contents, and the directory is served whole as a zip archive under that digest."
@@ -417,8 +417,8 @@ func TestLinkCopiedFilesWritesNoProvenanceForFilesAlone(t *testing.T) {
 // second one, and other directories' records are kept.
 func TestRecordDirectoriesReplacesTheRecordAtTheSamePath(t *testing.T) {
 	blobDir := t.TempDir()
-	first := CopiedFile{Directory: true, Name: "zarr_test", Modified: testFileModified, Digest: "1111", BlobPath: "zarr_test/"}
-	other := CopiedFile{Directory: true, Name: "stac", Modified: testFileModified, Digest: "2222", BlobPath: "stac/"}
+	first := CopiedFile{Directory: true, Name: "zarr_test/", Modified: testFileModified, Digest: "1111", BlobPath: "zarr_test/"}
+	other := CopiedFile{Directory: true, Name: "stac/", Modified: testFileModified, Digest: "2222", BlobPath: "stac/"}
 	require.NoError(t, recordDirectories(blobDir, []CopiedFile{first, other}))
 	second := first
 	second.Digest = "3333"
@@ -446,10 +446,57 @@ func TestLinkCopiedFilesDiscardsAnUnreferencedDirectory(t *testing.T) {
 	blobDir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(blobDir, "zarr_test"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(blobDir, "zarr_test", "a.txt"), []byte("a"), 0644))
-	dir := CopiedFile{ContainerPath: "/zarr_test/", Directory: true, Name: "zarr_test", Digest: "1111", BlobPath: "zarr_test/", Path: filepath.Join(blobDir, "zarr_test")}
+	dir := CopiedFile{ContainerPath: "/zarr_test/", Directory: true, Name: "zarr_test/", Digest: "1111", BlobPath: "zarr_test/", Path: filepath.Join(blobDir, "zarr_test")}
 
 	require.NoError(t, LinkCopiedFiles(graph, []CopiedFile{dir}, blobDir))
 
 	require.NoDirExists(t, filepath.Join(blobDir, "zarr_test"))
 	require.NoFileExists(t, filepath.Join(blobDir, ProvFile))
+}
+
+// A directory's record in prov.jsonld describes it in a graph the same way
+// LinkCopiedFiles did when it was copied, with the record's comment as well,
+// so a table built again from source still describes the copy.
+func TestProvenanceAppendProvenanceDescribesEveryRecordedDirectory(t *testing.T) {
+	blobDir := t.TempDir()
+	dir := CopiedFile{Directory: true, Name: "catalog/", Modified: testFileModified, Digest: "1111", BlobPath: "out/catalog/"}
+	require.NoError(t, recordDirectories(blobDir, []CopiedFile{dir}))
+	provenance, err := LoadProvenance(blobDir)
+	require.NoError(t, err)
+	graph := rdflibgo.NewGraph()
+
+	require.Equal(t, 1, provenance.AppendProvenance(graph))
+
+	subject := rdflibgo.NewURIRefUnsafe("urn:sha256:1111")
+	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(owlVersionIRI), subject))
+	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(rdfsLabelIRI), rdflibgo.NewLiteral("catalog/")))
+	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(dctermsIdentifierIRI), rdflibgo.NewLiteral("out/catalog/")))
+	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(dctermsModifiedIRI), rdflibgo.NewLiteral("2026-09-10T14:26:05Z", rdflibgo.WithDatatype(rdflibgo.XSDDateTime))))
+	require.Contains(t, graphTriples(graph), `urn:sha256:1111 `+rdfsCommentIRI+` "Represents the directory out/catalog/ a SAL module task copied out of its container as of 2026-09-10T14:26:05Z. urn:sha256:1111 is the SHA-256 of its contents, and the directory is served whole as a zip archive under that digest."`)
+	require.Len(t, graphTriples(graph), 5)
+}
+
+// Appending the record of a directory the graph already describes, because
+// this run copied it, adds only the statements the graph lacks.
+func TestProvenanceAppendProvenanceAddsNothingTwice(t *testing.T) {
+	blobDir := t.TempDir()
+	dir := CopiedFile{Directory: true, Name: "catalog/", Modified: testFileModified, Digest: "1111", BlobPath: "out/catalog/"}
+	require.NoError(t, recordDirectories(blobDir, []CopiedFile{dir}))
+	provenance, err := LoadProvenance(blobDir)
+	require.NoError(t, err)
+	graph := rdflibgo.NewGraph()
+	provenance.AppendProvenance(graph)
+
+	provenance.AppendProvenance(graph)
+
+	require.Len(t, graphTriples(graph), 5)
+}
+
+func TestProvenanceAppendProvenanceIsEmptyWithoutAProvFile(t *testing.T) {
+	provenance, err := LoadProvenance(t.TempDir())
+	require.NoError(t, err)
+	graph := rdflibgo.NewGraph()
+
+	require.Zero(t, provenance.AppendProvenance(graph))
+	require.Empty(t, graphTriples(graph))
 }
