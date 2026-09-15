@@ -41,7 +41,7 @@ jobs:
       - name: Build the ontology docs
         uses: cgs-earth/onto-to-pages@main
         with:
-          input_dir: ./build/testdata/reference/public
+          input_dir: ./specs
           output_dir: ./sal-gha
           deploy: false
 
