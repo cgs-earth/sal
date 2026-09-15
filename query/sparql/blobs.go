@@ -10,13 +10,13 @@ import (
 // owl:versionIRI is a urn:sha256: or urn:git-commit-hash: name, which is how
 // build records a pinned vocabulary, and how a file or directory a SAL module
 // task handed over is named once it is copied into the blob store. Every such
-// name is what GET /blobs/{hash} serves. The file/directory column is the
-// subject's rdfs:label, the namespace of a vocabulary or the name of a copied
-// file, ending in a slash for a copied directory, and the subject itself when
-// it has none. A subject pinned at several versions
+// name is what GET /blobs/{hash} serves. The iri column is the subject's
+// rdfs:label, the IRI the blob was known by before it was pinned: a
+// vocabulary's namespace, or the file:/// IRI a task named a copied file or
+// directory with, and the subject itself when it has no label. A subject pinned at several versions
 // over the table's history lists once per version, since each is a blob.
 const blobsSQL = `SELECT
-	COALESCE(MIN(%[1]s), version.subject) AS "file/directory",
+	COALESCE(MIN(%[1]s), version.subject) AS iri,
 	version.object_iri AS hash
 FROM triples AS version
 LEFT JOIN triples AS label
@@ -25,7 +25,7 @@ LEFT JOIN triples AS label
 WHERE version.predicate = 'http://www.w3.org/2002/07/owl#versionIRI'
 	AND (version.object_iri LIKE 'urn:sha256:%%' OR version.object_iri LIKE 'urn:git-commit-hash:%%')
 GROUP BY version.subject, version.object_iri
-ORDER BY "file/directory", hash
+ORDER BY iri, hash
 LIMIT %[2]d`
 
 // BlobsSQL is the DuckDB statement listing the first limit blobs the table
@@ -37,10 +37,10 @@ func BlobsSQL(limit int) string {
 
 // Blob is one blob the table refers to, as the Blobs tab lists it.
 type Blob struct {
-	// File is what the blob is known as: a vocabulary's namespace, or the name
-	// of a file or directory a SAL module task handed over, ending in a slash
-	// for a directory. It is the listing's file/directory column.
-	File string `json:"file"`
+	// IRI is what the blob was known by before it was pinned: a vocabulary's
+	// namespace, or the file:/// IRI a SAL module task named a copied file or
+	// directory with.
+	IRI string `json:"iri"`
 	// Hash is the owl:versionIRI naming the blob, urn:sha256:<digest> or
 	// urn:git-commit-hash:<commit>, which /blobs/{hash} resolves.
 	Hash string `json:"hash"`
@@ -76,9 +76,9 @@ func (r DuckDBRunner) Blobs(ctx context.Context, limit int) (BlobListing, error)
 			break
 		}
 		if len(row) < 2 {
-			return BlobListing{}, fmt.Errorf("blob listing returned %d columns rather than file/directory and hash", len(row))
+			return BlobListing{}, fmt.Errorf("blob listing returned %d columns rather than iri and hash", len(row))
 		}
-		listing.Blobs = append(listing.Blobs, Blob{File: strings.TrimSpace(row[0]), Hash: strings.TrimSpace(row[1])})
+		listing.Blobs = append(listing.Blobs, Blob{IRI: strings.TrimSpace(row[0]), Hash: strings.TrimSpace(row[1])})
 	}
 	return listing, nil
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -42,7 +43,6 @@ func TestRunTaskCopiesFilesTheOutputNamesIntoTheBlobStore(t *testing.T) {
 	require.Equal(t, runner.runOutput, string(result.Output))
 	require.Equal(t, []CopiedFile{{
 		ContainerPath: "/tmp/test.txt",
-		Name:          "test.txt",
 		Modified:      testFileModified,
 		Digest:        testFileDigest(),
 		BlobPath:      testFileDigest(),
@@ -84,8 +84,8 @@ func TestRunTaskCopiesEveryDistinctFile(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, result.Files, 2)
-	require.Equal(t, "a.txt", result.Files[0].Name)
-	require.Equal(t, "b.txt", result.Files[1].Name)
+	require.Equal(t, "a.txt", filepath.Base(result.Files[0].ContainerPath))
+	require.Equal(t, "b.txt", filepath.Base(result.Files[1].ContainerPath))
 	require.NotEqual(t, result.Files[0].Digest, result.Files[1].Digest)
 }
 
@@ -151,6 +151,13 @@ func TestContainerFilePathRejectsAFileIRIWithAHost(t *testing.T) {
 	require.Contains(t, err.Error(), "file:///absolute/path")
 }
 
+// linkTestFiles is LinkCopiedFiles for a test that only cares that it succeeds.
+func linkTestFiles(t *testing.T, graph *rdflibgo.Graph, files []CopiedFile, blobDir string) {
+	t.Helper()
+	_, err := LinkCopiedFiles(graph, files, blobDir)
+	require.NoError(t, err)
+}
+
 func parseTestTurtle(t *testing.T, content string) *rdflibgo.Graph {
 	t.Helper()
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase("https://example.test/project/"))
@@ -176,15 +183,15 @@ func TestLinkCopiedFilesRewritesFileObjectsAndRecordsTheirNames(t *testing.T) {
 		@prefix schema: <https://schema.org/> .
 		<dataset> schema:hasPart <file:///tmp/test.txt> ; schema:name "a dataset" .
 	`)
-	file := CopiedFile{ContainerPath: "/tmp/test.txt", Name: "test.txt", Modified: testFileModified, Digest: testFileDigest(), BlobPath: testFileDigest(), Path: filepath.Join(t.TempDir(), testFileDigest())}
+	file := CopiedFile{ContainerPath: "/tmp/test.txt", Modified: testFileModified, Digest: testFileDigest(), BlobPath: testFileDigest(), Path: filepath.Join(t.TempDir(), testFileDigest())}
 
-	require.NoError(t, LinkCopiedFiles(graph, []CopiedFile{file}, t.TempDir()))
+	linkTestFiles(t, graph, []CopiedFile{file}, t.TempDir())
 
 	copyIRI := "urn:sha256:" + testFileDigest()
 	require.ElementsMatch(t, []string{
 		"https://example.test/project/dataset https://schema.org/hasPart " + copyIRI,
 		`https://example.test/project/dataset https://schema.org/name "a dataset"`,
-		copyIRI + ` http://www.w3.org/2000/01/rdf-schema#label "test.txt"`,
+		copyIRI + ` http://www.w3.org/2000/01/rdf-schema#label "file:///tmp/test.txt"`,
 		copyIRI + ` http://purl.org/dc/terms/modified "2026-09-10T14:26:05Z"`,
 		copyIRI + ` http://purl.org/dc/terms/identifier "` + testFileDigest() + `"`,
 		copyIRI + " http://www.w3.org/2002/07/owl#versionIRI " + copyIRI,
@@ -201,9 +208,9 @@ func TestLinkCopiedFilesDiscardsACopyNothingRefersToAsAnObject(t *testing.T) {
 	`)
 	path := filepath.Join(t.TempDir(), testFileDigest())
 	require.NoError(t, os.WriteFile(path, []byte(testFileContent), 0644))
-	file := CopiedFile{ContainerPath: "/tmp/test.txt", Name: "test.txt", Digest: testFileDigest(), Path: path}
+	file := CopiedFile{ContainerPath: "/tmp/test.txt", Digest: testFileDigest(), Path: path}
 
-	require.NoError(t, LinkCopiedFiles(graph, []CopiedFile{file}, filepath.Dir(path)))
+	linkTestFiles(t, graph, []CopiedFile{file}, filepath.Dir(path))
 
 	require.NoFileExists(t, path)
 	require.Equal(t, []string{`https://example.test/project/dataset https://schema.org/url "file:///tmp/test.txt"`}, graphTriples(graph))
@@ -215,7 +222,7 @@ func TestLinkCopiedFilesRejectsAFileObjectThatWasNotCopied(t *testing.T) {
 		<dataset> schema:hasPart <file://host/tmp/test.txt> .
 	`)
 
-	err := LinkCopiedFiles(graph, nil, t.TempDir())
+	_, err := LinkCopiedFiles(graph, nil, t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "file://host/tmp/test.txt")
@@ -252,7 +259,6 @@ func TestRunTaskCopiesADirectoryVerbatimUnderItsOwnPath(t *testing.T) {
 	require.Equal(t, []CopiedFile{{
 		ContainerPath: "/out/zarr_test/",
 		Directory:     true,
-		Name:          "zarr_test/",
 		Modified:      testFileModified,
 		Digest:        testTreeDigest(t, map[string]string{"a.txt": "a", "sub/b.txt": "b"}),
 		BlobPath:      "out/zarr_test/",
@@ -329,15 +335,15 @@ func TestLinkCopiedFilesRewritesAFileSubjectAndKeepsItsProperties(t *testing.T) 
 	`)
 	blobDir := t.TempDir()
 	digest := testTreeDigest(t, map[string]string{"a.txt": "a"})
-	dir := CopiedFile{ContainerPath: "/out/zarr_test/", Directory: true, Name: "zarr_test/", Modified: testFileModified, Digest: digest, BlobPath: "out/zarr_test/", Path: filepath.Join(blobDir, "out", "zarr_test")}
+	dir := CopiedFile{ContainerPath: "/out/zarr_test/", Directory: true, Modified: testFileModified, Digest: digest, BlobPath: "out/zarr_test/", Path: filepath.Join(blobDir, "out", "zarr_test")}
 
-	require.NoError(t, LinkCopiedFiles(graph, []CopiedFile{dir}, blobDir))
+	linkTestFiles(t, graph, []CopiedFile{dir}, blobDir)
 
 	copyIRI := "urn:sha256:" + digest
 	require.ElementsMatch(t, []string{
 		"https://example.test/project/dataset https://schema.org/hasPart " + copyIRI,
 		copyIRI + ` https://schema.org/name "Test zarr project"`,
-		copyIRI + ` http://www.w3.org/2000/01/rdf-schema#label "zarr_test/"`,
+		copyIRI + ` http://www.w3.org/2000/01/rdf-schema#label "file:///out/zarr_test/"`,
 		copyIRI + ` http://purl.org/dc/terms/modified "2026-09-10T14:26:05Z"`,
 		copyIRI + ` http://purl.org/dc/terms/identifier "out/zarr_test/"`,
 		copyIRI + " http://www.w3.org/2002/07/owl#versionIRI " + copyIRI,
@@ -353,9 +359,9 @@ func TestLinkCopiedFilesCountsASubjectAsAReference(t *testing.T) {
 	`)
 	path := filepath.Join(t.TempDir(), testFileDigest())
 	require.NoError(t, os.WriteFile(path, []byte(testFileContent), 0644))
-	file := CopiedFile{ContainerPath: "/tmp/test.txt", Name: "test.txt", Digest: testFileDigest(), BlobPath: testFileDigest(), Path: path}
+	file := CopiedFile{ContainerPath: "/tmp/test.txt", Digest: testFileDigest(), BlobPath: testFileDigest(), Path: path}
 
-	require.NoError(t, LinkCopiedFiles(graph, []CopiedFile{file}, filepath.Dir(path)))
+	linkTestFiles(t, graph, []CopiedFile{file}, filepath.Dir(path))
 
 	require.FileExists(t, path)
 	require.Contains(t, graphTriples(graph), "urn:sha256:"+testFileDigest()+` https://schema.org/name "described but not linked"`)
@@ -368,9 +374,9 @@ func TestLinkCopiedFilesRecordsADirectoryInProvenance(t *testing.T) {
 	`)
 	blobDir := t.TempDir()
 	digest := testTreeDigest(t, map[string]string{"a.txt": "a"})
-	dir := CopiedFile{ContainerPath: "/zarr_test/", Directory: true, Name: "zarr_test/", Modified: testFileModified, Digest: digest, BlobPath: "zarr_test/", Path: filepath.Join(blobDir, "zarr_test")}
+	dir := CopiedFile{ContainerPath: "/zarr_test/", Directory: true, Modified: testFileModified, Digest: digest, BlobPath: "zarr_test/", Path: filepath.Join(blobDir, "zarr_test")}
 
-	require.NoError(t, LinkCopiedFiles(graph, []CopiedFile{dir}, blobDir))
+	linkTestFiles(t, graph, []CopiedFile{dir}, blobDir)
 
 	content, err := os.ReadFile(filepath.Join(blobDir, ProvFile))
 	require.NoError(t, err)
@@ -382,8 +388,8 @@ func TestLinkCopiedFilesRecordsADirectoryInProvenance(t *testing.T) {
 			"xsd": "http://www.w3.org/2001/XMLSchema#"
 		},
 		"@graph": [{
-			"@id": "zarr_test/",
-			"rdfs:label": "zarr_test/",
+			"@id": "file:///zarr_test/",
+			"rdfs:label": "file:///zarr_test/",
 			"owl:versionIRI": {"@id": "urn:sha256:`+digest+`"},
 			"dcterms:modified": {"@value": "2026-09-10T14:26:05Z", "@type": "xsd:dateTime"},
 			"rdfs:comment": "Represents the directory zarr_test/ a SAL module task copied out of its container as of 2026-09-10T14:26:05Z. urn:sha256:`+digest+` is the SHA-256 of its contents, and the directory is served whole as a zip archive under that digest."
@@ -406,9 +412,9 @@ func TestLinkCopiedFilesWritesNoProvenanceForFilesAlone(t *testing.T) {
 		<dataset> schema:hasPart <file:///tmp/test.txt> .
 	`)
 	blobDir := t.TempDir()
-	file := CopiedFile{ContainerPath: "/tmp/test.txt", Name: "test.txt", Digest: testFileDigest(), BlobPath: testFileDigest(), Path: filepath.Join(blobDir, testFileDigest())}
+	file := CopiedFile{ContainerPath: "/tmp/test.txt", Digest: testFileDigest(), BlobPath: testFileDigest(), Path: filepath.Join(blobDir, testFileDigest())}
 
-	require.NoError(t, LinkCopiedFiles(graph, []CopiedFile{file}, blobDir))
+	linkTestFiles(t, graph, []CopiedFile{file}, blobDir)
 
 	require.NoFileExists(t, filepath.Join(blobDir, ProvFile))
 }
@@ -417,8 +423,8 @@ func TestLinkCopiedFilesWritesNoProvenanceForFilesAlone(t *testing.T) {
 // second one, and other directories' records are kept.
 func TestRecordDirectoriesReplacesTheRecordAtTheSamePath(t *testing.T) {
 	blobDir := t.TempDir()
-	first := CopiedFile{Directory: true, Name: "zarr_test/", Modified: testFileModified, Digest: "1111", BlobPath: "zarr_test/"}
-	other := CopiedFile{Directory: true, Name: "stac/", Modified: testFileModified, Digest: "2222", BlobPath: "stac/"}
+	first := CopiedFile{ContainerPath: "/zarr_test/", Directory: true, Modified: testFileModified, Digest: "1111", BlobPath: "zarr_test/"}
+	other := CopiedFile{ContainerPath: "/stac/", Directory: true, Modified: testFileModified, Digest: "2222", BlobPath: "stac/"}
 	require.NoError(t, recordDirectories(blobDir, []CopiedFile{first, other}))
 	second := first
 	second.Digest = "3333"
@@ -446,9 +452,9 @@ func TestLinkCopiedFilesDiscardsAnUnreferencedDirectory(t *testing.T) {
 	blobDir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(blobDir, "zarr_test"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(blobDir, "zarr_test", "a.txt"), []byte("a"), 0644))
-	dir := CopiedFile{ContainerPath: "/zarr_test/", Directory: true, Name: "zarr_test/", Digest: "1111", BlobPath: "zarr_test/", Path: filepath.Join(blobDir, "zarr_test")}
+	dir := CopiedFile{ContainerPath: "/zarr_test/", Directory: true, Digest: "1111", BlobPath: "zarr_test/", Path: filepath.Join(blobDir, "zarr_test")}
 
-	require.NoError(t, LinkCopiedFiles(graph, []CopiedFile{dir}, blobDir))
+	linkTestFiles(t, graph, []CopiedFile{dir}, blobDir)
 
 	require.NoDirExists(t, filepath.Join(blobDir, "zarr_test"))
 	require.NoFileExists(t, filepath.Join(blobDir, ProvFile))
@@ -459,7 +465,7 @@ func TestLinkCopiedFilesDiscardsAnUnreferencedDirectory(t *testing.T) {
 // so a table built again from source still describes the copy.
 func TestProvenanceAppendProvenanceDescribesEveryRecordedDirectory(t *testing.T) {
 	blobDir := t.TempDir()
-	dir := CopiedFile{Directory: true, Name: "catalog/", Modified: testFileModified, Digest: "1111", BlobPath: "out/catalog/"}
+	dir := CopiedFile{ContainerPath: "/out/catalog/", Directory: true, Modified: testFileModified, Digest: "1111", BlobPath: "out/catalog/"}
 	require.NoError(t, recordDirectories(blobDir, []CopiedFile{dir}))
 	provenance, err := LoadProvenance(blobDir)
 	require.NoError(t, err)
@@ -469,7 +475,7 @@ func TestProvenanceAppendProvenanceDescribesEveryRecordedDirectory(t *testing.T)
 
 	subject := rdflibgo.NewURIRefUnsafe("urn:sha256:1111")
 	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(owlVersionIRI), subject))
-	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(rdfsLabelIRI), rdflibgo.NewLiteral("catalog/")))
+	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(rdfsLabelIRI), rdflibgo.NewLiteral("file:///out/catalog/")))
 	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(dctermsIdentifierIRI), rdflibgo.NewLiteral("out/catalog/")))
 	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(dctermsModifiedIRI), rdflibgo.NewLiteral("2026-09-10T14:26:05Z", rdflibgo.WithDatatype(rdflibgo.XSDDateTime))))
 	require.Contains(t, graphTriples(graph), `urn:sha256:1111 `+rdfsCommentIRI+` "Represents the directory out/catalog/ a SAL module task copied out of its container as of 2026-09-10T14:26:05Z. urn:sha256:1111 is the SHA-256 of its contents, and the directory is served whole as a zip archive under that digest."`)
@@ -480,7 +486,7 @@ func TestProvenanceAppendProvenanceDescribesEveryRecordedDirectory(t *testing.T)
 // this run copied it, adds only the statements the graph lacks.
 func TestProvenanceAppendProvenanceAddsNothingTwice(t *testing.T) {
 	blobDir := t.TempDir()
-	dir := CopiedFile{Directory: true, Name: "catalog/", Modified: testFileModified, Digest: "1111", BlobPath: "out/catalog/"}
+	dir := CopiedFile{ContainerPath: "/out/catalog/", Directory: true, Modified: testFileModified, Digest: "1111", BlobPath: "out/catalog/"}
 	require.NoError(t, recordDirectories(blobDir, []CopiedFile{dir}))
 	provenance, err := LoadProvenance(blobDir)
 	require.NoError(t, err)
@@ -499,4 +505,152 @@ func TestProvenanceAppendProvenanceIsEmptyWithoutAProvFile(t *testing.T) {
 
 	require.Zero(t, provenance.AppendProvenance(graph))
 	require.Empty(t, graphTriples(graph))
+}
+
+// A prov.jsonld written before the @id carried the file:/// scheme names the
+// directory by its blob path alone, and still resolves.
+func TestDirectoryPathReadsARecordWithoutTheFileScheme(t *testing.T) {
+	blobDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(blobDir, ProvFile), []byte(`{"@context": {}, "@graph": [{"@id": "out/catalog/", "owl:versionIRI": {"@id": "urn:sha256:1111"}}]}`), 0644))
+	provenance, err := LoadProvenance(blobDir)
+	require.NoError(t, err)
+
+	path, ok := provenance.DirectoryPath("1111")
+
+	require.True(t, ok)
+	require.Equal(t, "out/catalog/", path)
+}
+
+// seedCopiedDirectory puts a directory on disk under blobDir and records it in
+// prov.jsonld the way a run does, standing in for a copy an earlier run made.
+func seedCopiedDirectory(t *testing.T, blobDir string, containerPath string, digest string) CopiedFile {
+	t.Helper()
+	blobPath := strings.TrimPrefix(containerPath, "/")
+	dir := CopiedFile{ContainerPath: containerPath, Directory: true, Modified: testFileModified, Digest: digest, BlobPath: blobPath, Path: filepath.Join(blobDir, filepath.FromSlash(strings.TrimSuffix(blobPath, "/")))}
+	require.NoError(t, os.MkdirAll(dir.Path, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir.Path, "a.txt"), []byte("a"), 0644))
+	require.NoError(t, recordDirectories(blobDir, []CopiedFile{dir}))
+	return dir
+}
+
+func TestLinkCopiedFilesReturnsTheCopiesItKept(t *testing.T) {
+	graph := parseTestTurtle(t, `
+		@prefix schema: <https://schema.org/> .
+		<dataset> schema:hasPart <file:///tmp/test.txt> ;
+			schema:url "file:///tmp/dropped.txt" .
+	`)
+	blobDir := t.TempDir()
+	referenced := CopiedFile{ContainerPath: "/tmp/test.txt", Digest: testFileDigest(), BlobPath: testFileDigest(), Path: filepath.Join(blobDir, testFileDigest())}
+	dropped := CopiedFile{ContainerPath: "/tmp/dropped.txt", Digest: "2222", BlobPath: "2222", Path: filepath.Join(blobDir, "2222")}
+
+	kept, err := LinkCopiedFiles(graph, []CopiedFile{referenced, dropped}, blobDir)
+
+	require.NoError(t, err)
+	require.Equal(t, []CopiedFile{referenced}, kept)
+}
+
+// A directory an earlier run copied that the latest run did not produce is
+// removed from prov.jsonld and from disk, so the file describes what the most
+// recent run left on disk and nothing else.
+func TestPruneProvenanceRemovesDirectoriesTheRunDidNotProduce(t *testing.T) {
+	blobDir := t.TempDir()
+	stale := seedCopiedDirectory(t, blobDir, "/out/old/", "1111")
+	current := seedCopiedDirectory(t, blobDir, "/out/catalog/", "2222")
+
+	removed, err := PruneProvenance(blobDir, []CopiedFile{current})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"out/old/"}, removed)
+	require.NoDirExists(t, stale.Path)
+	require.DirExists(t, current.Path)
+	provenance, err := LoadProvenance(blobDir)
+	require.NoError(t, err)
+	require.Equal(t, []string{"out/catalog/"}, provenance.DirectoryPaths())
+}
+
+func TestPruneProvenanceLeavesAFileThatRecordsOnlyTheRunsDirectories(t *testing.T) {
+	blobDir := t.TempDir()
+	current := seedCopiedDirectory(t, blobDir, "/out/catalog/", "2222")
+	before, err := os.ReadFile(filepath.Join(blobDir, ProvFile))
+	require.NoError(t, err)
+
+	removed, err := PruneProvenance(blobDir, []CopiedFile{current})
+
+	require.NoError(t, err)
+	require.Empty(t, removed)
+	after, err := os.ReadFile(filepath.Join(blobDir, ProvFile))
+	require.NoError(t, err)
+	require.Equal(t, string(before), string(after))
+}
+
+// A run that produced no directory leaves no prov.jsonld, the same as a blob
+// store that never held one.
+func TestPruneProvenanceRemovesTheFileWhenNothingIsKept(t *testing.T) {
+	blobDir := t.TempDir()
+	stale := seedCopiedDirectory(t, blobDir, "/out/old/", "1111")
+	file := CopiedFile{ContainerPath: "/tmp/test.txt", Digest: "3333", BlobPath: "3333"}
+
+	removed, err := PruneProvenance(blobDir, []CopiedFile{file})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"out/old/"}, removed)
+	require.NoDirExists(t, stale.Path)
+	require.NoFileExists(t, filepath.Join(blobDir, ProvFile))
+}
+
+func TestPruneProvenanceDoesNothingWithoutAProvFile(t *testing.T) {
+	blobDir := t.TempDir()
+
+	removed, err := PruneProvenance(blobDir, nil)
+
+	require.NoError(t, err)
+	require.Empty(t, removed)
+	require.NoFileExists(t, filepath.Join(blobDir, ProvFile))
+}
+
+// A record from before the @id carried the file:/// scheme is matched by the
+// path it names, so a directory the run produced again is kept.
+func TestPruneProvenanceKeepsARecordWithoutTheFileScheme(t *testing.T) {
+	blobDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(blobDir, "out", "catalog"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(blobDir, ProvFile), []byte(`{"@context": {}, "@graph": [{"@id": "out/catalog/", "owl:versionIRI": {"@id": "urn:sha256:1111"}}]}`), 0644))
+	current := CopiedFile{ContainerPath: "/out/catalog/", Directory: true, Digest: "1111", BlobPath: "out/catalog/"}
+
+	removed, err := PruneProvenance(blobDir, []CopiedFile{current})
+
+	require.NoError(t, err)
+	require.Empty(t, removed)
+	require.DirExists(t, filepath.Join(blobDir, "out", "catalog"))
+}
+
+func TestPruneProvenanceRefusesAPathOutsideTheBlobStore(t *testing.T) {
+	blobDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(blobDir, ProvFile), []byte(`{"@context": {}, "@graph": [{"@id": "file:///../escape/", "owl:versionIRI": {"@id": "urn:sha256:1111"}}]}`), 0644))
+
+	_, err := PruneProvenance(blobDir, nil)
+
+	require.ErrorContains(t, err, "not a directory inside the blob store")
+}
+
+func TestRemoveCopiedDirectoriesDeletesEveryRecordedDirectoryAndTheFile(t *testing.T) {
+	blobDir := t.TempDir()
+	first := seedCopiedDirectory(t, blobDir, "/out/catalog/", "1111")
+	second := seedCopiedDirectory(t, blobDir, "/zarr/", "2222")
+	require.NoError(t, os.WriteFile(filepath.Join(blobDir, "3333"), []byte("a file named by its digest"), 0644))
+
+	removed, err := RemoveCopiedDirectories(blobDir)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"out/catalog/", "zarr/"}, removed)
+	require.NoDirExists(t, first.Path)
+	require.NoDirExists(t, second.Path)
+	require.NoFileExists(t, filepath.Join(blobDir, ProvFile))
+	require.FileExists(t, filepath.Join(blobDir, "3333"))
+}
+
+func TestRemoveCopiedDirectoriesDoesNothingWithoutAProvFile(t *testing.T) {
+	removed, err := RemoveCopiedDirectories(t.TempDir())
+
+	require.NoError(t, err)
+	require.Empty(t, removed)
 }

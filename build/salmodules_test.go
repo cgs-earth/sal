@@ -293,7 +293,7 @@ func TestMaterializeSalModulesCopiesTheFilesATaskNames(t *testing.T) {
 	digest := sha256.Sum256([]byte("hello\n"))
 	copyIRI := "urn:sha256:" + hex.EncodeToString(digest[:])
 	require.FileExists(t, filepath.Join(blobDir, hex.EncodeToString(digest[:])))
-	require.True(t, graphHasTriple(graph, copyIRI, "http://www.w3.org/2000/01/rdf-schema#label", "test.txt"))
+	require.True(t, graphHasTriple(graph, copyIRI, "http://www.w3.org/2000/01/rdf-schema#label", "file:///tmp/test.txt"))
 	require.True(t, graphHasTriple(graph, copyIRI, "http://purl.org/dc/terms/modified", "2026-09-10T14:26:05Z"))
 	var partIRIs []string
 	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
@@ -367,7 +367,35 @@ func TestMaterializeSalModulesCopiesADirectoryATaskNames(t *testing.T) {
 	recorded, ok := provenance.DirectoryPath(copyIRI)
 	require.True(t, ok)
 	require.Equal(t, "out/catalog/", recorded)
-	require.True(t, graphHasTriple(graph, copyIRI, "http://www.w3.org/2000/01/rdf-schema#label", "catalog/"))
+	require.True(t, graphHasTriple(graph, copyIRI, "http://www.w3.org/2000/01/rdf-schema#label", "file:///out/catalog/"))
 	require.True(t, graphHasTriple(graph, copyIRI, "http://purl.org/dc/terms/identifier", "out/catalog/"))
 	require.True(t, graphHasTriple(graph, copyIRI, "https://schema.org/name", "a STAC catalog"))
+}
+
+// A directory an earlier run copied that no task produced this time is an
+// orphan: the run removes it from disk and from prov.jsonld, so both describe
+// only what the most recent run produced.
+func TestMaterializeSalModulesRemovesDirectoriesEarlierRunsLeftBehind(t *testing.T) {
+	graph := parseTestProject(t, testProject)
+	blobDir := filepath.Join(t.TempDir(), "blobs")
+	require.NoError(t, os.MkdirAll(filepath.Join(blobDir, "out", "old"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(blobDir, "out", "old", "stale.json"), []byte("{}"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(blobDir, salmodule.ProvFile), []byte(`{"@context": {}, "@graph": [{"@id": "file:///out/old/", "rdfs:label": "file:///out/old/", "owl:versionIRI": {"@id": "urn:sha256:1111"}}]}`), 0644))
+	runner := &testContainerRunner{
+		ontology:       testModuleOntology,
+		runOutput:      `{"@id":"https://example.test/dataset","schema:hasPart":{"@id":"file:///out/catalog/"}}`,
+		containerFiles: map[string]string{"/out/catalog/catalog.json": `{"links":[]}`},
+	}
+
+	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, tasksRun)
+	require.NoDirExists(t, filepath.Join(blobDir, "out", "old"))
+	require.FileExists(t, filepath.Join(blobDir, "out", "catalog", "catalog.json"))
+	provenance, err := salmodule.LoadProvenance(blobDir)
+	require.NoError(t, err)
+	require.Equal(t, []string{"out/catalog/"}, provenance.DirectoryPaths())
+	_, ok := provenance.DirectoryPath("1111")
+	require.False(t, ok)
 }
