@@ -301,8 +301,8 @@ sal get classes
 
 ```
 class                                                                 rdfs:label      rdfs:comment
-https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#NodeProc...  Node Processor  A task that reads nodes and writes nodes
-https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#Task         Task            A unit of work a module runs
+https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#NodeProc...  Node Processor  A task that reads nodes and writes nodes
+https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#Task         Task            A unit of work a module runs
 ```
 
 A class is a subject declared to be an `rdfs:Class` or an `owl:Class`, so a data product that only types its resources with a vocabulary it does not itself carry lists none; `sal get instances` is what reports the classes resources are typed with.
@@ -320,8 +320,8 @@ sal get datatypes
 
 ```
 datatype                                                           rdfs:label         rdfs:comment
-https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#inbou...  Inbound Listener   Literal representing a [host:]<port>
-https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#outbo...  Outbound Endpoint  Literal representing a URL or <host>:<port>
+https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#inbou...  Inbound Listener   Literal representing a [host:]<port>
+https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#outbo...  Outbound Endpoint  Literal representing a URL or <host>:<port>
 ```
 
 A datatype is a subject declared to be an `rdfs:Datatype`, so a data product that only holds instance data lists none.
@@ -377,9 +377,9 @@ sal get properties
 
 ```
 property                                                     type
-https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#...  http://www.w3.org/2002/07/owl#AnnotationProperty
-https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#...  http://www.w3.org/2002/07/owl#DatatypeProperty
-https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#...  http://www.w3.org/2002/07/owl#ObjectProperty
+https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#...  http://www.w3.org/2002/07/owl#AnnotationProperty
+https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#...  http://www.w3.org/2002/07/owl#DatatypeProperty
+https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#...  http://www.w3.org/2002/07/owl#ObjectProperty
 ```
 
 A property is a subject typed `rdf:Property`, `owl:ObjectProperty`, `owl:DatatypeProperty`, or `owl:AnnotationProperty`, so `type` is what the property was declared to be rather than something inferred from how it is used.

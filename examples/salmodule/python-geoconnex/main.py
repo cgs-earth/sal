@@ -24,7 +24,7 @@ def ontology():
         "@context": {
             "schema": "http://schema.org/",
             "gsp": "http://www.opengis.net/ont/geosparql#",
-            "salmodule": "https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#",
+            "salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#",
             "owl": "http://www.w3.org/2002/07/owl#",
             "sh": "http://www.w3.org/ns/shacl#",
             "sf": "http://www.opengis.net/ont/sf#",

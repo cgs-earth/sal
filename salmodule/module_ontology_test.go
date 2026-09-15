@@ -15,7 +15,7 @@ const testOntology = `{
 	"@context": {
 		"schema": "https://schema.org/",
 		"owl": "http://www.w3.org/2002/07/owl#",
-		"salmodule": "https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#"
+		"salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
 	},
 	"@graph": [
 		{
@@ -48,7 +48,7 @@ func TestParseModuleOntologyFindsIndirectTaskSubclasses(t *testing.T) {
 		"@context": {
 			"owl": "http://www.w3.org/2002/07/owl#",
 			"rdfs": "http://www.w3.org/2000/01/rdf-schema#",
-			"salmodule": "https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#"
+			"salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
 		},
 		"@graph": [
 			{"@id": "BaseFinder", "@type": "owl:Class", "rdfs:subClassOf": {"@id": "salmodule:NodeProcessor"}},
@@ -73,7 +73,7 @@ func TestParseModuleOntologyUsesDeclaredTaskInstanceEnvVar(t *testing.T) {
 	document := `{
 		"@context": {
 			"owl": "http://www.w3.org/2002/07/owl#",
-			"salmodule": "https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#"
+			"salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
 		},
 		"@graph": [
 			{"@id": ".", "@type": "owl:Ontology", "salmodule:taskInstanceEnvVar": "MODULE_TASK"}
