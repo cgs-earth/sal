@@ -153,7 +153,7 @@ type TaskResult struct {
 func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, envVar string, taskInstance string, blobDir string) (TaskResult, error) {
 	var result TaskResult
 	err := r.runModuleCommand(ctx, ref, []string{envVar + "=" + taskInstance}, RunCommand, func(ctx context.Context, stdout io.Reader, files ContainerFiles) error {
-		copier := &fileCopier{dir: blobDir, files: files}
+		copier := &fileCopier{dir: blobDir, source: strings.TrimSuffix(ref.Namespace, "/"), files: files}
 		var output bytes.Buffer
 		reader := bufio.NewReader(stdout)
 		for {

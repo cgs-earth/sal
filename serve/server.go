@@ -142,11 +142,11 @@ func NewEndpointWithUI(runner UIRunner, blobDir string, stacDir string) (http.Ha
 // by the git commit hash of the module repository it was read from. A request
 // may give either name bare or headed by the scheme its owl:versionIRI
 // carries, "urn:sha256:" or "urn:git-commit-hash:"; the prefix is stripped
-// before it is looked up. A copied directory sits under the path it had in
-// the container, so /blobs/<path>/<file> serves each file in it directly,
+// before it is looked up. A copied directory sits under <digest>/ with its
+// files verbatim, so /blobs/<digest>/<file> serves each file in it directly,
 // with a content type from its extension, and a Zarr store or STAC catalog
-// reads in place. The directory itself, asked for by that path or by the
-// digest prov.jsonld records for it, is served whole as a zip archive. Range
+// reads in place. The directory itself, asked for by its digest with or
+// without a trailing slash, is served whole as a zip archive. Range
 // requests are honored via http.ServeContent for a file. CORS is open, the same
 // as the STAC endpoint, so a STAC browser on another origin can follow the data
 // product's catalog into a module's.
@@ -183,37 +183,28 @@ func (h blobHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveNamed answers a request for a blob by hash: the file stored under that
-// name, or, when there is none, the directory prov.jsonld records under that
-// digest, as a zip.
+// name, or the directory stored under it as a zip.
 func (h blobHandler) serveNamed(w http.ResponseWriter, r *http.Request, name string) {
 	file, err := os.Open(filepath.Join(h.dir, name))
-	if err == nil {
-		defer closeBlob(file)
-		info, err := file.Stat()
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		// a blob is an opaque pinned document, not necessarily text; setting this
-		// keeps http.ServeContent from sniffing the content and reporting it as
-		// text/plain
-		w.Header().Set("Content-Type", "application/octet-stream")
-		http.ServeContent(w, r, name, info.ModTime(), file)
-		return
-	}
-
-	provenance, err := salmodule.LoadProvenance(h.dir)
 	if err != nil {
-		slog.Error("failed to read the blob store's "+salmodule.ProvFile, "error", err)
 		http.NotFound(w, r)
 		return
 	}
-	directory, ok := provenance.DirectoryPath(name)
-	if !ok {
+	defer closeBlob(file)
+	info, err := file.Stat()
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	h.serveZip(w, r, directory)
+	if info.IsDir() {
+		h.serveZip(w, r, name+"/")
+		return
+	}
+	// a blob is an opaque pinned document, not necessarily text; setting this
+	// keeps http.ServeContent from sniffing the content and reporting it as
+	// text/plain
+	w.Header().Set("Content-Type", "application/octet-stream")
+	http.ServeContent(w, r, name, info.ModTime(), file)
 }
 
 // servePath answers a request for something under the blob store by path: a
@@ -278,11 +269,18 @@ func blobContentType(extension string) string {
 }
 
 // serveZip streams the directory at the given blob store path, relative and
-// ending in a slash, as a zip archive whose entries sit under the directory's
-// own name, the way a directory zipped by hand is laid out.
+// ending in a slash, as a zip archive whose entries sit under the name the
+// task gave the directory, the last segment of the file:/// IRI prov.jsonld
+// records as its label, the way a directory zipped by hand is laid out. A
+// directory prov.jsonld does not record is named by the path it sits at.
 func (h blobHandler) serveZip(w http.ResponseWriter, r *http.Request, directory string) {
 	root := filepath.Join(h.dir, filepath.FromSlash(strings.TrimSuffix(directory, "/")))
 	base := path.Base(strings.TrimSuffix(directory, "/"))
+	if provenance, err := salmodule.LoadProvenance(h.dir); err == nil {
+		if label, ok := provenance.Label(directory); ok {
+			base = path.Base(strings.TrimSuffix(label, "/"))
+		}
+	}
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+base+`.zip"`)
 	if r.Method == http.MethodHead {

@@ -14,12 +14,12 @@ import (
 )
 
 // ProvFile is the name of the JSON-LD document in the blob store that records
-// every directory a SAL module task copied there: the path it sits at, its
-// name, when it was last written, and the SHA-256 of its contents as
-// owl:versionIRI. A single file is named by its digest, so it needs no
-// record; a directory keeps the path the module gave it, so that a Zarr or
-// STAC client can read it in place, and this file is what resolves its digest
-// back to that path. The shape is the one .sal/config.jsonld records a pinned
+// every file and directory a SAL module task has ever copied there: its
+// digest, the name the task gave it, the module that produced it, when it was
+// written, and where it sits under the blob store. It is an append-only log.
+// A run adds the copies it kept and never removes what an earlier run left,
+// so the blob store accumulates every version a task has produced until the
+// user clears it. The shape is the one .sal/config.jsonld records a pinned
 // vocabulary in.
 const ProvFile = "prov.jsonld"
 
@@ -38,17 +38,20 @@ type provDocument struct {
 	Graph   []provNode        `json:"@graph"`
 }
 
-// provNode is one copied directory in prov.jsonld. Its @id and rdfs:label are
-// both the file:/// IRI the task named the directory with, ending in a slash,
-// so that the record is known by the same name the task's output used. The
-// directory's path under the blob store is that IRI's path without its leading
-// slash, which blobPath derives.
+// provNode is one copy in prov.jsonld. Its @id is the urn:sha256: IRI of the
+// copy's contents, the same IRI the graph refers to the copy by, so that two
+// modules naming a path the same way never share a record; its rdfs:label is
+// the file:/// IRI the task named it with, ending in a slash for a directory;
+// its dcterms:identifier is where the copy sits under the blob store; and its
+// dcterms:source is the module whose task produced it.
 type provNode struct {
-	ID         string        `json:"@id"`
-	Label      string        `json:"rdfs:label"`
-	VersionIRI provReference `json:"owl:versionIRI"`
-	Modified   provDateTime  `json:"dcterms:modified"`
-	Comment    string        `json:"rdfs:comment"`
+	ID         string         `json:"@id"`
+	Label      string         `json:"rdfs:label"`
+	VersionIRI provReference  `json:"owl:versionIRI"`
+	Identifier string         `json:"dcterms:identifier,omitempty"`
+	Source     *provReference `json:"dcterms:source,omitempty"`
+	Modified   provDateTime   `json:"dcterms:modified"`
+	Comment    string         `json:"rdfs:comment"`
 }
 
 type provReference struct {
@@ -66,7 +69,7 @@ type Provenance struct {
 }
 
 // LoadProvenance reads prov.jsonld from blobDir. A blob store without one
-// holds no copied directories and loads empty.
+// holds no copies and loads empty.
 func LoadProvenance(blobDir string) (*Provenance, error) {
 	content, err := os.ReadFile(filepath.Join(blobDir, ProvFile))
 	if errors.Is(err, os.ErrNotExist) {
@@ -82,14 +85,19 @@ func LoadProvenance(blobDir string) (*Provenance, error) {
 	return &Provenance{nodes: document.Graph}, nil
 }
 
-// blobPath is where the recorded directory sits relative to the blob store,
-// ending in a slash: the path of its file:/// IRI without the leading slash. A
-// record written before the @id carried the scheme is already that path.
-func (n provNode) blobPath() string { return strings.TrimPrefix(n.ID, fileIRIPrefix) }
+// blobPath is where the recorded copy sits relative to the blob store, ending
+// in a slash for a directory: its dcterms:identifier, or the bare digest of
+// its @id for a record without one.
+func (n provNode) blobPath() string {
+	if n.Identifier != "" {
+		return n.Identifier
+	}
+	return strings.TrimPrefix(n.ID, digestIRIPrefix)
+}
 
-// DirectoryPaths returns the path, relative to the blob store and ending in a
-// slash, of every directory prov.jsonld records.
-func (p *Provenance) DirectoryPaths() []string {
+// BlobPaths returns the path, relative to the blob store and ending in a
+// slash for a directory, of every copy prov.jsonld records.
+func (p *Provenance) BlobPaths() []string {
 	paths := make([]string, 0, len(p.nodes))
 	for _, node := range p.nodes {
 		paths = append(paths, node.blobPath())
@@ -97,28 +105,27 @@ func (p *Provenance) DirectoryPaths() []string {
 	return paths
 }
 
-// DirectoryPath returns the path, relative to the blob store and ending in a
-// slash, of the directory whose contents hash to digest, given bare or as
-// urn:sha256:<digest>, and whether there is one.
-func (p *Provenance) DirectoryPath(digest string) (string, bool) {
-	versionIRI := "urn:sha256:" + strings.TrimPrefix(digest, "urn:sha256:")
+// Label returns the file:/// IRI the task named the copy at blobPath with,
+// and whether prov.jsonld records a copy there.
+func (p *Provenance) Label(blobPath string) (string, bool) {
 	for _, node := range p.nodes {
-		if node.VersionIRI.ID == versionIRI {
-			return node.blobPath(), true
+		if node.blobPath() == blobPath && node.Label != "" {
+			return node.Label, true
 		}
 	}
 	return "", false
 }
 
-// AppendProvenance describes every directory prov.jsonld records in graph,
-// under the urn:sha256: IRI of its contents, the way LinkCopiedFiles describes
-// a copy when it is made: its file:/// IRI as rdfs:label, when it was written
-// as dcterms:modified, its path under the blob store as dcterms:identifier, and
-// its digest as owl:versionIRI, plus the rdfs:comment the record carries. It is
-// what carries a directory copied by an earlier run into a table built again
-// from source, so that the table describes every copy the blob store holds and
-// a copy is listed with the pinned vocabularies. A statement the graph already
-// holds is left as it is. It returns how many directories were described.
+// AppendProvenance describes every copy prov.jsonld records in graph, under
+// the urn:sha256: IRI of its contents, the way LinkCopiedFiles describes a
+// copy when it is made: its file:/// IRI as rdfs:label, when it was written as
+// dcterms:modified, its path under the blob store as dcterms:identifier, the
+// module that produced it as dcterms:source, and its digest as
+// owl:versionIRI, plus the rdfs:comment the record carries. It is what carries
+// a copy made by an earlier run into a table built again from source, so that
+// the table describes every copy the blob store holds and a copy is listed
+// with the pinned vocabularies. A statement the graph already holds is left as
+// it is. It returns how many copies were described.
 func (p *Provenance) AppendProvenance(graph *rdflibgo.Graph) int {
 	described := 0
 	for _, node := range p.nodes {
@@ -130,8 +137,11 @@ func (p *Provenance) AppendProvenance(graph *rdflibgo.Graph) int {
 		if node.Label != "" {
 			graph.Add(subject, rdflibgo.NewURIRefUnsafe(rdfsLabelIRI), rdflibgo.NewLiteral(node.Label))
 		}
-		if node.ID != "" {
-			graph.Add(subject, rdflibgo.NewURIRefUnsafe(dctermsIdentifierIRI), rdflibgo.NewLiteral(node.blobPath()))
+		if path := node.blobPath(); path != "" {
+			graph.Add(subject, rdflibgo.NewURIRefUnsafe(dctermsIdentifierIRI), rdflibgo.NewLiteral(path))
+		}
+		if node.Source != nil && node.Source.ID != "" {
+			graph.Add(subject, rdflibgo.NewURIRefUnsafe(dctermsSourceIRI), rdflibgo.NewURIRefUnsafe(node.Source.ID))
 		}
 		if node.Modified.Value != "" {
 			graph.Add(subject, rdflibgo.NewURIRefUnsafe(dctermsModifiedIRI), rdflibgo.NewLiteral(node.Modified.Value, rdflibgo.WithDatatype(rdflibgo.XSDDateTime)))
@@ -144,22 +154,33 @@ func (p *Provenance) AppendProvenance(graph *rdflibgo.Graph) int {
 	return described
 }
 
-// recordDirectories adds each copied directory to prov.jsonld under blobDir,
-// replacing the record of an earlier copy at the same path, since the path
-// now holds the new copy.
-func recordDirectories(blobDir string, directories []CopiedFile) error {
+// recordCopies appends each copy to prov.jsonld under blobDir. A copy whose
+// digest is already recorded is the same contents stored again, so its record
+// is replaced rather than repeated; nothing else in the file is touched, since
+// the file is a log of everything the blob store has been handed.
+func recordCopies(blobDir string, copies []CopiedFile) error {
 	provenance, err := LoadProvenance(blobDir)
 	if err != nil {
 		return err
 	}
-	for _, directory := range directories {
+	for _, copied := range copies {
+		kind := "file"
+		served := "the file is served under that digest"
+		if copied.Directory {
+			kind = "directory"
+			served = "the directory is served whole as a zip archive under that digest"
+		}
 		node := provNode{
-			ID:         directory.FileIRI(),
-			Label:      directory.FileIRI(),
-			VersionIRI: provReference{ID: directory.IRI()},
-			Modified:   provDateTime{Value: directory.Modified.Format(time.RFC3339), Type: "xsd:dateTime"},
-			Comment: fmt.Sprintf("Represents the directory %s a SAL module task copied out of its container as of %s. %s is the SHA-256 of its contents, and the directory is served whole as a zip archive under that digest.",
-				directory.BlobPath, directory.Modified.Format(time.RFC3339), directory.IRI()),
+			ID:         copied.IRI(),
+			Label:      copied.FileIRI(),
+			VersionIRI: provReference{ID: copied.IRI()},
+			Identifier: copied.BlobPath,
+			Modified:   provDateTime{Value: copied.Modified.Format(time.RFC3339), Type: "xsd:dateTime"},
+			Comment: fmt.Sprintf("Represents the %s %s a task of the SAL module %s copied out of its container as of %s. %s is the SHA-256 of its contents, and %s.",
+				kind, copied.FileIRI(), copied.Source, copied.Modified.Format(time.RFC3339), copied.IRI(), served),
+		}
+		if copied.Source != "" {
+			node.Source = &provReference{ID: copied.Source}
 		}
 		replaced := false
 		for i := range provenance.nodes {
@@ -176,83 +197,32 @@ func recordDirectories(blobDir string, directories []CopiedFile) error {
 	return writeProvenance(blobDir, provenance.nodes)
 }
 
-// PruneProvenance makes prov.jsonld under blobDir record exactly the
-// directories kept, the ones the run that just finished copied and linked:
-// the record and the on-disk copy of any other directory, left by an earlier
-// run whose task no longer produces it, are removed, and the file itself is
-// removed when nothing is kept. It returns the blob-relative paths removed. A
-// task that ran again replaced its directory in place, so what remains is
-// what is on disk from the most recent run and nothing else.
-func PruneProvenance(blobDir string, kept []CopiedFile) ([]string, error) {
-	provenance, err := LoadProvenance(blobDir)
-	if err != nil {
-		return nil, err
-	}
-	keptPaths := map[string]bool{}
-	for _, directory := range kept {
-		if directory.Directory {
-			keptPaths[directory.BlobPath] = true
-		}
-	}
-
-	var removed []string
-	nodes := provenance.nodes[:0]
-	for _, node := range provenance.nodes {
-		path := node.blobPath()
-		if keptPaths[path] {
-			nodes = append(nodes, node)
-			continue
-		}
-		if err := removeCopiedDirectory(blobDir, path); err != nil {
-			return nil, err
-		}
-		removed = append(removed, path)
-	}
-	if len(removed) == 0 {
-		return nil, nil
-	}
-	if len(nodes) == 0 {
-		if err := os.Remove(filepath.Join(blobDir, ProvFile)); err != nil && !os.IsNotExist(err) {
-			return nil, err
-		}
-		return removed, nil
-	}
-	return removed, writeProvenance(blobDir, nodes)
-}
-
-// RemoveCopiedDirectories deletes every directory prov.jsonld under blobDir
+// RemoveCopiedFiles deletes every file and directory prov.jsonld under blobDir
 // records, and prov.jsonld itself. It is what a wipe does with them: they are
 // artifacts of a run, regenerated by the next one, and without the table that
-// refers to them nothing resolves their digests.
-func RemoveCopiedDirectories(blobDir string) ([]string, error) {
+// refers to them nothing resolves their digests. It is the only time sal
+// removes a copy; a run only ever adds to the blob store.
+func RemoveCopiedFiles(blobDir string) ([]string, error) {
 	provenance, err := LoadProvenance(blobDir)
 	if err != nil {
 		return nil, err
 	}
-	paths := provenance.DirectoryPaths()
+	paths := provenance.BlobPaths()
 	for _, path := range paths {
-		if err := removeCopiedDirectory(blobDir, path); err != nil {
-			return nil, err
+		relative := filepath.FromSlash(strings.TrimSuffix(path, "/"))
+		// a path that would reach outside the blob store, which only a
+		// hand-edited prov.jsonld could carry, is refused rather than followed
+		if relative == "" || !filepath.IsLocal(relative) {
+			return nil, fmt.Errorf("%s records %q, which is not inside the blob store", ProvFile, path)
+		}
+		if err := os.RemoveAll(filepath.Join(blobDir, relative)); err != nil {
+			return nil, fmt.Errorf("remove the copy of %s: %w", path, err)
 		}
 	}
 	if err := os.Remove(filepath.Join(blobDir, ProvFile)); err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
 	return paths, nil
-}
-
-// removeCopiedDirectory deletes the directory at a blob-relative path. A path
-// that would reach outside the blob store, which only a hand-edited
-// prov.jsonld could carry, is refused rather than followed.
-func removeCopiedDirectory(blobDir string, path string) error {
-	relative := filepath.FromSlash(strings.TrimSuffix(path, "/"))
-	if relative == "" || !filepath.IsLocal(relative) {
-		return fmt.Errorf("%s records %q, which is not a directory inside the blob store", ProvFile, path)
-	}
-	if err := os.RemoveAll(filepath.Join(blobDir, relative)); err != nil {
-		return fmt.Errorf("remove the copy of %s: %w", path, err)
-	}
-	return nil
 }
 
 // writeProvenance writes nodes as prov.jsonld under blobDir, sorted by @id so

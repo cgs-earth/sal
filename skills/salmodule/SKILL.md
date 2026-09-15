@@ -100,11 +100,13 @@ To deliver a file, write it completely inside the container, then reference it a
 line naming it is printed. The path must be absolute (`file:///`). Each path is copied once; a second
 reference is skipped with a warning. In the project the reference becomes `urn:sha256:<digest>` with
 `rdfs:label` (file name), `dcterms:modified`, `dcterms:identifier` (its path under `.sal/data/blobs`),
-and `owl:versionIRI` attached, and the copy sits in `.sal/data/blobs` under its digest.
+`dcterms:source` (the module), and `owl:versionIRI` attached, and the copy sits in `.sal/data/blobs` under its
+digest and is recorded in `.sal/data/blobs/prov.jsonld`.
 
 To deliver a whole directory, a Zarr store or a STAC catalog for instance, end the path with a slash. It is
-copied verbatim under its own path (`.sal/data/blobs/out/catalog/`), so what reads it finds the layout it
-expects, and its `urn:sha256:` is the digest of its contents, recorded in `.sal/data/blobs/prov.jsonld`.
+copied with its files verbatim under the digest of its contents (`.sal/data/blobs/<digest>/`), so
+what reads it finds the layout it expects and no other module's output can land on top of it. Earlier copies
+are never removed by a run; the blob store and `prov.jsonld` only grow until the user clears them.
 Anything else the task says about the `file:///` IRI stays attached to it:
 
 ```json

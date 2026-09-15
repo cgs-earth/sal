@@ -1260,18 +1260,23 @@ func TestEndpointWithUIServesTheStacCatalogRatherThanTheApp(t *testing.T) {
 	require.JSONEq(t, `{"type":"Catalog","id":"widgets"}`, string(body))
 }
 
+// testDirectoryDigest is the digest the copied directory the blob tests lay
+// out is stored under.
+var testDirectoryDigest = strings.Repeat("ab", 32)
+
 // writeDirectoryBlob lays out a copied directory under dir the way a SAL
-// module task's directory copy lands: verbatim under its own path, recorded in
-// prov.jsonld under a digest. It returns that digest.
+// module task's directory copy lands: under its digest with its files
+// verbatim, recorded in prov.jsonld under that digest.
 func writeDirectoryBlob(t *testing.T, dir string) string {
 	t.Helper()
-	digest := strings.Repeat("ab", 32)
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "out", "catalog", "items"), 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "out", "catalog", "catalog.json"), []byte(`{"links":[{"rel":"item","href":"./items/a.json"}]}`), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "out", "catalog", "items", "a.json"), []byte(`{"id":"a"}`), 0644))
+	digest := testDirectoryDigest
+	copied := filepath.Join(dir, digest)
+	require.NoError(t, os.MkdirAll(filepath.Join(copied, "items"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(copied, "catalog.json"), []byte(`{"links":[{"rel":"item","href":"./items/a.json"}]}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(copied, "items", "a.json"), []byte(`{"id":"a"}`), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, salmodule.ProvFile), []byte(`{
 		"@context": {"owl": "http://www.w3.org/2002/07/owl#"},
-		"@graph": [{"@id": "out/catalog/", "rdfs:label": "catalog", "owl:versionIRI": {"@id": "urn:sha256:`+digest+`"}}]
+		"@graph": [{"@id": "urn:sha256:`+digest+`", "rdfs:label": "file:///out/catalog/", "dcterms:identifier": "`+digest+`/", "owl:versionIRI": {"@id": "urn:sha256:`+digest+`"}}]
 	}`), 0644))
 	return digest
 }
@@ -1283,7 +1288,7 @@ func TestBlobEndpointServesAFileInsideACopiedDirectory(t *testing.T) {
 	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/blobs/out/catalog/items/a.json")
+	resp, err := http.Get(server.URL + "/blobs/urn:sha256:" + testDirectoryDigest + "/items/a.json")
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, resp.Body.Close())
@@ -1363,7 +1368,7 @@ func TestBlobEndpointServesACopiedDirectoryAsAZipByItsPath(t *testing.T) {
 	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/blobs/out/catalog/")
+	resp, err := http.Get(server.URL + "/blobs/urn:sha256:" + testDirectoryDigest + "/")
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, resp.Body.Close())
@@ -1383,7 +1388,7 @@ func TestBlobEndpointDoesNotServeOutsideTheBlobStore(t *testing.T) {
 	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
 	defer server.Close()
 
-	for _, target := range []string{"/blobs/../secret.txt", "/blobs/out/../../secret.txt", "/blobs/"} {
+	for _, target := range []string{"/blobs/../secret.txt", "/blobs/" + testDirectoryDigest + "/../../secret.txt", "/blobs/"} {
 		req, err := http.NewRequest(http.MethodGet, server.URL+target, nil)
 		require.NoError(t, err)
 		// the request path is sent as written so the server, not the client, cleans it
@@ -1405,7 +1410,7 @@ func TestEndpointWithUIServesAFileInACopiedDirectoryToABrowser(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	resp := browserGet(t, server.URL+"/blobs/out/catalog/catalog.json")
+	resp := browserGet(t, server.URL+"/blobs/"+testDirectoryDigest+"/catalog.json")
 	defer func() {
 		require.NoError(t, resp.Body.Close())
 	}()
@@ -1423,13 +1428,13 @@ func TestBlobEndpointAllowsCrossOriginReads(t *testing.T) {
 	server := httptest.NewServer(NewEndpoint(&endpointRunner{}, dir, ""))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/blobs/out/catalog/catalog.json")
+	resp, err := http.Get(server.URL + "/blobs/urn:sha256:" + testDirectoryDigest + "/catalog.json")
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
 
-	preflight, err := http.NewRequest(http.MethodOptions, server.URL+"/blobs/out/catalog/catalog.json", nil)
+	preflight, err := http.NewRequest(http.MethodOptions, server.URL+"/blobs/"+testDirectoryDigest+"/catalog.json", nil)
 	require.NoError(t, err)
 	resp, err = http.DefaultClient.Do(preflight)
 	require.NoError(t, err)

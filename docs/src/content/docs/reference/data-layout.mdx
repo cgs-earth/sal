@@ -26,7 +26,7 @@ For the main triples table, SAL writes an Apache Iceberg table under the project
       <sha256-of-a-vocabulary-document>
       <sha256-of-a-file-a-module-task-produced>
       prov.jsonld
-      <path-of-a-directory-a-module-task-produced>/
+      <sha256-of-a-directory-a-module-task-produced>/
     stac/
       catalog.json
       triples/
@@ -44,10 +44,11 @@ The files named by a hash under `.sal/data/blobs` are the vocabulary documents t
 [Pinned vocabularies](#pinned-vocabularies) below, and the files SAL module tasks produce, which
 [`sal run`](/sal/reference/commands/#sal-run) copies out of the module's container under the SHA-256 digest of
 their contents. [`sal serve`](/sal/reference/commands/#sal-serve) serves both over HTTP at `/blobs/{sha256}`.
-A directory a task produces, a Zarr store or STAC catalog for instance, is copied verbatim under the path it had
-in the container instead, so that it can be read in place from disk, from `/blobs/{path}/`, or from a bucket the
-data product is uploaded to; `prov.jsonld` records the SHA-256 of each such directory's contents, which is what
-the table refers to it by and what `/blobs/urn:sha256:{digest}` serves it whole as a zip archive from. See
+A directory a task produces, a Zarr store or STAC catalog for instance, is copied with its files verbatim under
+`{digest}/`, the SHA-256 of its contents, so that it can be read in place from disk, from `/blobs/{digest}/`, or
+from a bucket the data product is uploaded to, and `/blobs/{digest}` serves it whole as a zip archive. Everything
+under `.sal/data/blobs` other than `prov.jsonld` is named by a hash. `prov.jsonld` is the log of every file and directory tasks have copied there,
+each under its digest with the module that produced it; a run adds to it and never removes from it. See
 [Files a task produces](/sal/guides/using-sal-modules/#files-a-task-produces).
 
 `.sal/data/stac` is the STAC catalog the build writes last, describing the table it just committed; see [STAC catalog](#stac-catalog) below. `sal serve` serves it at `/stac/catalog.json`.
@@ -191,7 +192,7 @@ The last thing `sal build` does is describe the data product as a [STAC](https:/
 after it every STAC catalog a SAL module task handed over as a directory (see
 [Files a task produces](/sal/guides/using-sal-modules/#files-a-task-produces)): a directory under `.sal/data/blobs`
 whose `catalog.json` is a STAC Catalog or Collection is linked as a child by relative path, such as
-`../blobs/out/catalog/catalog.json`, titled by the catalog's own `title` or `id`. The module's files are left
+`../blobs/3f9a…/catalog.json`, titled by the catalog's own `title` or `id`. The module's files are left
 where the copy put them, since their own links name their neighbours by relative path, and the link is relative
 too, so the data product is one catalog tree on disk, under `sal serve`, and in a bucket it is uploaded to.
 A sub-catalog inside a linked catalog is that catalog's to list and is not linked again; a `catalog.json` that is

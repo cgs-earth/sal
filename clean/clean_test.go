@@ -165,21 +165,26 @@ func TestRemoveProjectConfigDeletesTheDocumentsThePinsName(t *testing.T) {
 	require.NoFileExists(t, configPath)
 }
 
-// The directories module tasks handed over sit under .sal/data/blobs at their
-// own paths rather than inside the table, so a wipe removes them and the
-// prov.jsonld that records them explicitly.
-func TestRemoveCopiedDirectoriesDeletesTheRecordedDirectoriesAndProv(t *testing.T) {
+// The files and directories module tasks handed over sit under .sal/data/blobs
+// rather than inside the table, so a wipe removes every one prov.jsonld
+// records, and prov.jsonld itself, explicitly.
+func TestRemoveCopiedFilesDeletesTheRecordedCopiesAndProv(t *testing.T) {
 	blobsDir := filepath.Join(t.TempDir(), "blobs")
-	require.NoError(t, os.MkdirAll(filepath.Join(blobsDir, "out", "catalog"), 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(blobsDir, "out", "catalog", "catalog.json"), []byte("{}"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(blobsDir, salmodule.ProvFile), []byte(`{"@context": {}, "@graph": [{"@id": "file:///out/catalog/", "owl:versionIRI": {"@id": "urn:sha256:1111"}}]}`), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(blobsDir, "1111"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(blobsDir, "1111", "catalog.json"), []byte("{}"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(blobsDir, "2222"), []byte("a copied file"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(blobsDir, salmodule.ProvFile), []byte(`{"@context": {}, "@graph": [
+		{"@id": "urn:sha256:1111", "dcterms:identifier": "1111/", "owl:versionIRI": {"@id": "urn:sha256:1111"}},
+		{"@id": "urn:sha256:2222", "dcterms:identifier": "2222", "owl:versionIRI": {"@id": "urn:sha256:2222"}}
+	]}`), 0644))
 
-	require.NoError(t, removeCopiedDirectories(blobsDir))
+	require.NoError(t, removeCopiedFiles(blobsDir))
 
-	require.NoDirExists(t, filepath.Join(blobsDir, "out", "catalog"))
+	require.NoDirExists(t, filepath.Join(blobsDir, "1111"))
+	require.NoFileExists(t, filepath.Join(blobsDir, "2222"))
 	require.NoFileExists(t, filepath.Join(blobsDir, salmodule.ProvFile))
 }
 
-func TestRemoveCopiedDirectoriesSucceedsWithoutABlobStore(t *testing.T) {
-	require.NoError(t, removeCopiedDirectories(filepath.Join(t.TempDir(), "blobs")))
+func TestRemoveCopiedFilesSucceedsWithoutABlobStore(t *testing.T) {
+	require.NoError(t, removeCopiedFiles(filepath.Join(t.TempDir(), "blobs")))
 }

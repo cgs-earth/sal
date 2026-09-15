@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"strings"
 
 	"github.com/cgs-earth/sal/salmodule"
 	rdflibgo "github.com/tggo/goRDFlib"
@@ -88,9 +87,10 @@ func findSalModuleTasks(graph *rdflibgo.Graph) ([]salModuleTask, error) {
 // as the project's own instance data unless the module wrote absolute IRIs.
 // A file a task names with a file:/// IRI is copied out of the container
 // into blobDir under its SHA-256 digest, a directory named with a trailing
-// slash is copied whole under its own path and recorded in blobDir's
-// prov.jsonld, and the graph refers to either as urn:sha256:<digest> in place
-// of the container path.
+// slash is copied whole under <digest>/, both are appended to
+// blobDir's prov.jsonld, and the graph refers to either as urn:sha256:<digest>
+// in place of the container path. Nothing an earlier run copied is removed;
+// the blob store only grows until the user clears it.
 func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver *salmodule.Resolver, blobDir string) (int, error) {
 	tasks, err := findSalModuleTasks(graph)
 	if err != nil {
@@ -98,8 +98,6 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 	}
 
 	tasksRun := 0
-	// every copy this run kept, so that prov.jsonld can be pruned to it
-	var kept []salmodule.CopiedFile
 	for _, task := range tasks {
 		ontology, err := resolver.Ontology(ctx, task.ref)
 		if err != nil {
@@ -129,11 +127,9 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 		case err != nil:
 			return tasksRun, fmt.Errorf("run: %w", err)
 		}
-		copies, err := salmodule.LinkCopiedFiles(moduleGraph, result.Files, blobDir)
-		if err != nil {
+		if err := salmodule.LinkCopiedFiles(moduleGraph, result.Files, blobDir); err != nil {
 			return tasksRun, fmt.Errorf("run: %w", err)
 		}
-		kept = append(kept, copies...)
 
 		var materialized int
 		moduleGraph.Triples(nil, nil, nil)(func(rdflibgo.Triple) bool {
@@ -144,19 +140,6 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 		tasksRun++
 		slog.Info(fmt.Sprintf("Materialized %d triples from %s", materialized, task.classIRI))
 		slog.Info(fmt.Sprintf("Copied %d files from %s into %s", len(result.Files), task.classIRI, blobDir))
-	}
-	if tasksRun == 0 {
-		return 0, nil
-	}
-	// prov.jsonld describes what the most recent run left on disk: a directory
-	// an earlier run copied that no task produced this time is an orphan, so
-	// its record and its copy go
-	removed, err := salmodule.PruneProvenance(blobDir, kept)
-	if err != nil {
-		return tasksRun, fmt.Errorf("run: %w", err)
-	}
-	if len(removed) > 0 {
-		slog.Info(fmt.Sprintf("Removed %d directories earlier runs copied into %s that this run did not produce: %s", len(removed), blobDir, strings.Join(removed, ", ")))
 	}
 	return tasksRun, nil
 }

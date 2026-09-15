@@ -260,8 +260,8 @@ func TestWriteStacCatalogLinksTheCatalogsModulesProduced(t *testing.T) {
 	data := t.TempDir()
 	dir := filepath.Join(data, "stac")
 	blobDir := filepath.Join(data, "blobs")
-	writeModuleStacCatalog(t, filepath.Join(blobDir, "out", "stations"), "stations", "Station catalog")
-	writeModuleStacCatalog(t, filepath.Join(blobDir, "elevation"), "elevation", "")
+	writeModuleStacCatalog(t, filepath.Join(blobDir, strings.Repeat("b", 64)), "stations", "Station catalog")
+	writeModuleStacCatalog(t, filepath.Join(blobDir, strings.Repeat("1", 64)), "elevation", "")
 	require.NoError(t, os.WriteFile(filepath.Join(blobDir, strings.Repeat("a", 64)), []byte("a pinned vocabulary"), 0644))
 	require.NoError(t, os.MkdirAll(filepath.Join(blobDir, "zarr_test"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(blobDir, "zarr_test", "catalog.json"), []byte(`{"not": "stac"}`), 0644))
@@ -277,12 +277,12 @@ func TestWriteStacCatalogLinksTheCatalogsModulesProduced(t *testing.T) {
 	}
 	require.Len(t, children, 3)
 	require.Equal(t, "./triples/collection.json", children[0]["href"])
-	require.Equal(t, "../blobs/elevation/catalog.json", children[1]["href"])
+	require.Equal(t, "../blobs/"+strings.Repeat("1", 64)+"/catalog.json", children[1]["href"])
 	require.Equal(t, "elevation", children[1]["title"])
 	require.Equal(t, "application/json", children[1]["type"])
-	require.Equal(t, "../blobs/out/stations/catalog.json", children[2]["href"])
+	require.Equal(t, "../blobs/"+strings.Repeat("b", 64)+"/catalog.json", children[2]["href"])
 	require.Equal(t, "Station catalog", children[2]["title"])
 	// the module catalogs stay where the copy put them
-	require.FileExists(t, filepath.Join(blobDir, "out", "stations", "sub", "catalog.json"))
+	require.FileExists(t, filepath.Join(blobDir, strings.Repeat("b", 64), "sub", "catalog.json"))
 	require.NoDirExists(t, filepath.Join(dir, "blobs"))
 }

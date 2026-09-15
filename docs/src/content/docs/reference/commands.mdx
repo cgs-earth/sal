@@ -223,11 +223,11 @@ output is named as the project's own data unless the module wrote absolute IRIs.
 A `file:///` IRI in that output names a file inside the container; `sal run` copies it into `.sal/data/blobs`
 under its SHA-256 digest while the task runs, rewrites the reference to `urn:sha256:{digest}`, and describes the
 copy with the `file:///` IRI the task wrote as `rdfs:label`, its modification time as `dcterms:modified`, its digest as `owl:versionIRI`,
-and its path under `.sal/data/blobs` as `dcterms:identifier`. A `file:///` IRI ending in a slash names a directory,
-copied whole under its own path so that it can be read in place, labelled with the same `file:///` IRI,
-with the digest of its contents recorded in `.sal/data/blobs/prov.jsonld` under that IRI. Every later `sal build` carries that record into the table as provenance, so a table
-built again from source still describes the directory. When a run finishes, `prov.jsonld` records exactly the directories that run produced: a directory an earlier
-run copied that no task produced this time is removed from disk along with its record, so the file always describes what the most recent run left on disk. See [Using SAL Modules](/sal/guides/using-sal-modules/), including
+its path under `.sal/data/blobs` as `dcterms:identifier`, and the module that produced it as `dcterms:source`. A `file:///` IRI ending in a slash names a directory,
+copied whole under `.sal/data/blobs/{digest}/` with its files verbatim, so that it can be read in place, labelled with the same `file:///` IRI.
+Every copy is appended to `.sal/data/blobs/prov.jsonld` under its `urn:sha256:` IRI, and every later `sal build` carries those records into the table as provenance, so a table
+built again from source still describes every copy. `prov.jsonld` is a log: a run only ever adds to it and to `.sal/data/blobs`, and never removes what an earlier
+run copied, so clearing old copies is up to the user, with `sal clean --wipe` or by hand. See [Using SAL Modules](/sal/guides/using-sal-modules/), including
 [Files a task produces](/sal/guides/using-sal-modules/#files-a-task-produces).
 
 `sal run` refuses to run anything unless the data product matches the sources as they stand:
@@ -537,7 +537,7 @@ A query can also name one of these endpoints in a `SERVICE` clause and subtract 
 
 It also serves the vocabulary and imported ontology documents the project has pinned, and the files SAL module tasks produced, at `GET /blobs/{hash}`, where `{hash}` is the name a document is stored by under `.sal/data/blobs`: the SHA-256 digest of the document, or the git commit hash of the module for a `salmodule://` vocabulary. Either may be given bare or headed by the scheme its `owl:versionIRI` carries, `urn:sha256:` or `urn:git-commit-hash:`, which is stripped. A hash with no matching document answers `404`. The endpoint supports HTTP range requests, so a client can fetch part of a document without downloading the whole thing. This route is available with or without `--with-ui`; the UI's own Blobs tab, described below, is a thin form over it.
 
-A directory a SAL module task produced sits under `.sal/data/blobs` at its own path rather than under a hash, so `GET /blobs/{path}` serves each file in it as it is, with a content type from its extension, and a STAC or Zarr client pointed at `/blobs/{path}/` reads it in place. The directory itself is served as a zip archive, either at its path with a trailing slash or at the `urn:sha256:` digest `.sal/data/blobs/prov.jsonld` records for it, and `/blobs/prov.jsonld` serves that record. A path that would step outside `.sal/data/blobs` answers `404`. CORS is open on the endpoint, the same as on `/stac/`, so a STAC browser on another origin can follow the data product's catalog into a module's. With `--with-ui`, only `/blobs` itself is the Blobs tab; a browser following a link to `/blobs/{path}` gets the file.
+A directory a SAL module task produced sits under `.sal/data/blobs/{digest}/` with its files as the task wrote them, so `GET /blobs/{digest}/{file}` serves each file in it as it is, with a content type from its extension, and a STAC or Zarr client pointed at `/blobs/{digest}/` reads it in place. The directory itself is served as a zip archive, named after the `file:///` IRI the task gave it, at `/blobs/{digest}` with or without a trailing slash, and `/blobs/prov.jsonld` serves the record of every copy. A path that would step outside `.sal/data/blobs` answers `404`. CORS is open on the endpoint, the same as on `/stac/`, so a STAC browser on another origin can follow the data product's catalog into a module's. With `--with-ui`, only `/blobs` itself is the Blobs tab; a browser following a link to `/blobs/{path}` gets the file.
 
 The STAC catalog `sal build` writes is served at `GET /stac/catalog.json`, which `/stac` and `/stac/` also answer with, and its collection at `GET /stac/triples/collection.json`.
 The documents are served exactly as they were written, so the collection's `iceberg:metadata_location` is a `file://` URL on the machine running the server, which a reader on that machine can pass straight to DuckDB's `iceberg_scan()`; see [STAC catalog](/sal/reference/data-layout/#stac-catalog).
@@ -640,7 +640,7 @@ Removes or reshapes local build artifacts.
 Use `--wipe` to delete the local data product, or `--squash` to condense local snapshots ahead of a remote artifact.
 
 `--wipe` also deletes `.sal/config.jsonld` along with the vocabulary documents its pins name,
-the directories SAL module tasks handed over together with the `.sal/data/blobs/prov.jsonld` that records them,
+the files and directories SAL module tasks handed over together with the `.sal/data/blobs/prov.jsonld` that records them,
 and any data products pulled under `.sal/data/imports`,
 putting the project back to the state it was in before anything was built or imported.
 The confirmation prompt names `.sal/config.jsonld` when it exists, since it is a file the project keeps in Git rather than a build artifact.

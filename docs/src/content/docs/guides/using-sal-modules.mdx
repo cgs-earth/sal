@@ -165,14 +165,15 @@ out of the container instead of one file:
 {"@id": "file:///out/catalog/", "schema:name": "The 2024 STAC catalog"}
 ```
 
-A directory is not stored by its digest, since renaming its files would break whatever reads them. It lands
-verbatim under the path it had in the container, `.sal/data/blobs/out/catalog/` here, so that a Zarr or STAC
-client pointed at that path, on disk, at `/blobs/out/catalog/` under `sal serve`, or in the bucket
-[`sal upload`](/sal/reference/commands/#sal-upload) copies `.sal/data` to, reads it with no rewriting or lookup.
+A directory is stored under the digest of its contents, `.sal/data/blobs/3f9a…/` here, with the files
+inside it left exactly as the task wrote them, so that a Zarr or STAC client pointed at that directory, on disk,
+at `/blobs/3f9a…/` under `sal serve`, or in the bucket
+[`sal upload`](/sal/reference/commands/#sal-upload) copies `.sal/data` to, reads it with no rewriting or lookup,
+and so that two modules writing the same container path, `/out/catalog/` say, never overwrite each other.
 The digest is the SHA-256 of the directory's contents (one line per file, sorted by path, of the relative path,
-a NUL, and the file's own SHA-256), so a directory copied again unchanged hashes the same, and it is recorded in
-`.sal/data/blobs/prov.jsonld`, one node per copied directory in the shape `.sal/config.jsonld` records a pinned
-vocabulary in:
+a NUL, and the file's own SHA-256), so a directory copied again unchanged hashes the same. Every copy, file or
+directory, is recorded in `.sal/data/blobs/prov.jsonld`, one node per copy in the shape `.sal/config.jsonld`
+records a pinned vocabulary in, with the module that produced it as `dcterms:source`:
 
 ```json
 {
@@ -184,40 +185,43 @@ vocabulary in:
   },
   "@graph": [
     {
-      "@id": "file:///out/catalog/",
+      "@id": "urn:sha256:3f9a…",
       "rdfs:label": "file:///out/catalog/",
       "owl:versionIRI": { "@id": "urn:sha256:3f9a…" },
+      "dcterms:identifier": "3f9a…/",
+      "dcterms:source": { "@id": "salmodule://github.com/example/stac-module" },
       "dcterms:modified": { "@value": "2026-09-10T14:26:05Z", "@type": "xsd:dateTime" },
-      "rdfs:comment": "Represents the directory out/catalog/ a SAL module task copied out of its container as of 2026-09-10T14:26:05Z. urn:sha256:3f9a… is the SHA-256 of its contents, and the directory is served whole as a zip archive under that digest."
+      "rdfs:comment": "Represents the directory file:///out/catalog/ a task of the SAL module salmodule://github.com/example/stac-module copied out of its container as of 2026-09-10T14:26:05Z. urn:sha256:3f9a… is the SHA-256 of its contents, and the directory is served whole as a zip archive under that digest."
     }
   ]
 }
 ```
 
-The node's `@id` and `rdfs:label` are both the `file:///` IRI the task named the directory with; its path under
-the blob store is that IRI's path without the leading slash. The graph refers to the directory as `urn:sha256:3f9a…`
-the same way it does a file, described with that IRI, modification time (the newest of any file in it), digest,
-and path, together with whatever else the task said about it:
+The node's `@id` is the digest IRI the graph refers to the copy by, its `rdfs:label` is the `file:///` IRI the
+task named it with, and its `dcterms:identifier` is where it sits under the blob store. The graph refers to the
+directory as `urn:sha256:3f9a…` the same way it does a file, described with that IRI, modification time (the
+newest of any file in it), digest, path, and source module, together with whatever else the task said about it:
 
 ```turtle
 <https://example.org/dataset/2024> schema:hasPart <urn:sha256:3f9a…> .
 <urn:sha256:3f9a…> rdfs:label "file:///out/catalog/" ;
     dcterms:modified "2026-09-10T14:26:05Z"^^xsd:dateTime ;
-    dcterms:identifier "out/catalog/" ;
+    dcterms:identifier "3f9a…/" ;
+    dcterms:source <salmodule://github.com/example/stac-module> ;
     owl:versionIRI <urn:sha256:3f9a…> ;
     schema:name "The 2024 STAC catalog" .
 ```
 
-`sal serve` serves each file in the directory at `/blobs/out/catalog/{file}` and the directory whole as a zip
-archive at `/blobs/urn:sha256:3f9a…`, resolved through `prov.jsonld`, or at `/blobs/out/catalog/`. A directory
-whose `catalog.json` is a STAC Catalog or Collection is also linked as a child of the data product's own
-[STAC catalog](/sal/reference/data-layout/#stac-catalog), so a STAC client that opens `.sal/data/stac/catalog.json`
-finds the module's catalog beneath the triples table. A directory
-copied again lands at the same path and replaces the earlier copy, and its `prov.jsonld` node is replaced with it;
-the digest is what tells the versions apart, so an earlier `urn:sha256:` in the table no longer resolves once the
-path holds a newer copy. A directory an earlier run copied that no task produced in the latest run is removed
-together with its record when that run finishes, so `prov.jsonld` only ever describes what the most recent run
-left on disk. `sal clean --wipe` removes the recorded directories and `prov.jsonld` with the data product.
+`sal serve` serves each file in the directory at `/blobs/3f9a…/{file}` and the directory whole as a zip
+archive, named after the `file:///` IRI the task gave it, at `/blobs/3f9a…` or `/blobs/urn:sha256:3f9a…`. A directory whose `catalog.json` is a STAC Catalog or Collection is also linked as a
+child of the data product's own [STAC catalog](/sal/reference/data-layout/#stac-catalog), so a STAC client that
+opens `.sal/data/stac/catalog.json` finds the module's catalog beneath the triples table.
+
+`prov.jsonld` and the blob store are a log. A run appends the copies it made and never removes what an earlier
+run left, so a directory produced again with different contents lands under a new digest beside the old one,
+every `urn:sha256:` a past build committed to the table still resolves, and every STAC catalog ever handed over
+stays linked from the data product's catalog. Clearing old copies is up to the user: `sal clean --wipe` removes
+every recorded copy and `prov.jsonld` with the data product, or delete a copy's directory and its node by hand.
 
 Files are copied concurrently with the task writing its output, so a module must finish writing a file, or every
 file in a directory, before it prints the line that names it; one named before it is complete is copied

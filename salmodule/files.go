@@ -34,15 +34,23 @@ const (
 	rdfsCommentIRI       = "http://www.w3.org/2000/01/rdf-schema#comment"
 	dctermsModifiedIRI   = "http://purl.org/dc/terms/modified"
 	dctermsIdentifierIRI = "http://purl.org/dc/terms/identifier"
+	dctermsSourceIRI     = "http://purl.org/dc/terms/source"
 	owlVersionIRI        = "http://www.w3.org/2002/07/owl#versionIRI"
 )
 
+// digestIRIPrefix heads the urn:sha256: IRI a copy is known by once it is
+// stored.
+const digestIRIPrefix = "urn:sha256:"
+
 // CopiedFile is a file or directory a task named with a file:/// IRI in its
-// output and that was copied out of the container into the blob store. A file
-// is stored under its digest so that it is content addressable; a directory is
-// stored verbatim under the path it had in the container, so that whatever
-// reads it, a Zarr or STAC client for instance, finds the layout it expects,
-// and its digest is recorded in the blob store's prov.jsonld instead.
+// output and that was copied out of the container into the blob store. Both
+// are stored under the digest of their contents so that they are content
+// addressable and two modules naming a path the same way never collide: a
+// file as the bare digest, a directory as <digest>/ with the files inside it
+// kept verbatim, so that whatever reads it, a Zarr or STAC client for
+// instance, finds the layout it expects. Everything in the blob store but
+// prov.jsonld is named by a hash. Every copy is recorded in prov.jsonld
+// together with the module that produced it.
 type CopiedFile struct {
 	// ContainerPath is the absolute path the file had inside the container,
 	// ending in a slash for a directory.
@@ -50,6 +58,10 @@ type CopiedFile struct {
 	// Directory reports whether the copy is a whole directory rather than one
 	// file.
 	Directory bool
+	// Source is the salmodule:// IRI of the module whose task produced the
+	// file, recorded as dcterms:source. It is the IRI the table records the
+	// module under, the module's namespace without its trailing slash.
+	Source string
 	// Modified is when the file was last written inside the container, or the
 	// newest such time of any file in a directory, recorded as
 	// dcterms:modified.
@@ -58,9 +70,8 @@ type CopiedFile struct {
 	// tree (see treeDigest). It names a file in the blob store.
 	Digest string
 	// BlobPath is where the copy sits relative to the blob store, recorded as
-	// dcterms:identifier: the digest for a file, the container path without
-	// its leading slash for a directory. It is also the path the copy is
-	// served at under /blobs/.
+	// dcterms:identifier: <digest> for a file, <digest>/ for a directory. It
+	// is also the path the copy is served at under /blobs/.
 	BlobPath string
 	// Path is where the copy landed on disk.
 	Path string
@@ -69,7 +80,7 @@ type CopiedFile struct {
 // IRI returns the identifier the file's triples use in place of the file:///
 // IRI the task wrote, urn:sha256:<digest>, which is the same form the pinned
 // vocabulary documents in the blob store are named with.
-func (f CopiedFile) IRI() string { return "urn:sha256:" + f.Digest }
+func (f CopiedFile) IRI() string { return digestIRIPrefix + f.Digest }
 
 // FileIRI returns the file:/// IRI the task named the file or directory with,
 // file:///<container path>, ending in a slash for a directory. It is what the
@@ -104,10 +115,12 @@ func containerFilePath(iri string) (containerPath string, isDir bool, err error)
 // container as the task's output arrives, each in its own goroutine so that
 // copying overlaps with the task still writing, and finishes them all before
 // the container is let go. A file is copied at most once; a later reference to
-// it is warned about and skipped.
+// it is warned about and skipped. source is the module IRI each copy is
+// attributed to.
 type fileCopier struct {
-	dir   string
-	files ContainerFiles
+	dir    string
+	source string
+	files  ContainerFiles
 
 	mu     sync.Mutex
 	wg     sync.WaitGroup
@@ -170,7 +183,7 @@ func (c *fileCopier) start(ctx context.Context, containerPath string, isDir bool
 	if c.copied == nil {
 		c.copied = map[string]*CopiedFile{}
 	}
-	copied := &CopiedFile{ContainerPath: containerPath, Directory: isDir}
+	copied := &CopiedFile{ContainerPath: containerPath, Directory: isDir, Source: c.source}
 	c.copied[containerPath] = copied
 
 	c.wg.Add(1)
@@ -233,11 +246,10 @@ func (c *fileCopier) copyFile(ctx context.Context, copied *CopiedFile) error {
 
 // copyDirectory streams a whole directory out of the container into a
 // temporary directory in the blob store, hashing each file on the way, and
-// moves it to its place under the container's own path only once every entry
-// has arrived, so a partially copied tree is never found where a complete one
-// is expected. A directory already there from an earlier copy is replaced,
-// since a path names the current copy rather than one version of it; the
-// digest is what tells versions apart.
+// moves it to <digest>/ only once every entry has arrived and the digest is
+// known, so a partially copied tree is never found where a complete
+// one is expected. A directory already there holds the same contents, since
+// the name is their digest, and is replaced by the fresh copy.
 func (c *fileCopier) copyDirectory(ctx context.Context, copied *CopiedFile) error {
 	if err := os.MkdirAll(c.dir, 0755); err != nil {
 		return fmt.Errorf("create blob directory for copied files: %w", err)
@@ -291,11 +303,8 @@ func (c *fileCopier) copyDirectory(ctx context.Context, copied *CopiedFile) erro
 	}
 	copied.Modified = modified.UTC()
 	copied.Digest = treeDigest(entries)
-	copied.BlobPath = strings.TrimPrefix(copied.ContainerPath, "/")
-	copied.Path = filepath.Join(c.dir, filepath.FromSlash(strings.TrimSuffix(copied.BlobPath, "/")))
-	if err := os.MkdirAll(filepath.Dir(copied.Path), 0755); err != nil {
-		return fmt.Errorf("store copy of %s: %w", copied.ContainerPath, err)
-	}
+	copied.BlobPath = copied.Digest + "/"
+	copied.Path = filepath.Join(c.dir, copied.Digest)
 	if err := os.RemoveAll(copied.Path); err != nil {
 		return fmt.Errorf("replace the earlier copy of %s: %w", copied.ContainerPath, err)
 	}
@@ -347,18 +356,17 @@ func (c *fileCopier) wait() ([]CopiedFile, error) {
 // object, to the urn:sha256: IRI of the copy that was made of it and describes
 // each copy the way a pinned vocabulary's provenance node is described: the
 // file:/// IRI the task wrote as rdfs:label, when it was written as
-// dcterms:modified, and its digest
-// as owl:versionIRI, plus where it sits under the blob store as
-// dcterms:identifier. Whatever else the task said about the file:/// IRI
-// stays with it under its new name. The data product then refers to the
-// copies it holds rather than to paths inside a container that no longer
-// exists. A file:// IRI that was not copied is an error. A copy nothing
-// refers to as an IRI, because the task wrote the path as a literal, is
-// removed again and warned about. Every directory that is kept is recorded in
-// the blob store's prov.jsonld under blobDir, which is how its digest is
-// resolved back to the directory. It returns the copies that were kept, so
-// that the run can prune from prov.jsonld whatever it did not produce.
-func LinkCopiedFiles(graph *rdflibgo.Graph, files []CopiedFile, blobDir string) ([]CopiedFile, error) {
+// dcterms:modified, its digest as owl:versionIRI, where it sits under the blob
+// store as dcterms:identifier, and the module that produced it as
+// dcterms:source. Whatever else the task said about the file:/// IRI stays
+// with it under its new name. The data product then refers to the copies it
+// holds rather than to paths inside a container that no longer exists. A
+// file:// IRI that was not copied is an error. A copy nothing refers to as an
+// IRI, because the task wrote the path as a literal, is removed again and
+// warned about. Every copy that is kept is appended to the blob store's
+// prov.jsonld under blobDir, which is the log of everything module tasks have
+// handed over.
+func LinkCopiedFiles(graph *rdflibgo.Graph, files []CopiedFile, blobDir string) error {
 	byPath := map[string]CopiedFile{}
 	for _, file := range files {
 		byPath[file.ContainerPath] = file
@@ -393,40 +401,40 @@ func LinkCopiedFiles(graph *rdflibgo.Graph, files []CopiedFile, blobDir string) 
 			graph.Add(copy, rdflibgo.NewURIRefUnsafe(dctermsModifiedIRI), rdflibgo.NewLiteral(file.Modified.Format(time.RFC3339), rdflibgo.WithDatatype(rdflibgo.XSDDateTime)))
 			graph.Add(copy, rdflibgo.NewURIRefUnsafe(dctermsIdentifierIRI), rdflibgo.NewLiteral(file.BlobPath))
 			graph.Add(copy, rdflibgo.NewURIRefUnsafe(owlVersionIRI), copy)
+			if file.Source != "" {
+				graph.Add(copy, rdflibgo.NewURIRefUnsafe(dctermsSourceIRI), rdflibgo.NewURIRefUnsafe(file.Source))
+			}
 		}
 		return copy, nil
 	}
 	for _, triple := range fileTriples {
 		subject, err := link(triple.Subject)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		object, err := link(triple.Object)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		graph.Remove(triple.Subject, &triple.Predicate, triple.Object)
 		graph.Add(subject.(rdflibgo.Subject), triple.Predicate, object)
 	}
 
-	var kept, directories []CopiedFile
+	var kept []CopiedFile
 	for _, file := range files {
 		if !referenced[file.ContainerPath] {
 			slog.Warn(fileIRIPrefix + strings.TrimPrefix(file.ContainerPath, "/") + " was copied but nothing in the SAL module's output refers to it as an IRI, so the copy was discarded; write it as {\"@id\": \"file:///...\"} to keep it")
 			if err := os.RemoveAll(file.Path); err != nil && !os.IsNotExist(err) {
-				return nil, fmt.Errorf("discard unreferenced copy of %s: %w", file.ContainerPath, err)
+				return fmt.Errorf("discard unreferenced copy of %s: %w", file.ContainerPath, err)
 			}
 			continue
 		}
 		kept = append(kept, file)
-		if file.Directory {
-			directories = append(directories, file)
-		}
 	}
-	if len(directories) == 0 {
-		return kept, nil
+	if len(kept) == 0 {
+		return nil
 	}
-	return kept, recordDirectories(blobDir, directories)
+	return recordCopies(blobDir, kept)
 }
 
 // isFileIRI reports whether term is an IRI with the file scheme.

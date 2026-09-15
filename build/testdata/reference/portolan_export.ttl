@@ -10,11 +10,6 @@
         ]
         [
             portolan:provider "arcgis" ;
-            portolan:url "https://services.arcgis.com/6fiE7QkLWSPMd0N5/ArcGIS/rest/services/1_Neighborhoods_Philadelphia/FeatureServer" ;
-            portolan:options ( "--output-crs" "EPSG:4326"  "--license" "CC-BY-4.0" )
-        ]
-        [
-            portolan:provider "arcgis" ;
             portolan:url "https://services.arcgis.com/6fiE7QkLWSPMd0N5/ArcGIS/rest/services/PIttsburgh_incomes_22/FeatureServer" ;
             portolan:options ( "--output-crs" "EPSG:4326"  "--license" "CC-BY-4.0" )
         ]

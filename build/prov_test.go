@@ -18,17 +18,19 @@ const provTestDocument = `{
     "xsd": "http://www.w3.org/2001/XMLSchema#"
   },
   "@graph": [{
-    "@id": "file:///out/catalog/",
+    "@id": "urn:sha256:1111",
     "rdfs:label": "file:///out/catalog/",
     "owl:versionIRI": {"@id": "urn:sha256:1111"},
+    "dcterms:identifier": "1111/",
+    "dcterms:source": {"@id": "salmodule://github.com/test/module"},
     "dcterms:modified": {"@value": "2026-09-10T14:26:05Z", "@type": "xsd:dateTime"},
-    "rdfs:comment": "Represents the directory out/catalog/ a SAL module task copied out of its container."
+    "rdfs:comment": "Represents the directory file:///out/catalog/ a SAL module task copied out of its container."
   }]
 }`
 
 // A directory an earlier run copied is described in the graph of a later
-// build from its prov.jsonld record, so the table describes it whether or
-// not the module ran again.
+// build from its prov.jsonld record, with the module that produced it, so the
+// table describes it whether or not the module ran again.
 func TestAppendBlobProvenanceDescribesTheDirectoriesTheBlobStoreRecords(t *testing.T) {
 	project := newPinsTestProject(t)
 	blobDir := filepath.Join(project, ".sal", "data", "blobs")
@@ -39,9 +41,10 @@ func TestAppendBlobProvenanceDescribesTheDirectoriesTheBlobStoreRecords(t *testi
 	require.NoError(t, appendBlobProvenance(graph))
 
 	require.True(t, graphHasTriple(graph, "urn:sha256:1111", "http://www.w3.org/2000/01/rdf-schema#label", "file:///out/catalog/"))
-	require.True(t, graphHasTriple(graph, "urn:sha256:1111", "http://purl.org/dc/terms/identifier", "out/catalog/"))
-	require.True(t, graphHasTriple(graph, "urn:sha256:1111", "http://www.w3.org/2000/01/rdf-schema#comment", "Represents the directory out/catalog/ a SAL module task copied out of its container."))
+	require.True(t, graphHasTriple(graph, "urn:sha256:1111", "http://purl.org/dc/terms/identifier", "1111/"))
+	require.True(t, graphHasTriple(graph, "urn:sha256:1111", "http://www.w3.org/2000/01/rdf-schema#comment", "Represents the directory file:///out/catalog/ a SAL module task copied out of its container."))
 	require.True(t, graph.Contains(rdflibgo.NewURIRefUnsafe("urn:sha256:1111"), rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#versionIRI"), rdflibgo.NewURIRefUnsafe("urn:sha256:1111")))
+	require.True(t, graph.Contains(rdflibgo.NewURIRefUnsafe("urn:sha256:1111"), rdflibgo.NewURIRefUnsafe("http://purl.org/dc/terms/source"), rdflibgo.NewURIRefUnsafe("salmodule://github.com/test/module")))
 }
 
 func TestAppendBlobProvenanceAddsNothingWithoutAProvFile(t *testing.T) {
