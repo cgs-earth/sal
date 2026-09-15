@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-
-
 import click
 import requests
 import json
@@ -48,7 +45,7 @@ def ontology():
                 "rdfs:label": "Geoconnex U.S. States Reference Features",
                 "rdfs:comment": "Feteches the states from Geoconnex reference feature in Geoconnex.",
                 "rdfs:subClassOf": {"@id": "salmodule:Task"},
-                "salmodule:output": {
+                "salmodule:stdoutShape": {
                     "@type": "sh:NodeShape",
                     "sh:targetClass": {"@id": "schema:Place"},
                     "sh:property": [
@@ -73,7 +70,7 @@ def ontology():
                         }
                     ]
                 },
-                "salmodule:self": {
+                "salmodule:taskShape": {
                     "@type": "sh:NodeShape",
                     "sh:property": [
                         {
@@ -110,7 +107,7 @@ def run():
 def geoconnex_reference_feature_states(task_instance):
     """salmodule:Task implementation"""
  
-    # get maxRetries property value as per the salmodule:self NodeShape definition for this task instance
+    # get maxRetries property value as per the salmodule:taskShape NodeShape definition for this task instance
     max_retries=0
     if isinstance(task_instance['maxRetries'],dict):
         max_retries=int(task_instance['maxRetries']['@value']) # datatype rendered as a object. Get the @value 
@@ -155,7 +152,7 @@ def print_states_jsonld(state_pid,max_retries):
                 continue
 
 def print_err_msg(msg):
-    """Print an error message as a JSON object to stdout in conformance to salmodule:output SHACL Shape annotation for salmodule:Task base class"""
+    """Print an error message as a JSON object to stdout in conformance to salmodule:stdoutShape SHACL Shape annotation for salmodule:Task base class"""
     err_msg = {
         "@type": "salmodule:Error",
         "rdfs:comment": msg
