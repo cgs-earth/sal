@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { fetchBlobs, resolveBlob, type BlobListing } from '../api'
 import { blobLink, shareLink, visit } from '../routing'
 
@@ -63,7 +63,6 @@ export function BlobsTab({ hash: initialHash, render: initialRender }: BlobsTabP
   const [rendered, setRendered] = useState<Rendered | null>(null)
   const [listing, setListing] = useState<BlobListing | null>(null)
   const [listError, setListError] = useState<string | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
 
   // The listing is read once, when the tab opens, so that the blobs the table
   // refers to are on hand without a hash having to be known in advance.
@@ -76,14 +75,6 @@ export function BlobsTab({ hash: initialHash, render: initialRender }: BlobsTabP
         setListError(caught instanceof Error ? caught.message : String(caught))
       })
     return () => controller.abort()
-  }, [])
-
-  // Load fills the form with a listed blob's hash, leaving the download or
-  // render to the user the way a link without render=true does.
-  const load = useCallback((blobHash: string) => {
-    setHash(blobHash)
-    setError(null)
-    inputRef.current?.focus()
   }, [])
 
   // The address bar mirrors the form, so the URL can be copied at any point and
@@ -143,7 +134,6 @@ export function BlobsTab({ hash: initialHash, render: initialRender }: BlobsTabP
           }}
         >
           <input
-            ref={inputRef}
             className="module-input"
             type="text"
             value={hash}
@@ -167,7 +157,15 @@ export function BlobsTab({ hash: initialHash, render: initialRender }: BlobsTabP
         </p>
       </section>
 
-      <BlobList listing={listing} error={listError} onLoad={load} />
+      <BlobList
+        listing={listing}
+        error={listError}
+        render={render}
+        onLoad={(blobHash) => {
+          setHash(blobHash)
+          void resolve(blobHash, render)
+        }}
+      />
 
       {rendered && (
         <section className="panel">
@@ -199,17 +197,20 @@ type BlobListProps = {
   /** The blobs the table refers to, or null while they are still being read. */
   listing: BlobListing | null
   error: string | null
-  /** Fills the form with a listed blob's hash. */
+  /** Whether the form is set to render rather than download, which a hash link follows. */
+  render: boolean
+  /** Loads a listed blob: fills the form with its hash and fetches it. */
   onLoad: (hash: string) => void
 }
 
 /**
  * Every blob the table refers to, the vocabularies the Stats tab lists and the
- * files and directories SAL module tasks handed over, each with a button that
- * loads its hash into the form above. Collapsed by default, since the form is
- * what the tab is for and the list can be long.
+ * files and directories SAL module tasks handed over. Each hash is a link that
+ * loads the blob straight away, the way the Stats tab's version links do.
+ * Collapsed by default, since the form is what the tab is for and the list can
+ * be long.
  */
-function BlobList({ listing, error, onLoad }: BlobListProps) {
+function BlobList({ listing, error, render, onLoad }: BlobListProps) {
   const count = listing?.blobs.length ?? 0
   let summary = 'Reading the table…'
   if (error) summary = 'Could not be read'
@@ -223,7 +224,8 @@ function BlobList({ listing, error, onLoad }: BlobListProps) {
       </summary>
       <p className="hint module-hint blob-list-hint">
         Every blob the triples table refers to by an <code>owl:versionIRI</code>: the vocabularies the Stats tab lists
-        and the files and directories SAL module tasks handed over. A directory's name ends in a <code>/</code>.
+        and the files and directories SAL module tasks handed over, each by the IRI it was known by before it was
+        pinned. Click a hash to load it.
       </p>
       {error && <p className="error-banner">{error}</p>}
       {listing && listing.blobs.length === 0 && (
@@ -234,27 +236,26 @@ function BlobList({ listing, error, onLoad }: BlobListProps) {
           <table className="result-table">
             <thead>
               <tr>
-                <th scope="col">file/directory</th>
+                <th scope="col">IRI</th>
                 <th scope="col">hash</th>
-                <th scope="col">load</th>
               </tr>
             </thead>
             <tbody>
               {listing.blobs.map((blob) => (
-                <tr key={`${blob.file}|${blob.hash}`}>
-                  <td title={blob.file}>{blob.file}</td>
+                <tr key={`${blob.iri}|${blob.hash}`}>
+                  <td title={blob.iri}>{blob.iri}</td>
                   <td title={blob.hash}>
-                    <code className="iri">{blob.hash}</code>
-                  </td>
-                  <td className="blob-load">
-                    <button
-                      type="button"
-                      className="button"
-                      onClick={() => onLoad(blob.hash)}
-                      aria-label={`Load ${blob.file} into the form`}
+                    <a
+                      href={blobLink(blob.hash, render)}
+                      className="iri"
+                      title={render ? 'Render this blob' : 'Download this blob'}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        onLoad(blob.hash)
+                      }}
                     >
-                      Load
-                    </button>
+                      {blob.hash}
+                    </a>
                   </td>
                 </tr>
               ))}

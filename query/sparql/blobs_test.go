@@ -18,9 +18,9 @@ const blobsTestTable = `CREATE TABLE triples AS
 		('https://schema.org/', 'http://www.w3.org/2002/07/owl#versionIRI', 'urn:sha256:bbbb', NULL),
 		('salmodule://github.com/cgs-earth/demo', 'http://www.w3.org/2002/07/owl#versionIRI', 'urn:git-commit-hash:cccc', NULL),
 		('urn:sha256:dddd', 'http://www.w3.org/2002/07/owl#versionIRI', 'urn:sha256:dddd', NULL),
-		('urn:sha256:dddd', 'http://www.w3.org/2000/01/rdf-schema#label', NULL, 'report.csv'),
+		('urn:sha256:dddd', 'http://www.w3.org/2000/01/rdf-schema#label', NULL, 'file:///tmp/report.csv'),
 		('urn:sha256:eeee', 'http://www.w3.org/2002/07/owl#versionIRI', 'urn:sha256:eeee', NULL),
-		('urn:sha256:eeee', 'http://www.w3.org/2000/01/rdf-schema#label', NULL, 'catalog/'),
+		('urn:sha256:eeee', 'http://www.w3.org/2000/01/rdf-schema#label', NULL, 'file:///out/catalog/'),
 		('https://ontology.test/', 'http://www.w3.org/2002/07/owl#versionIRI', 'https://ontology.test/1.0', NULL)
 	) t(subject, predicate, object_iri, object_string),
 	(SELECT NULL::DOUBLE AS object_float, NULL::BIGINT AS object_integer, NULL::INTEGER AS object_byte, NULL::TIMESTAMP AS object_time)`
@@ -33,12 +33,12 @@ func TestBlobsSQLListsEveryPinnedVersionAndCopiedFile(t *testing.T) {
 	header, rows, err := queryRows(context.Background(), db, BlobsSQL(100))
 
 	require.NoError(t, err)
-	require.Equal(t, []string{"file/directory", "hash"}, header)
+	require.Equal(t, []string{"iri", "hash"}, header)
 	require.Equal(t, [][]string{
-		{"catalog/", "urn:sha256:eeee"},
+		{"file:///out/catalog/", "urn:sha256:eeee"},
+		{"file:///tmp/report.csv", "urn:sha256:dddd"},
 		{"https://schema.org/", "urn:sha256:aaaa"},
 		{"https://schema.org/", "urn:sha256:bbbb"},
-		{"report.csv", "urn:sha256:dddd"},
 		{"salmodule://github.com/cgs-earth/demo", "urn:git-commit-hash:cccc"},
 	}, rows)
 }
@@ -52,7 +52,7 @@ func TestBlobsSQLStopsAtTheLimit(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, [][]string{
-		{"catalog/", "urn:sha256:eeee"},
-		{"https://schema.org/", "urn:sha256:aaaa"},
+		{"file:///out/catalog/", "urn:sha256:eeee"},
+		{"file:///tmp/report.csv", "urn:sha256:dddd"},
 	}, rows)
 }

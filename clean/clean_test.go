@@ -12,6 +12,7 @@ import (
 	"github.com/cgs-earth/sal/build/load"
 	"github.com/cgs-earth/sal/build/validate"
 	"github.com/cgs-earth/sal/pkg"
+	"github.com/cgs-earth/sal/salmodule"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
@@ -162,4 +163,23 @@ func TestRemoveProjectConfigDeletesTheDocumentsThePinsName(t *testing.T) {
 
 	require.NoFileExists(t, documents[0])
 	require.NoFileExists(t, configPath)
+}
+
+// The directories module tasks handed over sit under .sal/data/blobs at their
+// own paths rather than inside the table, so a wipe removes them and the
+// prov.jsonld that records them explicitly.
+func TestRemoveCopiedDirectoriesDeletesTheRecordedDirectoriesAndProv(t *testing.T) {
+	blobsDir := filepath.Join(t.TempDir(), "blobs")
+	require.NoError(t, os.MkdirAll(filepath.Join(blobsDir, "out", "catalog"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(blobsDir, "out", "catalog", "catalog.json"), []byte("{}"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(blobsDir, salmodule.ProvFile), []byte(`{"@context": {}, "@graph": [{"@id": "file:///out/catalog/", "owl:versionIRI": {"@id": "urn:sha256:1111"}}]}`), 0644))
+
+	require.NoError(t, removeCopiedDirectories(blobsDir))
+
+	require.NoDirExists(t, filepath.Join(blobsDir, "out", "catalog"))
+	require.NoFileExists(t, filepath.Join(blobsDir, salmodule.ProvFile))
+}
+
+func TestRemoveCopiedDirectoriesSucceedsWithoutABlobStore(t *testing.T) {
+	require.NoError(t, removeCopiedDirectories(filepath.Join(t.TempDir(), "blobs")))
 }

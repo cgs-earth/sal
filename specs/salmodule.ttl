@@ -3,7 +3,6 @@
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
-@prefix xml: <http://www.w3.org/XML/1998/namespace> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
@@ -63,7 +62,7 @@ salmodule:runCommand a owl:OntologyProperty ;
                      rdfs:seeAlso salmodule:Task ,
                                   salmodule:baseCommand ,
                                   salmodule:taskInstanceEnvVar ;
-                     skos:example "<salmodule:taskInstanceEnvVar>=\"<JSON-LD object representation of salmodule:Task> instance\" docker run SAL_MODULE_IMAGE <salmodule:runCommand>" ;
+                     skos:example "<salmodule:taskInstanceEnvVar>=\"<JSON-LD object representation of a salmodule:Task instance>\" docker run SAL_MODULE_IMAGE <salmodule:runCommand>" ;
                      skos:note "The environment variable <salmodule:taskInstanceEnvVar> must be set to a JSON-LD representation of the salmodule:Task subclass instance to be invoked."@en .
 
 
@@ -73,7 +72,7 @@ salmodule:taskInstanceEnvVar a owl:OntologyProperty ;
                              rdfs:label "Task Instance Environment Variable"@en ;
                              skos:example "<salmodule:taskInstanceEnvVar>=\"<JSON object representation of salmodule:Task instance>\"" ;
                              skos:note "Environment variable <salmodule:taskInstanceEnvVar> must be set to a JSON representation of the SAL Module's salmodule:Task subclass instance to be invoked."@en ;
-                             skos:note "Environment variable's assigned JSON object will be converted to RDF statements by the SAL Module ontology @context." .
+                             skos:note "Environment variable's assigned JSON object will be converted to RDF statements by the SAL Module ontology @context."@en .
 
 #################################################################
 #    Datatypes
@@ -81,7 +80,7 @@ salmodule:taskInstanceEnvVar a owl:OntologyProperty ;
 
 ###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#inboundListener
 salmodule:inboundListener a rdfs:Datatype ;
-                          rdfs:comment "Literal representing a [host:]<port>  describing a desired inbound connection to the SAL Module" ;
+                          rdfs:comment "Literal representing a [host:]<port> describing a desired inbound connection to the SAL Module"@en ;
                           rdfs:label "Inbound Listener"@en ;
                           skos:example "8080" ,
                                        "example.com:8080" ;
@@ -90,7 +89,7 @@ salmodule:inboundListener a rdfs:Datatype ;
 
 ###  https://w3id.org/sal/cgs-earth/sal-module-spec/salmodule#outboundEndpoint
 salmodule:outboundEndpoint a rdfs:Datatype ;
-                           rdfs:comment "Literal representing a URL or <host>:<port> format describing a desired outbound connection from the SAL Module" ;
+                           rdfs:comment "Literal representing a URL or <host>:<port> format describing a desired outbound connection from the SAL Module"@en ;
                            rdfs:label "Outbound Endpoint"@en ;
                            skos:example "example.com:8080" ,
                                         "http://example.com:8080" ;
@@ -135,7 +134,7 @@ salmodule:Task a owl:Class ;
                rdfs:label "Task"@en ;
                skos:note "SAL Module implementers create subclasses of salmodule:Task to define specific operational tasks within the containerized application."@en ;
                rdfs:seeAlso salmodule:taskInstanceEnvVar, salmodule:runCommand;
-               salmodule:output [ a sh:NodeShape ;
+               salmodule:stdoutShape [ a sh:NodeShape ;
                                   sh:property [ sh:message "An rdfs:comment (message) is required for salmodule:Error instances"@en ;
                                                 sh:minCount 1 ;
                                                 sh:path rdfs:comment
@@ -162,7 +161,7 @@ salmodule:Error a owl:Class ;
 salmodule:NodeConsumer a owl:Class ;
                        owl:equivalentClass [ owl:intersectionOf ( salmodule:Task
                                                                   [ a owl:Restriction ;
-                                                                    owl:onProperty salmodule:input ;
+                                                                    owl:onProperty salmodule:stdinShape ;
                                                                     owl:someValuesFrom sh:NodeShape
                                                                   ]
                                                                 ) ;
@@ -176,11 +175,11 @@ salmodule:NodeConsumer a owl:Class ;
 salmodule:NodeProcessor a owl:Class ;
                         owl:equivalentClass [ owl:intersectionOf ( salmodule:Task
                                                                    [ a owl:Restriction ;
-                                                                     owl:onProperty salmodule:input ;
+                                                                     owl:onProperty salmodule:stdinShape ;
                                                                      owl:someValuesFrom sh:NodeShape
                                                                    ]
                                                                    [ a owl:Restriction ;
-                                                                     owl:onProperty salmodule:output ;
+                                                                     owl:onProperty salmodule:stdoutShape ;
                                                                      owl:someValuesFrom sh:NodeShape
                                                                    ]
                                                                  ) ;
@@ -194,7 +193,7 @@ salmodule:NodeProcessor a owl:Class ;
 salmodule:NodeProducer a owl:Class ;
                        owl:equivalentClass [ owl:intersectionOf ( salmodule:Task
                                                                   [ a owl:Restriction ;
-                                                                    owl:onProperty salmodule:output ;
+                                                                    owl:onProperty salmodule:stdoutShape ;
                                                                     owl:someValuesFrom sh:NodeShape
                                                                   ]
                                                                 ) ;

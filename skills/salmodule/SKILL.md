@@ -36,8 +36,8 @@ Print one JSON-LD document to stdout and exit 0. Requirements:
   `salmodule:NodeProcessor`, `salmodule:NodeProducer`, or `salmodule:NodeConsumer`.
 - Every configuration property as an `owl:DatatypeProperty` or `owl:ObjectProperty`, ideally with
   `rdfs:domain` and `rdfs:range`. A property the ontology does not declare never reaches the task.
-- Optional SHACL shapes on the task class: `salmodule:self` (what a valid instance looks like),
-  `salmodule:input`, and `salmodule:output` (what the task consumes and produces).
+- Optional SHACL shapes on the task class: `salmodule:taskShape` (what a valid instance looks like),
+  `salmodule:stdinShape`, and `salmodule:stdoutShape` (what the task consumes and produces).
 - Optional `salmodule:taskInstanceEnvVar` on the ontology node to rename the environment variable;
   it defaults to `SALMODULE_TASK_INSTANCE`.
 

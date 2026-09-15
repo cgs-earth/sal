@@ -18,8 +18,8 @@ const provTestDocument = `{
     "xsd": "http://www.w3.org/2001/XMLSchema#"
   },
   "@graph": [{
-    "@id": "out/catalog/",
-    "rdfs:label": "catalog/",
+    "@id": "file:///out/catalog/",
+    "rdfs:label": "file:///out/catalog/",
     "owl:versionIRI": {"@id": "urn:sha256:1111"},
     "dcterms:modified": {"@value": "2026-09-10T14:26:05Z", "@type": "xsd:dateTime"},
     "rdfs:comment": "Represents the directory out/catalog/ a SAL module task copied out of its container."
@@ -38,7 +38,7 @@ func TestAppendBlobProvenanceDescribesTheDirectoriesTheBlobStoreRecords(t *testi
 
 	require.NoError(t, appendBlobProvenance(graph))
 
-	require.True(t, graphHasTriple(graph, "urn:sha256:1111", "http://www.w3.org/2000/01/rdf-schema#label", "catalog/"))
+	require.True(t, graphHasTriple(graph, "urn:sha256:1111", "http://www.w3.org/2000/01/rdf-schema#label", "file:///out/catalog/"))
 	require.True(t, graphHasTriple(graph, "urn:sha256:1111", "http://purl.org/dc/terms/identifier", "out/catalog/"))
 	require.True(t, graphHasTriple(graph, "urn:sha256:1111", "http://www.w3.org/2000/01/rdf-schema#comment", "Represents the directory out/catalog/ a SAL module task copied out of its container."))
 	require.True(t, graph.Contains(rdflibgo.NewURIRefUnsafe("urn:sha256:1111"), rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#versionIRI"), rdflibgo.NewURIRefUnsafe("urn:sha256:1111")))

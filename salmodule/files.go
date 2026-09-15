@@ -50,10 +50,6 @@ type CopiedFile struct {
 	// Directory reports whether the copy is a whole directory rather than one
 	// file.
 	Directory bool
-	// Name is the file or directory name at the end of ContainerPath,
-	// recorded as rdfs:label. A directory's name keeps its trailing slash,
-	// which is what tells the two apart wherever the label is read.
-	Name string
 	// Modified is when the file was last written inside the container, or the
 	// newest such time of any file in a directory, recorded as
 	// dcterms:modified.
@@ -74,6 +70,12 @@ type CopiedFile struct {
 // IRI the task wrote, urn:sha256:<digest>, which is the same form the pinned
 // vocabulary documents in the blob store are named with.
 func (f CopiedFile) IRI() string { return "urn:sha256:" + f.Digest }
+
+// FileIRI returns the file:/// IRI the task named the file or directory with,
+// file:///<container path>, ending in a slash for a directory. It is what the
+// copy is labelled with, in the graph and in prov.jsonld, so that a copy is
+// still known by the name its task gave it once it is stored under a digest.
+func (f CopiedFile) FileIRI() string { return "file://" + f.ContainerPath }
 
 // containerFilePath returns the absolute path inside the container that a
 // file:/// IRI names, and whether it names a directory, which a trailing slash
@@ -168,11 +170,7 @@ func (c *fileCopier) start(ctx context.Context, containerPath string, isDir bool
 	if c.copied == nil {
 		c.copied = map[string]*CopiedFile{}
 	}
-	name := path.Base(containerPath)
-	if isDir {
-		name += "/"
-	}
-	copied := &CopiedFile{ContainerPath: containerPath, Directory: isDir, Name: name}
+	copied := &CopiedFile{ContainerPath: containerPath, Directory: isDir}
 	c.copied[containerPath] = copied
 
 	c.wg.Add(1)
@@ -347,9 +345,9 @@ func (c *fileCopier) wait() ([]CopiedFile, error) {
 
 // LinkCopiedFiles rewrites every file:/// IRI in a task's graph, as subject or
 // object, to the urn:sha256: IRI of the copy that was made of it and describes
-// each copy the way a pinned vocabulary's provenance node is described: its
-// name as rdfs:label, ending in a slash for a directory, when it was written
-// as dcterms:modified, and its digest
+// each copy the way a pinned vocabulary's provenance node is described: the
+// file:/// IRI the task wrote as rdfs:label, when it was written as
+// dcterms:modified, and its digest
 // as owl:versionIRI, plus where it sits under the blob store as
 // dcterms:identifier. Whatever else the task said about the file:/// IRI
 // stays with it under its new name. The data product then refers to the
@@ -358,8 +356,9 @@ func (c *fileCopier) wait() ([]CopiedFile, error) {
 // refers to as an IRI, because the task wrote the path as a literal, is
 // removed again and warned about. Every directory that is kept is recorded in
 // the blob store's prov.jsonld under blobDir, which is how its digest is
-// resolved back to the directory.
-func LinkCopiedFiles(graph *rdflibgo.Graph, files []CopiedFile, blobDir string) error {
+// resolved back to the directory. It returns the copies that were kept, so
+// that the run can prune from prov.jsonld whatever it did not produce.
+func LinkCopiedFiles(graph *rdflibgo.Graph, files []CopiedFile, blobDir string) ([]CopiedFile, error) {
 	byPath := map[string]CopiedFile{}
 	for _, file := range files {
 		byPath[file.ContainerPath] = file
@@ -390,7 +389,7 @@ func LinkCopiedFiles(graph *rdflibgo.Graph, files []CopiedFile, blobDir string) 
 		copy := rdflibgo.NewURIRefUnsafe(file.IRI())
 		if !referenced[containerPath] {
 			referenced[containerPath] = true
-			graph.Add(copy, rdflibgo.NewURIRefUnsafe(rdfsLabelIRI), rdflibgo.NewLiteral(file.Name))
+			graph.Add(copy, rdflibgo.NewURIRefUnsafe(rdfsLabelIRI), rdflibgo.NewLiteral(file.FileIRI()))
 			graph.Add(copy, rdflibgo.NewURIRefUnsafe(dctermsModifiedIRI), rdflibgo.NewLiteral(file.Modified.Format(time.RFC3339), rdflibgo.WithDatatype(rdflibgo.XSDDateTime)))
 			graph.Add(copy, rdflibgo.NewURIRefUnsafe(dctermsIdentifierIRI), rdflibgo.NewLiteral(file.BlobPath))
 			graph.Add(copy, rdflibgo.NewURIRefUnsafe(owlVersionIRI), copy)
@@ -400,33 +399,34 @@ func LinkCopiedFiles(graph *rdflibgo.Graph, files []CopiedFile, blobDir string) 
 	for _, triple := range fileTriples {
 		subject, err := link(triple.Subject)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		object, err := link(triple.Object)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		graph.Remove(triple.Subject, &triple.Predicate, triple.Object)
 		graph.Add(subject.(rdflibgo.Subject), triple.Predicate, object)
 	}
 
-	var directories []CopiedFile
+	var kept, directories []CopiedFile
 	for _, file := range files {
 		if !referenced[file.ContainerPath] {
 			slog.Warn(fileIRIPrefix + strings.TrimPrefix(file.ContainerPath, "/") + " was copied but nothing in the SAL module's output refers to it as an IRI, so the copy was discarded; write it as {\"@id\": \"file:///...\"} to keep it")
 			if err := os.RemoveAll(file.Path); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("discard unreferenced copy of %s: %w", file.ContainerPath, err)
+				return nil, fmt.Errorf("discard unreferenced copy of %s: %w", file.ContainerPath, err)
 			}
 			continue
 		}
+		kept = append(kept, file)
 		if file.Directory {
 			directories = append(directories, file)
 		}
 	}
 	if len(directories) == 0 {
-		return nil
+		return kept, nil
 	}
-	return recordDirectories(blobDir, directories)
+	return kept, recordDirectories(blobDir, directories)
 }
 
 // isFileIRI reports whether term is an IRI with the file scheme.
