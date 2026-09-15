@@ -139,13 +139,13 @@ running, the way `docker cp` would:
 
 The copy lands in `.sal/data/blobs` named by the SHA-256 digest of its contents, so it is content addressable
 and stored once however many tasks produce it. Every triple that named the file, as its subject or its object, is
-rewritten to refer to the copy, and the copy is described the same way a pinned vocabulary is: its file name as
-`rdfs:label`, when it was written inside the container as `dcterms:modified`, its digest as `owl:versionIRI`, and
+rewritten to refer to the copy, and the copy is described the same way a pinned vocabulary is: the `file:///` IRI
+the task wrote as `rdfs:label`, when it was written inside the container as `dcterms:modified`, its digest as `owl:versionIRI`, and
 where it sits under `.sal/data/blobs` as `dcterms:identifier`. The example above commits:
 
 ```turtle
 <https://example.org/dataset/2024> schema:hasPart <urn:sha256:9f86d0…> .
-<urn:sha256:9f86d0…> rdfs:label "test.txt" ;
+<urn:sha256:9f86d0…> rdfs:label "file:///tmp/test.txt" ;
     dcterms:modified "2026-09-10T14:26:05Z"^^xsd:dateTime ;
     dcterms:identifier "9f86d0…" ;
     owl:versionIRI <urn:sha256:9f86d0…> .
@@ -184,8 +184,8 @@ vocabulary in:
   },
   "@graph": [
     {
-      "@id": "out/catalog/",
-      "rdfs:label": "catalog",
+      "@id": "file:///out/catalog/",
+      "rdfs:label": "file:///out/catalog/",
       "owl:versionIRI": { "@id": "urn:sha256:3f9a…" },
       "dcterms:modified": { "@value": "2026-09-10T14:26:05Z", "@type": "xsd:dateTime" },
       "rdfs:comment": "Represents the directory out/catalog/ a SAL module task copied out of its container as of 2026-09-10T14:26:05Z. urn:sha256:3f9a… is the SHA-256 of its contents, and the directory is served whole as a zip archive under that digest."
@@ -194,14 +194,14 @@ vocabulary in:
 }
 ```
 
-The node's `@id` is the directory's path relative to the blob store, so it resolves against wherever
-`prov.jsonld` is read from to the directory itself. The graph refers to the directory as `urn:sha256:3f9a…`
-the same way it does a file, described with its name, modification time (the newest of any file in it), digest,
-and path, together with whatever else the task said about the `file:///` IRI:
+The node's `@id` and `rdfs:label` are both the `file:///` IRI the task named the directory with; its path under
+the blob store is that IRI's path without the leading slash. The graph refers to the directory as `urn:sha256:3f9a…`
+the same way it does a file, described with that IRI, modification time (the newest of any file in it), digest,
+and path, together with whatever else the task said about it:
 
 ```turtle
 <https://example.org/dataset/2024> schema:hasPart <urn:sha256:3f9a…> .
-<urn:sha256:3f9a…> rdfs:label "catalog" ;
+<urn:sha256:3f9a…> rdfs:label "file:///out/catalog/" ;
     dcterms:modified "2026-09-10T14:26:05Z"^^xsd:dateTime ;
     dcterms:identifier "out/catalog/" ;
     owl:versionIRI <urn:sha256:3f9a…> ;
@@ -215,7 +215,9 @@ whose `catalog.json` is a STAC Catalog or Collection is also linked as a child o
 finds the module's catalog beneath the triples table. A directory
 copied again lands at the same path and replaces the earlier copy, and its `prov.jsonld` node is replaced with it;
 the digest is what tells the versions apart, so an earlier `urn:sha256:` in the table no longer resolves once the
-path holds a newer copy.
+path holds a newer copy. A directory an earlier run copied that no task produced in the latest run is removed
+together with its record when that run finishes, so `prov.jsonld` only ever describes what the most recent run
+left on disk. `sal clean --wipe` removes the recorded directories and `prov.jsonld` with the data product.
 
 Files are copied concurrently with the task writing its output, so a module must finish writing a file, or every
 file in a directory, before it prints the line that names it; one named before it is complete is copied

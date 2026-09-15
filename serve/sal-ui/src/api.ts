@@ -56,8 +56,8 @@ export type BlobResult = {
 
 /** One blob the table refers to, as `/api/blobs` lists it. */
 export type PinnedBlob = {
-  /** What the blob is known as: a vocabulary's namespace, or the name of a file or directory a SAL module task handed over, ending in a slash for a directory. */
-  file: string
+  /** What the blob was known by before it was pinned: a vocabulary's namespace, or the file:/// IRI a SAL module task named a copied file or directory with. */
+  iri: string
   /** The owl:versionIRI naming the blob, urn:sha256:… or urn:git-commit-hash:…, which /blobs/{hash} resolves. */
   hash: string
 }

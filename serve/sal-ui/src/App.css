@@ -705,17 +705,6 @@ kbd {
   max-height: 420px;
 }
 
-.blob-list .result-table td.blob-load {
-  width: 1%;
-  padding-top: 3px;
-  padding-bottom: 3px;
-}
-
-.blob-list .result-table td.blob-load .button {
-  padding: 2px 10px;
-  font-size: 12px;
-}
-
 /* the digest is the heading, so it keeps its case and wraps rather than overflowing */
 .blob-view-header > div {
   display: flex;

@@ -530,7 +530,7 @@ func TestTruncateResultReportsTheFullRowCount(t *testing.T) {
 
 func TestEndpointWithUIListsBlobs(t *testing.T) {
 	runner := &endpointUIRunner{blobs: salsparql.BlobListing{
-		Blobs:     []salsparql.Blob{{File: "https://schema.org/", Hash: "urn:sha256:aaaa"}, {File: "report.csv", Hash: "urn:sha256:dddd"}},
+		Blobs:     []salsparql.Blob{{IRI: "https://schema.org/", Hash: "urn:sha256:aaaa"}, {IRI: "file:///tmp/report.csv", Hash: "urn:sha256:dddd"}},
 		Truncated: true,
 		SQL:       "SELECT 1",
 	}}
