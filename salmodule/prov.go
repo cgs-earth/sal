@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	rdflibgo "github.com/tggo/goRDFlib"
 )
 
 // ProvFile is the name of the JSON-LD document in the blob store that records
@@ -39,7 +41,8 @@ type provDocument struct {
 // provNode is one copied directory in prov.jsonld. Its @id is the directory's
 // path relative to the blob store, ending in a slash, so that it resolves
 // against wherever the document is served from, /blobs/ or a bucket, to the
-// directory itself.
+// directory itself. Its rdfs:label is the directory's name with the same
+// trailing slash, which is what marks it as a directory rather than a file.
 type provNode struct {
 	ID         string        `json:"@id"`
 	Label      string        `json:"rdfs:label"`
@@ -90,6 +93,40 @@ func (p *Provenance) DirectoryPath(digest string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// AppendProvenance describes every directory prov.jsonld records in graph,
+// under the urn:sha256: IRI of its contents, the way LinkCopiedFiles describes
+// a copy when it is made: its name as rdfs:label, when it was written as
+// dcterms:modified, its path under the blob store as dcterms:identifier, and
+// its digest as owl:versionIRI, plus the rdfs:comment the record carries. It is
+// what carries a directory copied by an earlier run into a table built again
+// from source, so that the table describes every copy the blob store holds and
+// a copy is listed with the pinned vocabularies. A statement the graph already
+// holds is left as it is. It returns how many directories were described.
+func (p *Provenance) AppendProvenance(graph *rdflibgo.Graph) int {
+	described := 0
+	for _, node := range p.nodes {
+		if node.VersionIRI.ID == "" {
+			continue
+		}
+		subject := rdflibgo.NewURIRefUnsafe(node.VersionIRI.ID)
+		graph.Add(subject, rdflibgo.NewURIRefUnsafe(owlVersionIRI), subject)
+		if node.Label != "" {
+			graph.Add(subject, rdflibgo.NewURIRefUnsafe(rdfsLabelIRI), rdflibgo.NewLiteral(node.Label))
+		}
+		if node.ID != "" {
+			graph.Add(subject, rdflibgo.NewURIRefUnsafe(dctermsIdentifierIRI), rdflibgo.NewLiteral(node.ID))
+		}
+		if node.Modified.Value != "" {
+			graph.Add(subject, rdflibgo.NewURIRefUnsafe(dctermsModifiedIRI), rdflibgo.NewLiteral(node.Modified.Value, rdflibgo.WithDatatype(rdflibgo.XSDDateTime)))
+		}
+		if node.Comment != "" {
+			graph.Add(subject, rdflibgo.NewURIRefUnsafe(rdfsCommentIRI), rdflibgo.NewLiteral(node.Comment))
+		}
+		described++
+	}
+	return described
 }
 
 // recordDirectories adds each copied directory to prov.jsonld under blobDir,

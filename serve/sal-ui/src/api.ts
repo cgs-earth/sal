@@ -54,6 +54,22 @@ export type BlobResult = {
   contentType: string | null
 }
 
+/** One blob the table refers to, as `/api/blobs` lists it. */
+export type PinnedBlob = {
+  /** What the blob is known as: a vocabulary's namespace, or the name of a file or directory a SAL module task handed over, ending in a slash for a directory. */
+  file: string
+  /** The owl:versionIRI naming the blob, urn:sha256:… or urn:git-commit-hash:…, which /blobs/{hash} resolves. */
+  hash: string
+}
+
+export type BlobListing = {
+  blobs: PinnedBlob[]
+  /** Whether the table refers to more blobs than were listed. */
+  truncated: boolean
+  /** The DuckDB statement that lists the same blobs, for running by hand in the SQL tab. */
+  sql: string
+}
+
 /** A longitude/latitude bounding box as [minX, minY, maxX, maxY]. */
 export type BBox = [number, number, number, number]
 
@@ -149,6 +165,18 @@ export async function resolveBlob(hash: string, signal?: AbortSignal): Promise<B
   const blob = await response.blob()
   const version = `${digest.length === 40 ? 'urn:git-commit-hash:' : 'urn:sha256:'}${digest}`
   return { digest, version, blob, contentType: response.headers.get('Content-Type') }
+}
+
+/**
+ * Lists the first `limit` blobs the table refers to: every vocabulary a build
+ * pinned and every file or directory a SAL module task handed over, each by
+ * the hash `/blobs/{hash}` serves it at. The listing is read from the triples
+ * table itself, so a blob is listed once a build has recorded it there.
+ */
+export async function fetchBlobs(limit: number, signal?: AbortSignal): Promise<BlobListing> {
+  const response = await fetch(`/api/blobs?limit=${limit}`, { signal })
+  if (!response.ok) throw await failure(response)
+  return (await response.json()) as BlobListing
 }
 
 export async function fetchGeometries(query: GeometryQuery, signal?: AbortSignal): Promise<GeoJSONFeatureCollection> {

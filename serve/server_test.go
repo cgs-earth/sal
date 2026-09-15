@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -59,6 +60,14 @@ type endpointUIRunner struct {
 	sqlErr     error
 	sql        string
 	geometries salsparql.GeometryQuery
+	blobs      salsparql.BlobListing
+	// blobLimit is the limit Blobs was last asked for.
+	blobLimit int
+}
+
+func (r *endpointUIRunner) Blobs(_ context.Context, limit int) (salsparql.BlobListing, error) {
+	r.blobLimit = limit
+	return r.blobs, r.err
 }
 
 func (r *endpointUIRunner) Geometries(_ context.Context, query salsparql.GeometryQuery) (salsparql.FeatureCollection, error) {
@@ -517,6 +526,63 @@ func TestTruncateResultReportsTheFullRowCount(t *testing.T) {
 
 	require.Len(t, truncated.Rows, maxUIRows)
 	require.Equal(t, fmt.Sprintf("%d rows (showing the first %d)", maxUIRows+5, maxUIRows), truncated.Message)
+}
+
+func TestEndpointWithUIListsBlobs(t *testing.T) {
+	runner := &endpointUIRunner{blobs: salsparql.BlobListing{
+		Blobs:     []salsparql.Blob{{File: "https://schema.org/", Hash: "urn:sha256:aaaa"}, {File: "report.csv", Hash: "urn:sha256:dddd"}},
+		Truncated: true,
+		SQL:       "SELECT 1",
+	}}
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/blobs?limit=2")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, 2, runner.blobLimit)
+	var body salsparql.BlobListing
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, runner.blobs, body)
+}
+
+func TestEndpointWithUIListsAHundredBlobsByDefault(t *testing.T) {
+	runner := &endpointUIRunner{blobs: salsparql.BlobListing{Blobs: []salsparql.Blob{}}}
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/blobs")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, defaultBlobListing, runner.blobLimit)
+
+	resp, err = http.Get(server.URL + "/api/blobs?limit=999999")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, maxUIRows, runner.blobLimit)
+}
+
+func TestEndpointWithUIReportsBlobListingErrorsAsJSON(t *testing.T) {
+	runner := &endpointUIRunner{}
+	runner.err = errors.New("no such table")
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/blobs")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, "no such table", body["error"])
 }
 
 func TestEndpointWithUIReturnsTableStats(t *testing.T) {

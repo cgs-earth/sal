@@ -31,6 +31,7 @@ const fileIRIPrefix = "file:///"
 // the blob store
 const (
 	rdfsLabelIRI         = "http://www.w3.org/2000/01/rdf-schema#label"
+	rdfsCommentIRI       = "http://www.w3.org/2000/01/rdf-schema#comment"
 	dctermsModifiedIRI   = "http://purl.org/dc/terms/modified"
 	dctermsIdentifierIRI = "http://purl.org/dc/terms/identifier"
 	owlVersionIRI        = "http://www.w3.org/2002/07/owl#versionIRI"
@@ -50,7 +51,8 @@ type CopiedFile struct {
 	// file.
 	Directory bool
 	// Name is the file or directory name at the end of ContainerPath,
-	// recorded as rdfs:label.
+	// recorded as rdfs:label. A directory's name keeps its trailing slash,
+	// which is what tells the two apart wherever the label is read.
 	Name string
 	// Modified is when the file was last written inside the container, or the
 	// newest such time of any file in a directory, recorded as
@@ -166,7 +168,11 @@ func (c *fileCopier) start(ctx context.Context, containerPath string, isDir bool
 	if c.copied == nil {
 		c.copied = map[string]*CopiedFile{}
 	}
-	copied := &CopiedFile{ContainerPath: containerPath, Directory: isDir, Name: path.Base(containerPath)}
+	name := path.Base(containerPath)
+	if isDir {
+		name += "/"
+	}
+	copied := &CopiedFile{ContainerPath: containerPath, Directory: isDir, Name: name}
 	c.copied[containerPath] = copied
 
 	c.wg.Add(1)
@@ -342,7 +348,8 @@ func (c *fileCopier) wait() ([]CopiedFile, error) {
 // LinkCopiedFiles rewrites every file:/// IRI in a task's graph, as subject or
 // object, to the urn:sha256: IRI of the copy that was made of it and describes
 // each copy the way a pinned vocabulary's provenance node is described: its
-// name as rdfs:label, when it was written as dcterms:modified, and its digest
+// name as rdfs:label, ending in a slash for a directory, when it was written
+// as dcterms:modified, and its digest
 // as owl:versionIRI, plus where it sits under the blob store as
 // dcterms:identifier. Whatever else the task said about the file:/// IRI
 // stays with it under its new name. The data product then refers to the

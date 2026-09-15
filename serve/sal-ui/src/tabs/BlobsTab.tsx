@@ -1,8 +1,15 @@
-import { useCallback, useEffect, useState } from 'react'
-import { resolveBlob } from '../api'
-import { blobLink } from '../routing'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { fetchBlobs, resolveBlob, type BlobListing } from '../api'
+import { blobLink, shareLink, visit } from '../routing'
 
 const EXAMPLE = '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a0'
+
+/**
+ * How many blobs the listing shows. The table can refer to far more, one row
+ * per pinned vocabulary version and per file a module task handed over, and
+ * past this many the query tabs are the right tool for finding one.
+ */
+const BLOB_LIST_LIMIT = 100
 
 /** Saves blob to disk under the browser's normal download flow. */
 function saveAs(blob: Blob, filename: string) {
@@ -54,6 +61,30 @@ export function BlobsTab({ hash: initialHash, render: initialRender }: BlobsTabP
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [rendered, setRendered] = useState<Rendered | null>(null)
+  const [listing, setListing] = useState<BlobListing | null>(null)
+  const [listError, setListError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // The listing is read once, when the tab opens, so that the blobs the table
+  // refers to are on hand without a hash having to be known in advance.
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchBlobs(BLOB_LIST_LIMIT, controller.signal)
+      .then(setListing)
+      .catch((caught: unknown) => {
+        if (controller.signal.aborted) return
+        setListError(caught instanceof Error ? caught.message : String(caught))
+      })
+    return () => controller.abort()
+  }, [])
+
+  // Load fills the form with a listed blob's hash, leaving the download or
+  // render to the user the way a link without render=true does.
+  const load = useCallback((blobHash: string) => {
+    setHash(blobHash)
+    setError(null)
+    inputRef.current?.focus()
+  }, [])
 
   // The address bar mirrors the form, so the URL can be copied at any point and
   // reopen the tab on the same digest with the same choice. replaceState keeps
@@ -112,6 +143,7 @@ export function BlobsTab({ hash: initialHash, render: initialRender }: BlobsTabP
           }}
         >
           <input
+            ref={inputRef}
             className="module-input"
             type="text"
             value={hash}
@@ -134,6 +166,8 @@ export function BlobsTab({ hash: initialHash, render: initialRender }: BlobsTabP
           answers a 404.
         </p>
       </section>
+
+      <BlobList listing={listing} error={listError} onLoad={load} />
 
       {rendered && (
         <section className="panel">
@@ -158,5 +192,92 @@ export function BlobsTab({ hash: initialHash, render: initialRender }: BlobsTabP
         </section>
       )}
     </div>
+  )
+}
+
+type BlobListProps = {
+  /** The blobs the table refers to, or null while they are still being read. */
+  listing: BlobListing | null
+  error: string | null
+  /** Fills the form with a listed blob's hash. */
+  onLoad: (hash: string) => void
+}
+
+/**
+ * Every blob the table refers to, the vocabularies the Stats tab lists and the
+ * files and directories SAL module tasks handed over, each with a button that
+ * loads its hash into the form above. Collapsed by default, since the form is
+ * what the tab is for and the list can be long.
+ */
+function BlobList({ listing, error, onLoad }: BlobListProps) {
+  const count = listing?.blobs.length ?? 0
+  let summary = 'Reading the table…'
+  if (error) summary = 'Could not be read'
+  else if (listing) summary = listing.truncated ? `first ${count} of more` : `${count}`
+
+  return (
+    <details className="panel blob-list">
+      <summary className="panel-header blob-list-summary">
+        <h3>Pinned blobs</h3>
+        <p>{summary}</p>
+      </summary>
+      <p className="hint module-hint blob-list-hint">
+        Every blob the triples table refers to by an <code>owl:versionIRI</code>: the vocabularies the Stats tab lists
+        and the files and directories SAL module tasks handed over. A directory's name ends in a <code>/</code>.
+      </p>
+      {error && <p className="error-banner">{error}</p>}
+      {listing && listing.blobs.length === 0 && (
+        <p className="empty">The table refers to no blobs yet; run sal build to pin the vocabularies it resolves against.</p>
+      )}
+      {listing && listing.blobs.length > 0 && (
+        <div className="table-scroll blob-list-scroll">
+          <table className="result-table">
+            <thead>
+              <tr>
+                <th scope="col">file/directory</th>
+                <th scope="col">hash</th>
+                <th scope="col">load</th>
+              </tr>
+            </thead>
+            <tbody>
+              {listing.blobs.map((blob) => (
+                <tr key={`${blob.file}|${blob.hash}`}>
+                  <td title={blob.file}>{blob.file}</td>
+                  <td title={blob.hash}>
+                    <code className="iri">{blob.hash}</code>
+                  </td>
+                  <td className="blob-load">
+                    <button
+                      type="button"
+                      className="button"
+                      onClick={() => onLoad(blob.hash)}
+                      aria-label={`Load ${blob.file} into the form`}
+                    >
+                      Load
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {listing?.truncated && (
+        <p className="hint module-hint blob-list-hint">
+          Only the first {BLOB_LIST_LIMIT} blobs are listed here. To look up the rest, query <code>owl:versionIRI</code>{' '}
+          in the SPARQL tab or{' '}
+          <a
+            href={shareLink('SQL', listing.sql)}
+            onClick={(event) => {
+              event.preventDefault()
+              visit(shareLink('SQL', listing.sql))
+            }}
+          >
+            run this listing's SQL in the SQL tab
+          </a>{' '}
+          with a higher limit.
+        </p>
+      )}
+    </details>
   )
 }
