@@ -22,6 +22,65 @@ The repository must not be your home directory and must already have a Git remot
 
 ![sal init running in a repository that already has a remote](/sal/demos/sal-init.gif)
 
+### `sal init --salmodule`
+
+Initializes the repository as a [SAL module](/sal/reference/salmodule-description/) as well as a SAL project. On top of everything `sal init` creates, it scaffolds the files a module needs in the repository root:
+
+- `ontology.jsonld`, a skeleton of the document the module's `salmodule ontology` command prints: a `@context` binding the prefixes it uses and a `@graph` holding an `owl:Ontology` node followed by one `owl:Class` that is a subclass of `salmodule:Task`. The ontology node is `"@id": "."`, its `dc:title` is the git repository name, and its `dc:creator` is the configured git `user.name`; `owl:versionInfo` and every other string start blank for you to fill in.
+- A `Dockerfile` holding only a comment reminding you that the image must stream JSON-LD to standard out per the salmodule specification.
+- A `.dockerignore` holding only a comment saying it excludes files from the module container.
+
+A file that already exists is left unchanged, so the flag is safe to re-run.
+
+So that the ontology starts with a worked example rather than blank fields, `sal init --salmodule` asks three questions about one task the module will offer: a unique ID with no spaces or special characters (it becomes the class's `@id` and the `@type` a project instance uses), a human readable name (`rdfs:label`), and a comment about what the task does (`rdfs:comment`). An ID with a space or punctuation is asked for again. The task class's `salmodule:taskShape` then becomes a `sh:NodeShape` targeting that class with an empty `sh:property` list, ready for the constraints on the task's configuration properties:
+
+```
+Unique ID for the task, with no spaces or special characters (e.g. FetchStations): FetchStations
+Human readable name for the task (e.g. Fetch weather stations): Fetch weather stations
+Comment describing what the task does: Fetches every station in a region and emits it as schema:Place
+```
+
+```json
+{
+  "@context": {
+    "dc": "http://purl.org/dc/elements/1.1/",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#",
+    "sh": "http://www.w3.org/ns/shacl#"
+  },
+  "@graph": [
+    {
+      "@id": ".",
+      "@type": "owl:Ontology",
+      "dc:creator": "Ada Lovelace",
+      "dc:title": "my-module",
+      "owl:versionInfo": "",
+      "rdfs:label": "",
+      "rdfs:comment": ""
+    },
+    {
+      "@id": "FetchStations",
+      "@type": "owl:Class",
+      "rdfs:subClassOf": { "@id": "salmodule:Task" },
+      "rdfs:label": "Fetch weather stations",
+      "rdfs:comment": "Fetches every station in a region and emits it as schema:Place",
+      "salmodule:taskShape": {
+        "@type": "sh:NodeShape",
+        "sh:targetClass": { "@id": "FetchStations" },
+        "sh:property": []
+      }
+    }
+  ]
+}
+```
+
+Pass `--bare` to skip the questions. The task class is then written with every string blank and `"salmodule:taskShape": {}`, which is also what you get when standard input is not a terminal.
+
+```sh
+sal init --salmodule --bare
+```
+
 ## `sal import`
 
 Records an external ontology in the project so that every build carries it.

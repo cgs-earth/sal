@@ -243,6 +243,20 @@ func canonicalPath(path string) (string, error) {
 	return filepath.EvalSymlinks(abs)
 }
 
+// GitUserName returns the user.name git is configured with, or an empty string
+// when none is set.
+func GitUserName() (string, error) {
+	out, err := exec.Command("git", "config", "user.name").Output()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to get git user.name: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 func GitCommitHash() (string, error) {
 	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
 	if err != nil {
