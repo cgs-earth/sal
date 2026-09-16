@@ -278,6 +278,27 @@ func (s *SalModuleSuite) TestRunReportsModuleErrors() {
 	s.Contains(err.Error(), "the task instance asked this module to fail")
 }
 
+// TestRunStopsATaskWhoseOutputViolatesItsStdoutShape checks that the SHACL
+// shape the module declares for its task's output is enforced as the output
+// arrives: the nameless place fails the run with the shape's own message, and
+// the container, which would otherwise keep running for two minutes, is
+// stopped rather than waited for.
+func (s *SalModuleSuite) TestRunStopsATaskWhoseOutputViolatesItsStdoutShape() {
+	project := s.newSalProject(projectReferencing(`fixture:nameless "true"^^xsd:boolean`))
+	s.buildForRun(project)
+
+	started := time.Now()
+	_, err := (&build.RunCmd{Paths: []string{"module.ttl"}}).Run()
+
+	var shapeErr salmodule.StdoutShapeError
+	s.Require().ErrorAs(err, &shapeErr)
+	s.Equal(2, shapeErr.Line)
+	s.Contains(err.Error(), "A place must have a schema:name")
+	s.Contains(err.Error(), "https://example.test/place/nameless")
+	s.Less(time.Since(started), time.Minute, "the container was waited for instead of stopped")
+	s.Empty(s.builtObjectsForPredicate("https://schema.org/name"))
+}
+
 // TestRunHasNothingToDoForClassesThatAreNotTasks checks that referencing a
 // module term which is not a task builds cleanly without invoking the module's
 // run command, and leaves sal run with nothing to run.

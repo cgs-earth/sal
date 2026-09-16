@@ -150,17 +150,34 @@ type TaskResult struct {
 // task reports its own failures as salmodule:Error nodes on stdout before
 // exiting non-zero; those messages describe the failure far better than the
 // container's exit status does.
-func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, envVar string, taskInstance string, blobDir string) (TaskResult, error) {
+//
+// A non-nil validator checks each line as it arrives, before any file the line
+// names is copied. The first line that fails ends the run: the container is
+// stopped, copies still in flight are abandoned, and the StdoutShapeError is
+// returned in place of whatever the task wrote.
+func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, envVar string, taskInstance string, blobDir string, validator *StdoutValidator) (TaskResult, error) {
 	var result TaskResult
 	err := r.runModuleCommand(ctx, ref, []string{envVar + "=" + taskInstance}, RunCommand, func(ctx context.Context, stdout io.Reader, files ContainerFiles) error {
+		// copies run under their own context so that a rejected line can
+		// abandon them rather than wait for a file the container is still
+		// writing
+		copyCtx, cancelCopies := context.WithCancel(ctx)
+		defer cancelCopies()
 		copier := &fileCopier{dir: blobDir, source: strings.TrimSuffix(ref.Namespace, "/"), files: files}
 		var output bytes.Buffer
 		reader := bufio.NewReader(stdout)
-		for {
+		for lineNumber := 1; ; lineNumber++ {
 			line, err := reader.ReadBytes('\n')
 			output.Write(line)
 			if trimmed := bytes.TrimSpace(line); len(trimmed) > 0 {
-				copier.observe(ctx, trimmed)
+				if validator != nil {
+					if err := validator.ValidateLine(trimmed, lineNumber); err != nil {
+						cancelCopies()
+						_, _ = copier.wait()
+						return err
+					}
+				}
+				copier.observe(copyCtx, trimmed)
 			}
 			if errors.Is(err, io.EOF) {
 				break

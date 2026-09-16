@@ -127,6 +127,46 @@ was pulled from, writes absolute IRIs, which are kept as written.
 
 If a task emits `salmodule:Error` nodes instead of data, the run fails with the messages the module reported.
 
+### Validating a task's output
+
+A module can declare what its task's output must look like by annotating the task class in its ontology with
+`salmodule:stdoutShape`, whose value is a SHACL `sh:NodeShape`:
+
+```json
+{
+  "@id": "StationFetcher",
+  "@type": "owl:Class",
+  "rdfs:subClassOf": {"@id": "salmodule:Task"},
+  "salmodule:stdoutShape": {
+    "@type": "sh:NodeShape",
+    "sh:targetClass": {"@id": "schema:Place"},
+    "sh:property": [
+      {"sh:path": {"@id": "schema:name"}, "sh:minCount": 1, "sh:message": "A station must have a name"}
+    ]
+  }
+}
+```
+
+When the class, or a superclass of it the module's ontology declares, carries such a shape, `sal run` validates
+every line the task writes as it arrives, with the module's `@context` injected the same way it is before the
+output is converted to RDF, so the shape sees each node as it will be committed. The first line that fails
+stops the container and fails the run with the shape's `sh:message` and the node it is about:
+
+```
+run: SAL module salmodule://github.com/owner/stations wrote a node on output line 3 that does not conform to the salmodule:stdoutShape of salmodule://github.com/owner/stations/StationFetcher: <https://example.test/project/station/7> A station must have a name
+```
+
+Nothing the task wrote is committed. A result whose severity the shape lowers to `sh:Warning` or `sh:Info`
+is logged rather than fatal. A class without a `salmodule:stdoutShape` is run unchecked, and the check costs
+nothing then.
+
+Each line is validated on its own, so a shape can only describe the nodes of one line; the line's `@id` is
+resolved against your project's namespace, the same way it is when the output is committed. Standard SHACL
+targeting applies, so a shape needs a target, typically `sh:targetClass`, to apply to anything. Any SHACL Core
+constraint can be used except `sh:languageIn`, `sh:uniqueLang`, `sh:disjoint`,
+`sh:qualifiedValueShapesDisjoint`, and `sh:sparql`; a shape using one of those fails the run before the task
+is started.
+
 ### Files a task produces
 
 A task can hand over files as well as triples. Any IRI in its output written with the `file:///` scheme

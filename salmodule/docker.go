@@ -181,6 +181,16 @@ func (d *dockerRunner) RunContainer(ctx context.Context, image string, env []str
 	// a consumer that stopped reading early must not leave the demuxer blocked
 	// on the pipe
 	_ = stdoutReader.Close()
+	if consumeErr != nil {
+		// the consumer rejected the output part way through, so the task may
+		// well still be running; the followed log stream, and with it the
+		// demuxer, only ends once the container has stopped, so it is stopped
+		// now rather than left to run on. A container that has already exited
+		// answers with a conflict, which is not a failure.
+		if _, err := d.client.ContainerKill(ctx, created.ID, client.ContainerKillOptions{}); err != nil && !cerrdefs.IsNotFound(err) && !cerrdefs.IsConflict(err) {
+			slog.Warn("failed to stop container for " + image + ": " + err.Error())
+		}
+	}
 	if err := <-demuxed; err != nil && consumeErr == nil {
 		return stderr.Bytes(), fmt.Errorf("read output of container for %s: %w", image, err)
 	}

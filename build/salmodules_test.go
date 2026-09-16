@@ -404,3 +404,67 @@ func TestMaterializeSalModulesLeavesDirectoriesEarlierRunsCopied(t *testing.T) {
 	require.Len(t, provenance.BlobPaths(), 2)
 	require.Contains(t, provenance.BlobPaths(), "1111/")
 }
+
+// testShapedModuleOntology is testModuleOntology with a salmodule:stdoutShape
+// on the task class: every schema:Person the task emits must have a name.
+const testShapedModuleOntology = `{
+	"@context": {
+		"schema": "https://schema.org/",
+		"owl": "http://www.w3.org/2002/07/owl#",
+		"rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+		"sh": "http://www.w3.org/ns/shacl#",
+		"xsd": "http://www.w3.org/2001/XMLSchema#",
+		"salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
+	},
+	"@graph": [
+		{"@id": ".", "@type": "owl:Ontology"},
+		{
+			"@id": "EducationalHistoryFinder",
+			"@type": "owl:Class",
+			"rdfs:subClassOf": {"@id": "salmodule:Task"},
+			"salmodule:stdoutShape": {
+				"@type": "sh:NodeShape",
+				"sh:targetClass": {"@id": "schema:Person"},
+				"sh:property": [{"sh:path": {"@id": "schema:name"}, "sh:minCount": 1, "sh:message": "Every person needs a name"}]
+			}
+		},
+		{"@id": "maxRetries", "@type": "owl:DatatypeProperty"}
+	]
+}`
+
+// TestMaterializeSalModulesFailsWhenOutputViolatesTheStdoutShape checks that
+// the shape a module declares for its task's output is enforced at run time,
+// and that the violation is what the user is told rather than anything about
+// the container.
+func TestMaterializeSalModulesFailsWhenOutputViolatesTheStdoutShape(t *testing.T) {
+	graph := parseTestProject(t, testProject)
+	runner := &testContainerRunner{
+		ontology: testShapedModuleOntology,
+		runOutput: `{"@id":"person/alice","@type":"schema:Person","schema:name":"Alice"}` + "\n" +
+			`{"@id":"person/bob","@type":"schema:Person"}` + "\n",
+	}
+
+	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+
+	var shapeErr salmodule.StdoutShapeError
+	require.ErrorAs(t, err, &shapeErr)
+	require.Equal(t, 2, shapeErr.Line)
+	require.ErrorContains(t, err, "Every person needs a name")
+	require.ErrorContains(t, err, "https://example.test/project/person/bob")
+	require.Equal(t, 0, tasksRun)
+	require.False(t, graphHasTriple(graph, "https://example.test/project/person/alice", "https://schema.org/name", "Alice"))
+}
+
+func TestMaterializeSalModulesMergesOutputThatConformsToTheStdoutShape(t *testing.T) {
+	graph := parseTestProject(t, testProject)
+	runner := &testContainerRunner{
+		ontology:  testShapedModuleOntology,
+		runOutput: `{"@id":"person/alice","@type":"schema:Person","schema:name":"Alice"}` + "\n",
+	}
+
+	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, tasksRun)
+	require.True(t, graphHasTriple(graph, "https://example.test/project/person/alice", "https://schema.org/name", "Alice"))
+}

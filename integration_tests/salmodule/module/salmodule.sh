@@ -12,6 +12,7 @@ ontology() {
         "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
         "schema": "https://schema.org/",
         "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "sh": "http://www.w3.org/ns/shacl#",
         "salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
     },
     "@graph": [
@@ -26,7 +27,14 @@ ontology() {
             "@type": "owl:Class",
             "rdfs:label": "Static Place Producer",
             "rdfs:comment": "Emits a fixed set of schema:Place nodes, narrowed by the properties its task instance is configured with.",
-            "rdfs:subClassOf": {"@id": "salmodule:Task"}
+            "rdfs:subClassOf": {"@id": "salmodule:Task"},
+            "salmodule:stdoutShape": {
+                "@type": "sh:NodeShape",
+                "sh:targetClass": {"@id": "schema:Place"},
+                "sh:property": [
+                    {"sh:path": {"@id": "schema:name"}, "sh:minCount": 1, "sh:message": "A place must have a schema:name"}
+                ]
+            }
         },
         {
             "@id": "region",
@@ -46,6 +54,13 @@ ontology() {
             "@id": "fail",
             "@type": "owl:DatatypeProperty",
             "rdfs:comment": "Set on a task instance to ask this module to report a failure.",
+            "rdfs:domain": {"@id": "StaticPlaceProducer"},
+            "rdfs:range": {"@id": "xsd:boolean"}
+        },
+        {
+            "@id": "nameless",
+            "@type": "owl:DatatypeProperty",
+            "rdfs:comment": "Set on a task instance to ask this module to emit a place without a schema:name, which violates its stdoutShape, and then keep running.",
             "rdfs:domain": {"@id": "StaticPlaceProducer"},
             "rdfs:range": {"@id": "xsd:boolean"}
         },
@@ -99,6 +114,16 @@ run() {
     if [ "$(typed_property fail)" = "true" ]; then
         error "the task instance asked this module to fail"
         exit 1
+    fi
+
+    # a place without a name violates the stdoutShape above; the task then
+    # keeps running so tests can check that SAL stops it rather than waits
+    if [ "$(typed_property nameless)" = "true" ]; then
+        place tahoe "Lake Tahoe"
+        printf '{"@id":"https://example.test/place/nameless","@type":"schema:Place"}\n'
+        sleep 120
+        place erie "Lake Erie"
+        exit 0
     fi
 
     # region narrows what this run emits, which is how the tests check that the
