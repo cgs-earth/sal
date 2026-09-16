@@ -10,7 +10,9 @@ metadata:
 
 # SAL modules
 
-A SAL module is a git repository with a `Dockerfile` in its root. The image it builds is a CLI with
+A SAL module is a git repository with a `Dockerfile` in its root; `sal init --salmodule` scaffolds one,
+asking for one sample task to seed `ontology.jsonld` with (`--bare` skips the questions) and writing a
+`Dockerfile` and `.dockerignore` holding only a comment. The image it builds is a CLI with
 two subcommands. `sal` clones the repository, builds the image, and runs those subcommands; nothing
 else about the language, framework, or base image matters.
 
