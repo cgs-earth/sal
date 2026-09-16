@@ -29,7 +29,7 @@ func runTestTask(t *testing.T, runner *fakeRunner, blobDir string) (TaskResult, 
 	t.Helper()
 	ref, err := ParseModuleIRI(testModuleNamespace)
 	require.NoError(t, err)
-	return newTestResolver(runner).RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", blobDir)
+	return newTestResolver(runner).RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", blobDir, nil)
 }
 
 func TestRunTaskCopiesFilesTheOutputNamesIntoTheBlobStore(t *testing.T) {

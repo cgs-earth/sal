@@ -38,6 +38,10 @@ Print one JSON-LD document to stdout and exit 0. Requirements:
   `rdfs:domain` and `rdfs:range`. A property the ontology does not declare never reaches the task.
 - Optional SHACL shapes on the task class: `salmodule:taskShape` (what a valid instance looks like),
   `salmodule:stdinShape`, and `salmodule:stdoutShape` (what the task consumes and produces).
+  `salmodule:stdoutShape` is enforced: `sal run` validates every line the task writes against it, with the
+  ontology's `@context` injected, and the first line that fails stops the container and fails the run with
+  the shape's `sh:message`. Give the shape a target (`sh:targetClass` usually), and do not use
+  `sh:languageIn`, `sh:uniqueLang`, `sh:disjoint`, `sh:qualifiedValueShapesDisjoint`, or `sh:sparql`.
 - Optional `salmodule:taskInstanceEnvVar` on the ontology node to rename the environment variable;
   it defaults to `SALMODULE_TASK_INSTANCE`.
 

@@ -28,6 +28,12 @@ type ModuleOntology struct {
 	// prefixes are the namespace bindings of Context, used to write the IRIs of a
 	// task instance the way the module's own ontology writes them.
 	prefixes map[string]string
+	// graph is the parsed ontology, kept so that the shapes a task class
+	// declares can be read out of it when the class is run.
+	graph *rdflibgo.Graph
+	// parents maps each class the ontology declares a superclass for to its
+	// direct superclasses.
+	parents map[string][]string
 }
 
 // IsTaskClass reports whether the ontology declares iri as a subclass of one of
@@ -51,13 +57,16 @@ func parseModuleOntology(namespace string, document []byte) (*ModuleOntology, er
 		return nil, fmt.Errorf("parse ontology of %s: %w", namespace, err)
 	}
 
+	parents := subClassParents(graph)
 	return &ModuleOntology{
 		Namespace:          namespace,
 		Document:           document,
 		Context:            envelope.Context,
 		TaskInstanceEnvVar: taskInstanceEnvVar(graph),
-		taskClasses:        taskClasses(graph),
+		taskClasses:        taskClasses(parents),
 		prefixes:           contextPrefixes(envelope.Context),
+		graph:              graph,
+		parents:            parents,
 	}, nil
 }
 
@@ -91,9 +100,9 @@ func taskInstanceEnvVar(graph *rdflibgo.Graph) string {
 	return name
 }
 
-// taskClasses returns every class the ontology declares, directly or
-// transitively, as a subclass of a SAL Module task class.
-func taskClasses(graph *rdflibgo.Graph) map[string]bool {
+// subClassParents maps every class the ontology declares a superclass for to
+// its direct superclasses.
+func subClassParents(graph *rdflibgo.Graph) map[string][]string {
 	parents := map[string][]string{}
 	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		if !isSubClassOfPredicate(triple.Predicate.Value()) {
@@ -106,7 +115,12 @@ func taskClasses(graph *rdflibgo.Graph) map[string]bool {
 		}
 		return true
 	})
+	return parents
+}
 
+// taskClasses returns every class the ontology declares, directly or
+// transitively, as a subclass of a SAL Module task class.
+func taskClasses(parents map[string][]string) map[string]bool {
 	classes := map[string]bool{}
 	for class := range parents {
 		if inheritsFromTaskClass(class, parents, map[string]bool{}) {

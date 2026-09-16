@@ -113,13 +113,28 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 			return tasksRun, fmt.Errorf("run: %w", err)
 		}
 
+		// the shape a task class declares for its output is enforced line by
+		// line as the task writes; a class without one is run unchecked
+		validator, err := ontology.StdoutValidator(task.classIRI, graph.Base())
+		if err != nil {
+			return tasksRun, fmt.Errorf("run: %w", err)
+		}
+
 		slog.Info("Running SAL module task " + task.classIRI)
-		result, runErr := resolver.RunTask(ctx, task.ref, ontology.TaskInstanceEnvVar, taskInstance, blobDir)
+		if validator != nil {
+			slog.Info("Validating the output of " + task.classIRI + " against its salmodule:stdoutShape")
+		}
+		result, runErr := resolver.RunTask(ctx, task.ref, ontology.TaskInstanceEnvVar, taskInstance, blobDir, validator)
 		moduleGraph, err := ontology.GraphFromTaskOutput(result.Output, graph.Base())
-		// a failing task reports why it failed as salmodule:Error nodes before it
-		// exits, so those messages are preferred over the container's exit status
+		// a line that violates the output shape stopped the task, so nothing
+		// after it was read; a failing task reports why it failed as
+		// salmodule:Error nodes before it exits, so those messages are
+		// preferred over the container's exit status
+		var shapeErr salmodule.StdoutShapeError
 		var taskErr salmodule.TaskError
 		switch {
+		case errors.As(runErr, &shapeErr):
+			return tasksRun, fmt.Errorf("run: %w", shapeErr)
 		case errors.As(err, &taskErr):
 			return tasksRun, fmt.Errorf("run: %w", taskErr)
 		case runErr != nil:

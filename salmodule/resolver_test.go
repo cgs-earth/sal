@@ -157,7 +157,7 @@ func TestResolverBuildsEachModuleOnlyOnce(t *testing.T) {
 	require.NoError(t, err)
 	_, err = resolver.Ontology(context.Background(), ref)
 	require.NoError(t, err)
-	_, err = resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir())
+	_, err = resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), nil)
 	require.NoError(t, err)
 
 	require.Len(t, runner.builds, 1)
@@ -276,7 +276,7 @@ func TestResolverRunTaskPassesTaskInstanceThroughEnvironment(t *testing.T) {
 	ref, err := ParseModuleIRI(testModuleNamespace)
 	require.NoError(t, err)
 
-	_, err = newTestResolver(runner).RunTask(context.Background(), ref, "MODULE_TASK", `{"@id":"x"}`, t.TempDir())
+	_, err = newTestResolver(runner).RunTask(context.Background(), ref, "MODULE_TASK", `{"@id":"x"}`, t.TempDir(), nil)
 
 	require.NoError(t, err)
 	require.Equal(t, []string{`MODULE_TASK={"@id":"x"}`}, runner.runs[0].env)
