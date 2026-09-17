@@ -44,7 +44,7 @@ const testModuleOntology = `{
 }`
 
 // testProject is the shape of a SAL project that references a SAL module, as
-// described in build/testdata/reference/ontology_with_sal.ttl. The instance is
+// described in examples/usage/geoconnex_salmodule_example.ttl. The instance is
 // configured with the module's own properties rather than an embedded JSON-LD
 // literal.
 const testProject = `
