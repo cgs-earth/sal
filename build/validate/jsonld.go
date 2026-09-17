@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	cgsld "github.com/cgs-earth/json-gold/ld"
-	"github.com/cgs-earth/sal/build/vocab"
 	piprateld "github.com/piprate/json-gold/ld"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/jsonld"
@@ -53,7 +52,7 @@ func parseJSONLDContent(content []byte, displayPath string, base string) (*rdfDo
 		return nil, fmt.Errorf("%s:%d: invalid JSON-LD: %w", path, jsonErrorLine(content, err), err)
 	}
 
-	loader := cgsld.NewCachingDocumentLoader(bundledDocumentLoader{next: cgsld.NewDefaultDocumentLoader(nil)})
+	loader := cgsld.NewCachingDocumentLoader(vocabularyBaseDocumentLoader{next: cgsld.NewDefaultDocumentLoader(nil)})
 	ctx, err := collectJSONLDContext(doc, loader)
 	if err != nil {
 		return nil, fmt.Errorf("%s: invalid JSON-LD: %w", path, err)
@@ -77,54 +76,38 @@ func parseJSONLDContent(content []byte, displayPath string, base string) (*rdfDo
 	}
 
 	g := rdflibgo.NewGraph(rdflibgo.WithBase(base))
-	err = jsonld.Parse(g, bytes.NewReader(content), jsonld.WithBase(base), jsonld.WithDocumentLoader(piprateld.NewCachingDocumentLoader(piprateBundledDocumentLoader{next: piprateld.NewDefaultDocumentLoader(nil)})))
+	err = jsonld.Parse(g, bytes.NewReader(content), jsonld.WithBase(base), jsonld.WithDocumentLoader(piprateld.NewCachingDocumentLoader(piprateVocabularyBaseDocumentLoader{next: piprateld.NewDefaultDocumentLoader(nil)})))
 	if err != nil {
 		return nil, fmt.Errorf("%s: invalid JSON-LD: %w", path, err)
 	}
 
-	return &rdfDocument{graph: g, ctx: ctx, terms: terms}, nil
+	return &rdfDocument{graph: g, ctx: ctx, terms: terms, content: content}, nil
 }
 
-type bundledDocumentLoader struct {
+// vocabularyBaseDocumentLoader answers a remote context that is a bare
+// vocabulary namespace, such as "https://schema.org/", with a context whose
+// @vocab is that namespace, so the document's keys resolve against it without
+// the namespace ever being fetched. Anything else is loaded by next.
+type vocabularyBaseDocumentLoader struct {
 	next cgsld.DocumentLoader
 }
 
-func (l bundledDocumentLoader) LoadDocument(u string) (*cgsld.RemoteDocument, error) {
+func (l vocabularyBaseDocumentLoader) LoadDocument(u string) (*cgsld.RemoteDocument, error) {
 	if looksLikeVocabularyBase(u) {
 		return &cgsld.RemoteDocument{DocumentURL: u, Document: vocabularyBaseContext(u)}, nil
-	}
-	body, _, ok, err := vocab.Load(u)
-	if err != nil {
-		return nil, err
-	}
-	if ok {
-		var doc any
-		if err := json.Unmarshal(body, &doc); err != nil {
-			return nil, err
-		}
-		return &cgsld.RemoteDocument{DocumentURL: u, Document: doc}, nil
 	}
 	return l.next.LoadDocument(u)
 }
 
-type piprateBundledDocumentLoader struct {
+// piprateVocabularyBaseDocumentLoader is vocabularyBaseDocumentLoader for the
+// json-gold fork goRDFlib parses with.
+type piprateVocabularyBaseDocumentLoader struct {
 	next piprateld.DocumentLoader
 }
 
-func (l piprateBundledDocumentLoader) LoadDocument(u string) (*piprateld.RemoteDocument, error) {
+func (l piprateVocabularyBaseDocumentLoader) LoadDocument(u string) (*piprateld.RemoteDocument, error) {
 	if looksLikeVocabularyBase(u) {
 		return &piprateld.RemoteDocument{DocumentURL: u, Document: vocabularyBaseContext(u)}, nil
-	}
-	body, _, ok, err := vocab.Load(u)
-	if err != nil {
-		return nil, err
-	}
-	if ok {
-		var doc any
-		if err := json.Unmarshal(body, &doc); err != nil {
-			return nil, err
-		}
-		return &piprateld.RemoteDocument{DocumentURL: u, Document: doc}, nil
 	}
 	return l.next.LoadDocument(u)
 }

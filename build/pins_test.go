@@ -214,3 +214,16 @@ func TestBuildWritesThePinButNotTheStatementsOfAVocabularyItDoesNotImport(t *tes
 		rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"),
 	))
 }
+
+func TestValidateDoesNotRequireACleanWorktree(t *testing.T) {
+	project := newPinsTestProject(t)
+	servePinsTestVocabulary(t)
+	// an edit the user has not committed yet is exactly what validate is for
+	require.NoError(t, os.WriteFile(filepath.Join(project, "data.ttl"), []byte(pinsTestSource+"\n# edited\n"), 0644))
+
+	_, err := (&ValidateCmd{}).Run()
+	require.NoError(t, err)
+
+	_, err = (&BuildCmd{Format: GraphExportFormatNQuads}).Run()
+	require.ErrorIs(t, err, ErrUncommittedChanges)
+}

@@ -4,13 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log/slog"
 	"mime"
 	"net/http"
 	"slices"
 	"strings"
 
-	"github.com/cgs-earth/sal/build/vocab"
 	"github.com/cgs-earth/sal/salmodule"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/jsonld"
@@ -97,7 +95,21 @@ func replacementVocabularyTerm(iri, base string, replacements map[string]string)
 	return replacement + strings.TrimPrefix(iri, base)
 }
 
+// schemaOrgNamespace is the one namespace schema.org defines its terms under.
+const schemaOrgNamespace = "https://schema.org/"
+
+// schemaOrgDocumentURL is where the schema.org vocabulary is fetched from. The
+// namespace itself answers with an HTML page whatever Accept header is sent, so
+// it cannot be dereferenced the way other vocabularies are; the current release
+// of the vocabulary is published at this URL instead.
+const schemaOrgDocumentURL = "https://schema.org/version/latest/schemaorg-current-https.jsonld"
+
+// vocabularyDocumentURL is the URL the document defining a namespace is fetched
+// from, for the namespaces that are not served at their own IRI.
 func vocabularyDocumentURL(base string) string {
+	if base == schemaOrgNamespace {
+		return schemaOrgDocumentURL
+	}
 	if before, _, ok := strings.Cut(base, "#"); ok {
 		return before
 	}
@@ -140,35 +152,20 @@ func (c *vocabularyCache) parseBase(base string) string {
 
 // loadTerms reads the terms a vocabulary defines out of the version the project
 // pins for it, pinning what it fetched when there is no pin yet. A document SAL
-// cannot parse falls back to the bundled copy in build/vocab, which is then
-// pinned in its place; a pinned document that no longer parses is an error,
-// since silently validating against something else would defeat the pin.
+// cannot parse is an error either way; a fetched one is unpinned again, since
+// it is not a version the project should record.
 func (c *vocabularyCache) loadTerms(namespace string) (map[string]bool, error) {
 	body, mediaType, pinned, err := c.pins.Document(namespace, vocabularyDocumentURL(namespace))
-	if err == nil {
-		terms, _, parseErr := serializeRdfDataAndGetVocab(mediaType, body, c.parseBase(namespace))
-		if parseErr == nil {
-			return terms, nil
-		}
-		if pinned {
-			return nil, parseErr
-		}
-		// what was just fetched is not RDF SAL can read, so it is not the
-		// version this project should record
-		c.pins.Unpin(namespace)
-		err = parseErr
-	}
-
-	bundled, bundledType, ok, bundledErr := vocab.Load(namespace)
-	if bundledErr != nil || !ok {
+	if err != nil {
 		return nil, err
 	}
-	terms, _, parseErr := serializeRdfDataAndGetVocab(bundledType, bundled, c.parseBase(namespace))
-	if parseErr != nil {
+	terms, _, err := serializeRdfDataAndGetVocab(mediaType, body, c.parseBase(namespace))
+	if err != nil {
+		if !pinned {
+			c.pins.Unpin(namespace)
+		}
 		return nil, err
 	}
-	slog.Warn("Could not read the vocabulary at " + namespace + ", so SAL's bundled copy is pinned instead: " + err.Error())
-	c.pins.Pin(namespace, bundled, bundledType, PinnedVersion{})
 	return terms, nil
 }
 

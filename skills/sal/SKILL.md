@@ -24,7 +24,7 @@ file that is committed is `.sal/config.jsonld`, the lockfile of pinned vocabular
 
 ```sh
 sal init                 # once, at the repo root; creates .sal/data and gitignores it
-sal validate data/       # parse and check every term against its vocabulary; commits nothing
+sal validate data/       # parse and check every term against its vocabulary; commits nothing, works on a dirty worktree
 git add -A && git commit # build refuses a dirty worktree
 sal build data/          # validate, then commit new triples to .sal/data as an Iceberg snapshot
 sal run                  # only if the RDF declares SAL module tasks; materializes their output
@@ -43,6 +43,8 @@ commit `.sal/config.jsonld` before the next build.
 - Prefix namespaces must end in `/` or `#`. One ending in neither needs confirmation or
   `--allow-prefixes-without-slash-or-hash`. One vocabulary declared with mixed spellings
   (`http` vs `https`, `/` vs `#`) across files is an error; reconcile with `--prefix-maps old=new`.
+- schema.org must be declared as `https://schema.org/`; the `http` namespace is an error, since the
+  vocabulary defines no terms under it.
 - Relative IRIs resolve against the project base, derived from the git remote. Use them for the
   project's own instances and absolute IRIs for everything external.
 - Only new triples are committed; a rebuild after no change adds nothing.

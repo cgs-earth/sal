@@ -3,7 +3,6 @@ package build
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -100,13 +99,6 @@ func TestAllowPrefixesWithoutSlashOrHashIncludesThemWithoutAsking(t *testing.T) 
 func TestValidateAsksAboutAPrefixWithoutTerminatorUnlessAllowed(t *testing.T) {
 	project := newPinsTestProject(t)
 	writeBareNamespaceSource(t, project)
-	// validate has no --force, so the source has to be committed
-	for _, args := range [][]string{{"add", "-A"}, {"-c", "user.email=sal@example.test", "-c", "user.name=SAL", "commit", "-m", "bare prefix"}} {
-		command := exec.Command("git", args...)
-		command.Dir = project
-		out, err := command.CombinedOutput()
-		require.NoErrorf(t, err, "git %v: %s", args, out)
-	}
 	asked := answerPrompt(t, false)
 
 	_, err := (&ValidateCmd{Paths: []string{project}}).Run()
@@ -142,4 +134,21 @@ func TestBuildRejectsTheSameVocabularyDeclaredUnderHttpAndHttps(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrConflictingPrefixes)
 	require.NoFileExists(t, filepath.Join(project, ".sal", "config.jsonld"))
+}
+
+func TestBuildRefusesTheHttpSchemaOrgPrefix(t *testing.T) {
+	project := newPinsTestProject(t)
+	fetches := servePinsTestVocabulary(t)
+	require.NoError(t, os.WriteFile(filepath.Join(project, "data.ttl"), []byte(pinsTestSource+`
+@prefix schema: <http://schema.org/> .
+`), 0644))
+
+	_, err := (&BuildCmd{Format: GraphExportFormatNQuads, Force: true}).Run()
+
+	var insecure validate.InsecurePrefixError
+	require.ErrorAs(t, err, &insecure)
+	// the build reports the file under the project directory as it walked it,
+	// which on macOS is the temp dir with its symlink resolved
+	require.Regexp(t, `^\S*/data\.ttl:7: http used instead of https for schema\.org; declare <https://schema\.org/> instead$`, err.Error())
+	require.Zero(t, *fetches, "the prefix check runs before any vocabulary is fetched")
 }
