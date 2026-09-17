@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"context"
 	"fmt"
 	"testing"
 )
@@ -38,7 +39,7 @@ hyf:HY_HydroLocation a rdfs:Class .
 func schemaOrgValidator(t *testing.T) *Validator {
 	t.Helper()
 	pins := EphemeralVocabularies()
-	pins.Fetch = func(u string) ([]byte, string, PinnedVersion, error) {
+	pins.Fetch = func(_ context.Context, u string) ([]byte, string, PinnedVersion, error) {
 		switch u {
 		case schemaOrgDocumentURL:
 			return []byte(testSchemaOrgVocabulary), "text/turtle", PinnedVersion{}, nil

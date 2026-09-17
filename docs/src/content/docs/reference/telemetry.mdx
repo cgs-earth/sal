@@ -1,0 +1,86 @@
+---
+title: Telemetry
+description: Tracing and metrics for the slow parts of a SAL build, run, or query through OpenTelemetry.
+---
+
+`sal` records [OpenTelemetry](https://opentelemetry.io/) traces around the steps that take time, and reports the memory and CPU the process used while they ran, so that a slow build or query can be read as a timeline rather than guessed at from the log.
+
+Nothing is exported unless the environment asks for it.
+A plain `sal build` pays only for spans that go nowhere.
+
+## Turning it on
+
+The exporters are configured with the [standard OpenTelemetry environment variables](https://opentelemetry.io/docs/languages/sdk-configuration/), so any OTLP backend works.
+Set an endpoint and traces and metrics both go there:
+
+```sh
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+sal build
+```
+
+| Variable | Effect |
+| --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Base URL of an OTLP collector. `/v1/traces` and `/v1/metrics` are appended to it. Setting it turns both signals on. |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | The full URL for one signal, used as written. Setting one turns on only that signal. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf`, the default, or `grpc`. `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` and `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL` set it per signal. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Headers to send, as `key=value,key2=value2`, for a backend that wants a token. |
+| `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER` | `otlp`, `console`, or `none`. `console` pretty prints to stderr and needs no collector. Unset, each is `otlp` when an endpoint for it is configured and `none` otherwise. |
+| `OTEL_METRIC_EXPORT_INTERVAL` | How often metrics are exported, in milliseconds. The default is 10 seconds, and a final export happens as the process exits, so a short build still reports. |
+| `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` | Rename the service, which is `sal` by default, or tag everything it sends. |
+
+To look at one build without running anything else:
+
+```sh
+OTEL_TRACES_EXPORTER=console sal build 2> trace.json
+```
+
+## What is traced
+
+Only the steps that can take a while have spans.
+Everything else is covered by the span above it, so a trace reads as an outline of the invocation rather than a call graph.
+
+`sal build`, `sal run`, and `sal validate` each produce one trace, named `sal.build`, `sal.run`, or `sal.validate`, carrying `sal.files`, how many source files were read.
+Under it:
+
+| Span | What it covers | Attributes |
+| --- | --- | --- |
+| `build.validate_sources` | Checking every term of every source file against its vocabulary, and pinning every declared prefix. This is where vocabularies are fetched. | `sal.documents` |
+| `validate.document` | One source file's terms. | `sal.file`, `sal.terms` |
+| `validate.load_vocabulary` | Resolving one vocabulary, from the project's pin or from its source. | `sal.vocabulary`, `sal.vocabulary.pinned`, `sal.vocabulary.bytes`, `sal.vocabulary.terms` |
+| `salmodule.resolve` | Turning a `salmodule://` reference into a container image. `sal.module.cache` says what was reused: `pinned image` when nothing was cloned or built, `image` when the clone's commit already had an image, `none` when the image was built. | `sal.module`, `sal.module.commit`, `sal.module.image`, `sal.module.cache` |
+| `salmodule.clone` | The `git clone` of the module repository. | `sal.module.clone_url` |
+| `salmodule.build_image` | The `docker build` of the module's Dockerfile. | `sal.module.image` |
+| `salmodule.ontology` | Running the module's `salmodule ontology` command for its vocabulary. | `sal.module` |
+| `build.import_ontology` | Fetching one `owl:imports` of the project ontology. | `sal.import` |
+| `salmodule.task` | One task instance from the module's ontology through to its triples merged into the graph (`sal run` only). | `sal.module`, `sal.module.task_class`, `sal.module.task`, `sal.triples.materialized`, `sal.module.files_copied` |
+| `salmodule.run_task` | The module's `salmodule run` command, from the container starting to the last `file:///` copy finishing. | `sal.module`, `sal.module.output_bytes`, `sal.module.files_copied` |
+| `iceberg.write` | Writing the graph to the Iceberg table. | `sal.iceberg.warehouse`, `sal.iceberg.namespace` |
+| `iceberg.diff` | Scanning the table's triple hashes and comparing them to the graph, which decides what the snapshot adds and removes. | `sal.triples.existing`, `sal.triples.added`, `sal.triples.removed`, `sal.triples.unchanged` |
+| `iceberg.write_data_files` | Writing the new triples to Parquet. | `sal.iceberg.data_files`, `sal.triples.written` |
+| `iceberg.commit` | Writing the equality deletes and committing the snapshot. | `sal.iceberg.data_files`, `sal.triples.added`, `sal.triples.removed` |
+
+A span whose step failed carries the error as its status and as an `exception` event, so a failed build shows where it stopped.
+
+`sal serve` produces one trace per request, named by the method and path, such as `POST /sparql` or `GET /v7847372623449923428/sparql`, and honours the [W3C trace context](https://www.w3.org/TR/trace-context/) headers a client sends, so a request made from an instrumented application joins that application's trace.
+Requests for the UI's own static assets are left out.
+Under a request:
+
+| Span | What it covers | Attributes |
+| --- | --- | --- |
+| `sparql.query` | Translating a SPARQL query and running the SQL. | `sal.sparql.query` |
+| `duckdb.query` | One DuckDB statement, which is also what `/api/sql`, `/api/stats`, and the geometry endpoints run. | `db.system.name`, `db.query.text`, `db.response.returned_rows` |
+| `duckdb.open` | Opening DuckDB and loading the Iceberg extension, once per process on the first query. | |
+| `duckdb.load_spatial` | Loading the spatial extension the first time a query needs it. | |
+
+Query text is cut to 4096 bytes.
+`sal query` records the same `sparql.query` and `duckdb.query` spans, one trace per statement.
+
+## What is measured
+
+Metrics are collected at `OTEL_METRIC_EXPORT_INTERVAL` and once more as the process exits.
+`sal` defines no metrics of its own; it reports the OpenTelemetry [Go runtime](https://pkg.go.dev/go.opentelemetry.io/contrib/instrumentation/runtime) and [host](https://pkg.go.dev/go.opentelemetry.io/contrib/instrumentation/host) instrumentation, which cover:
+
+- **Memory**: `go.memory.used`, `go.memory.limit`, `go.memory.allocated`, `go.memory.allocations`, and `go.memory.gc.goal` for the Go heap, and `system.memory.usage` and `system.memory.utilization` for the machine. A build that parses a large graph shows up here before it shows up anywhere else.
+- **CPU**: `process.cpu.time` for the `sal` process and `system.cpu.time` for the machine, both split by state, so a step that waits on Docker or the network can be told from one that computes.
+- **Scheduling**: `go.goroutine.count`, `go.processor.limit`, `go.schedule.duration`, and `go.config.gogc`.
+- **Requests**: `http.server.request.duration` from `sal serve`, a histogram per method and status.

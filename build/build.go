@@ -11,8 +11,10 @@ import (
 
 	"github.com/cgs-earth/sal/build/validate"
 	"github.com/cgs-earth/sal/pkg"
+	"github.com/cgs-earth/sal/pkg/telemetry"
 	"github.com/cgs-earth/sal/salmodule"
 	rdflibgo "github.com/tggo/goRDFlib"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type ValidateCmd struct {
@@ -92,10 +94,22 @@ func confirmPrefixesWithoutTerminator(validator *validate.Validator, allow bool)
 }
 
 // Run validates RDF files for terms that are not defined by their vocabularies and returns their merged RDF graph.
-func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
+func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("build: missing arguments")
 	}
+
+	// the whole invocation is one trace, named after the subcommand that made
+	// it, with the validation of every source, each module built or run, and
+	// the iceberg diff and write as spans under it
+	traceName := "sal.build"
+	if cfg.skipCommit {
+		traceName = "sal.validate"
+	} else if cfg.runModules {
+		traceName = "sal.run"
+	}
+	ctx, span := telemetry.Start(context.Background(), traceName)
+	defer func() { telemetry.End(span, err) }()
 
 	// only a build that commits a snapshot needs the worktree to be clean, so
 	// that the snapshot maps to a commit; `sal validate` writes nothing, not
@@ -150,6 +164,7 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no JSON-LD or TTL files found in %s", strings.Join(paths, ", "))
 	}
+	span.SetAttributes(attribute.Int("sal.files", len(files)))
 
 	vocabsToReplace, err := parsePrefixMaps(cfg.PrefixMaps)
 	if err != nil {
@@ -238,10 +253,13 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		return nil, err
 	}
 
+	// checking the terms is where every vocabulary is fetched, and where a
+	// module a file references is cloned and built, so it is a span of its own
+	validateCtx, validateSpan := telemetry.Start(ctx, "build.validate_sources", attribute.Int("sal.documents", len(docs)))
 	finalGraph := rdflibgo.NewGraph(rdflibgo.WithBase(base))
 	for _, doc := range docs {
 		// TODO do this in parallel.
-		graph, err := validator.Validate(doc)
+		graph, err := validator.Validate(validateCtx, doc)
 		if err != nil {
 			if nested, ok := err.(validate.MultiError); ok {
 				errs = append(errs, nested...)
@@ -253,12 +271,15 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		mergeGraph(finalGraph, graph)
 	}
 	if len(errs) > 0 {
+		telemetry.End(validateSpan, errs)
 		return nil, errs
 	}
 	validatedCount := len(docs)
 	// a prefix a file declares is pinned even when no term from it was used, so
 	// that what a project resolves against is what it declares
-	if err := validator.PinDeclaredPrefixes(); err != nil {
+	err = validator.PinDeclaredPrefixes(validateCtx)
+	telemetry.End(validateSpan, err)
+	if err != nil {
 		return nil, err
 	}
 	if validatedCount == 1 {
@@ -280,7 +301,7 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		slog.Warn("Exporting as NQuads. Note this will create a larger and less efficient file than iceberg")
 	}
 
-	if err := ImportOntologies(finalGraph, pins); err != nil {
+	if err := ImportOntologies(ctx, finalGraph, pins); err != nil {
 		return nil, err
 	}
 
@@ -304,7 +325,7 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		if err != nil {
 			return nil, err
 		}
-		tasksRun, err := MaterializeSalModules(context.Background(), finalGraph, resolver, blobDir)
+		tasksRun, err := MaterializeSalModules(ctx, finalGraph, resolver, blobDir)
 		if err != nil {
 			return nil, err
 		}
@@ -323,7 +344,7 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 
 	// every module downloaded so far, both the ones validation dereferenced for
 	// their vocabulary and the ones materialization ran, is recorded in the table
-	if err := ExportGraph(finalGraph, cfg.Format, hash, resolver.Downloaded()); err != nil {
+	if err := ExportGraph(ctx, finalGraph, cfg.Format, hash, resolver.Downloaded()); err != nil {
 		return nil, err
 	}
 

@@ -72,7 +72,7 @@ func TestValidateAcceptsTermsDefinedBySalModuleOntology(t *testing.T) {
 			history:maxRetries "5"^^xsd:integer .
 	`)
 
-	_, err := ValidateRDFFile(path, nil, testBase)
+	_, err := ValidateRDFFile(context.Background(), path, nil, testBase)
 
 	require.NoError(t, err)
 }
@@ -89,7 +89,7 @@ func TestValidateChecksTaskConfigurationPropertiesAgainstTheModuleOntology(t *te
 			history:maxRetriess "5"^^xsd:integer .
 	`)
 
-	_, err := ValidateRDFFile(path, nil, testBase)
+	_, err := ValidateRDFFile(context.Background(), path, nil, testBase)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "undefined term")
@@ -103,7 +103,7 @@ func TestValidateChecksTaskConfigurationPropertiesAgainstTheModuleOntology(t *te
 func TestPinnedGraphResolvesAModuleOntologyAgainstTheModuleNamespace(t *testing.T) {
 	useFakeSalModule(t)
 
-	graph, err := PinnedGraph(EphemeralVocabularies(), "salmodule://www.github.com/test/history-getter")
+	graph, err := PinnedGraph(context.Background(), EphemeralVocabularies(), "salmodule://www.github.com/test/history-getter")
 
 	require.NoError(t, err)
 	require.True(t, graph.Contains(
@@ -120,7 +120,7 @@ func TestPinnedGraphPinsASalModuleVocabularyByItsCommitHash(t *testing.T) {
 	useFakeSalModule(t)
 	pins := EphemeralVocabularies()
 
-	_, err := PinnedGraph(pins, "salmodule://www.github.com/test/history-getter")
+	_, err := PinnedGraph(context.Background(), pins, "salmodule://www.github.com/test/history-getter")
 	require.NoError(t, err)
 
 	entry, ok := pins.entries["salmodule://www.github.com/test/history-getter"]
@@ -137,7 +137,7 @@ func TestValidateRejectsTermsMissingFromSalModuleOntology(t *testing.T) {
 		<EducationFinder> a history:EducationalHistoryFinderr .
 	`)
 
-	_, err := ValidateRDFFile(path, nil, testBase)
+	_, err := ValidateRDFFile(context.Background(), path, nil, testBase)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "undefined term")

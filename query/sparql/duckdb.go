@@ -10,10 +10,16 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cgs-earth/sal/pkg/telemetry"
 	// DuckDB is linked into the sal binary rather than shelled out to, so no
 	// duckdb CLI has to be installed for sal to query a built table.
 	_ "github.com/duckdb/duckdb-go/v2"
+	"go.opentelemetry.io/otel/attribute"
 )
+
+// maxQueryTextAttribute bounds the query text a span records, since a query
+// can be pasted in far longer than a trace viewer can show.
+const maxQueryTextAttribute = 4096
 
 // Extensions are the DuckDB extensions sal queries need on top of the ones the
 // linked in library already carries. iceberg reads the triples table, httpfs
@@ -48,25 +54,35 @@ func (d *duckdbInstance) prepare(ctx context.Context, tablePath string, imports 
 	defer d.mu.Unlock()
 
 	if d.db == nil {
+		// opening the database and loading the iceberg extension is the slow
+		// part of a process's first query, so it is a span of its own
+		openCtx, span := telemetry.Start(ctx, "duckdb.open")
 		db, err := sql.Open("duckdb", "")
 		if err != nil {
+			telemetry.End(span, err)
 			return nil, fmt.Errorf("open duckdb: %w", err)
 		}
 		// The object cache holds on to Iceberg metadata it has already read. A
 		// long lived process would otherwise keep serving the snapshot that was
 		// current when it first read the table, where a fresh duckdb process
 		// never could.
-		if _, err := db.ExecContext(ctx, "SET enable_object_cache = false; INSTALL iceberg; LOAD iceberg;"); err != nil {
+		if _, err := db.ExecContext(openCtx, "SET enable_object_cache = false; INSTALL iceberg; LOAD iceberg;"); err != nil {
 			if closeErr := db.Close(); closeErr != nil {
 				slog.Warn("failed to close the duckdb handle", "error", closeErr)
 			}
+			telemetry.End(span, err)
 			return nil, fmt.Errorf("load the duckdb iceberg extension: %w", err)
 		}
 		d.db = db
+		telemetry.End(span, nil)
 	}
 
 	if withSpatial && !d.spatial {
-		if _, err := d.db.ExecContext(ctx, "INSTALL spatial; LOAD spatial;"); err != nil {
+		// the spatial extension is tens of megabytes, downloaded on first use
+		spatialCtx, span := telemetry.Start(ctx, "duckdb.load_spatial")
+		_, err := d.db.ExecContext(spatialCtx, "INSTALL spatial; LOAD spatial;")
+		telemetry.End(span, err)
+		if err != nil {
 			return nil, fmt.Errorf("load the duckdb spatial extension: %w", err)
 		}
 		d.spatial = true
@@ -147,7 +163,9 @@ FROM iceberg_scan('%s', allow_moved_paths = true)`, quoteIdentifier(table.View),
 }
 
 // RunSQL executes a DuckDB statement with the Iceberg triples table registered as the `triples` view.
-func (r DuckDBRunner) RunSQL(ctx context.Context, statement string) (Result, error) {
+func (r DuckDBRunner) RunSQL(ctx context.Context, statement string) (_ Result, err error) {
+	ctx, span := telemetry.Start(ctx, "duckdb.query", attribute.String("db.system.name", "duckdb"), attribute.String("db.query.text", queryTextAttribute(statement)))
+	defer func() { telemetry.End(span, err) }()
 	withSpatial := needsSpatial(statement)
 	header, rows, err := r.runSQL(ctx, statement, withSpatial)
 	// A statement can need spatial in a way needsSpatial does not recognize.
@@ -158,12 +176,22 @@ func (r DuckDBRunner) RunSQL(ctx context.Context, statement string) (Result, err
 	if err != nil {
 		return Result{}, err
 	}
+	span.SetAttributes(attribute.Int("db.response.returned_rows", len(rows)))
 	return Result{
 		SQL:     statement,
 		Header:  header,
 		Rows:    rows,
 		Message: fmt.Sprintf("%d rows", len(rows)),
 	}, nil
+}
+
+// queryTextAttribute is a query as a span records it, cut to
+// maxQueryTextAttribute bytes.
+func queryTextAttribute(query string) string {
+	if len(query) > maxQueryTextAttribute {
+		return query[:maxQueryTextAttribute]
+	}
+	return query
 }
 
 func (r DuckDBRunner) runSQL(ctx context.Context, statement string, withSpatial bool) ([]string, [][]string, error) {

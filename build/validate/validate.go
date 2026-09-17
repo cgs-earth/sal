@@ -2,13 +2,16 @@ package validate
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 
+	"github.com/cgs-earth/sal/pkg/telemetry"
 	rdflibgo "github.com/tggo/goRDFlib"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type RdfContext struct {
@@ -147,20 +150,22 @@ func (v *Validator) parsed(path string, doc *rdfDocument) *Document {
 
 // Validate checks that every vocabulary term a parsed document uses is defined
 // by the vocabulary declared for its prefix, and returns the document's graph.
-func (v *Validator) Validate(doc *Document) (*rdflibgo.Graph, error) {
-	if err := v.validateTerms(doc.path, doc.doc.terms, doc.doc.ctx); err != nil {
+func (v *Validator) Validate(ctx context.Context, doc *Document) (_ *rdflibgo.Graph, err error) {
+	ctx, span := telemetry.Start(ctx, "validate.document", attribute.String("sal.file", doc.path), attribute.Int("sal.terms", len(doc.doc.terms)))
+	defer func() { telemetry.End(span, err) }()
+	if err := v.validateTerms(ctx, doc.path, doc.doc.terms, doc.doc.ctx); err != nil {
 		return nil, err
 	}
 	return doc.doc.graph, nil
 }
 
 // ValidateFile parses one file and checks its terms in one step.
-func (v *Validator) ValidateFile(path string) (*rdflibgo.Graph, error) {
+func (v *Validator) ValidateFile(ctx context.Context, path string) (*rdflibgo.Graph, error) {
 	doc, err := v.ParseFile(path)
 	if err != nil {
 		return nil, err
 	}
-	return v.Validate(doc)
+	return v.Validate(ctx, doc)
 }
 
 func (v *Validator) declare(namespace, path string, content []byte) {
@@ -322,14 +327,14 @@ func (v *Validator) ConflictingPrefixes() []PrefixConflict {
 // files declared, so a project pins what it declares rather than only what it
 // happened to use. A prefix that cannot be resolved fails the run, since a
 // build cannot pin a version of a vocabulary it cannot read.
-func (v *Validator) PinDeclaredPrefixes() error {
+func (v *Validator) PinDeclaredPrefixes(ctx context.Context) error {
 	var errs MultiError
 	for _, prefix := range v.declaredPrefixes() {
 		namespace := prefix.Namespace
 		if !v.vocabs.resolvable(namespace) {
 			continue
 		}
-		if _, err := v.vocabs.load(namespace); err != nil {
+		if _, err := v.vocabs.load(ctx, namespace); err != nil {
 			errs = append(errs, fmt.Errorf("failed to resolve the vocabulary declared for prefix <%s>: %w", namespace, err))
 		}
 	}
@@ -341,8 +346,8 @@ func (v *Validator) PinDeclaredPrefixes() error {
 
 // ValidateRDFFile checks one file's terms without pinning the vocabularies it
 // resolved. A build validates through a Validator holding the project's pins.
-func ValidateRDFFile(path string, vocabsToReplace map[string]string, base string) (*rdflibgo.Graph, error) {
-	return NewValidator(EphemeralVocabularies(), base, vocabsToReplace).ValidateFile(path)
+func ValidateRDFFile(ctx context.Context, path string, vocabsToReplace map[string]string, base string) (*rdflibgo.Graph, error) {
+	return NewValidator(EphemeralVocabularies(), base, vocabsToReplace).ValidateFile(ctx, path)
 }
 
 func displayTerm(iri string, ctx RdfContext) (string, bool) {
@@ -361,7 +366,7 @@ func displayTerm(iri string, ctx RdfContext) (string, bool) {
 	return iri, true
 }
 
-func (v *Validator) validateTerms(path string, terms []UsedTermsInFile, rdfPrefixes RdfContext) error {
+func (v *Validator) validateTerms(ctx context.Context, path string, terms []UsedTermsInFile, rdfPrefixes RdfContext) error {
 	vocabs := &v.vocabs
 
 	var errs MultiError
@@ -375,7 +380,7 @@ func (v *Validator) validateTerms(path string, terms []UsedTermsInFile, rdfPrefi
 		if !ok {
 			continue
 		}
-		defined, err := vocabs.isDefined(term.iri, rdfPrefixes)
+		defined, err := vocabs.isDefined(ctx, term.iri, rdfPrefixes)
 		if err != nil {
 			if failure, seen := lookupFailures[err.Error()]; seen {
 				if term.line != failure.Line && !slices.Contains(failure.OtherLines, term.line) {

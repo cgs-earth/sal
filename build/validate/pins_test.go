@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -41,7 +42,7 @@ func newTestPins(t *testing.T, projectDir string, body string, fetches *int) *Pi
 
 	pins, err := LoadPinnedVocabularies(filepath.Join(projectDir, "config.jsonld"), filepath.Join(projectDir, "data"))
 	require.NoError(t, err)
-	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
+	pins.Fetch = func(context.Context, string) ([]byte, string, PinnedVersion, error) {
 		if fetches != nil {
 			*fetches++
 		}
@@ -54,7 +55,7 @@ func TestSaveWritesTheDocumentUnderItsHashAndPinsThatVersion(t *testing.T) {
 	projectDir := t.TempDir()
 	pins := newTestPins(t, projectDir, testVocabularyDocument, nil)
 
-	_, mediaType, pinned, err := pins.Document(testVocabularyNamespace, "https://vocab.test/things")
+	_, mediaType, pinned, err := pins.Document(context.Background(), testVocabularyNamespace, "https://vocab.test/things")
 	require.NoError(t, err)
 	require.False(t, pinned)
 	require.Equal(t, "text/turtle", mediaType)
@@ -85,11 +86,11 @@ func TestADocumentPinnedByFetchIsRecordedAtTheCommitHashRatherThanItsDigest(t *t
 	pins, err := LoadPinnedVocabularies(filepath.Join(projectDir, "config.jsonld"), filepath.Join(projectDir, "data"))
 	require.NoError(t, err)
 	const commitHash = "abc123def456abc123def456abc123def456abc"
-	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
+	pins.Fetch = func(context.Context, string) ([]byte, string, PinnedVersion, error) {
 		return []byte(testVocabularyDocument), "application/ld+json", PinnedVersion{Scheme: gitCommitVersionScheme, Value: commitHash}, nil
 	}
 
-	_, _, pinned, err := pins.Document(testVocabularyNamespace, "salmodule://example.test/module")
+	_, _, pinned, err := pins.Document(context.Background(), testVocabularyNamespace, "salmodule://example.test/module")
 	require.NoError(t, err)
 	require.False(t, pinned)
 	require.NoError(t, pins.Save())
@@ -104,11 +105,11 @@ func TestADocumentPinnedByFetchIsRecordedAtTheCommitHashRatherThanItsDigest(t *t
 	// reopening resolves the pin from disk rather than fetching it again
 	reopened, err := LoadPinnedVocabularies(filepath.Join(projectDir, "config.jsonld"), filepath.Join(projectDir, "data"))
 	require.NoError(t, err)
-	reopened.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
+	reopened.Fetch = func(context.Context, string) ([]byte, string, PinnedVersion, error) {
 		t.Fatal("should not have been fetched again")
 		return nil, "", PinnedVersion{}, nil
 	}
-	body, _, pinned, err := reopened.Document(testVocabularyNamespace, "salmodule://example.test/module")
+	body, _, pinned, err := reopened.Document(context.Background(), testVocabularyNamespace, "salmodule://example.test/module")
 	require.NoError(t, err)
 	require.True(t, pinned)
 	require.Equal(t, testVocabularyDocument, string(body))
@@ -133,13 +134,13 @@ func TestPinnedModuleCommitsReportsOnlySalModulePinsByNamespace(t *testing.T) {
 func TestAPinnedVocabularyIsResolvedFromDiskRatherThanFetched(t *testing.T) {
 	projectDir := t.TempDir()
 	pins := newTestPins(t, projectDir, testVocabularyDocument, nil)
-	_, _, _, err := pins.Document(testVocabularyNamespace, "https://vocab.test/things")
+	_, _, _, err := pins.Document(context.Background(), testVocabularyNamespace, "https://vocab.test/things")
 	require.NoError(t, err)
 	require.NoError(t, pins.Save())
 
 	fetches := 0
 	reopened := newTestPins(t, projectDir, "this should never be fetched", &fetches)
-	body, mediaType, pinned, err := reopened.Document(testVocabularyNamespace, "https://vocab.test/things")
+	body, mediaType, pinned, err := reopened.Document(context.Background(), testVocabularyNamespace, "https://vocab.test/things")
 
 	require.NoError(t, err)
 	require.True(t, pinned)
@@ -151,7 +152,7 @@ func TestAPinnedVocabularyIsResolvedFromDiskRatherThanFetched(t *testing.T) {
 func TestRefreshFetchesAndRepinsAVocabularyThatIsAlreadyPinned(t *testing.T) {
 	projectDir := t.TempDir()
 	pins := newTestPins(t, projectDir, testVocabularyDocument, nil)
-	_, _, _, err := pins.Document(testVocabularyNamespace, "https://vocab.test/things")
+	_, _, _, err := pins.Document(context.Background(), testVocabularyNamespace, "https://vocab.test/things")
 	require.NoError(t, err)
 	require.NoError(t, pins.Save())
 
@@ -159,7 +160,7 @@ func TestRefreshFetchesAndRepinsAVocabularyThatIsAlreadyPinned(t *testing.T) {
 	fetches := 0
 	refreshed := newTestPins(t, projectDir, updated, &fetches)
 	refreshed.Refresh = true
-	body, _, pinned, err := refreshed.Document(testVocabularyNamespace, "https://vocab.test/things")
+	body, _, pinned, err := refreshed.Document(context.Background(), testVocabularyNamespace, "https://vocab.test/things")
 	require.NoError(t, err)
 	require.False(t, pinned)
 	require.Equal(t, 1, fetches)
@@ -178,7 +179,7 @@ func TestRefreshFetchesAndRepinsAVocabularyThatIsAlreadyPinned(t *testing.T) {
 func TestSaveLeavesTheLockfileAloneWhenNothingChanged(t *testing.T) {
 	projectDir := t.TempDir()
 	pins := newTestPins(t, projectDir, testVocabularyDocument, nil)
-	_, _, _, err := pins.Document(testVocabularyNamespace, "https://vocab.test/things")
+	_, _, _, err := pins.Document(context.Background(), testVocabularyNamespace, "https://vocab.test/things")
 	require.NoError(t, err)
 	require.NoError(t, pins.Save())
 
@@ -187,7 +188,7 @@ func TestSaveLeavesTheLockfileAloneWhenNothingChanged(t *testing.T) {
 	require.NoError(t, err)
 
 	reopened := newTestPins(t, projectDir, testVocabularyDocument, nil)
-	_, _, _, err = reopened.Document(testVocabularyNamespace, "https://vocab.test/things")
+	_, _, _, err = reopened.Document(context.Background(), testVocabularyNamespace, "https://vocab.test/things")
 	require.NoError(t, err)
 	require.NoError(t, reopened.Save())
 
@@ -201,14 +202,14 @@ func TestSaveLeavesTheLockfileAloneWhenNothingChanged(t *testing.T) {
 func TestAPinnedVocabularyMissingFromDiskIsFetchedAgain(t *testing.T) {
 	projectDir := t.TempDir()
 	pins := newTestPins(t, projectDir, testVocabularyDocument, nil)
-	_, _, _, err := pins.Document(testVocabularyNamespace, "https://vocab.test/things")
+	_, _, _, err := pins.Document(context.Background(), testVocabularyNamespace, "https://vocab.test/things")
 	require.NoError(t, err)
 	require.NoError(t, pins.Save())
 	require.NoError(t, os.RemoveAll(filepath.Join(projectDir, "data")))
 
 	fetches := 0
 	reopened := newTestPins(t, projectDir, testVocabularyDocument, &fetches)
-	body, _, pinned, err := reopened.Document(testVocabularyNamespace, "https://vocab.test/things")
+	body, _, pinned, err := reopened.Document(context.Background(), testVocabularyNamespace, "https://vocab.test/things")
 
 	require.NoError(t, err)
 	require.False(t, pinned)
@@ -219,7 +220,7 @@ func TestAPinnedVocabularyMissingFromDiskIsFetchedAgain(t *testing.T) {
 func TestADocumentThatNoLongerHashesToItsPinnedVersionIsFetchedAgain(t *testing.T) {
 	projectDir := t.TempDir()
 	pins := newTestPins(t, projectDir, testVocabularyDocument, nil)
-	_, _, _, err := pins.Document(testVocabularyNamespace, "https://vocab.test/things")
+	_, _, _, err := pins.Document(context.Background(), testVocabularyNamespace, "https://vocab.test/things")
 	require.NoError(t, err)
 	require.NoError(t, pins.Save())
 
@@ -229,7 +230,7 @@ func TestADocumentThatNoLongerHashesToItsPinnedVersionIsFetchedAgain(t *testing.
 
 	fetches := 0
 	reopened := newTestPins(t, projectDir, testVocabularyDocument, &fetches)
-	body, _, _, err := reopened.Document(testVocabularyNamespace, "https://vocab.test/things")
+	body, _, _, err := reopened.Document(context.Background(), testVocabularyNamespace, "https://vocab.test/things")
 
 	require.NoError(t, err)
 	require.Equal(t, 1, fetches)
@@ -241,9 +242,9 @@ func TestTwoNamespacesServedByOneDocumentAreFetchedOnce(t *testing.T) {
 	fetches := 0
 	pins := newTestPins(t, projectDir, testVocabularyDocument, &fetches)
 
-	_, _, _, err := pins.Document("https://vocab.test/things#", "https://vocab.test/things")
+	_, _, _, err := pins.Document(context.Background(), "https://vocab.test/things#", "https://vocab.test/things")
 	require.NoError(t, err)
-	_, _, _, err = pins.Document("https://vocab.test/things/", "https://vocab.test/things")
+	_, _, _, err = pins.Document(context.Background(), "https://vocab.test/things/", "https://vocab.test/things")
 	require.NoError(t, err)
 
 	require.Equal(t, 1, fetches)
@@ -253,11 +254,11 @@ func TestTwoNamespacesServedByOneDocumentAreFetchedOnce(t *testing.T) {
 func TestAnEphemeralStoreWritesNothing(t *testing.T) {
 	projectDir := t.TempDir()
 	pins := EphemeralVocabularies()
-	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
+	pins.Fetch = func(context.Context, string) ([]byte, string, PinnedVersion, error) {
 		return []byte(testVocabularyDocument), "text/turtle", PinnedVersion{}, nil
 	}
 
-	_, _, pinned, err := pins.Document(testVocabularyNamespace, "https://vocab.test/things")
+	_, _, pinned, err := pins.Document(context.Background(), testVocabularyNamespace, "https://vocab.test/things")
 	require.NoError(t, err)
 	require.False(t, pinned)
 	require.NoError(t, pins.Save())
@@ -270,7 +271,7 @@ func TestAnEphemeralStoreWritesNothing(t *testing.T) {
 func TestAppendProvenanceAddsAnOntologyNodeForEveryPin(t *testing.T) {
 	projectDir := t.TempDir()
 	pins := newTestPins(t, projectDir, testVocabularyDocument, nil)
-	_, mediaType, _, err := pins.Document(testVocabularyNamespace, "https://vocab.test/things")
+	_, mediaType, _, err := pins.Document(context.Background(), testVocabularyNamespace, "https://vocab.test/things")
 	require.NoError(t, err)
 	require.NoError(t, pins.Save())
 

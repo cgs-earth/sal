@@ -17,6 +17,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
+	"github.com/cgs-earth/sal/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type Result struct {
@@ -93,7 +95,9 @@ func (r sqlRunner) Run(ctx context.Context, query string) (Result, error) {
 }
 
 // Run translates SPARQL to SQL and executes it through DuckDB.
-func (r DuckDBRunner) Run(ctx context.Context, query string) (Result, error) {
+func (r DuckDBRunner) Run(ctx context.Context, query string) (_ Result, err error) {
+	ctx, span := telemetry.Start(ctx, "sparql.query", attribute.String("sal.sparql.query", queryTextAttribute(query)))
+	defer func() { telemetry.End(span, err) }()
 	sql, err := r.Translate(query)
 	if err != nil {
 		return Result{}, err

@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,7 +41,7 @@ func writeBareNamespaceSource(t *testing.T, project string) *[]string {
 		if err != nil {
 			return nil, err
 		}
-		pins.Fetch = func(source string) ([]byte, string, validate.PinnedVersion, error) {
+		pins.Fetch = func(_ context.Context, source string) ([]byte, string, validate.PinnedVersion, error) {
 			fetched = append(fetched, source)
 			if source != "https://vocab.test/things" && source != "https://vocab.test/bare" {
 				return nil, "", validate.PinnedVersion{}, fmt.Errorf("bad response status code: 404")

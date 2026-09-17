@@ -2,6 +2,7 @@ package validate
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"mime"
@@ -9,11 +10,13 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cgs-earth/sal/pkg/telemetry"
 	"github.com/cgs-earth/sal/salmodule"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/jsonld"
 	"github.com/tggo/goRDFlib/rdfxml"
 	"github.com/tggo/goRDFlib/turtle"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // vocabularyCache holds the term sets a run has resolved. The documents those
@@ -42,7 +45,7 @@ func longestPrefixBase(iri string, ctx RdfContext) (string, string, bool) {
 	return bestPrefix, bestBase, bestBase != ""
 }
 
-func (c *vocabularyCache) isDefined(iri string, ctx RdfContext) (bool, error) {
+func (c *vocabularyCache) isDefined(ctx context.Context, iri string, rdfCtx RdfContext) (bool, error) {
 	if c.base != "" && strings.HasPrefix(iri, c.base) {
 		return true, nil
 	}
@@ -50,13 +53,13 @@ func (c *vocabularyCache) isDefined(iri string, ctx RdfContext) (bool, error) {
 		return slices.Contains(xsdBuiltinDatatypeLocalNames, iriWithoutXsdNamepace), nil
 	}
 
-	_, base, ok := longestPrefixBase(iri, ctx)
+	_, base, ok := longestPrefixBase(iri, rdfCtx)
 	if !ok {
 		return true, nil
 	}
 	lookupIRI := replacementVocabularyTerm(iri, base, c.replacements)
 	base = replacementVocabularyBase(base, c.replacements)
-	vocab, err := c.load(base)
+	vocab, err := c.load(ctx, base)
 	if err != nil {
 		return false, err
 	}
@@ -122,7 +125,7 @@ func vocabularyDocumentURL(base string) string {
 // load resolves the vocabulary a prefix namespace names. The namespace rather
 // than the document URL is the key, since that is what a project pins a version
 // against; two namespaces served by one document are only fetched once.
-func (c *vocabularyCache) load(namespace string) (Vocabulary, error) {
+func (c *vocabularyCache) load(ctx context.Context, namespace string) (Vocabulary, error) {
 	if vocab, ok := c.cache[namespace]; ok {
 		return vocab, nil
 	}
@@ -130,7 +133,7 @@ func (c *vocabularyCache) load(namespace string) (Vocabulary, error) {
 		return Vocabulary{}, err
 	}
 
-	terms, err := c.loadTerms(namespace)
+	terms, err := c.loadTerms(ctx, namespace)
 	if err != nil {
 		c.failures[namespace] = err
 		return Vocabulary{}, err
@@ -154,11 +157,16 @@ func (c *vocabularyCache) parseBase(base string) string {
 // pins for it, pinning what it fetched when there is no pin yet. A document SAL
 // cannot parse is an error either way; a fetched one is unpinned again, since
 // it is not a version the project should record.
-func (c *vocabularyCache) loadTerms(namespace string) (map[string]bool, error) {
-	body, mediaType, pinned, err := c.pins.Document(namespace, vocabularyDocumentURL(namespace))
+func (c *vocabularyCache) loadTerms(ctx context.Context, namespace string) (_ map[string]bool, err error) {
+	// resolving a vocabulary is a fetch, or for a salmodule:// one a clone and
+	// a docker build, so it is a span of its own under the document using it
+	ctx, span := telemetry.Start(ctx, "validate.load_vocabulary", attribute.String("sal.vocabulary", namespace))
+	defer func() { telemetry.End(span, err) }()
+	body, mediaType, pinned, err := c.pins.Document(ctx, namespace, vocabularyDocumentURL(namespace))
 	if err != nil {
 		return nil, err
 	}
+	span.SetAttributes(attribute.Bool("sal.vocabulary.pinned", pinned), attribute.Int("sal.vocabulary.bytes", len(body)))
 	terms, _, err := serializeRdfDataAndGetVocab(mediaType, body, c.parseBase(namespace))
 	if err != nil {
 		if !pinned {
@@ -166,6 +174,7 @@ func (c *vocabularyCache) loadTerms(namespace string) (map[string]bool, error) {
 		}
 		return nil, err
 	}
+	span.SetAttributes(attribute.Int("sal.vocabulary.terms", len(terms)))
 	return terms, nil
 }
 
@@ -264,8 +273,8 @@ func extractVocabularyTermsFromGraph(g *rdflibgo.Graph) map[string]bool {
 // IRI, not against the SAL project being built. A vocabulary namespace is
 // dereferenced through the same document URL validation used, so a pin whose
 // document is missing on disk is fetched from where it came from.
-func PinnedGraph(pins *PinnedVocabularies, iri string) (*rdflibgo.Graph, error) {
-	body, contentType, _, err := pins.Document(iri, vocabularyDocumentURL(iri))
+func PinnedGraph(ctx context.Context, pins *PinnedVocabularies, iri string) (*rdflibgo.Graph, error) {
+	body, contentType, _, err := pins.Document(ctx, iri, vocabularyDocumentURL(iri))
 	if err != nil {
 		return nil, err
 	}
@@ -286,21 +295,21 @@ func PinnedGraph(pins *PinnedVocabularies, iri string) (*rdflibgo.Graph, error) 
 	return graph, nil
 }
 
-func fetchVocabularyDocument(u string) ([]byte, string, PinnedVersion, error) {
+func fetchVocabularyDocument(ctx context.Context, u string) ([]byte, string, PinnedVersion, error) {
 	// a salmodule:// vocabulary is not served over HTTP; it is obtained by
 	// building the module's container and asking it for its ontology, and it is
 	// pinned by the git commit hash of the module repository rather than by the
 	// digest of the ontology document, since code the module runs can change
 	// without the ontology itself changing
 	if salmodule.IsModuleIRI(u) {
-		document, mediaType, commitHash, err := salmodule.FetchOntologyDocument(u)
+		document, mediaType, commitHash, err := salmodule.FetchOntologyDocument(ctx, u)
 		if err != nil {
 			return nil, "", PinnedVersion{}, err
 		}
 		return document, mediaType, PinnedVersion{Scheme: gitCommitVersionScheme, Value: commitHash}, nil
 	}
 
-	req, err := http.NewRequest(http.MethodGet, u, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, http.NoBody)
 	if err != nil {
 		return nil, "", PinnedVersion{}, err
 	}

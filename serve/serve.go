@@ -3,6 +3,9 @@ package serve
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/cgs-earth/sal/pkg"
 	salsparql "github.com/cgs-earth/sal/query/sparql"
@@ -16,7 +19,10 @@ func (cmd *ServeCmd) Run() error {
 	if cmd == nil {
 		return fmt.Errorf("serve: missing arguments")
 	}
-	ctx := context.Background()
+	// an interrupt stops the server rather than the process, so that the
+	// spans and metrics of the last requests are delivered before exit
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	table, err := salsparql.LocateTriplesTable()
 	if err != nil {
 		return err

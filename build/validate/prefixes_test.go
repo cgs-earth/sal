@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -12,7 +13,7 @@ import (
 func ephemeralValidator(t *testing.T, replacements map[string]string) *Validator {
 	t.Helper()
 	pins := EphemeralVocabularies()
-	pins.Fetch = func(u string) ([]byte, string, PinnedVersion, error) {
+	pins.Fetch = func(_ context.Context, u string) ([]byte, string, PinnedVersion, error) {
 		return nil, "", PinnedVersion{}, fmt.Errorf("%s should not have been dereferenced", u)
 	}
 	return NewValidator(pins, testBase, replacements)
@@ -27,7 +28,7 @@ func TestPrefixesWithoutTerminatorReportsANamespaceEndingInNeitherSlashNorHash(t
 		<widgets/1> a <Widget> .
 	`)
 	validator := ephemeralValidator(t, nil)
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 	require.NoError(t, err)
 
 	suspicious := validator.PrefixesWithoutTerminator()
@@ -45,7 +46,7 @@ func TestPrefixesWithoutTerminatorReportsAJSONLDVocab(t *testing.T) {
 		"@type": "`+testBase+`Thing"
 	}`)
 	validator := ephemeralValidator(t, nil)
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 	require.NoError(t, err)
 
 	suspicious := validator.PrefixesWithoutTerminator()
@@ -62,7 +63,7 @@ func TestPrefixesWithoutTerminatorSeesThePrefixMapsApplied(t *testing.T) {
 		<widgets/1> a <Widget> .
 	`)
 	validator := ephemeralValidator(t, map[string]string{"https://foo.com": "https://foo.com/"})
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 	require.NoError(t, err)
 
 	require.Empty(t, validator.PrefixesWithoutTerminator())
@@ -78,9 +79,9 @@ func TestPrefixesWithoutTerminatorListsEveryFileDeclaringTheNamespace(t *testing
 		<widgets/2> a <Widget> .
 	`)
 	validator := ephemeralValidator(t, nil)
-	_, err := validator.ValidateFile(first)
+	_, err := validator.ValidateFile(context.Background(), first)
 	require.NoError(t, err)
-	_, err = validator.ValidateFile(second)
+	_, err = validator.ValidateFile(context.Background(), second)
 	require.NoError(t, err)
 
 	suspicious := validator.PrefixesWithoutTerminator()
@@ -99,9 +100,9 @@ func TestConflictingPrefixesRejectsHttpBesideHttps(t *testing.T) {
 		<widgets/2> a <Widget> .
 	`)
 	validator := ephemeralValidator(t, nil)
-	_, err := validator.ValidateFile(first)
+	_, err := validator.ValidateFile(context.Background(), first)
 	require.NoError(t, err)
-	_, err = validator.ValidateFile(second)
+	_, err = validator.ValidateFile(context.Background(), second)
 	require.NoError(t, err)
 
 	conflicts := validator.ConflictingPrefixes()
@@ -123,7 +124,7 @@ func TestConflictingPrefixesRejectsANamespaceWithAndWithoutItsTrailingSlash(t *t
 		<widgets/1> a <Widget> .
 	`)
 	validator := ephemeralValidator(t, nil)
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 	require.NoError(t, err)
 
 	conflicts := validator.ConflictingPrefixes()
@@ -145,7 +146,7 @@ func TestConflictingPrefixesRejectsAHashBesideASlash(t *testing.T) {
 		<widgets/1> a <Widget> .
 	`)
 	validator := ephemeralValidator(t, nil)
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 	require.NoError(t, err)
 
 	require.Len(t, validator.ConflictingPrefixes(), 1)
@@ -159,7 +160,7 @@ func TestConflictingPrefixesDescribesAMixOfSchemeAndTerminatorAsBoth(t *testing.
 		<widgets/1> a <Widget> .
 	`)
 	validator := ephemeralValidator(t, nil)
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 	require.NoError(t, err)
 
 	conflicts := validator.ConflictingPrefixes()
@@ -197,7 +198,7 @@ func TestConflictingPrefixesAcceptsSpellingsAPrefixMapFoldsTogether(t *testing.T
 		<widgets/1> a <Widget> .
 	`)
 	validator := ephemeralValidator(t, map[string]string{"http://schema.org/": "https://schema.org/"})
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 	require.NoError(t, err)
 
 	require.Empty(t, validator.ConflictingPrefixes())
@@ -210,7 +211,7 @@ func TestConflictingPrefixesAcceptsDistinctVocabularies(t *testing.T) {
 		<widgets/1> a <Widget> .
 	`)
 	validator := ephemeralValidator(t, nil)
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 	require.NoError(t, err)
 
 	require.Empty(t, validator.ConflictingPrefixes())
@@ -223,7 +224,7 @@ func TestInsecurePrefixesReportsTheHttpSchemaOrgNamespace(t *testing.T) {
 		<widgets/1> a <Widget> .
 	`)
 	validator := ephemeralValidator(t, nil)
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 	require.NoError(t, err)
 
 	insecure := validator.InsecurePrefixes()
@@ -262,7 +263,7 @@ func TestInsecurePrefixesSeesThePrefixMapsApplied(t *testing.T) {
 		<widgets/1> a <Widget> .
 	`)
 	validator := ephemeralValidator(t, map[string]string{"http://schema.org/": "https://schema.org/"})
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 	require.NoError(t, err)
 
 	require.Empty(t, validator.InsecurePrefixes())
@@ -274,7 +275,7 @@ func TestInsecurePrefixesAcceptsTheHttpsSchemaOrgNamespace(t *testing.T) {
 		<widgets/1> a <Widget> .
 	`)
 	validator := ephemeralValidator(t, nil)
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 	require.NoError(t, err)
 
 	require.Empty(t, validator.InsecurePrefixes())

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"github.com/cgs-earth/sal/get"
 	"github.com/cgs-earth/sal/importation"
 	"github.com/cgs-earth/sal/initialization"
+	"github.com/cgs-earth/sal/pkg/telemetry"
 	"github.com/cgs-earth/sal/push"
 	"github.com/cgs-earth/sal/query"
 	"github.com/cgs-earth/sal/salmodule"
@@ -77,9 +79,25 @@ func main() {
 		os.Args = append(os.Args, "--help")
 	}
 
+	// traces and metrics are exported only when the environment asks for them;
+	// see pkg/telemetry. Whatever was recorded is flushed on every way out,
+	// which os.Exit would otherwise skip.
+	shutdownTelemetry, err := telemetry.Setup(context.Background())
+	if err != nil {
+		slog.Error(err.Error())
+		closeLog()
+		os.Exit(1)
+	}
+	exit := func(code int) {
+		if err := shutdownTelemetry(context.Background()); err != nil {
+			slog.Warn("failed to flush telemetry", "error", err)
+		}
+		closeLog()
+		os.Exit(code)
+	}
+
 	var cli args
 	arg.MustParse(&cli)
-	var err error
 	switch {
 	case cli.Build != nil:
 		_, err = cli.Build.Run()
@@ -89,7 +107,7 @@ func main() {
 		// since they belong in the log
 		if err != nil && !errors.Is(err, build.ErrUncommittedChanges) {
 			fmt.Println(err.Error())
-			os.Exit(1)
+			exit(1)
 		}
 	case cli.RunTasks != nil:
 		_, err = cli.RunTasks.Run()
@@ -97,7 +115,7 @@ func main() {
 		// errors that tell the user to build again belong in the log
 		if err != nil && !errors.Is(err, build.ErrRunUncommittedChanges) && !errors.Is(err, build.ErrStaleDataProduct) {
 			fmt.Println(err.Error())
-			os.Exit(1)
+			exit(1)
 		}
 	case cli.Init != nil:
 		err = cli.Init.Run()
@@ -135,13 +153,14 @@ func main() {
 		_, err = cli.Validate.Run()
 		if err != nil {
 			fmt.Println(err.Error())
-			os.Exit(1)
+			exit(1)
 		}
 	}
 	if err != nil {
 		slog.Error(err.Error())
-		os.Exit(1)
+		exit(1)
 	}
+	exit(0)
 }
 
 // newLogWriter writes logs to stderr and appends the same output to a temp log file.

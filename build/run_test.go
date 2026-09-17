@@ -151,7 +151,7 @@ func serveModuleVocabulary(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		pins.Fetch = func(source string) ([]byte, string, validate.PinnedVersion, error) {
+		pins.Fetch = func(_ context.Context, source string) ([]byte, string, validate.PinnedVersion, error) {
 			if source != testModuleNamespace {
 				return nil, "", validate.PinnedVersion{}, fmt.Errorf("bad response status code: 404")
 			}

@@ -25,7 +25,7 @@ const (
 // Export graph takes in a rdflib format graph struct and
 // serializes it to disk in the specified format. modules are the SAL modules
 // the build downloaded, which are recorded in the Iceberg table metadata.
-func ExportGraph(graph *rdflibgo.Graph, format GraphExportFormat, hash string, modules []string) error {
+func ExportGraph(ctx context.Context, graph *rdflibgo.Graph, format GraphExportFormat, hash string, modules []string) error {
 
 	switch format {
 	case "nq":
@@ -61,7 +61,7 @@ func ExportGraph(graph *rdflibgo.Graph, format GraphExportFormat, hash string, m
 		if err != nil {
 			return err
 		}
-		err = load.WriteGraphToIceberg(context.Background(), graph, &load.LoadConfig{
+		err = load.WriteGraphToIceberg(ctx, graph, &load.LoadConfig{
 			BatchSize:          131072,
 			ParquetCompression: "snappy",
 			Warehouse:          dataDir,
