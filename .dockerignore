@@ -8,6 +8,8 @@ Dockerfile
 **/node_modules
 .env
 examples/**
+# The demo image re-includes the one example project file it copies in.
+!examples/usage/portolan_export.ttl
 docs/**
 **/.astro
 .claude/**

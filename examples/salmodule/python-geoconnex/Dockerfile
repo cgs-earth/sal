@@ -4,8 +4,9 @@ FROM python:3.11-slim
 # Set the working directory inside the container
 WORKDIR /app
 
-# Copy the script and requirements file into the container
+# Copy the script, its ontology, and requirements file into the container
 COPY main.py .
+COPY ontology.jsonld .
 COPY requirements.txt .
 
 # Install the required click package

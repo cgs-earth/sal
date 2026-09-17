@@ -21,6 +21,8 @@ From this git repository's root directory run:
 
 `docker run sample-sal-module-1:latest salmodule ontology`
 
+The command prints `ontology.jsonld`, the module's vocabulary, which sits beside `main.py` and is copied into the image by the Dockerfile. Edit that file to change the tasks the module declares or the SHACL shapes it enforces; `main.py` reads it from disk rather than embedding it.
+
 ### Running the SAL Modules Tasks
 
 #### GeoconnexReferenceFeatureStates Task

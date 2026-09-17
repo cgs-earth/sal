@@ -4,6 +4,11 @@ import json
 import sys
 import os
 
+# The module's vocabulary lives in ontology.jsonld next to this script rather
+# than in code, so the same document can be read, edited, and validated on its
+# own. The Dockerfile copies it into the image beside main.py.
+ONTOLOGY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ontology.jsonld")
+
 # 1. Top-level main CLI group
 @click.group()
 def cli():
@@ -19,82 +24,10 @@ def salmodule():
 # 3. 'ontology' subcommand nested under 'salmodule'
 @salmodule.command("ontology")
 def ontology():
-    """Print the sample-sal-module-1 ontology."""
-    onto = {
-        "@context": {
-            "schema": "https://schema.org/",
-            "gsp": "http://www.opengis.net/ont/geosparql#",
-            "salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#",
-            "owl": "http://www.w3.org/2002/07/owl#",
-            "sh": "http://www.w3.org/ns/shacl#",
-            "sf": "http://www.opengis.net/ont/sf#",
-            "xsd": "http://www.w3.org/2001/XMLSchema#",
-            "dc": "http://purl.org/dc/terms/"
-        },
-        "@graph": [
-            {
-                "@id":".",
-                "@type": "owl:Ontology",
-                "dc:creator": "Andrew Padilla",
-                "dc:title": "Sample SAL Module",
-                "owl:versionInfo": "1.0"
-            },
-            {
-                "@id": "GeoconnexReferenceFeatureStates",
-                "@type": "owl:Class",
-                "rdfs:label": "Geoconnex U.S. States Reference Features",
-                "rdfs:comment": "Feteches the states from Geoconnex reference feature in Geoconnex.",
-                "rdfs:subClassOf": {"@id": "salmodule:Task"},
-                "salmodule:stdoutShape": {
-                    "@type": "sh:NodeShape",
-                    "sh:targetClass": {"@id": "schema:Place"},
-                    "sh:property": [
-                        {
-                            "sh:path": {"@id": "schema:name"},
-                            "sh:minCount": 1,
-                            "sh:maxCount": 1,
-                            "sh:message": "The name property must have exactly one value."
-                        },
-                        {
-                            "sh:path": {"@id": "schema:subjectOf"},
-                            "sh:minCount": 1,
-                        
-                            "sh:nodeKind": {"@id": "sh:IRI"},
-                            "sh:message": "The subjectOf property must have exactly one IRI value."
-                        },
-                        {
-                            "sh:path": {"@id": "gsp:hasGeometry"},
-                            "sh:minCount": 1,
-                            "sh:message": "The hasGeometry property must have exactly one value of type (OGC Simple Features Geometry)",
-                            "sh:nodeKind": {"@id": "sh:IRI"}
-                        }
-                    ]
-                },
-                "salmodule:taskShape": {
-                    "@type": "sh:NodeShape",
-                    "sh:property": [
-                        {
-                            "sh:targetClass": {"@id": "GeoconnexReferenceFeatureStates"},
-                            "sh:path": {"@id": "maxRetries"},
-                            "sh:datatype": {"@id": "xsd:integer"},
-                            "sh:minInclusive": 0,
-                            "sh:minCount": 1,
-                            "sh:maxCount": 1,
-                            "sh:message": "The GeoconnexReferenceFeatureStates instance 'maxRetries' property must have exactly one value."
-                        }
-                    ]
-                }
-            },
-            {
-                "@id": "maxRetries",
-                "@type": "owl:DatatypeProperty",
-                "rdfs:comment": "The maximum number of retry attempts to connect to the reference feature server before giving up.",
-                "rdfs:domain": {"@id": "GeoconnexReferenceFeatureStates"},
-                "rdfs:range": {"@id": "xsd:integer"}
-            }
-        ]
-    }
-    print( json.dumps(onto,indent=4))
+    """Print this module's ontology, read from the ontology.jsonld that sits beside this script."""
+    with open(ONTOLOGY_PATH) as f:
+        onto = json.load(f)
+    print(json.dumps(onto, indent=4))
 
 
 @salmodule.command("run")
@@ -175,7 +108,7 @@ def salmodule_task_2_handler(task_name):
     """resolve task name (salmodule:Task subclass) to corresponding handler function."""
 
     #  Below assumes that SAL abides by @context terms as set forth in a SAL Module's ontology
-    #  In the ontology definition (see def ontology()) the task @type is set to a relative path (i.e. just the class Type no ns prefix)
+    #  In the ontology definition (see ontology.jsonld) the task @type is set to a relative path (i.e. just the class Type no ns prefix)
     #  SAL Modules can expect that all json uses keys corresponding to resolvable terms in the ontology's @context.
      
     salmodule_tasks = {

@@ -96,7 +96,7 @@ ENTRYPOINT [ "/app/sal" ]
 FROM runtime AS runtime-true
 
 COPY build/testdata/correct/ /app/demo-data/
-COPY build/testdata/reference/portolan_export.ttl /app/demo-data/
+COPY examples/usage/portolan_export.ttl /app/demo-data/
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
