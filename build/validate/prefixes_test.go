@@ -180,9 +180,9 @@ func TestConflictingPrefixesAcceptsTheSameNamespaceDeclaredEverywhere(t *testing
 		"@type": "sdo:Thing"
 	}`)
 	validator := ephemeralValidator(t, nil)
-	_, err := validator.ValidateFile(first)
+	_, err := validator.ParseFile(first)
 	require.NoError(t, err)
-	_, err = validator.ValidateFile(second)
+	_, err = validator.ParseFile(second)
 	require.NoError(t, err)
 
 	require.Empty(t, validator.ConflictingPrefixes())
@@ -214,4 +214,68 @@ func TestConflictingPrefixesAcceptsDistinctVocabularies(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Empty(t, validator.ConflictingPrefixes())
+}
+
+func TestInsecurePrefixesReportsTheHttpSchemaOrgNamespace(t *testing.T) {
+	path := writeTurtleTestFileNamed(t, "http.ttl", `
+		@prefix schema: <http://schema.org/> .
+		@prefix sosa: <http://www.w3.org/ns/sosa/> .
+		<widgets/1> a <Widget> .
+	`)
+	validator := ephemeralValidator(t, nil)
+	_, err := validator.ValidateFile(path)
+	require.NoError(t, err)
+
+	insecure := validator.InsecurePrefixes()
+
+	require.Equal(t, []InsecurePrefixError{{
+		Location:       Location{Path: path, Line: 2},
+		Namespace:      "http://schema.org/",
+		HTTPSNamespace: "https://schema.org/",
+	}}, insecure)
+	require.Equal(t, path+":2: http used instead of https for schema.org; declare <https://schema.org/> instead", insecure[0].Error())
+}
+
+// A JSON-LD document whose context is the namespace itself declares it as its
+// @vocab, so the http spelling is caught there too.
+func TestInsecurePrefixesReportsTheHttpSchemaOrgContext(t *testing.T) {
+	path := writeTurtleTestFileNamed(t, "http.jsonld", `{
+		"@context": "http://schema.org/",
+		"@id": "`+testBase+`bob",
+		"@type": "Person"
+	}`)
+	validator := ephemeralValidator(t, nil)
+	_, err := validator.ParseFile(path)
+	require.NoError(t, err)
+
+	insecure := validator.InsecurePrefixes()
+
+	require.Len(t, insecure, 1)
+	require.Equal(t, Location{Path: path, Line: 2}, insecure[0].Location)
+}
+
+// Mapping the http namespace onto the https one is how a project fixes a file
+// it cannot edit, so the mapped prefix is no longer insecure.
+func TestInsecurePrefixesSeesThePrefixMapsApplied(t *testing.T) {
+	path := writeTurtleTestFileNamed(t, "mapped.ttl", `
+		@prefix schema: <http://schema.org/> .
+		<widgets/1> a <Widget> .
+	`)
+	validator := ephemeralValidator(t, map[string]string{"http://schema.org/": "https://schema.org/"})
+	_, err := validator.ValidateFile(path)
+	require.NoError(t, err)
+
+	require.Empty(t, validator.InsecurePrefixes())
+}
+
+func TestInsecurePrefixesAcceptsTheHttpsSchemaOrgNamespace(t *testing.T) {
+	path := writeTurtleTestFileNamed(t, "https.ttl", `
+		@prefix schema: <https://schema.org/> .
+		<widgets/1> a <Widget> .
+	`)
+	validator := ephemeralValidator(t, nil)
+	_, err := validator.ValidateFile(path)
+	require.NoError(t, err)
+
+	require.Empty(t, validator.InsecurePrefixes())
 }

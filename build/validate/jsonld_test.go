@@ -20,7 +20,7 @@ func writeJSONLDTestFile(t *testing.T, content string) string {
 
 func TestValidateJSONLDFileRejectsUndefinedSchemaOrgProperty(t *testing.T) {
 	path := writeJSONLDTestFile(t, `{
-		"@context": "http://schema.org/",
+		"@context": "https://schema.org/",
 		"@type": "Person",
 		"@id": "Bob",
 		"namee": "Jane Doe",
@@ -29,7 +29,7 @@ func TestValidateJSONLDFileRejectsUndefinedSchemaOrgProperty(t *testing.T) {
 		"url": "http://www.janedoe.com"
 	}`)
 
-	_, err := ValidateRDFFile(path, nil, testBase)
+	_, err := schemaOrgValidator(t).ValidateFile(path)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "undefined term")
@@ -48,7 +48,7 @@ func TestValidateJSONLDFileAcceptsInlineVocabDefinedSchemaTerms(t *testing.T) {
 		"jobTitle": "Professor"
 	}`)
 
-	_, err := ValidateRDFFile(path, nil, testBase)
+	_, err := schemaOrgValidator(t).ValidateFile(path)
 
 	require.NoError(t, err)
 }
@@ -63,7 +63,7 @@ func TestValidateJSONLDFileRejectsUndefinedInlineVocabType(t *testing.T) {
 		"name": "Jane Doe"
 	}`)
 
-	_, err := ValidateRDFFile(path, nil, testBase)
+	_, err := schemaOrgValidator(t).ValidateFile(path)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "undefined term")
@@ -80,7 +80,7 @@ func TestValidateJSONLDFileRejectsUndefinedCompactProperty(t *testing.T) {
 		"schema:namee": "Jane Doe"
 	}`)
 
-	_, err := ValidateRDFFile(path, nil, testBase)
+	_, err := schemaOrgValidator(t).ValidateFile(path)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "undefined term")
@@ -98,7 +98,7 @@ func TestValidateJSONLDFileRejectsUndeclaredCompactPropertyPrefix(t *testing.T) 
 		"sh:property": "name"
 	}`)
 
-	_, err := ValidateRDFFile(path, nil, testBase)
+	_, err := schemaOrgValidator(t).ValidateFile(path)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "undefined term")
@@ -116,7 +116,7 @@ func TestValidateJSONLDFileRejectsUndeclaredCompactTypePrefix(t *testing.T) {
 		"@type": "sh:NodeShape"
 	}`)
 
-	_, err := ValidateRDFFile(path, nil, testBase)
+	_, err := schemaOrgValidator(t).ValidateFile(path)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "undefined term")
@@ -138,7 +138,7 @@ func TestValidateJSONLDFileRejectsUndeclaredCompactIDPrefix(t *testing.T) {
 		}
 	}`)
 
-	_, err := ValidateRDFFile(path, nil, testBase)
+	_, err := schemaOrgValidator(t).ValidateFile(path)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "undefined term")
@@ -157,7 +157,7 @@ func TestValidateJSONLDFileReportsUndefinedTypeLine(t *testing.T) {
 		"name": "Jane Doe"
 	}`)
 
-	_, err := ValidateRDFFile(path, nil, testBase)
+	_, err := schemaOrgValidator(t).ValidateFile(path)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "undefined term")
@@ -180,7 +180,7 @@ func TestValidateJSONLDFileReportsUndefinedArrayTypeValueLineOnce(t *testing.T) 
 		]
 	}`)
 
-	_, err := ValidateRDFFile(path, nil, testBase)
+	_, err := schemaOrgValidator(t).ValidateFile(path)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "undefined term")
@@ -199,14 +199,14 @@ func TestValidateJSONLDFileSkipsRelativeIDUnderBase(t *testing.T) {
 		"name": "Jane Doe"
 	}`)
 
-	_, err := ValidateRDFFile(path, nil, testBase)
+	_, err := schemaOrgValidator(t).ValidateFile(path)
 
 	require.NoError(t, err)
 }
 
 func TestValidateJSONLDFileRejectsLocalIDWithoutType(t *testing.T) {
 	path := writeJSONLDTestFile(t, `{
-		"@context": "http://schema.org/",
+		"@context": "https://schema.org/",
 		"@id": "Jane",
 		"name": "Jane Doe",
 		"jobTitle": "Professor",
@@ -214,7 +214,7 @@ func TestValidateJSONLDFileRejectsLocalIDWithoutType(t *testing.T) {
 		"url": "http://www.janedoe.com"
 	}`)
 
-	_, err := ValidateRDFFile(path, nil, testBase)
+	_, err := schemaOrgValidator(t).ValidateFile(path)
 
 	require.Error(t, err)
 	var missingTypeErr missingTypeError

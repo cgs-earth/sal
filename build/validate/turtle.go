@@ -66,5 +66,5 @@ func parseTurtleFile(path string, base string) (*rdfDocument, error) {
 	}
 
 	ctx := RdfContext{Prefixes: turtleDeclaredPrefixes(g, content)}
-	return &rdfDocument{graph: g, ctx: ctx, terms: terms}, nil
+	return &rdfDocument{graph: g, ctx: ctx, terms: terms, content: content}, nil
 }

@@ -97,15 +97,20 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		return nil, fmt.Errorf("build: missing arguments")
 	}
 
-	hasChanges, err := pkg.UncommittedChangesInGit()
-	if err != nil {
-		return nil, err
-	}
-	if hasChanges && !cfg.Force {
-		return nil, ErrUncommittedChanges
-	}
-	if cfg.Force {
-		slog.Warn("Creating build with modified source tree. This should only be done for testing purposes.")
+	// only a build that commits a snapshot needs the worktree to be clean, so
+	// that the snapshot maps to a commit; `sal validate` writes nothing, not
+	// even a pin, so it validates the sources as they stand
+	if !cfg.skipCommit {
+		hasChanges, err := uncommittedChangesInGit()
+		if err != nil {
+			return nil, err
+		}
+		if hasChanges && !cfg.Force {
+			return nil, ErrUncommittedChanges
+		}
+		if cfg.Force {
+			slog.Warn("Creating build with modified source tree. This should only be done for testing purposes.")
+		}
 	}
 
 	pins, err := projectVocabularies(cfg.NoCache)
@@ -220,6 +225,11 @@ func (cfg *BuildCmd) Run() (*rdflibgo.Graph, error) {
 		}
 		slog.Error("Vocabulary is declared under mixed namespaces, so its terms would not match across files", attrs...)
 		errs = append(errs, ErrConflictingPrefixes)
+	}
+	// a namespace declared under http when the vocabulary defines its terms
+	// only under https names nothing, so it is reported where it is declared
+	for _, err := range validator.InsecurePrefixes() {
+		errs = append(errs, err)
 	}
 	if len(errs) > 0 {
 		return nil, errs

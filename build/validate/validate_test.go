@@ -84,14 +84,16 @@ func TestPinDeclaredPrefixesSkipsTheProjectBaseAndXsd(t *testing.T) {
 	require.NoError(t, validator.PinDeclaredPrefixes())
 }
 
-// build/vocab holds copies of the vocabularies that cannot be dereferenced
-// reliably. What SAL validated against is the copy, so the copy is what the
-// project pins.
-func TestAVocabularyThatCannotBeFetchedPinsSalsBundledCopy(t *testing.T) {
+// The schema.org namespace answers with an HTML page whatever is asked for, so
+// the vocabulary is fetched from the release document schema.org publishes and
+// pinned against the namespace the project declared.
+func TestSchemaOrgIsResolvedFromItsReleaseDocument(t *testing.T) {
 	projectDir := t.TempDir()
 	pins := newTestPins(t, projectDir, "", nil)
-	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
-		return nil, "", PinnedVersion{}, fmt.Errorf("bad response status code: 403")
+	var requested []string
+	pins.Fetch = func(u string) ([]byte, string, PinnedVersion, error) {
+		requested = append(requested, u)
+		return []byte(testSchemaOrgVocabulary), "text/turtle", PinnedVersion{}, nil
 	}
 	path := writeTurtleTestFileNamed(t, "schema.ttl", `
 		@prefix schema: <https://schema.org/> .
@@ -104,10 +106,33 @@ func TestAVocabularyThatCannotBeFetchedPinsSalsBundledCopy(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, pins.Save())
 
+	require.Equal(t, []string{"https://schema.org/version/latest/schemaorg-current-https.jsonld"}, requested)
 	content, err := os.ReadFile(filepath.Join(projectDir, "config.jsonld"))
 	require.NoError(t, err)
-	require.Contains(t, string(content), "https://schema.org/")
+	require.Contains(t, string(content), `"@id": "https://schema.org/"`)
 	require.Len(t, pins.Documents(), 1)
+}
+
+// There is no bundled copy to fall back on: a fetched document sal cannot read
+// fails the term, and is not pinned as the version the project validated against.
+func TestAFetchedVocabularyThatCannotBeParsedIsAnErrorAndIsNotPinned(t *testing.T) {
+	projectDir := t.TempDir()
+	pins := newTestPins(t, projectDir, "", nil)
+	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
+		return []byte("this is not turtle"), "text/turtle", PinnedVersion{}, nil
+	}
+	path := writeTurtleTestFileNamed(t, "schema.ttl", `
+		@prefix schema: <https://schema.org/> .
+
+		<person/bob> a schema:Person .
+	`)
+
+	validator := NewValidator(pins, testBase, nil)
+	_, err := validator.ValidateFile(path)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unsupported vocabulary serialization")
+	require.Empty(t, pins.IDs())
 }
 
 // An ontology the config file's ontology node imports is merged at the version the project

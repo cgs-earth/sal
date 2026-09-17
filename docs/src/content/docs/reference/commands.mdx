@@ -201,6 +201,7 @@ Important flags:
 
 `sal validate` reads the project's pinned vocabulary versions but never writes them; only `sal build` records a pin.
 Run outside a SAL project, it resolves vocabularies from their sources with nothing pinned at all.
+Since it writes nothing, it does not require a clean Git working tree the way `sal build` does; it validates the files as they are on disk, committed or not.
 
 An undefined term is reported with the file and the line number it appears on:
 
@@ -214,6 +215,10 @@ The prefixes the source files declare are checked as well as the terms used from
 - The same vocabulary declared under two spellings that differ only by `http`/`https` or by a trailing `/` or `#`, such as `<http://schema.org/>` in one file and `<https://schema.org/>` in another, is an error.
   Terms written against the two never compare equal, so the vocabulary would end up in the data product under two IRIs.
   Declare the same namespace everywhere, or fold the spellings together with `--prefix-maps`.
+- `http://schema.org/` is an error. schema.org defines every term under `https://schema.org/`, so a term written against the `http` namespace names nothing the vocabulary defines.
+  Declare `<https://schema.org/>`, or map the `http` spelling onto it with `--prefix-maps http://schema.org/=https://schema.org/` for a file you cannot edit.
+
+schema.org is also resolved differently from other vocabularies: its namespace answers with an HTML page whatever format is asked for, so the vocabulary is fetched from the release document at `https://schema.org/version/latest/schemaorg-current-https.jsonld` and pinned against `https://schema.org/` like any other namespace.
 
 Validating a file that references a SAL module clones and builds that module so its vocabulary can be checked.
 `sal validate` does not run module tasks; only `sal run` does.

@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"bytes"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -29,6 +30,35 @@ type rdfDocument struct {
 	graph *rdflibgo.Graph
 	ctx   RdfContext
 	terms []UsedTermsInFile
+	// content is the source the document was parsed from, kept so that a
+	// prefix declaration can be reported with the line it is on
+	content []byte
+}
+
+// Location is a place in a source file: the file and a line in it, or the
+// whole file when the line is 0.
+type Location struct {
+	Path string
+	Line int
+}
+
+func (l Location) String() string {
+	if l.Line == 0 {
+		return l.Path
+	}
+	return fmt.Sprintf("%s:%d", l.Path, l.Line)
+}
+
+// declarationLine is the line a namespace is declared on: the first line that
+// writes it as an IRI, in angle brackets in Turtle or quoted in JSON-LD. It is
+// 0 when the namespace is nowhere in the file, as when a prefix map wrote it.
+func declarationLine(content []byte, namespace string) int {
+	for _, written := range []string{"<" + namespace + ">", `"` + namespace + `"`} {
+		if i := bytes.Index(content, []byte(written)); i >= 0 {
+			return jsonOffsetLine(content, int64(i))
+		}
+	}
+	return 0
 }
 
 // Validator checks RDF files against the vocabulary versions a project pins.
@@ -38,9 +68,9 @@ type rdfDocument struct {
 type Validator struct {
 	vocabs vocabularyCache
 	// declared is every prefix namespace the validated files declared, whether
-	// or not a term from it was used, mapped to the files that declared it in
-	// the order they were validated
-	declared map[string][]string
+	// or not a term from it was used, mapped to where it was declared in the
+	// order the files were validated
+	declared map[string][]Location
 }
 
 // DeclaredPrefix is a prefix namespace the validated files declared and the
@@ -61,7 +91,7 @@ func NewValidator(pins *PinnedVocabularies, base string, vocabsToReplace map[str
 			replacements: vocabsToReplace,
 			base:         base,
 		},
-		declared: map[string][]string{},
+		declared: map[string][]Location{},
 	}
 }
 
@@ -107,10 +137,10 @@ func (v *Validator) ParseContent(content []byte, displayPath string) (*Document,
 
 func (v *Validator) parsed(path string, doc *rdfDocument) *Document {
 	if doc.ctx.Vocab != "" {
-		v.declare(doc.ctx.Vocab, path)
+		v.declare(doc.ctx.Vocab, path, doc.content)
 	}
 	for _, namespace := range doc.ctx.Prefixes {
-		v.declare(namespace, path)
+		v.declare(namespace, path, doc.content)
 	}
 	return &Document{path: path, doc: doc}
 }
@@ -133,9 +163,9 @@ func (v *Validator) ValidateFile(path string) (*rdflibgo.Graph, error) {
 	return v.Validate(doc)
 }
 
-func (v *Validator) declare(namespace, path string) {
-	if !slices.Contains(v.declared[namespace], path) {
-		v.declared[namespace] = append(v.declared[namespace], path)
+func (v *Validator) declare(namespace, path string, content []byte) {
+	if !slices.ContainsFunc(v.declared[namespace], func(l Location) bool { return l.Path == path }) {
+		v.declared[namespace] = append(v.declared[namespace], Location{Path: path, Line: declarationLine(content, namespace)})
 	}
 }
 
@@ -145,16 +175,16 @@ func (v *Validator) declare(namespace, path string) {
 // order. Two declarations one prefix map folds together are listed once.
 func (v *Validator) declaredPrefixes() []DeclaredPrefix {
 	byNamespace := map[string]*DeclaredPrefix{}
-	for declared, paths := range v.declared {
+	for declared, locations := range v.declared {
 		namespace := replacementVocabularyBase(declared, v.vocabs.replacements)
 		prefix, ok := byNamespace[namespace]
 		if !ok {
 			prefix = &DeclaredPrefix{Namespace: namespace}
 			byNamespace[namespace] = prefix
 		}
-		for _, path := range paths {
-			if !slices.Contains(prefix.Paths, path) {
-				prefix.Paths = append(prefix.Paths, path)
+		for _, location := range locations {
+			if !slices.Contains(prefix.Paths, location.Path) {
+				prefix.Paths = append(prefix.Paths, location.Path)
 			}
 		}
 	}
@@ -182,6 +212,56 @@ func (v *Validator) PrefixesWithoutTerminator() []DeclaredPrefix {
 		suspicious = append(suspicious, prefix)
 	}
 	return suspicious
+}
+
+// httpsOnlyNamespaces maps the http spelling of a namespace whose vocabulary is
+// only defined under https to the https namespace. schema.org defines every
+// term under https://schema.org/, so a term written against the http namespace
+// names nothing the vocabulary defines, however familiar it looks.
+var httpsOnlyNamespaces = map[string]string{
+	"http://" + strings.TrimPrefix(schemaOrgNamespace, "https://"): schemaOrgNamespace,
+}
+
+// InsecurePrefixError is one declaration of a namespace under http when the
+// vocabulary only defines its terms under https.
+type InsecurePrefixError struct {
+	// Location is where the namespace is declared
+	Location Location
+	// Namespace is the http namespace as declared
+	Namespace string
+	// HTTPSNamespace is the namespace the vocabulary defines its terms under
+	HTTPSNamespace string
+}
+
+func (e InsecurePrefixError) Error() string {
+	vocabulary := strings.TrimSuffix(strings.TrimPrefix(e.HTTPSNamespace, "https://"), "/")
+	return fmt.Sprintf("%s: http used instead of https for %s; declare <%s> instead", e.Location, vocabulary, e.HTTPSNamespace)
+}
+
+// InsecurePrefixes reports every declaration of a namespace under http when the
+// vocabulary only defines its terms under https, such as `http://schema.org/`,
+// one error per file declaring it. The prefix maps are applied first, so a
+// file that cannot be edited is fixed by mapping the http namespace onto the
+// https one.
+func (v *Validator) InsecurePrefixes() []InsecurePrefixError {
+	var errs []InsecurePrefixError
+	for declared, locations := range v.declared {
+		namespace := replacementVocabularyBase(declared, v.vocabs.replacements)
+		secure, ok := httpsOnlyNamespaces[namespace]
+		if !ok {
+			continue
+		}
+		for _, location := range locations {
+			errs = append(errs, InsecurePrefixError{Location: location, Namespace: namespace, HTTPSNamespace: secure})
+		}
+	}
+	sort.Slice(errs, func(i, j int) bool {
+		if errs[i].Location.Path != errs[j].Location.Path {
+			return errs[i].Location.Path < errs[j].Location.Path
+		}
+		return errs[i].Location.Line < errs[j].Location.Line
+	})
+	return errs
 }
 
 // PrefixConflict is one vocabulary the validated files declare under more than
