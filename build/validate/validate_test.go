@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,9 +32,9 @@ func TestPinDeclaredPrefixesPinsAPrefixNoTermUses(t *testing.T) {
 	`)
 
 	validator := NewValidator(pins, testBase, nil)
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 	require.NoError(t, err)
-	require.NoError(t, validator.PinDeclaredPrefixes())
+	require.NoError(t, validator.PinDeclaredPrefixes(context.Background()))
 	require.NoError(t, pins.Save())
 
 	content, err := os.ReadFile(filepath.Join(projectDir, "config.jsonld"))
@@ -43,7 +44,7 @@ func TestPinDeclaredPrefixesPinsAPrefixNoTermUses(t *testing.T) {
 
 func TestPinDeclaredPrefixesFailsWhenADeclaredVocabularyCannotBeResolved(t *testing.T) {
 	pins := EphemeralVocabularies()
-	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
+	pins.Fetch = func(context.Context, string) ([]byte, string, PinnedVersion, error) {
 		return nil, "", PinnedVersion{}, fmt.Errorf("bad response status code: 404")
 	}
 	path := writeTurtleTestFileNamed(t, "missing.ttl", `
@@ -53,10 +54,10 @@ func TestPinDeclaredPrefixesFailsWhenADeclaredVocabularyCannotBeResolved(t *test
 	`)
 
 	validator := NewValidator(pins, testBase, nil)
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 	require.NoError(t, err)
 
-	err = validator.PinDeclaredPrefixes()
+	err = validator.PinDeclaredPrefixes(context.Background())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "https://vocab.test/gone#")
@@ -67,7 +68,7 @@ func TestPinDeclaredPrefixesFailsWhenADeclaredVocabularyCannotBeResolved(t *test
 // vocabulary document, so there is no version of either to pin.
 func TestPinDeclaredPrefixesSkipsTheProjectBaseAndXsd(t *testing.T) {
 	pins := EphemeralVocabularies()
-	pins.Fetch = func(u string) ([]byte, string, PinnedVersion, error) {
+	pins.Fetch = func(_ context.Context, u string) ([]byte, string, PinnedVersion, error) {
 		return nil, "", PinnedVersion{}, fmt.Errorf("%s should not have been dereferenced", u)
 	}
 	path := writeTurtleTestFileNamed(t, "builtins.ttl", `
@@ -78,10 +79,10 @@ func TestPinDeclaredPrefixesSkipsTheProjectBaseAndXsd(t *testing.T) {
 	`)
 
 	validator := NewValidator(pins, testBase, nil)
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 	require.NoError(t, err)
 
-	require.NoError(t, validator.PinDeclaredPrefixes())
+	require.NoError(t, validator.PinDeclaredPrefixes(context.Background()))
 }
 
 // The schema.org namespace answers with an HTML page whatever is asked for, so
@@ -91,7 +92,7 @@ func TestSchemaOrgIsResolvedFromItsReleaseDocument(t *testing.T) {
 	projectDir := t.TempDir()
 	pins := newTestPins(t, projectDir, "", nil)
 	var requested []string
-	pins.Fetch = func(u string) ([]byte, string, PinnedVersion, error) {
+	pins.Fetch = func(_ context.Context, u string) ([]byte, string, PinnedVersion, error) {
 		requested = append(requested, u)
 		return []byte(testSchemaOrgVocabulary), "text/turtle", PinnedVersion{}, nil
 	}
@@ -102,7 +103,7 @@ func TestSchemaOrgIsResolvedFromItsReleaseDocument(t *testing.T) {
 	`)
 
 	validator := NewValidator(pins, testBase, nil)
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 	require.NoError(t, err)
 	require.NoError(t, pins.Save())
 
@@ -118,7 +119,7 @@ func TestSchemaOrgIsResolvedFromItsReleaseDocument(t *testing.T) {
 func TestAFetchedVocabularyThatCannotBeParsedIsAnErrorAndIsNotPinned(t *testing.T) {
 	projectDir := t.TempDir()
 	pins := newTestPins(t, projectDir, "", nil)
-	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
+	pins.Fetch = func(context.Context, string) ([]byte, string, PinnedVersion, error) {
 		return []byte("this is not turtle"), "text/turtle", PinnedVersion{}, nil
 	}
 	path := writeTurtleTestFileNamed(t, "schema.ttl", `
@@ -128,7 +129,7 @@ func TestAFetchedVocabularyThatCannotBeParsedIsAnErrorAndIsNotPinned(t *testing.
 	`)
 
 	validator := NewValidator(pins, testBase, nil)
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unsupported vocabulary serialization")
@@ -143,7 +144,7 @@ func TestPinnedGraphMergesTheVersionTheProjectPinned(t *testing.T) {
 <https://vocab.test/onto#Thing> a owl:Class .
 `
 	pins := newTestPins(t, projectDir, imported, nil)
-	_, err := PinnedGraph(pins, "https://vocab.test/onto")
+	_, err := PinnedGraph(context.Background(), pins, "https://vocab.test/onto")
 	require.NoError(t, err)
 	require.NoError(t, pins.Save())
 
@@ -151,7 +152,7 @@ func TestPinnedGraphMergesTheVersionTheProjectPinned(t *testing.T) {
 	reopened := newTestPins(t, projectDir, `@prefix owl: <http://www.w3.org/2002/07/owl#> .
 <https://vocab.test/onto#Replaced> a owl:Class .
 `, &fetches)
-	graph, err := PinnedGraph(reopened, "https://vocab.test/onto")
+	graph, err := PinnedGraph(context.Background(), reopened, "https://vocab.test/onto")
 
 	require.NoError(t, err)
 	require.Zero(t, fetches)
@@ -165,7 +166,7 @@ func TestPinnedGraphMergesTheVersionTheProjectPinned(t *testing.T) {
 func TestOneValidatorResolvesAVocabularyOnceAcrossFiles(t *testing.T) {
 	fetches := 0
 	pins := EphemeralVocabularies()
-	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
+	pins.Fetch = func(context.Context, string) ([]byte, string, PinnedVersion, error) {
 		fetches++
 		return []byte(testVocabularyDocument), "text/turtle", PinnedVersion{}, nil
 	}
@@ -178,11 +179,11 @@ func TestOneValidatorResolvesAVocabularyOnceAcrossFiles(t *testing.T) {
 	second := writeTurtleTestFileNamed(t, "second.ttl", uses)
 
 	validator := NewValidator(pins, testBase, nil)
-	_, err := validator.ValidateFile(first)
+	_, err := validator.ValidateFile(context.Background(), first)
 	require.NoError(t, err)
-	_, err = validator.ValidateFile(second)
+	_, err = validator.ValidateFile(context.Background(), second)
 	require.NoError(t, err)
-	require.NoError(t, validator.PinDeclaredPrefixes())
+	require.NoError(t, validator.PinDeclaredPrefixes(context.Background()))
 
 	require.Equal(t, 1, fetches)
 }
@@ -193,12 +194,12 @@ func TestOneValidatorResolvesAVocabularyOnceAcrossFiles(t *testing.T) {
 func TestPinnedGraphDereferencesANamespaceThroughItsDocumentURL(t *testing.T) {
 	var requested []string
 	pins := EphemeralVocabularies()
-	pins.Fetch = func(source string) ([]byte, string, PinnedVersion, error) {
+	pins.Fetch = func(_ context.Context, source string) ([]byte, string, PinnedVersion, error) {
 		requested = append(requested, source)
 		return []byte(testVocabularyDocument), "text/turtle", PinnedVersion{}, nil
 	}
 
-	graph, err := PinnedGraph(pins, testVocabularyNamespace)
+	graph, err := PinnedGraph(context.Background(), pins, testVocabularyNamespace)
 
 	require.NoError(t, err)
 	require.Equal(t, []string{"https://vocab.test/things"}, requested)
@@ -214,7 +215,7 @@ func TestPinnedGraphDereferencesANamespaceThroughItsDocumentURL(t *testing.T) {
 // it affects listed, rather than once per use.
 func TestAVocabularyThatCannotBeCheckedIsReportedOnce(t *testing.T) {
 	pins := EphemeralVocabularies()
-	pins.Fetch = func(string) ([]byte, string, PinnedVersion, error) {
+	pins.Fetch = func(context.Context, string) ([]byte, string, PinnedVersion, error) {
 		return nil, "", PinnedVersion{}, fmt.Errorf("bad response status code: 404")
 	}
 	path := writeTurtleTestFileNamed(t, "gone.ttl", `
@@ -228,7 +229,7 @@ func TestAVocabularyThatCannotBeCheckedIsReportedOnce(t *testing.T) {
 	`)
 
 	validator := NewValidator(pins, testBase, nil)
-	_, err := validator.ValidateFile(path)
+	_, err := validator.ValidateFile(context.Background(), path)
 
 	require.Error(t, err)
 	var errs MultiError

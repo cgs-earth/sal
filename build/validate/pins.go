@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -64,7 +65,7 @@ type PinnedVocabularies struct {
 	// Fetch dereferences a vocabulary document. Tests replace it. The returned
 	// PinnedVersion overrides how the document is pinned; a salmodule:// source
 	// returns one, everything else returns the zero value.
-	Fetch func(string) ([]byte, string, PinnedVersion, error)
+	Fetch func(context.Context, string) ([]byte, string, PinnedVersion, error)
 
 	entries map[string]pinnedVocabulary
 	// fetched memoizes by source URL so two namespaces that resolve to the same
@@ -138,7 +139,7 @@ func LoadPinnedVocabularies(path string, blobDir string) (*PinnedVocabularies, e
 // namespace written with a fragment is not the namespace itself. The returned
 // bool reports whether the document came from the project's pins rather than
 // from its source.
-func (p *PinnedVocabularies) Document(id string, source string) ([]byte, string, bool, error) {
+func (p *PinnedVocabularies) Document(ctx context.Context, id string, source string) ([]byte, string, bool, error) {
 	if !p.Refresh {
 		if entry, ok := p.entries[id]; ok {
 			body, err := p.readDocument(entry)
@@ -157,7 +158,7 @@ func (p *PinnedVocabularies) Document(id string, source string) ([]byte, string,
 		return doc.body, doc.mediaType, false, nil
 	}
 
-	body, mediaType, version, err := p.Fetch(source)
+	body, mediaType, version, err := p.Fetch(ctx, source)
 	if err != nil {
 		return nil, "", false, err
 	}

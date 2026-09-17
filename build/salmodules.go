@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"sort"
 
+	"github.com/cgs-earth/sal/pkg/telemetry"
 	"github.com/cgs-earth/sal/salmodule"
 	rdflibgo "github.com/tggo/goRDFlib"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // salModuleTask is a SAL module task instance declared in a project's RDF.
@@ -99,62 +101,83 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 
 	tasksRun := 0
 	for _, task := range tasks {
-		ontology, err := resolver.Ontology(ctx, task.ref)
+		ran, err := materializeTask(ctx, graph, resolver, blobDir, task)
 		if err != nil {
-			return tasksRun, fmt.Errorf("run: %w", err)
+			return tasksRun, err
 		}
-		if !task.declaredTask && !ontology.IsTaskClass(task.classIRI) {
-			slog.Debug("Skipping " + task.subject.String() + "; " + task.classIRI + " is not a SAL module task class")
-			continue
+		if ran {
+			tasksRun++
 		}
-
-		taskInstance, err := ontology.TaskInstance(graph, task.subject, task.classIRI)
-		if err != nil {
-			return tasksRun, fmt.Errorf("run: %w", err)
-		}
-
-		// the shape a task class declares for its output is enforced line by
-		// line as the task writes; a class without one is run unchecked
-		validator, err := ontology.StdoutValidator(task.classIRI, graph.Base())
-		if err != nil {
-			return tasksRun, fmt.Errorf("run: %w", err)
-		}
-
-		slog.Info("Running SAL module task " + task.classIRI)
-		if validator != nil {
-			slog.Info("Validating the output of " + task.classIRI + " against its salmodule:stdoutShape")
-		}
-		result, runErr := resolver.RunTask(ctx, task.ref, ontology.TaskInstanceEnvVar, taskInstance, blobDir, validator)
-		moduleGraph, err := ontology.GraphFromTaskOutput(result.Output, graph.Base())
-		// a line that violates the output shape stopped the task, so nothing
-		// after it was read; a failing task reports why it failed as
-		// salmodule:Error nodes before it exits, so those messages are
-		// preferred over the container's exit status
-		var shapeErr salmodule.StdoutShapeError
-		var taskErr salmodule.TaskError
-		switch {
-		case errors.As(runErr, &shapeErr):
-			return tasksRun, fmt.Errorf("run: %w", shapeErr)
-		case errors.As(err, &taskErr):
-			return tasksRun, fmt.Errorf("run: %w", taskErr)
-		case runErr != nil:
-			return tasksRun, fmt.Errorf("run: %w", runErr)
-		case err != nil:
-			return tasksRun, fmt.Errorf("run: %w", err)
-		}
-		if err := salmodule.LinkCopiedFiles(moduleGraph, result.Files, blobDir); err != nil {
-			return tasksRun, fmt.Errorf("run: %w", err)
-		}
-
-		var materialized int
-		moduleGraph.Triples(nil, nil, nil)(func(rdflibgo.Triple) bool {
-			materialized++
-			return true
-		})
-		mergeGraph(graph, moduleGraph)
-		tasksRun++
-		slog.Info(fmt.Sprintf("Materialized %d triples from %s", materialized, task.classIRI))
-		slog.Info(fmt.Sprintf("Copied %d files from %s into %s", len(result.Files), task.classIRI, blobDir))
 	}
 	return tasksRun, nil
+}
+
+// materializeTask runs one task instance and merges what it produced into
+// graph, reporting whether it ran at all: an instance whose class neither the
+// project nor the module's ontology declares a task is left alone.
+func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmodule.Resolver, blobDir string, task salModuleTask) (_ bool, err error) {
+	ctx, span := telemetry.Start(ctx, "salmodule.task",
+		attribute.String("sal.module", task.ref.Namespace),
+		attribute.String("sal.module.task_class", task.classIRI),
+		attribute.String("sal.module.task", task.subject.String()),
+	)
+	defer func() { telemetry.End(span, err) }()
+
+	ontology, err := resolver.Ontology(ctx, task.ref)
+	if err != nil {
+		return false, fmt.Errorf("run: %w", err)
+	}
+	if !task.declaredTask && !ontology.IsTaskClass(task.classIRI) {
+		slog.Debug("Skipping " + task.subject.String() + "; " + task.classIRI + " is not a SAL module task class")
+		return false, nil
+	}
+
+	taskInstance, err := ontology.TaskInstance(graph, task.subject, task.classIRI)
+	if err != nil {
+		return false, fmt.Errorf("run: %w", err)
+	}
+
+	// the shape a task class declares for its output is enforced line by
+	// line as the task writes; a class without one is run unchecked
+	validator, err := ontology.StdoutValidator(task.classIRI, graph.Base())
+	if err != nil {
+		return false, fmt.Errorf("run: %w", err)
+	}
+
+	slog.Info("Running SAL module task " + task.classIRI)
+	if validator != nil {
+		slog.Info("Validating the output of " + task.classIRI + " against its salmodule:stdoutShape")
+	}
+	result, runErr := resolver.RunTask(ctx, task.ref, ontology.TaskInstanceEnvVar, taskInstance, blobDir, validator)
+	moduleGraph, err := ontology.GraphFromTaskOutput(result.Output, graph.Base())
+	// a line that violates the output shape stopped the task, so nothing
+	// after it was read; a failing task reports why it failed as
+	// salmodule:Error nodes before it exits, so those messages are
+	// preferred over the container's exit status
+	var shapeErr salmodule.StdoutShapeError
+	var taskErr salmodule.TaskError
+	switch {
+	case errors.As(runErr, &shapeErr):
+		return false, fmt.Errorf("run: %w", shapeErr)
+	case errors.As(err, &taskErr):
+		return false, fmt.Errorf("run: %w", taskErr)
+	case runErr != nil:
+		return false, fmt.Errorf("run: %w", runErr)
+	case err != nil:
+		return false, fmt.Errorf("run: %w", err)
+	}
+	if err := salmodule.LinkCopiedFiles(moduleGraph, result.Files, blobDir); err != nil {
+		return false, fmt.Errorf("run: %w", err)
+	}
+
+	var materialized int
+	moduleGraph.Triples(nil, nil, nil)(func(rdflibgo.Triple) bool {
+		materialized++
+		return true
+	})
+	mergeGraph(graph, moduleGraph)
+	span.SetAttributes(attribute.Int("sal.triples.materialized", materialized), attribute.Int("sal.module.files_copied", len(result.Files)))
+	slog.Info(fmt.Sprintf("Materialized %d triples from %s", materialized, task.classIRI))
+	slog.Info(fmt.Sprintf("Copied %d files from %s into %s", len(result.Files), task.classIRI, blobDir))
+	return true, nil
 }

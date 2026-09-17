@@ -14,7 +14,9 @@ import (
 	"github.com/apache/iceberg-go/catalog/hadoop"
 	"github.com/apache/iceberg-go/table"
 	"github.com/cgs-earth/sal/pkg"
+	"github.com/cgs-earth/sal/pkg/telemetry"
 	rdflibgo "github.com/tggo/goRDFlib"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const deleteHashChunkSize = 100
@@ -45,13 +47,15 @@ type LoadConfig struct {
 }
 
 // WriteGraphToIceberg writes an RDF graph into the configured Iceberg triples table.
-func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig, customMetadata map[string]string) error {
+func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig, customMetadata map[string]string) (err error) {
 	if graph == nil {
 		return fmt.Errorf("load graph: missing graph")
 	}
 	if cfg == nil {
 		return fmt.Errorf("load graph: missing arguments")
 	}
+	ctx, span := telemetry.Start(ctx, "iceberg.write", attribute.String("sal.iceberg.warehouse", cfg.Warehouse), attribute.String("sal.iceberg.namespace", cfg.Namespace))
+	defer func() { telemetry.End(span, err) }()
 
 	graph = stabilizeBlankNodes(graph)
 
@@ -89,7 +93,7 @@ func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCo
 		return err
 	}
 
-	_, err = tx.Commit(context.Background())
+	_, err = tx.Commit(ctx)
 	if err != nil {
 		return err
 	}
@@ -136,7 +140,9 @@ func writeGraph(
 	arrowSchema *arrow.Schema,
 	batchSize int,
 	hashes map[string]struct{},
-) ([]iceberg.DataFile, int64, error) {
+) (_ []iceberg.DataFile, _ int64, err error) {
+	ctx, span := telemetry.Start(ctx, "iceberg.write_data_files")
+	defer func() { telemetry.End(span, err) }()
 	rdr := newFilteredGraphRecordReader(graph, arrowSchema, batchSize, hashes)
 	defer rdr.Release()
 
@@ -152,6 +158,7 @@ func writeGraph(
 		return nil, 0, fmt.Errorf("read graph: %w", err)
 	}
 
+	span.SetAttributes(attribute.Int("sal.iceberg.data_files", len(dataFiles)), attribute.Int64("sal.triples.written", rdr.RowsRead()))
 	slog.Info("Successfully wrote to iceberg table with " + fmt.Sprint(len(dataFiles)) + " data files and " + fmt.Sprint(rdr.RowsRead()) + " triples")
 	return dataFiles, rdr.RowsRead(), nil
 }
@@ -183,7 +190,9 @@ type existingTriple struct {
 }
 
 // diffGraphAgainstTable compares new graph triple hashes against hashes already in Iceberg.
-func diffGraphAgainstTable(ctx context.Context, tbl *table.Table, graph *rdflibgo.Graph) (*graphTableDiff, error) {
+func diffGraphAgainstTable(ctx context.Context, tbl *table.Table, graph *rdflibgo.Graph) (_ *graphTableDiff, err error) {
+	ctx, span := telemetry.Start(ctx, "iceberg.diff")
+	defer func() { telemetry.End(span, err) }()
 	existing, err := readExistingTriples(ctx, tbl)
 	if err != nil {
 		return nil, err
@@ -207,6 +216,12 @@ func diffGraphAgainstTable(ctx context.Context, tbl *table.Table, graph *rdflibg
 			diff.toDrop = append(diff.toDrop, triple)
 		}
 	}
+	span.SetAttributes(
+		attribute.Int("sal.triples.existing", len(existing)),
+		attribute.Int("sal.triples.added", len(diff.toAdd)),
+		attribute.Int("sal.triples.removed", len(diff.toDrop)),
+		attribute.Int("sal.triples.unchanged", diff.unchanged),
+	)
 
 	return diff, nil
 }
@@ -282,15 +297,16 @@ func readExistingTripleHashes(ctx context.Context, tbl *table.Table) (map[string
 }
 
 // commitGraphDelta commits appended data files and equality deletes in one Iceberg snapshot.
-func commitGraphDelta(ctx context.Context, tbl *table.Table, dataFiles []iceberg.DataFile, rows int64, toDrop []existingTriple) error {
+func commitGraphDelta(ctx context.Context, tbl *table.Table, dataFiles []iceberg.DataFile, rows int64, toDrop []existingTriple) (err error) {
 	if len(dataFiles) == 0 && len(toDrop) == 0 {
 		return fmt.Errorf("no triples found")
 	}
+	ctx, span := telemetry.Start(ctx, "iceberg.commit", attribute.Int("sal.iceberg.data_files", len(dataFiles)), attribute.Int64("sal.triples.added", rows), attribute.Int("sal.triples.removed", len(toDrop)))
+	defer func() { telemetry.End(span, err) }()
 
 	txn := tbl.NewTransaction()
 	var deleteFiles []iceberg.DataFile
 	if len(toDrop) > 0 {
-		var err error
 		deleteFiles, err = writeTripleHashDeletes(ctx, txn, tbl.Schema(), toDrop)
 		if err != nil {
 			return err

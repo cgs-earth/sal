@@ -270,6 +270,8 @@ is checked against its vocabulary, and commits that configuration RDF into the d
 
 See [Data Layout](/sal/reference/data-layout/) for the generated table structure.
 
+The validation, every module built or run, and the Iceberg diff and write are recorded as OpenTelemetry spans when an exporter is configured; see [Telemetry](/sal/reference/telemetry/).
+
 ## `sal run`
 
 Runs every SAL module task the project's RDF declares and commits the triples the modules produced as a new
@@ -607,6 +609,8 @@ The STAC catalog `sal build` writes is served at `GET /stac/catalog.json`, which
 The documents are served exactly as they were written, so the collection's `iceberg:metadata_location` is a `file://` URL on the machine running the server, which a reader on that machine can pass straight to DuckDB's `iceberg_scan()`; see [STAC catalog](/sal/reference/data-layout/#stac-catalog).
 The endpoint allows cross-origin reads, so a STAC browser on another origin can open it, and a table built before SAL wrote catalogs answers `404` saying to run `sal build`.
 This route is available with or without `--with-ui`.
+
+Every request is recorded as an OpenTelemetry trace, with the query it ran under it, when an exporter is configured; see [Telemetry](/sal/reference/telemetry/).
 
 ### `--with-ui`
 

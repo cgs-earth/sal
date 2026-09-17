@@ -250,7 +250,7 @@ func TestFetchOntologyDocumentReportsTheCommitHashOfTheModuleItBuilt(t *testing.
 		resolver.Reset()
 	})
 
-	_, mediaType, commitHash, err := FetchOntologyDocument(testModuleNamespace)
+	_, mediaType, commitHash, err := FetchOntologyDocument(context.Background(), testModuleNamespace)
 
 	require.NoError(t, err)
 	require.Equal(t, "application/ld+json", mediaType)

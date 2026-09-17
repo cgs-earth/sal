@@ -22,6 +22,7 @@ import (
 	"github.com/cgs-earth/sal/pkg"
 	salsparql "github.com/cgs-earth/sal/query/sparql"
 	"github.com/cgs-earth/sal/salmodule"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const sparqlResultsJSON = "application/sparql-results+json"
@@ -59,7 +60,7 @@ func Serve(ctx context.Context, addr string, runner salsparql.DuckDBRunner, blob
 	}
 	server := &http.Server{
 		Addr:    addr,
-		Handler: handler,
+		Handler: instrument(handler),
 	}
 	go func() {
 		<-ctx.Done()
@@ -77,6 +78,22 @@ func Serve(ctx context.Context, addr string, runner salsparql.DuckDBRunner, blob
 		return nil
 	}
 	return err
+}
+
+// instrument wraps the endpoint so that every request is a server span named
+// by its method and path, joined to the trace a client sent in its headers,
+// with the query it ran as a child span, and is counted in the
+// http.server.request.duration metric. Requests for the UI's own static assets
+// are left out, since they say nothing about the table.
+func instrument(handler http.Handler) http.Handler {
+	return otelhttp.NewHandler(handler, "sal.serve",
+		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+			return r.Method + " " + r.URL.Path
+		}),
+		otelhttp.WithFilter(func(r *http.Request) bool {
+			return !strings.HasPrefix(r.URL.Path, "/assets/")
+		}),
+	)
 }
 
 // NewEndpoint returns an HTTP handler for the SPARQL Protocol query operation,

@@ -14,6 +14,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/cgs-earth/sal/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // CommandRunner runs an external command and returns its combined output,
@@ -99,16 +102,18 @@ func (r *Resolver) Downloaded() []string {
 }
 
 // Ontology returns the vocabulary the module publishes through its ontology command.
-func (r *Resolver) Ontology(ctx context.Context, ref ModuleRef) (*ModuleOntology, error) {
+func (r *Resolver) Ontology(ctx context.Context, ref ModuleRef) (_ *ModuleOntology, err error) {
 	r.mu.Lock()
 	cached, ok := r.ontologies[ref.Namespace]
 	r.mu.Unlock()
 	if ok {
 		return cached, nil
 	}
+	ctx, span := telemetry.Start(ctx, "salmodule.ontology", attribute.String("sal.module", ref.Namespace))
+	defer func() { telemetry.End(span, err) }()
 
 	var stdout []byte
-	err := r.runModuleCommand(ctx, ref, nil, OntologyCommand, func(_ context.Context, output io.Reader, _ ContainerFiles) error {
+	err = r.runModuleCommand(ctx, ref, nil, OntologyCommand, func(_ context.Context, output io.Reader, _ ContainerFiles) error {
 		var err error
 		stdout, err = io.ReadAll(output)
 		return err
@@ -155,9 +160,13 @@ type TaskResult struct {
 // names is copied. The first line that fails ends the run: the container is
 // stopped, copies still in flight are abandoned, and the StdoutShapeError is
 // returned in place of whatever the task wrote.
-func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, envVar string, taskInstance string, blobDir string, validator *StdoutValidator) (TaskResult, error) {
-	var result TaskResult
-	err := r.runModuleCommand(ctx, ref, []string{envVar + "=" + taskInstance}, RunCommand, func(ctx context.Context, stdout io.Reader, files ContainerFiles) error {
+func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, envVar string, taskInstance string, blobDir string, validator *StdoutValidator) (result TaskResult, err error) {
+	ctx, span := telemetry.Start(ctx, "salmodule.run_task", attribute.String("sal.module", ref.Namespace))
+	defer func() {
+		span.SetAttributes(attribute.Int("sal.module.output_bytes", len(result.Output)), attribute.Int("sal.module.files_copied", len(result.Files)))
+		telemetry.End(span, err)
+	}()
+	err = r.runModuleCommand(ctx, ref, []string{envVar + "=" + taskInstance}, RunCommand, func(ctx context.Context, stdout io.Reader, files ContainerFiles) error {
 		// copies run under their own context so that a rejected line can
 		// abandon them rather than wait for a file the container is still
 		// writing
@@ -222,7 +231,7 @@ func (r *Resolver) runModuleCommand(ctx context.Context, ref ModuleRef, env []st
 // returns the local image tag it was built as. A module whose image already
 // exists on the docker daemon under the tag of the commit the project pins is
 // reused without cloning or building anything.
-func (r *Resolver) image(ctx context.Context, ref ModuleRef) (string, error) {
+func (r *Resolver) image(ctx context.Context, ref ModuleRef) (_ string, err error) {
 	r.mu.Lock()
 	image, ok := r.images[ref.Namespace]
 	pinnedCommit := r.pinnedCommits[ref.Namespace]
@@ -230,6 +239,10 @@ func (r *Resolver) image(ctx context.Context, ref ModuleRef) (string, error) {
 	if ok {
 		return image, nil
 	}
+	// the clone and the docker build are the slow steps of a build that
+	// references a module, so each is a span under the resolution itself
+	ctx, span := telemetry.Start(ctx, "salmodule.resolve", attribute.String("sal.module", ref.Namespace))
+	defer func() { telemetry.End(span, err) }()
 
 	runner, err := r.containerRunner()
 	if err != nil {
@@ -246,6 +259,7 @@ func (r *Resolver) image(ctx context.Context, ref ModuleRef) (string, error) {
 		}
 		if exists {
 			slog.Debug("Cache hit for SAL module " + ref.Namespace + ": reusing prebuilt image " + tag + " instead of cloning and building")
+			span.SetAttributes(attribute.String("sal.module.commit", pinnedCommit), attribute.String("sal.module.image", tag), attribute.String("sal.module.cache", "pinned image"))
 			r.remember(ref.Namespace, tag, pinnedCommit)
 			return tag, nil
 		}
@@ -266,7 +280,10 @@ func (r *Resolver) image(ctx context.Context, ref ModuleRef) (string, error) {
 	if command == nil {
 		command = runCommand
 	}
-	if _, err := command(ctx, "", "git", "clone", "--depth", "1", ref.CloneURL, repoDir); err != nil {
+	cloneCtx, cloneSpan := telemetry.Start(ctx, "salmodule.clone", attribute.String("sal.module.clone_url", ref.CloneURL))
+	_, err = command(cloneCtx, "", "git", "clone", "--depth", "1", ref.CloneURL, repoDir)
+	telemetry.End(cloneSpan, err)
+	if err != nil {
 		return "", fmt.Errorf("clone SAL module %s: %w", ref.Namespace, err)
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "Dockerfile")); err != nil {
@@ -285,11 +302,17 @@ func (r *Resolver) image(ctx context.Context, ref ModuleRef) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	span.SetAttributes(attribute.String("sal.module.commit", commit), attribute.String("sal.module.image", tag))
 	if exists {
 		slog.Debug("Cache hit for SAL module " + ref.Namespace + ": reusing prebuilt image " + tag + " instead of building")
+		span.SetAttributes(attribute.String("sal.module.cache", "image"))
 	} else {
 		slog.Info("Building SAL module image " + tag)
-		if err := runner.BuildImage(ctx, repoDir, tag); err != nil {
+		span.SetAttributes(attribute.String("sal.module.cache", "none"))
+		buildCtx, buildSpan := telemetry.Start(ctx, "salmodule.build_image", attribute.String("sal.module.image", tag))
+		err = runner.BuildImage(buildCtx, repoDir, tag)
+		telemetry.End(buildSpan, err)
+		if err != nil {
 			return "", err
 		}
 	}
@@ -344,16 +367,16 @@ func (r *Resolver) containerRunner() (ContainerRunner, error) {
 // ontology document so that RDF validation can resolve the module's terms, and
 // to the git commit hash of the module repository it was built from, which is
 // what a salmodule:// vocabulary is pinned at.
-func FetchOntologyDocument(iri string) (document []byte, mediaType string, commitHash string, err error) {
+func FetchOntologyDocument(ctx context.Context, iri string) (document []byte, mediaType string, commitHash string, err error) {
 	ref, err := ParseModuleIRI(iri)
 	if err != nil {
 		return nil, "", "", err
 	}
-	ontology, err := Default().Ontology(context.Background(), ref)
+	ontology, err := Default().Ontology(ctx, ref)
 	if err != nil {
 		return nil, "", "", err
 	}
-	commitHash, err = Default().CommitHash(context.Background(), ref)
+	commitHash, err = Default().CommitHash(ctx, ref)
 	if err != nil {
 		return nil, "", "", err
 	}

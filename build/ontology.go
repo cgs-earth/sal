@@ -8,7 +8,9 @@ import (
 	"github.com/cgs-earth/sal/build/validate"
 	"github.com/cgs-earth/sal/importation"
 	"github.com/cgs-earth/sal/pkg"
+	"github.com/cgs-earth/sal/pkg/telemetry"
 	rdflibgo "github.com/tggo/goRDFlib"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // projectOntologyContent renders the project ontology node .sal/config.jsonld
@@ -44,7 +46,7 @@ func projectOntologyContent(base string) ([]byte, error) {
 // kept out of the table entirely. The statements the ontology node makes
 // about the project itself arrive separately, validated directly from
 // projectOntologyContent rather than through this function.
-func ImportOntologies(graph *rdflibgo.Graph, pins *validate.PinnedVocabularies) error {
+func ImportOntologies(ctx context.Context, graph *rdflibgo.Graph, pins *validate.PinnedVocabularies) error {
 	path, err := pkg.SalConfigPath()
 	if err != nil {
 		return err
@@ -60,10 +62,12 @@ func ImportOntologies(graph *rdflibgo.Graph, pins *validate.PinnedVocabularies) 
 	pull := func(iri string) error {
 		// build has no registry flags, so an artifact behind a private registry
 		// is authenticated with the environment the other commands fall back to
-		return importation.PullArtifact(context.Background(), importsDir, iri, importation.ArtifactCredentialsFromEnv())
+		return importation.PullArtifact(ctx, importsDir, iri, importation.ArtifactCredentialsFromEnv())
 	}
-	fetch := func(iri string) (*rdflibgo.Graph, error) {
-		return validate.PinnedGraph(pins, iri)
+	fetch := func(iri string) (_ *rdflibgo.Graph, err error) {
+		ctx, span := telemetry.Start(ctx, "build.import_ontology", attribute.String("sal.import", iri))
+		defer func() { telemetry.End(span, err) }()
+		return validate.PinnedGraph(ctx, pins, iri)
 	}
 	return importOntologies(graph, path, base, fetch, pull)
 }

@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,7 +26,7 @@ func TestValidateTurtleFileAcceptsDefinedSchemaTerms(t *testing.T) {
 			schema:jobTitle "Professor" .
 	`)
 
-	_, err := schemaOrgValidator(t).ValidateFile(path)
+	_, err := schemaOrgValidator(t).ValidateFile(context.Background(), path)
 
 	require.NoError(t, err)
 }
@@ -43,7 +44,7 @@ func TestValidateTurtleFileAcceptsSchemaPropertiesFromVocabulary(t *testing.T) {
 			schema:worksFor <org/acme> .
 	`)
 
-	_, err := schemaOrgValidator(t).ValidateFile(path)
+	_, err := schemaOrgValidator(t).ValidateFile(context.Background(), path)
 
 	require.NoError(t, err)
 }
@@ -57,7 +58,7 @@ func TestValidateTurtleFileRejectsUndefinedSchemaProperty(t *testing.T) {
 			schema:jobTitle "Professor" .
 	`)
 
-	_, err := schemaOrgValidator(t).ValidateFile(path)
+	_, err := schemaOrgValidator(t).ValidateFile(context.Background(), path)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "undefined term")
@@ -72,7 +73,7 @@ func TestValidateTurtleFileRejectsUndefinedSchemaClass(t *testing.T) {
 			schema:name "Jane Doe" .
 	`)
 
-	_, err := schemaOrgValidator(t).ValidateFile(path)
+	_, err := schemaOrgValidator(t).ValidateFile(context.Background(), path)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "undefined term")
@@ -87,7 +88,7 @@ func TestValidateTurtleFileAcceptsSPARQLStylePrefix(t *testing.T) {
 			schema:telephone "(425) 123-4567" .
 	`)
 
-	_, err := schemaOrgValidator(t).ValidateFile(path)
+	_, err := schemaOrgValidator(t).ValidateFile(context.Background(), path)
 
 	require.NoError(t, err)
 }
@@ -101,7 +102,7 @@ func TestValidateTurtleFileSkipsRelativeSubjectUnderBase(t *testing.T) {
 			schema:name "Jane Doe" .
 	`)
 
-	_, err := schemaOrgValidator(t).ValidateFile(path)
+	_, err := schemaOrgValidator(t).ValidateFile(context.Background(), path)
 
 	require.NoError(t, err)
 }
@@ -120,7 +121,7 @@ func TestValidateTurtleFileSkipsRelativeSubjectUnderBase(t *testing.T) {
 // 			sal:WantOutbound "https://google.com" .
 // 	`)
 
-// 	_, err := schemaOrgValidator(t).ValidateFile(path)
+// 	_, err := schemaOrgValidator(t).ValidateFile(context.Background(), path)
 
 // 	require.NoError(t, err)
 // }
