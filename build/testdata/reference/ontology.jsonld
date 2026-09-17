@@ -7,7 +7,8 @@
         "sh": "http://www.w3.org/ns/shacl#",
         "sf": "http://www.opengis.net/ont/sf#",
         "xsd": "http://www.w3.org/2001/XMLSchema#",
-        "dc": "http://purl.org/dc/terms/"
+        "dc": "http://purl.org/dc/terms/",
+        "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
     },
     "@graph": [
         {
@@ -21,7 +22,7 @@
             "@id": "GeoconnexReferenceFeatureStates",
             "@type": "owl:Class",
             "rdfs:label": "Geoconnex U.S. States Reference Features",
-            "rdfs:comment": "Feteches the states from Geoconnex reference feature in Geoconnex.",
+            "rdfs:comment": "Fetches the states from Geoconnex reference feature in Geoconnex.",
             "rdfs:subClassOf": {
                 "@id": "salmodule:Task"
             },
@@ -63,13 +64,21 @@
             },
             "salmodule:taskShape": {
                 "@type": "sh:NodeShape",
+                "sh:targetClass": {
+                    "@id": "GeoconnexReferenceFeatureStates"
+                },
                 "sh:property": [
                     {
-                        "sh:targetClass": {
-                            "@id": "GeoconnexReferenceFeatureStates"
-                        },
                         "sh:path": {
-                            "@id": "maxRetries"
+                            "@id": "maxRetries",
+                            "@type": "owl:DatatypeProperty",
+                            "rdfs:comment": "The maximum number of retry attempts to connect to the reference feature server before giving up.",
+                            "rdfs:domain": {
+                                "@id": "GeoconnexReferenceFeatureStates"
+                            },
+                            "rdfs:range": {
+                                "@id": "xsd:integer"
+                            }
                         },
                         "sh:datatype": {
                             "@id": "xsd:integer"
@@ -80,17 +89,6 @@
                         "sh:message": "The GeoconnexReferenceFeatureStates instance 'maxRetries' property must have exactly one value."
                     }
                 ]
-            }
-        },
-        {
-            "@id": "maxRetries",
-            "@type": "owl:DatatypeProperty",
-            "rdfs:comment": "The maximum number of retry attempts to connect to the reference feature server before giving up.",
-            "rdfs:domain": {
-                "@id": "GeoconnexReferenceFeatureStates"
-            },
-            "rdfs:range": {
-                "@id": "xsd:integer"
             }
         }
     ]
