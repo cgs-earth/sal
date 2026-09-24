@@ -16,7 +16,7 @@
 #   SAL_DEMO_DIR     where the demo project is created (default /app/demo)
 #   SAL_DEMO_SOURCE  RDF copied into that project (default /app/demo-data)
 #   SAL_DEMO_REMOTE  git remote sal derives the base IRI from
-#   DOCKER_HOST      the docker daemon `sal run` builds and runs SAL modules on;
+#   DOCKER_HOST      the docker daemon `sal build` builds and runs SAL modules on;
 #                    /var/run/docker.sock is used when it is mounted and this is
 #                    unset. Without either, the sample data's module task is
 #                    left out rather than failing the build.
@@ -75,30 +75,31 @@ build_demo_data() {
 	# schema.org fails here rather than serving a table without it.
 	/app/sal import "https://schema.org/"
 	git add -A
-	# build refuses to snapshot a tree with uncommitted changes.
+	# build refuses to snapshot a tree with uncommitted changes. The SAL module
+	# task in portolan_export.ttl is left for the second build to run, see
+	# below, so this one commits only its configuration.
 	git commit -qm "Add sample RDF data"
-	/app/sal build data/
+	/app/sal build --without-sal-modules data/
 
 	# A second build on top of the first, so the demo has more than one snapshot
 	# and the table shows what an edit to an existing triple looks like: the old
 	# name triple stays in the history and the new one is added on top.
+	#
+	# This build also runs the SAL module task in portolan_export.ttl, when the
+	# file is still there. It pulls a few public ArcGIS layers in through the
+	# sal-portolan module and hands them over as STAC catalogs, which the build
+	# links into the data product's own catalog. Running it clones and builds the
+	# module on the docker daemon and runs its container there, so it is the
+	# step the demo image cannot do on a platform without one; cloudbuild.yaml
+	# runs this whole function where it can and bakes the result in.
 	log "renaming Example Organization 001 and rebuilding for a second snapshot"
+	if docker_reachable; then
+		log "the rebuild runs the SAL module task in portolan_export.ttl to pull the sample STAC catalogs in"
+	fi
 	sed -i 's/schema:name "Example Organization 001"/schema:name "Test Change"/' data/large.ttl
 	git add -A
 	git commit -qm "Rename Example Organization 001 to Test Change"
 	/app/sal build data/
-
-	# The SAL module task in portolan_export.ttl pulls a few public ArcGIS layers
-	# in through the sal-portolan module and hands them over as STAC catalogs,
-	# which the last build links into the data product's own catalog. Running it
-	# clones and builds the module on the docker daemon and runs its container
-	# there, so it is the step the demo image cannot do on a platform without
-	# one; cloudbuild.yaml runs this whole function where it can and bakes the
-	# result in.
-	if docker_reachable; then
-		log "running the SAL module task in portolan_export.ttl to pull the sample STAC catalogs in"
-		/app/sal run data/
-	fi
 }
 
 case "$DEMO_DATA" in

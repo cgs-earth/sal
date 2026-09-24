@@ -134,16 +134,16 @@ func (s *SalModuleSuite) newSalProject(source string) string {
 	return project
 }
 
-// buildForRun puts a project in the state sal run requires: the first build
-// pins the module's vocabulary into .sal/config.jsonld, committing that moves
-// HEAD, and the second build tags the table with the commit the worktree now
-// sits at.
+// buildForRun puts a project in the state sal run requires without running
+// any module task: the first build pins the module's vocabulary into
+// .sal/config.jsonld, committing that moves HEAD, and the second build tags the
+// table with the commit the worktree now sits at.
 func (s *SalModuleSuite) buildForRun(project string) {
-	_, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg}).Run()
+	_, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, WithoutSalModules: true}).Run()
 	s.Require().NoError(err)
 	s.git(project, "add", "-A")
 	s.git(project, "-c", "user.email=sal@example.test", "-c", "user.name=SAL", "commit", "-m", "pin vocabularies")
-	_, err = (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg}).Run()
+	_, err = (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, WithoutSalModules: true}).Run()
 	s.Require().NoError(err)
 }
 
@@ -198,11 +198,29 @@ func (s *SalModuleSuite) TestModuleImplementsSalModuleCli() {
 	s.NotEmpty(ontology.Graph)
 }
 
-// TestRunMaterializesModuleTriples is the round trip: a project referencing
-// the module is built, which commits the task's configuration without running
-// it, and sal run then invokes the module and commits the triples it produced,
-// which are read back out of the Iceberg table SAL wrote.
-func (s *SalModuleSuite) TestRunMaterializesModuleTriples() {
+// TestBuildMaterializesModuleTriples is the round trip of a build: a project
+// referencing the module is built, which invokes the module and commits the
+// triples it produced alongside the sources, and they are read back out of the
+// Iceberg table SAL wrote. The worktree is dirty with the pins the build
+// writes, which is what --force is for.
+func (s *SalModuleSuite) TestBuildMaterializesModuleTriples() {
+	s.newSalProject(projectReferencing())
+
+	graph, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, Force: true}).Run()
+
+	s.Require().NoError(err)
+	s.Require().NotNil(graph)
+
+	objects := s.builtObjectsForPredicate("https://schema.org/name")
+	s.Contains(objects, "Lake Tahoe")
+	s.Contains(objects, "Lake Erie")
+}
+
+// TestRunMaterializesModuleTriplesOnTopOfABuild is the debugging round trip:
+// the builds commit the task's configuration without running it, and sal run
+// then invokes the module and commits the triples it produced as a new
+// snapshot on top.
+func (s *SalModuleSuite) TestRunMaterializesModuleTriplesOnTopOfABuild() {
 	project := s.newSalProject(projectReferencing())
 	s.buildForRun(project)
 
@@ -300,8 +318,9 @@ func (s *SalModuleSuite) TestRunStopsATaskWhoseOutputViolatesItsStdoutShape() {
 }
 
 // TestRunHasNothingToDoForClassesThatAreNotTasks checks that referencing a
-// module term which is not a task builds cleanly without invoking the module's
-// run command, and leaves sal run with nothing to run.
+// module term which is not a task builds cleanly, whether or not the build is
+// asked to run module tasks, without invoking the module's run command, and
+// leaves sal run with nothing to run.
 func (s *SalModuleSuite) TestRunHasNothingToDoForClassesThatAreNotTasks() {
 	project := s.newSalProject(fmt.Sprintf(`
 @prefix fixture: <%s> .
@@ -310,9 +329,11 @@ func (s *SalModuleSuite) TestRunHasNothingToDoForClassesThatAreNotTasks() {
 `, moduleNamespace))
 	s.buildForRun(project)
 
+	_, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg}).Run()
+	s.Require().NoError(err)
 	s.Empty(s.builtObjectsForPredicate("https://schema.org/name"))
 
-	_, err := (&build.RunCmd{Paths: []string{"module.ttl"}}).Run()
+	_, err = (&build.RunCmd{Paths: []string{"module.ttl"}}).Run()
 
 	s.Require().ErrorIs(err, build.ErrNoModuleTasks)
 }

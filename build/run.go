@@ -44,13 +44,17 @@ type tableHead interface {
 	CurrentSchema() *iceberg.Schema
 }
 
-// Run runs every SAL module task the project's RDF declares and commits the
-// triples the modules produced as a new snapshot of the data product. It
-// refuses to run anything unless the worktree is fully committed and the
-// table's latest snapshot was built from the commit HEAD is at, so that what a
-// module materializes always lands on top of a build of the sources as they
-// stand.
+// Run re-runs every SAL module task the project's RDF declares on top of an
+// existing build and commits what the modules produced as a new snapshot of
+// the data product. `sal build` already runs the tasks as part of every build,
+// so this exists for debugging a module: it refuses to run anything unless the
+// worktree is fully committed and the table's latest snapshot was built from
+// the commit HEAD is at, so that what a module materializes always lands on top
+// of a build of the sources as they stand, and the snapshot it commits is made
+// through the same BuildCmd.Run a build is.
 func (cfg *RunCmd) Run() (*rdflibgo.Graph, error) {
+	slog.Warn("sal run is meant for debugging SAL modules: it re-runs the project's module tasks on top of the last build. sal build runs them as part of every build, so it is the command to produce a data product with.")
+
 	var err error
 	if cfg.Force {
 		// a dirty worktree means the sources match no commit at all, so checking
@@ -73,7 +77,7 @@ func (cfg *RunCmd) Run() (*rdflibgo.Graph, error) {
 		Format:                          GraphExportFormatIceberg,
 		Force:                           cfg.Force,
 		AllowPrefixesWithoutSlashOrHash: cfg.AllowPrefixesWithoutSlashOrHash,
-		runModules:                      true,
+		fromRunCmd:                      true,
 	}
 	return buildCfg.Run()
 }

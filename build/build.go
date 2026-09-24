@@ -43,6 +43,7 @@ type BuildCmd struct {
 	Force                           bool              `arg:"--force" help:"force build even if there are uncommitted changes in the git repository"`
 	NoCache                         bool              `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources and re-pin them in .sal/config.jsonld"`
 	AllowPrefixesWithoutSlashOrHash bool              `arg:"--allow-prefixes-without-slash-or-hash" help:"include a prefix whose namespace does not end in / or # without asking"`
+	WithoutSalModules               bool              `arg:"--without-sal-modules" help:"commit the SAL module task configuration the project declares without running any module task"`
 
 	// skip committing the built data to iceberg
 	skipCommit bool
@@ -50,10 +51,11 @@ type BuildCmd struct {
 	// skip validating that the command is called from within a valid sal project / git repo
 	skipProjectChecks bool
 
-	// runModules materializes the SAL module tasks the project declares before
-	// committing. Only `sal run` sets this; `sal build` commits the task
-	// configuration without running anything.
-	runModules bool
+	// fromRunCmd is set by `sal run`, the debugging command that re-runs the
+	// project's module tasks on top of an existing build. It names the trace
+	// after itself and fails when the project declares no task, since running
+	// nothing is the one thing it exists to do.
+	fromRunCmd bool
 }
 
 var findSALProjectDir = pkg.SALProjectDir
@@ -105,7 +107,7 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 	traceName := "sal.build"
 	if cfg.skipCommit {
 		traceName = "sal.validate"
-	} else if cfg.runModules {
+	} else if cfg.fromRunCmd {
 		traceName = "sal.run"
 	}
 	ctx, span := telemetry.Start(context.Background(), traceName)
@@ -317,10 +319,14 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 	// the data rather than only recorded in .sal/config.jsonld
 	pins.AppendProvenance(finalGraph)
 
-	// a build validates the task configuration of every referenced module
-	// against the module's ontology, but only `sal run` invokes their run
-	// commands; the configuration itself is committed like any other RDF
-	if cfg.runModules {
+	// a build runs every module task the project declares and commits what
+	// the tasks produced in the same snapshot as the sources, so that a build
+	// is the one operation that produces a snapshot; --without-sal-modules
+	// commits only the task configuration, which is validated against the
+	// module's ontology and committed like any other RDF either way
+	if cfg.WithoutSalModules {
+		slog.Warn("Skipping SAL module tasks because --without-sal-modules was passed; their configuration is committed without running anything")
+	} else {
 		blobDir, err := pkg.SalBlobsDir()
 		if err != nil {
 			return nil, err
@@ -329,7 +335,7 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 		if err != nil {
 			return nil, err
 		}
-		if tasksRun == 0 {
+		if tasksRun == 0 && cfg.fromRunCmd {
 			return nil, ErrNoModuleTasks
 		}
 	}

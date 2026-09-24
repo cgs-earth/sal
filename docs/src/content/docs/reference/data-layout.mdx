@@ -42,7 +42,7 @@ The `data` directory contains the table's data files.
 
 The files named by a hash under `.sal/data/blobs` are the vocabulary documents the project pins, described in
 [Pinned vocabularies](#pinned-vocabularies) below, and the files SAL module tasks produce, which
-[`sal run`](/sal/reference/commands/#sal-run) copies out of the module's container under the SHA-256 digest of
+[`sal build`](/sal/reference/commands/#sal-module-tasks) copies out of the module's container under the SHA-256 digest of
 their contents. [`sal serve`](/sal/reference/commands/#sal-serve) serves both over HTTP at `/blobs/{sha256}`.
 A directory a task produces, a Zarr store or STAC catalog for instance, is copied with its files verbatim under
 `{digest}/`, the SHA-256 of its contents, so that it can be read in place from disk, from `/blobs/{digest}/`, or
