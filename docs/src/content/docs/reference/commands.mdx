@@ -221,7 +221,7 @@ The prefixes the source files declare are checked as well as the terms used from
 schema.org is also resolved differently from other vocabularies: its namespace answers with an HTML page whatever format is asked for, so the vocabulary is fetched from the release document at `https://schema.org/version/latest/schemaorg-current-https.jsonld` and pinned against `https://schema.org/` like any other namespace.
 
 Validating a file that references a SAL module clones and builds that module so its vocabulary can be checked.
-`sal validate` does not run module tasks; only `sal run` does.
+`sal validate` does not run module tasks; only `sal build` does.
 
 ## `sal build`
 
@@ -241,6 +241,7 @@ Important flags:
 - `--force`: build even when the Git working tree has uncommitted changes.
 - `--no-cache`: resolve every vocabulary from its source again and re-pin it in `.sal/config.jsonld`.
 - `--allow-prefixes-without-slash-or-hash`: include a prefix whose namespace does not end in `/` or `#` without asking, as for [`sal validate`](#sal-validate).
+- `--without-sal-modules`: commit the configuration of every SAL module task the sources declare without running any of them; see [SAL module tasks](#sal-module-tasks) below.
 
 `sal build` pins the exact version of every vocabulary the project resolves against, so a later build validates against the same versions this one did.
 A build that pinned something new writes `.sal/config.jsonld`, which belongs in Git; commit it before the next build, which otherwise refuses to run against a dirty working tree.
@@ -264,9 +265,28 @@ The last thing a build does is describe the table it just committed as a [STAC](
 The catalog lists one collection, the triples table, carrying the [STAC Iceberg extension](https://github.com/portolan-sdi/stac-iceberg-extension): the table's current `metadata.json` location and snapshot ID, its Iceberg format version and partition spec, its columns, its row count, and the bounding box of every geometry it holds, all read from the table after it is written. It also links, as further children, every STAC catalog a SAL module task handed over as a directory under `.sal/data/blobs`, so the data product and what its modules produced are one catalog tree.
 [`sal serve`](#sal-serve) exposes it at `/stac/catalog.json`; see [STAC catalog](/sal/reference/data-layout/#stac-catalog) for what the documents contain.
 
-`sal build` does not run the SAL module's task(s) the source files reference; that is what [`sal run`](#sal-run) does.
-A build still validates each task's configuration against the module's own ontology, the same way any other term
-is checked against its vocabulary, and commits that configuration RDF into the data product like any other statement.
+### SAL module tasks
+
+A build is the one operation that produces a snapshot of the data product, so it also runs every SAL module task the source files declare and commits what the modules produced in the same snapshot as the sources.
+For each module's referenced task instance(s), `sal build` clones the module's repository, builds the `Dockerfile` in its repository root,
+and invokes the module's run command with the task instance serialized from the instance's RDF properties.
+The newline delimited JSON the module writes to stdout is converted to triples and committed alongside the
+sources. A relative IRI in that output resolves against the project's namespace, not the module's, so a task's
+output is named as the project's own data unless the module wrote absolute IRIs.
+A `file:///` IRI in that output names a file inside the container; `sal build` copies it into `.sal/data/blobs`
+under its SHA-256 digest while the task runs, rewrites the reference to `urn:sha256:{digest}`, and describes the
+copy with the `file:///` IRI the task wrote as `rdfs:label`, its modification time as `dcterms:modified`, its digest as `owl:versionIRI`,
+its path under `.sal/data/blobs` as `dcterms:identifier`, and the module that produced it as `dcterms:source`. A `file:///` IRI ending in a slash names a directory,
+copied whole under `.sal/data/blobs/{digest}/` with its files verbatim, so that it can be read in place, labelled with the same `file:///` IRI.
+Every copy is appended to `.sal/data/blobs/prov.jsonld` under its `urn:sha256:` IRI, and every later `sal build` carries those records into the table as provenance, so a table
+built again from source still describes every copy. `prov.jsonld` is a log: a build only ever adds to it and to `.sal/data/blobs`, and never removes what an earlier
+build copied, so clearing old copies is up to the user, with `sal clean --wipe` or by hand. See [Using SAL Modules](/sal/guides/using-sal-modules/), including
+[Files a task produces](/sal/guides/using-sal-modules/#files-a-task-produces).
+
+`sal build --without-sal-modules` skips running the tasks. The build still validates each task's configuration against the module's own ontology, the same way any other term
+is checked against its vocabulary, and commits that configuration RDF into the data product like any other statement; only the modules' run commands are never invoked.
+Use it when the sources should be committed without waiting on a module, or on a machine without a docker daemon to run one on.
+A project that declares no module tasks builds the same with or without the flag.
 
 See [Data Layout](/sal/reference/data-layout/) for the generated table structure.
 
@@ -274,27 +294,17 @@ The validation, every module built or run, and the Iceberg diff and write are re
 
 ## `sal run`
 
-Runs every SAL module task the project's RDF declares and commits the triples the modules produced as a new
+Re-runs every SAL module task the project's RDF declares on top of the last build and commits the triples the modules produced as a new
 snapshot of the data product:
 
 ```sh
 sal run
 ```
 
-For each module's referenced task instance(s), `sal run` clones the module's repository, builds the `Dockerfile` in its repository root,
-and invokes the module's run command with the task instance serialized from the instance's RDF properties.
-The newline delimited JSON the module writes to stdout is converted to triples and committed on top of the
-last build. A relative IRI in that output resolves against the project's namespace, not the module's, so a task's
-output is named as the project's own data unless the module wrote absolute IRIs.
-A `file:///` IRI in that output names a file inside the container; `sal run` copies it into `.sal/data/blobs`
-under its SHA-256 digest while the task runs, rewrites the reference to `urn:sha256:{digest}`, and describes the
-copy with the `file:///` IRI the task wrote as `rdfs:label`, its modification time as `dcterms:modified`, its digest as `owl:versionIRI`,
-its path under `.sal/data/blobs` as `dcterms:identifier`, and the module that produced it as `dcterms:source`. A `file:///` IRI ending in a slash names a directory,
-copied whole under `.sal/data/blobs/{digest}/` with its files verbatim, so that it can be read in place, labelled with the same `file:///` IRI.
-Every copy is appended to `.sal/data/blobs/prov.jsonld` under its `urn:sha256:` IRI, and every later `sal build` carries those records into the table as provenance, so a table
-built again from source still describes every copy. `prov.jsonld` is a log: a run only ever adds to it and to `.sal/data/blobs`, and never removes what an earlier
-run copied, so clearing old copies is up to the user, with `sal clean --wipe` or by hand. See [Using SAL Modules](/sal/guides/using-sal-modules/), including
-[Files a task produces](/sal/guides/using-sal-modules/#files-a-task-produces).
+`sal run` is a debugging command, and it says so in a warning every time it starts.
+[`sal build`](#sal-build) runs the same tasks as part of every build, so a data product never needs `sal run` to be complete;
+it exists to run a module again while working on it, on top of a build that already committed everything else.
+The snapshot it commits is produced by the same operation a build's is, with the task output the modules produced as the only change.
 
 `sal run` refuses to run anything unless the data product matches the sources as they stand:
 

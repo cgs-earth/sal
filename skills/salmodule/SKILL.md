@@ -1,6 +1,6 @@
 ---
 name: salmodule
-description: Create, test, and publish a SAL module, a git repository with a Dockerfile whose container implements the SAL Module CLI (salmodule ontology, salmodule run) so that a SAL project can reference it with a salmodule:// prefix and sal run can materialize the triples and files it produces. Use when asked to write a sal module, implement salmodule ontology or run, emit JSON-LD from a container for sal, or debug why sal cannot resolve or run a module.
+description: Create, test, and publish a SAL module, a git repository with a Dockerfile whose container implements the SAL Module CLI (salmodule ontology, salmodule run) so that a SAL project can reference it with a salmodule:// prefix and sal build can materialize the triples and files it produces. Use when asked to write a sal module, implement salmodule ontology or run, emit JSON-LD from a container for sal, or debug why sal cannot resolve or run a module.
 license: Apache-2.0
 metadata:
   homepage: https://cgs-earth.github.io/sal/reference/salmodule-description/
@@ -23,7 +23,8 @@ docker run -e SALMODULE_TASK_INSTANCE='{...}' IMAGE salmodule run     # run one 
 
 A project references the module as `salmodule://[HOST/]OWNER/REPO/` (host defaults to `github.com`),
 types an instance with one of the module's task classes, and configures it with the module's own
-properties. `sal validate` and `sal build` only ask for the ontology; `sal run` runs tasks.
+properties. `sal validate` only asks for the ontology; `sal build` runs tasks, unless passed
+`--without-sal-modules`, and `sal run` re-runs them on top of a build for debugging.
 
 ## 1. The ontology command
 
@@ -40,7 +41,7 @@ Print one JSON-LD document to stdout and exit 0. Requirements:
   `rdfs:domain` and `rdfs:range`. A property the ontology does not declare never reaches the task.
 - Optional SHACL shapes on the task class: `salmodule:taskShape` (what a valid instance looks like),
   `salmodule:stdinShape`, and `salmodule:stdoutShape` (what the task consumes and produces).
-  `salmodule:stdoutShape` is enforced: `sal run` validates every line the task writes against it, with the
+  `salmodule:stdoutShape` is enforced: `sal build` validates every line the task writes against it, with the
   ontology's `@context` injected, and the first line that fails stops the container and fails the run with
   the shape's `sh:message`. Give the shape a target (`sh:targetClass` usually), and do not use
   `sh:languageIn`, `sh:uniqueLang`, `sh:disjoint`, `sh:qualifiedValueShapesDisjoint`, or `sh:sparql`.
@@ -151,8 +152,9 @@ docker run --rm -e SALMODULE_TASK_INSTANCE='{"@id":"https://example.org/x","@typ
 sal salmodule inspect salmodule://github.com/owner/repo                     # what sal will see once pushed
 ```
 
-Then reference it from a SAL project (see the `sal` skill) and run `sal run --force` in a scratch
-checkout to confirm the triples and files land.
+Then reference it from a SAL project (see the `sal` skill) and run `sal build --force` in a scratch
+checkout to confirm the triples and files land. `sal run --force` runs the tasks again on top of that
+build without rebuilding the sources, which is quicker while iterating on the module.
 
 ## Checklist
 

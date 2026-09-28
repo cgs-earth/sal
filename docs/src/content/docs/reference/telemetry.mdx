@@ -52,7 +52,7 @@ Under it:
 | `salmodule.build_image` | The `docker build` of the module's Dockerfile. | `sal.module.image` |
 | `salmodule.ontology` | Running the module's `salmodule ontology` command for its vocabulary. | `sal.module` |
 | `build.import_ontology` | Fetching one `owl:imports` of the project ontology. | `sal.import` |
-| `salmodule.task` | One task instance from the module's ontology through to its triples merged into the graph (`sal run` only). | `sal.module`, `sal.module.task_class`, `sal.module.task`, `sal.triples.materialized`, `sal.module.files_copied` |
+| `salmodule.task` | One task instance from the module's ontology through to its triples merged into the graph. Absent from a `sal build --without-sal-modules` or `sal validate` trace, which run no task. | `sal.module`, `sal.module.task_class`, `sal.module.task`, `sal.triples.materialized`, `sal.module.files_copied` |
 | `salmodule.run_task` | The module's `salmodule run` command, from the container starting to the last `file:///` copy finishing. | `sal.module`, `sal.module.output_bytes`, `sal.module.files_copied` |
 | `iceberg.write` | Writing the graph to the Iceberg table. | `sal.iceberg.warehouse`, `sal.iceberg.namespace` |
 | `iceberg.diff` | Scanning the table's triple hashes and comparing them to the graph, which decides what the snapshot adds and removes. | `sal.triples.existing`, `sal.triples.added`, `sal.triples.removed`, `sal.triples.unchanged` |

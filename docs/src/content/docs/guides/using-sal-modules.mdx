@@ -1,11 +1,11 @@
 ---
 title: Using SAL Modules
-description: Reference a SAL Module from your project's RDF so that sal run materializes the triples it produces.
+description: Reference a SAL Module from your project's RDF so that sal build materializes the triples it produces.
 ---
 
 A [SAL Module](/sal/reference/salmodule-description/) is a git repository with a `Dockerfile` in its root whose
 container implements the SAL Module command line interface.
-Referencing one from your project's RDF lets `sal run` run it and fold the RDF it produces into your data product.
+Referencing one from your project's RDF lets `sal build` run it and fold the RDF it produces into your data product.
 
 ## Reference a module
 
@@ -106,17 +106,18 @@ A typo in a module term is reported the same way a typo in a `schema:` term is:
 data/module.ttl:5: undefined term states:GeoconnexReferenceFeatureStatess
 ```
 
-`sal build` commits the task's configuration into the data product without running anything.
-[`sal run`](/sal/reference/commands/#sal-run) then runs each task instance with
-`docker run -e SALMODULE_TASK_INSTANCE=... IMAGE salmodule run`, once the worktree is fully committed and the
-table's latest snapshot was built from the commit `HEAD` points at.
+[`sal build`](/sal/reference/commands/#sal-module-tasks) then runs each task instance with
+`docker run -e SALMODULE_TASK_INSTANCE=... IMAGE salmodule run` and commits what it produces in the same snapshot as
+the sources. `sal build --without-sal-modules` commits the task's configuration into the data product without running
+anything, and [`sal run`](/sal/reference/commands/#sal-run) is a debugging command that runs the tasks again on top of
+the last build.
 An instance is only run when it is typed as a SAL Module task, either because the project's RDF types it as a
 `salmodule:NodeProcessor`, `salmodule:NodeProducer`, `salmodule:NodeConsumer`, or `salmodule:Task`, or because
 the module's own ontology declares its class as a subclass of one of those.
 
 A task writes newline delimited JSON to stdout.
 SAL injects the module ontology's `@context` into each node so that its keys resolve to the module's vocabulary,
-converts the result to RDF, and commits it on top of the last build as a new snapshot.
+converts the result to RDF, and commits it alongside the sources.
 Those triples land in the Iceberg table alongside the triples from your source files.
 
 A relative IRI in a task's output, such as `"@id": "person/bob"`, resolves against your project's namespace,
@@ -147,10 +148,10 @@ A module can declare what its task's output must look like by annotating the tas
 }
 ```
 
-When the class, or a superclass of it the module's ontology declares, carries such a shape, `sal run` validates
+When the class, or a superclass of it the module's ontology declares, carries such a shape, `sal build` validates
 every line the task writes as it arrives, with the module's `@context` injected the same way it is before the
 output is converted to RDF, so the shape sees each node as it will be committed. The first line that fails
-stops the container and fails the run with the shape's `sh:message` and the node it is about:
+stops the container and fails the build with the shape's `sh:message` and the node it is about:
 
 ```
 run: SAL module salmodule://github.com/owner/stations wrote a node on output line 3 that does not conform to the salmodule:stdoutShape of salmodule://github.com/owner/stations/StationFetcher: <https://example.test/project/station/7> A station must have a name
@@ -170,7 +171,7 @@ is started.
 ### Files a task produces
 
 A task can hand over files as well as triples. Any IRI in its output written with the `file:///` scheme
-names a file inside the container, and `sal run` copies that file out of the container while the task is still
+names a file inside the container, and `sal build` copies that file out of the container while the task is still
 running, the way `docker cp` would:
 
 ```json
@@ -197,7 +198,7 @@ vocabulary document.
 #### Directories
 
 Some outputs are only useful as a whole directory: a Zarr store, a STAC catalog whose `href` links name the
-files beside it. A `file:///` IRI ending in a slash names a directory, and `sal run` copies the whole directory
+files beside it. A `file:///` IRI ending in a slash names a directory, and `sal build` copies the whole directory
 out of the container instead of one file:
 
 ```json
@@ -266,15 +267,15 @@ every recorded copy and `prov.jsonld` with the data product, or delete a copy's 
 Files are copied concurrently with the task writing its output, so a module must finish writing a file, or every
 file in a directory, before it prints the line that names it; one named before it is complete is copied
 incomplete. Each path is copied once: a second reference to the same path is warned about and skipped, and both
-references point at the same copy. The container is kept until every copy has finished, and the run fails if a
+references point at the same copy. The container is kept until every copy has finished, and the build fails if a
 named path does not exist, if a path without a trailing slash is a directory, if a path with one is a file, or
 if a directory holds anything other than regular files and directories, such as a symbolic link. A `file:///`
-path written as a plain string rather than an IRI is not a file reference; `sal run` warns about one and
+path written as a plain string rather than an IRI is not a file reference; `sal build` warns about one and
 discards it. After each task the log says how many files it copied.
 
 ## Importing a module's ontology
 
-Referencing a module checks its terms and lets `sal run` run its tasks, but the vocabulary itself stays outside the data
+Referencing a module checks its terms and lets `sal build` run its tasks, but the vocabulary itself stays outside the data
 product. Import the module to carry it too:
 
 ```sh
@@ -318,4 +319,4 @@ same version of the module's vocabulary without rebuilding the module to ask for
 every referenced module again, ignoring the pinned image, and re-pins the ontology each one reports. See
 [Pinned vocabularies](/sal/reference/data-layout/#pinned-vocabularies).
 
-Materialization is not pinned: `sal run` runs each task every time it is invoked, since a task's output is data rather than vocabulary.
+Materialization is not pinned: `sal build` runs each task every time it is invoked, since a task's output is data rather than vocabulary.

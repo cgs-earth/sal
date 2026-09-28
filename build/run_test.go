@@ -184,23 +184,77 @@ func installFakeModuleRunner(t *testing.T, runner *testContainerRunner) {
 }
 
 // buildAndCommitPins runs the builds that put a project in the state `sal run`
-// requires: the first build pins the vocabularies into .sal/config.jsonld,
-// committing that moves HEAD, and the second build tags the table with the
-// commit the worktree now sits at.
+// requires without running any module task: the first build pins the
+// vocabularies into .sal/config.jsonld, committing that moves HEAD, and the
+// second build tags the table with the commit the worktree now sits at.
 func buildAndCommitPins(t *testing.T, git func(args ...string)) {
 	t.Helper()
 
-	_, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	_, err := (&BuildCmd{Format: GraphExportFormatIceberg, WithoutSalModules: true}).Run()
 	require.NoError(t, err)
 	git("add", "-A")
 	git("commit", "-m", "pin vocabularies")
-	_, err = (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	_, err = (&BuildCmd{Format: GraphExportFormatIceberg, WithoutSalModules: true}).Run()
 	require.NoError(t, err)
 }
 
-// TestRunCommitsModuleOutputOnTopOfABuild is the round trip of the build and
-// run split: the builds commit the task's configuration without running
-// anything, and run invokes the module and commits what it produced as a new
+// TestBuildRunsModuleTasksByDefault checks that a build is the one operation
+// that materializes a project: it runs the task the sources declare and
+// commits what the module produced in the same snapshot as the sources.
+func TestBuildRunsModuleTasksByDefault(t *testing.T) {
+	newRunTestProject(t, runTestSource)
+	serveModuleVocabulary(t)
+	runner := &testContainerRunner{
+		ontology:  testModuleOntology,
+		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
+	}
+	installFakeModuleRunner(t, runner)
+
+	graph, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+
+	require.NoError(t, err)
+	require.Equal(t, 1, runner.runs)
+	require.True(t, graphHasTriple(graph, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
+	require.True(t, graphHasTriple(graph, "https://github.com/cgs-earth/sal-run-test-project/finder/1", testModuleNamespace+"maxRetries", "5"))
+}
+
+// TestBuildWithoutSalModulesCommitsOnlyTheTaskConfiguration checks the flag
+// that keeps a build from running anything: the task's configuration is still
+// validated against the module's ontology and committed, but the module's run
+// command is never invoked.
+func TestBuildWithoutSalModulesCommitsOnlyTheTaskConfiguration(t *testing.T) {
+	newRunTestProject(t, runTestSource)
+	serveModuleVocabulary(t)
+	runner := &testContainerRunner{
+		ontology:  testModuleOntology,
+		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
+	}
+	installFakeModuleRunner(t, runner)
+
+	graph, err := (&BuildCmd{Format: GraphExportFormatIceberg, WithoutSalModules: true}).Run()
+
+	require.NoError(t, err)
+	require.Equal(t, 0, runner.runs)
+	require.False(t, graphHasTriple(graph, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
+	require.True(t, graphHasTriple(graph, "https://github.com/cgs-earth/sal-run-test-project/finder/1", testModuleNamespace+"maxRetries", "5"))
+}
+
+// TestBuildWithoutTasksDoesNotFailForHavingNothingToRun checks that a project
+// declaring no module task builds cleanly now that every build tries to run
+// them; only `sal run` treats having nothing to run as an error.
+func TestBuildWithoutTasksDoesNotFailForHavingNothingToRun(t *testing.T) {
+	newRunTestProject(t, pinsTestSource)
+	servePinsTestVocabulary(t)
+	installFakeModuleRunner(t, &testContainerRunner{})
+
+	_, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+
+	require.NoError(t, err)
+}
+
+// TestRunCommitsModuleOutputOnTopOfABuild is the debugging round trip: the
+// builds commit the task's configuration without running anything, and run
+// invokes the module on top of them and commits what it produced as a new
 // snapshot.
 func TestRunCommitsModuleOutputOnTopOfABuild(t *testing.T) {
 	git := newRunTestProject(t, runTestSource)
@@ -233,7 +287,7 @@ func TestRunForceRunsWithADirtyWorktree(t *testing.T) {
 	}
 	installFakeModuleRunner(t, runner)
 
-	_, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	_, err := (&BuildCmd{Format: GraphExportFormatIceberg, WithoutSalModules: true}).Run()
 	require.NoError(t, err)
 
 	_, err = (&RunCmd{}).Run()

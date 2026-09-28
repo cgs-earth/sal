@@ -26,15 +26,17 @@ file that is committed is `.sal/config.jsonld`, the lockfile of pinned vocabular
 sal init                 # once, at the repo root; creates .sal/data and gitignores it
 sal validate data/       # parse and check every term against its vocabulary; commits nothing, works on a dirty worktree
 git add -A && git commit # build refuses a dirty worktree
-sal build data/          # validate, then commit new triples to .sal/data as an Iceberg snapshot
-sal run                  # only if the RDF declares SAL module tasks; materializes their output
+sal build data/          # validate, run any SAL module tasks the RDF declares, then commit new triples to .sal/data as an Iceberg snapshot
+sal build --without-sal-modules data/  # the same without running module tasks; only their configuration is committed
 sal query                # SQL shell over the `triples` view; `sal query --sparql` for SPARQL
 sal serve --with-ui      # http://localhost:8080 with SPARQL, SQL, map, and stats tabs
 ```
 
-`sal build` and `sal run` refuse to run on an uncommitted worktree so a snapshot always maps to a
-commit. `--force` skips that check for debugging only. After a build that pinned new vocabularies,
-commit `.sal/config.jsonld` before the next build.
+`sal build` refuses to run on an uncommitted worktree so a snapshot always maps to a commit.
+`--force` skips that check for debugging only. After a build that pinned new vocabularies, commit
+`.sal/config.jsonld` before the next build. `sal build` is the only operation that produces a
+snapshot; `sal run` is a debugging command that re-runs the module tasks on top of the last build and
+warns that it is one.
 
 ## Writing RDF that validates
 
@@ -80,9 +82,10 @@ class from the module's ontology plus a task base class:
 
 - Configure the task only with properties the module's own vocabulary defines; anything else on the
   instance is ignored when the task instance is serialized.
-- `sal validate` and `sal build` clone and build the module to check its terms, but never run it.
-  `sal run` runs each task and commits what it emits as a new snapshot. Files a task hands over land in
-  `.sal/data/blobs` named by SHA-256 and appear in the graph as `urn:sha256:<digest>`.
+- `sal validate` clones and builds the module to check its terms, but never runs it. `sal build` runs
+  each task and commits what it emits in the same snapshot as the sources; `--without-sal-modules`
+  commits only the task configuration. Files a task hands over land in `.sal/data/blobs` named by
+  SHA-256 and appear in the graph as `urn:sha256:<digest>`.
 - Modules are pinned by git commit in `.sal/config.jsonld`; `sal build --no-cache` picks up a new commit.
 - `sal salmodule inspect salmodule://owner/repo` prints a module's ontology without a project.
 - To write a module, use the `salmodule` skill.
