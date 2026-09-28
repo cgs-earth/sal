@@ -18,8 +18,10 @@ type sqlBinding struct {
 	column string
 }
 
-// ToSQL converts a read-only SPARQL SELECT over supported triple patterns
-// into SQL that runs against the DuckDB triples view.
+// ToSQL converts a read-only SPARQL SELECT or CONSTRUCT over supported triple
+// patterns into SQL that runs against the DuckDB triples view. A SELECT
+// projects its variables; a CONSTRUCT projects the triples its template
+// builds, in the columns ConstructColumns names.
 func ToSQL(input string) (string, error) {
 	return toSQL(input, tableSources{})
 }
@@ -168,8 +170,8 @@ func toSQL(input string, sources tableSources) (string, error) {
 		}
 		return "", fmt.Errorf("parse SPARQL query: %w", err)
 	}
-	if parsed.Type != "SELECT" {
-		return "", fmt.Errorf("only read-only SPARQL SELECT queries are supported")
+	if parsed.Type != "SELECT" && parsed.Type != "CONSTRUCT" {
+		return "", fmt.Errorf("only read-only SPARQL SELECT and CONSTRUCT queries are supported")
 	}
 	if len(parsed.GroupBy) > 0 || parsed.Having != nil || len(parsed.OrderBy) > 0 || parsed.Offset > 0 {
 		return "", fmt.Errorf("SPARQL solution modifiers are not supported yet")
@@ -194,6 +196,10 @@ func toSQL(input string, sources tableSources) (string, error) {
 		return "", err
 	}
 	where = append(where, clauses...)
+
+	if parsed.Type == "CONSTRUCT" {
+		return constructSQL(parsed, parts, from, where, bindings)
+	}
 
 	projected := parsed.Variables
 	if len(projected) == 0 {

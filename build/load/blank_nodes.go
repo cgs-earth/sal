@@ -10,11 +10,12 @@ import (
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
-// stabilizeBlankNodes replaces parser-generated blank node IDs with deterministic
+// StabilizeBlankNodes replaces parser-generated blank node IDs with deterministic
 // IDs derived from the graph structure. This is not full RDF canonicalization; it
 // only gives SAL stable row hashes without serializing through N-Quads, which
-// rejects relative IRIs that SAL accepts.
-func stabilizeBlankNodes(graph *rdflibgo.Graph) *rdflibgo.Graph {
+// rejects relative IRIs that SAL accepts. The IDs depend on the graph alone,
+// so stabilizing a graph that already is changes nothing.
+func StabilizeBlankNodes(graph *rdflibgo.Graph) *rdflibgo.Graph {
 	triples := graphTriples(graph)
 	blankIDs := graphBlankNodeIDs(triples)
 	if len(blankIDs) == 0 {

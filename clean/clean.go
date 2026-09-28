@@ -275,6 +275,12 @@ func wipe() error {
 		return err
 	}
 
+	// what the CONSTRUCT queries in sparql/ built is an artifact of the table
+	// being wiped, and the next build or `sal construct` writes it again
+	if err := os.RemoveAll(filepath.Join(filepath.Dir(configPath), "constructed")); err != nil {
+		return err
+	}
+
 	blobsDir, err := pkg.SalBlobsDir()
 	if err != nil {
 		return err

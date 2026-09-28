@@ -13,7 +13,13 @@ After [`sal init`](/sal/reference/commands/#sal-init), a project has:
 ```text
 .sal/
   data/
+sparql/
 ```
+
+`sparql/` is for the project's SPARQL queries. It is source rather than generated data, so it sits in the project root and is not gitignored.
+Every `CONSTRUCT` query in it, a file ending in `.rq` or `.sparql`, is run by [`sal build`](/sal/reference/commands/#constructed-triples), which commits the triples it constructs with the rest of the build.
+
+`.sal/constructed` holds what each of those queries constructed, one Turtle file per query named after it, written by `sal build` and by [`sal construct`](/sal/reference/commands/#sal-construct). It is gitignored, wiped before every run, and removed by `sal clean --wipe`. It is a copy for reading: the constructed triples themselves are in the table.
 
 After [`sal build`](/sal/reference/commands/#sal-build), `.sal/data` contains the built data product.
 For the main triples table, SAL writes an Apache Iceberg table under the project namespace:

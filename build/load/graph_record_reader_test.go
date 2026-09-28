@@ -314,8 +314,8 @@ func TestStabilizeBlankNodesStabilizesBlankNodeHashes(t *testing.T) {
 	first := graphWithGeometryBlankNode("first")
 	second := graphWithGeometryBlankNode("second")
 
-	canonicalFirst := stabilizeBlankNodes(first)
-	canonicalSecond := stabilizeBlankNodes(second)
+	canonicalFirst := StabilizeBlankNodes(first)
+	canonicalSecond := StabilizeBlankNodes(second)
 
 	require.Equal(t, tripleHashes(canonicalFirst), tripleHashes(canonicalSecond))
 }
@@ -328,7 +328,7 @@ func TestStabilizeBlankNodesPreservesRelativeIRIs(t *testing.T) {
 		rdflibgo.NewURIRefUnsafe("org/acme"),
 	)
 
-	stable := stabilizeBlankNodes(graph)
+	stable := StabilizeBlankNodes(graph)
 
 	require.Same(t, graph, stable)
 	require.Equal(t, tripleHashes(graph), tripleHashes(stable))
@@ -338,8 +338,8 @@ func TestStabilizeBlankNodesStabilizesNestedBlankNodeHashes(t *testing.T) {
 	first := graphWithNestedBlankNodes("location1", "address1")
 	second := graphWithNestedBlankNodes("location2", "address2")
 
-	stableFirst := stabilizeBlankNodes(first)
-	stableSecond := stabilizeBlankNodes(second)
+	stableFirst := StabilizeBlankNodes(first)
+	stableSecond := StabilizeBlankNodes(second)
 
 	require.Equal(t, tripleHashes(stableFirst), tripleHashes(stableSecond))
 }

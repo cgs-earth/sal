@@ -196,7 +196,7 @@ ASK {
   ?s schema:name "bob" .
 }`)
 
-	require.ErrorContains(t, err, "only read-only SPARQL SELECT queries are supported")
+	require.ErrorContains(t, err, "only read-only SPARQL SELECT and CONSTRUCT queries are supported")
 }
 
 func TestToSQLRejectsOptionalPatterns(t *testing.T) {

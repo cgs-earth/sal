@@ -55,8 +55,8 @@ func (cmd *ExportCmd) Run() error {
 
 	// object_geometry is rendered to WKT by ST_AsText, which needs spatial loaded.
 	err = runner.StreamSQL(ctx, salsparql.ExportSQL, true, func(row []sql.NullString) error {
-		object := objectTerm(row[2:])
-		batch.Add(subjectTerm(row[0].String), rdflibgo.NewURIRefUnsafe(row[1].String), object)
+		object := ObjectTerm(row[2:])
+		batch.Add(SubjectTerm(row[0].String), rdflibgo.NewURIRefUnsafe(row[1].String), object)
 		pending++
 		if pending >= exportBatchSize {
 			return flush()
@@ -78,18 +78,18 @@ func (cmd *ExportCmd) Run() error {
 // begin with it; the prefix alone identifies a blank node.
 const blankNodePrefix = "_:"
 
-// subjectTerm rebuilds the subject column as the IRI or blank node it names,
+// SubjectTerm rebuilds the subject column as the IRI or blank node it names,
 // writing the stored value exactly as-is (no base resolution): a relative IRI
 // in the table is exported as a relative IRI, since export mirrors what build
 // wrote rather than rewriting it.
-func subjectTerm(value string) rdflibgo.Subject {
+func SubjectTerm(value string) rdflibgo.Subject {
 	if id, ok := strings.CutPrefix(value, blankNodePrefix); ok {
 		return rdflibgo.NewBNode(id)
 	}
 	return rdflibgo.NewURIRefUnsafe(value)
 }
 
-// objectTerm rebuilds the RDF term the object columns held, writing the stored
+// ObjectTerm rebuilds the RDF term the object columns held, writing the stored
 // value exactly as-is. The object_type column carries the datatype IRI the
 // literal was built with, so a typed literal is restored with its exact
 // datatype whichever column its value landed in; a typed value column only
@@ -100,7 +100,7 @@ func subjectTerm(value string) rdflibgo.Subject {
 // in object_string carrying the "_:" prefix build stored it with, which is what
 // tells it apart from a plain string literal there; only a literal whose own
 // text starts with "_:" would be misread, and nothing SAL builds writes one.
-func objectTerm(cols []sql.NullString) rdflibgo.Term {
+func ObjectTerm(cols []sql.NullString) rdflibgo.Term {
 	iri, float, integer, byteCol, timeCol, wkt, str, datatype, language := cols[0], cols[1], cols[2], cols[3], cols[4], cols[5], cols[6], cols[7], cols[8]
 	typed := func(value string, fallback rdflibgo.URIRef) rdflibgo.Term {
 		if datatype.Valid {

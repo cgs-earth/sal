@@ -16,9 +16,10 @@ The repository must not be your home directory and must already have a Git remot
 `sal init` creates:
 
 - `.sal/data` in the project for generated data.
+- `sparql/` in the project root for the project's SPARQL queries, which is where [`sal build`](#constructed-triples) and [`sal construct`](#sal-construct) look for `CONSTRUCT` queries. An existing directory is left as it is.
 - `~/.sal/cache` for user-level cache data.
 - `~/.sal/config.jsonld` for user-level SAL configuration.
-- A `.gitignore` entry for `.sal/data`.
+- `.gitignore` entries for `.sal/data` and `.sal/constructed`.
 
 ![sal init running in a repository that already has a remote](/sal/demos/sal-init.gif)
 
@@ -288,6 +289,28 @@ is checked against its vocabulary, and commits that configuration RDF into the d
 Use it when the sources should be committed without waiting on a module, or on a machine without a docker daemon to run one on.
 A project that declares no module tasks builds the same with or without the flag.
 
+### Constructed triples
+
+Once the sources are validated, the imports merged, and the module tasks run, a build runs every SPARQL `CONSTRUCT` query in the project's `sparql/` directory over all of it and adds the triples they construct to the graph before anything is committed.
+The sources, the module output, and the constructed triples are therefore one Iceberg snapshot: they are committed together and roll back together.
+
+```sparql
+# sparql/known-by.rq
+PREFIX schema: <https://schema.org/>
+
+CONSTRUCT { ?b schema:knows ?a }
+WHERE     { ?a schema:knows ?b }
+```
+
+- A file is a query when it ends in `.rq` or `.sparql`, in `sparql/` or a directory under it. A file holding a `SELECT` is left alone.
+- A query that does not parse, or that uses syntax the [SPARQL engine](/sal/reference/sparql-engine/#construct) does not translate, fails the build before anything is fetched or run, naming the file.
+- Every query reads the build as it stood before any query ran, so a query never sees what another constructed and the order they run in does not matter.
+- The queries are answered by the same SPARQL to SQL translation `sal serve` uses, which reads a table. The build is staged in a temporary table for them to read, and the project's own table is written once, afterwards.
+- Constructed triples are not checked against the project's vocabularies, the same as module output.
+- The queries are hashed with the source files, so changing one changes the `sal.hash` the table records.
+
+The build also writes what each query constructed to `.sal/constructed`, exactly as [`sal construct`](#sal-construct) does.
+
 See [Data Layout](/sal/reference/data-layout/) for the generated table structure.
 
 The validation, every module built or run, and the Iceberg diff and write are recorded as OpenTelemetry spans when an exporter is configured; see [Telemetry](/sal/reference/telemetry/).
@@ -317,6 +340,32 @@ is an error, since there is nothing to run.
 
 Like `sal build --force`, `sal run --force` skips both checks and should only be used for test or
 debugging runs.
+
+## `sal construct`
+
+Runs every SPARQL `CONSTRUCT` query in the project's `sparql/` directory against the last build and writes what each one constructs to `.sal/constructed`:
+
+```sh
+sal construct
+```
+
+```text
+sparql/
+  known-by.rq
+  stations/nearby.rq
+.sal/
+  constructed/
+    known-by.ttl
+    stations/nearby.ttl
+```
+
+`sal construct` is a debugging command: it only reads the table, and never changes it or creates a snapshot.
+[`sal build`](#constructed-triples) runs the same queries as part of every build and is what commits the triples they construct.
+
+- `.sal/constructed` is wiped at the start of every run, so it never holds the output of a query that has since been renamed or removed.
+- The output is Turtle, written with the prefixes the query declares. It is smaller than the same graph as JSON-LD and needs no `@context` resolved to write or read it.
+- The directory is gitignored. `sal init` adds it to `.gitignore`; in a project whose `.gitignore` does not cover it, the directory is given a `.gitignore` of its own instead, so that a tracked file is never changed by a build.
+- It reads the table the last build committed, which already holds what the queries constructed then. A query whose pattern matches its own output therefore constructs more here than it did in the build, which ran it before those triples existed.
 
 ## `sal query`
 

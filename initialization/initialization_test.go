@@ -64,6 +64,47 @@ func TestInitWithoutSalModuleWritesNoModuleFiles(t *testing.T) {
 	require.NoFileExists(t, filepath.Join(dir, ".dockerignore"))
 }
 
+func TestInitGitignoresGeneratedDirectories(t *testing.T) {
+	dir := newGitRepo(t)
+	require.NoError(t, (&InitCmd{}).Run())
+
+	gitignore, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	require.NoError(t, err)
+	require.Equal(t, ".sal/data\n.sal/constructed\n", string(gitignore))
+}
+
+func TestInitAddsOnlyTheMissingGitignoreEntries(t *testing.T) {
+	dir := newGitRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules\n.sal/data"), 0644))
+
+	require.NoError(t, (&InitCmd{}).Run())
+	require.NoError(t, (&InitCmd{}).Run())
+
+	gitignore, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	require.NoError(t, err)
+	require.Equal(t, "node_modules\n.sal/data\n.sal/constructed\n", string(gitignore))
+}
+
+func TestInitCreatesSparqlDirectory(t *testing.T) {
+	dir := newGitRepo(t)
+	require.NoError(t, (&InitCmd{}).Run())
+
+	require.DirExists(t, filepath.Join(dir, "sparql"))
+}
+
+func TestInitLeavesExistingSparqlDirectoryAlone(t *testing.T) {
+	dir := newGitRepo(t)
+	query := filepath.Join(dir, "sparql", "stations.rq")
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "sparql"), 0755))
+	require.NoError(t, os.WriteFile(query, []byte("SELECT * WHERE { ?s ?p ?o }\n"), 0644))
+
+	require.NoError(t, (&InitCmd{}).Run())
+
+	content, err := os.ReadFile(query)
+	require.NoError(t, err)
+	require.Equal(t, "SELECT * WHERE { ?s ?p ?o }\n", string(content))
+}
+
 func TestInitSalModuleBareScaffoldsModuleFiles(t *testing.T) {
 	dir := newGitRepo(t)
 	require.NoError(t, (&InitCmd{SalModule: true, Bare: true}).Run())
