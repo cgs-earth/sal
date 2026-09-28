@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/cgs-earth/sal/build/validate"
+	"github.com/cgs-earth/sal/construct"
 	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/pkg/telemetry"
 	"github.com/cgs-earth/sal/salmodule"
@@ -195,7 +196,27 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 		}
 	}
 
-	hash, err := pkg.HashFilesAndContent(files, ontologyContent)
+	// the CONSTRUCT queries in sparql/ decide what a build commits as much as
+	// the RDF sources do, so they are found, and refused if sal cannot
+	// translate one, before anything is fetched or run, and hashed with the
+	// sources
+	var constructs []construct.Query
+	var projectDir string
+	hashed := files
+	if !cfg.skipCommit {
+		if projectDir, err = findSALProjectDir(os.UserHomeDir); err != nil {
+			return nil, fmt.Errorf("build: find SAL project directory: %w", err)
+		}
+		if constructs, err = construct.FindQueries(projectDir); err != nil {
+			return nil, err
+		}
+		hashed = append([]string{}, files...)
+		for _, query := range constructs {
+			hashed = append(hashed, query.Path)
+		}
+	}
+
+	hash, err := pkg.HashFilesAndContent(hashed, ontologyContent)
 	if err != nil {
 		return nil, err
 	}
@@ -345,6 +366,13 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 	// way a pinned vocabulary's is means a table built again from source still
 	// describes every copy the blob store holds, not only the ones this run made
 	if err := appendBlobProvenance(finalGraph); err != nil {
+		return nil, err
+	}
+
+	// the CONSTRUCT queries run last, over everything the build has gathered,
+	// and what they construct joins the graph before it is committed, so the
+	// sources, the module output, and the constructed triples are one snapshot
+	if finalGraph, err = MaterializeConstructs(ctx, finalGraph, projectDir, constructs); err != nil {
 		return nil, err
 	}
 

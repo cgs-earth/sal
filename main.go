@@ -13,6 +13,7 @@ import (
 	"github.com/cgs-earth/sal/build"
 	"github.com/cgs-earth/sal/clean"
 	"github.com/cgs-earth/sal/clone"
+	"github.com/cgs-earth/sal/construct"
 	"github.com/cgs-earth/sal/describe"
 	"github.com/cgs-earth/sal/edit"
 	"github.com/cgs-earth/sal/export"
@@ -38,6 +39,7 @@ type args struct {
 	Import    *importation.ImportCmd         `arg:"subcommand:import" help:"Import an external ontology so builds merge it into the data product"`
 	Build     *build.BuildCmd                `arg:"subcommand:build" help:"Build RDF data into a SAL data product in the iceberg table format"`
 	RunTasks  *build.RunCmd                  `arg:"subcommand:run" help:"Re-run the SAL module tasks the project declares on top of the last build, for debugging a module; sal build runs them by default"`
+	Construct *construct.ConstructCmd        `arg:"subcommand:construct" help:"Run the SPARQL CONSTRUCT queries in sparql/ against the last build and write what they construct to .sal/constructed, for debugging a query; sal build runs them by default"`
 	Validate  *build.ValidateCmd             `arg:"subcommand:validate" help:"Validate all RDF data is properly defined and structured"`
 	Query     *query.QueryCmd                `arg:"subcommand:query" help:"Open a SQL shell over a built SAL data product"`
 	Get       *get.GetCmd                    `arg:"subcommand:get" help:"Look up RDF resources inside a built SAL data product"`
@@ -117,6 +119,8 @@ func main() {
 			fmt.Println(err.Error())
 			exit(1)
 		}
+	case cli.Construct != nil:
+		err = cli.Construct.Run()
 	case cli.Init != nil:
 		err = cli.Init.Run()
 	case cli.Import != nil:

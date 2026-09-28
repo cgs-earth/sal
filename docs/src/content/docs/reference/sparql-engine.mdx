@@ -101,14 +101,15 @@ In a `FILTER`, the same rule applies to whichever side the variable is compared 
 
 | Keyword | Supported | Notes |
 | --- | --- | --- |
-| `SELECT` | Yes | The only supported query form. |
+| `SELECT` | Yes | |
+| `CONSTRUCT` | Yes | Projects the triples the template builds; see [CONSTRUCT](#construct). |
 | `SELECT *` | Yes | Projects every variable bound by a triple pattern. |
 | `DISTINCT` | Yes | Becomes `SELECT DISTINCT`. |
 | `PREFIX` | Yes | Prefixed names are expanded before translation; an undeclared prefix is an error. |
 | `WHERE` | Yes | Must contain at least one triple pattern. |
 | `FILTER` | Partly | Comparisons and boolean combinations only — see [Filters](#filters). |
 | `LIMIT` | Yes | Becomes `LIMIT`. |
-| `ASK`, `CONSTRUCT`, `DESCRIBE` | No | `only read-only SPARQL SELECT queries are supported`. |
+| `ASK`, `DESCRIBE` | No | `only read-only SPARQL SELECT and CONSTRUCT queries are supported`. |
 | `(LANG(?o) AS ?lang)`, `(DATATYPE(?o) AS ?type)` | Yes | The only projection expressions; see [Language tags and datatypes](#language-tags-and-datatypes). |
 | `OFFSET`, `ORDER BY`, `GROUP BY`, `HAVING` | No | `SPARQL solution modifiers are not supported yet`. |
 | Aggregates and other projection expressions, e.g. `(COUNT(?s) AS ?n)` | No | `SPARQL function "count" is not supported yet`. Count in SQL instead: `SELECT count(*) FROM triples`. |
@@ -120,6 +121,30 @@ In a `FILTER`, the same rule applies to whichever side the variable is compared 
 | `REDUCED` | Ignored | Accepted, but results are not deduplicated. Use `DISTINCT` if you need that. |
 
 Everything the engine supports is read-only. There is no SPARQL Update surface at all; the way to change a data product is to edit its RDF source files and run `sal build` again.
+
+### CONSTRUCT
+
+A `CONSTRUCT` translates to SQL whose rows are the triples it builds, in the columns [`sal export`](/sal/reference/commands/#sal-export) reads the table in: `subject`, `predicate`, and the object as `object_iri`, `object_float`, `object_integer`, `object_byte`, `object_time`, `object_wkt`, `object_string`, `object_type`, and `object_language`.
+The `WHERE` clause is translated exactly as a `SELECT`'s is, into a `solutions` CTE projecting the variables the template uses; each triple of the template is then one `SELECT` over it, combined with `UNION` since a graph holds a triple once.
+
+```sparql
+PREFIX schema: <https://schema.org/>
+CONSTRUCT { ?b schema:knows ?a }
+WHERE     { ?a schema:knows ?b }
+```
+
+| Template | Supported | Notes |
+| --- | --- | --- |
+| Variables, IRIs, and literals | Yes | An object variable keeps its datatype and language tag. A bare number is typed by its form: `1` is an `xsd:integer`, `1.5` an `xsd:decimal`, `1e5` an `xsd:double`. |
+| Blank nodes, `_:b` and `[ ... ]` | Yes | A different node for every solution, named from the values the solution binds so that the same data always constructs the same node. |
+| `CONSTRUCT WHERE { ... }` | Yes | The pattern is the template; it may hold only plain triple patterns. |
+| `LIMIT` | Yes | Bounds the solutions, not the triples built from them. |
+| A variable the `WHERE` clause does not bind | No | `CONSTRUCT template variable ?x is not bound by a supported triple pattern`. |
+
+A triple a solution makes invalid, one with a literal as its subject or anything but an IRI as its predicate, is left out rather than failing the query, as SPARQL specifies.
+A variable bound at the end of a repeated property path is constructed as an IRI.
+
+[`sal build`](/sal/reference/commands/#constructed-triples) and [`sal construct`](/sal/reference/commands/#sal-construct) read these rows back into RDF. The SPARQL shell and `sal serve` show them as a table of the columns above.
 
 ### Triple patterns
 

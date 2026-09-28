@@ -11,15 +11,15 @@ import (
 )
 
 func TestSubjectTermKeepsAnAbsoluteIRI(t *testing.T) {
-	subject := subjectTerm("http://example.org/s")
+	subject := SubjectTerm("http://example.org/s")
 	require.Equal(t, "<http://example.org/s>", subject.N3())
 }
 
 func TestSubjectTermReadsTheStoredBlankNodePrefixAsABlankNode(t *testing.T) {
-	subject := subjectTerm("_:sal_0123456789abcdef01234567")
+	subject := SubjectTerm("_:sal_0123456789abcdef01234567")
 	require.Equal(t, "_:sal_0123456789abcdef01234567", subject.N3())
 
-	suffixed := subjectTerm("_:sal_0123456789abcdef01234567_0002")
+	suffixed := SubjectTerm("_:sal_0123456789abcdef01234567_0002")
 	require.Equal(t, "_:sal_0123456789abcdef01234567_0002", suffixed.N3())
 }
 
@@ -29,7 +29,7 @@ func TestSubjectTermReadsTheStoredBlankNodePrefixAsABlankNode(t *testing.T) {
 // against some guessed base. Export mirrors whatever build actually wrote; if
 // a subject in the table is relative, the export is relative too.
 func TestSubjectTermKeepsARelativeIRIExactlyAsStored(t *testing.T) {
-	subject := subjectTerm("5a1269257241ad980dab13f371fb4b111706285a94127ec3a3f055da9378cef0")
+	subject := SubjectTerm("5a1269257241ad980dab13f371fb4b111706285a94127ec3a3f055da9378cef0")
 	require.Equal(t, "<5a1269257241ad980dab13f371fb4b111706285a94127ec3a3f055da9378cef0>", subject.N3())
 }
 
@@ -48,7 +48,7 @@ func (c objectCols) row() []sql.NullString {
 }
 
 func TestObjectTermRestoresAnIRI(t *testing.T) {
-	object := objectTerm(objectCols{iri: valid("http://example.org/o")}.row())
+	object := ObjectTerm(objectCols{iri: valid("http://example.org/o")}.row())
 	require.Equal(t, "<http://example.org/o>", object.N3())
 }
 
@@ -57,7 +57,7 @@ func TestObjectTermRestoresAnIRI(t *testing.T) {
 // object_iri column records this value as an IRI, and export writes it
 // unchanged, matching the raw table exactly (no base resolution).
 func TestObjectTermKeepsARelativeIRIExactlyAsStored(t *testing.T) {
-	object := objectTerm(objectCols{iri: valid("5a1269257241ad980dab13f371fb4b111706285a94127ec3a3f055da9378cef0")}.row())
+	object := ObjectTerm(objectCols{iri: valid("5a1269257241ad980dab13f371fb4b111706285a94127ec3a3f055da9378cef0")}.row())
 	require.Equal(t, "<5a1269257241ad980dab13f371fb4b111706285a94127ec3a3f055da9378cef0>", object.N3())
 }
 
@@ -66,31 +66,31 @@ func TestObjectTermKeepsARelativeIRIExactlyAsStored(t *testing.T) {
 // so a float typed xsd:float does not come back as the xsd:double the column
 // would otherwise imply.
 func TestObjectTermRestoresTheStoredDatatype(t *testing.T) {
-	object := objectTerm(objectCols{float: valid("42.0"), typ: valid("http://www.w3.org/2001/XMLSchema#float")}.row())
+	object := ObjectTerm(objectCols{float: valid("42.0"), typ: valid("http://www.w3.org/2001/XMLSchema#float")}.row())
 	require.Equal(t, `"42.0"^^<http://www.w3.org/2001/XMLSchema#float>`, object.N3())
 
-	object = objectTerm(objectCols{integer: valid("42"), typ: valid("http://www.w3.org/2001/XMLSchema#int")}.row())
+	object = ObjectTerm(objectCols{integer: valid("42"), typ: valid("http://www.w3.org/2001/XMLSchema#int")}.row())
 	require.Equal(t, `"42"^^<http://www.w3.org/2001/XMLSchema#int>`, object.N3())
 
-	object = objectTerm(objectCols{byteVal: valid("-8"), typ: valid("http://www.w3.org/2001/XMLSchema#byte")}.row())
+	object = ObjectTerm(objectCols{byteVal: valid("-8"), typ: valid("http://www.w3.org/2001/XMLSchema#byte")}.row())
 	require.Equal(t, `"-8"^^<http://www.w3.org/2001/XMLSchema#byte>`, object.N3())
 
-	object = objectTerm(objectCols{time: valid("2002-05-30T15:30:10Z"), typ: valid("http://www.w3.org/2001/XMLSchema#dateTime")}.row())
+	object = ObjectTerm(objectCols{time: valid("2002-05-30T15:30:10Z"), typ: valid("http://www.w3.org/2001/XMLSchema#dateTime")}.row())
 	require.Equal(t, `"2002-05-30T15:30:10Z"^^<http://www.w3.org/2001/XMLSchema#dateTime>`, object.N3())
 
 	// a typed literal stored as a string still exports with its datatype
-	object = objectTerm(objectCols{str: valid("2026-06-02"), typ: valid("http://www.w3.org/2001/XMLSchema#date")}.row())
+	object = ObjectTerm(objectCols{str: valid("2026-06-02"), typ: valid("http://www.w3.org/2001/XMLSchema#date")}.row())
 	require.Equal(t, `"2026-06-02"^^<http://www.w3.org/2001/XMLSchema#date>`, object.N3())
 }
 
 // TestObjectTermFallsBackToTheColumnDatatype covers a row written without
 // object_type, where the populated column is all there is to type it with.
 func TestObjectTermFallsBackToTheColumnDatatype(t *testing.T) {
-	object := objectTerm(objectCols{float: valid("42.0")}.row())
+	object := ObjectTerm(objectCols{float: valid("42.0")}.row())
 	require.Equal(t, `"42.0"^^<http://www.w3.org/2001/XMLSchema#double>`, object.N3())
 
 	// N3 renders xsd:integer with the bare Turtle shorthand, so check the term
-	object = objectTerm(objectCols{integer: valid("42")}.row())
+	object = ObjectTerm(objectCols{integer: valid("42")}.row())
 	literal, ok := object.(rdflibgo.Literal)
 	require.True(t, ok)
 	require.Equal(t, "42", literal.Lexical())
@@ -98,12 +98,12 @@ func TestObjectTermFallsBackToTheColumnDatatype(t *testing.T) {
 }
 
 func TestObjectTermRestoresAGeometryLiteralAsGeoSPARQLWKT(t *testing.T) {
-	object := objectTerm(objectCols{wkt: valid("POINT (1 2)"), typ: valid(wktLiteralDatatype)}.row())
+	object := ObjectTerm(objectCols{wkt: valid("POINT (1 2)"), typ: valid(wktLiteralDatatype)}.row())
 	require.Equal(t, `"POINT (1 2)"^^<http://www.opengis.net/ont/geosparql#wktLiteral>`, object.N3())
 }
 
 func TestObjectTermFallsBackToAPlainStringLiteral(t *testing.T) {
-	object := objectTerm(objectCols{str: valid("hello")}.row())
+	object := ObjectTerm(objectCols{str: valid("hello")}.row())
 	require.Equal(t, `"hello"`, object.N3())
 }
 
@@ -111,17 +111,17 @@ func TestObjectTermFallsBackToAPlainStringLiteral(t *testing.T) {
 // literal: xsd:string is what a plain literal means, and retyping an untagged
 // value as langString would write an invalid tagless literal.
 func TestObjectTermExportsStringAndTaglessLangStringAsPlainLiterals(t *testing.T) {
-	object := objectTerm(objectCols{str: valid("hello"), typ: valid("http://www.w3.org/2001/XMLSchema#string")}.row())
+	object := ObjectTerm(objectCols{str: valid("hello"), typ: valid("http://www.w3.org/2001/XMLSchema#string")}.row())
 	require.Equal(t, `"hello"`, object.N3())
 
-	object = objectTerm(objectCols{str: valid("hello"), typ: valid(rdflibgo.RDFLangString.Value())}.row())
+	object = ObjectTerm(objectCols{str: valid("hello"), typ: valid(rdflibgo.RDFLangString.Value())}.row())
 	require.Equal(t, `"hello"`, object.N3())
 }
 
 // TestObjectTermRestoresTheLanguageTag checks that the object_language column
 // turns a stored rdf:langString back into the tagged literal it was built from.
 func TestObjectTermRestoresTheLanguageTag(t *testing.T) {
-	object := objectTerm(objectCols{str: valid("hello"), typ: valid(rdflibgo.RDFLangString.Value()), lang: valid("en")}.row())
+	object := ObjectTerm(objectCols{str: valid("hello"), typ: valid(rdflibgo.RDFLangString.Value()), lang: valid("en")}.row())
 	require.Equal(t, `"hello"@en`, object.N3())
 	literal, ok := object.(rdflibgo.Literal)
 	require.True(t, ok)
@@ -134,7 +134,7 @@ func TestObjectTermRestoresTheLanguageTag(t *testing.T) {
 // a blank node object; the stored "_:" prefix is what tells it apart from a
 // plain string literal sharing that column.
 func TestObjectTermReadsTheStoredBlankNodePrefixAsABlankNode(t *testing.T) {
-	object := objectTerm(objectCols{str: valid("_:sal_0123456789abcdef01234567")}.row())
+	object := ObjectTerm(objectCols{str: valid("_:sal_0123456789abcdef01234567")}.row())
 	require.Equal(t, "_:sal_0123456789abcdef01234567", object.N3())
 }
 
@@ -145,9 +145,9 @@ func TestObjectTermReadsTheStoredBlankNodePrefixAsABlankNode(t *testing.T) {
 func TestExportedTriplesSerializeAsValidNTriples(t *testing.T) {
 	graph := rdflibgo.NewGraph()
 	graph.Add(
-		subjectTerm("http://example.org/s"),
+		SubjectTerm("http://example.org/s"),
 		rdflibgo.NewURIRefUnsafe("http://example.org/p"),
-		objectTerm(objectCols{float: valid("3.5"), typ: valid("http://www.w3.org/2001/XMLSchema#double")}.row()),
+		ObjectTerm(objectCols{float: valid("3.5"), typ: valid("http://www.w3.org/2001/XMLSchema#double")}.row()),
 	)
 
 	var out bytes.Buffer

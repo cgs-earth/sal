@@ -105,6 +105,13 @@ func (cmd *InitCmd) Run() error {
 		return err
 	}
 
+	// sparql/ holds the project's SPARQL queries; it is source, so it sits in
+	// the project root rather than under the gitignored .sal/data
+	err = os.MkdirAll(filepath.Join(cwd, "sparql"), 0755)
+	if err != nil {
+		return err
+	}
+
 	home, err = os.UserHomeDir()
 	if err != nil {
 		return err
@@ -121,28 +128,26 @@ func (cmd *InitCmd) Run() error {
 		return err
 	}
 
-	// check if .gitignore is present in the cwd, if not create it and add .sal/data to it
+	// .sal/data and .sal/constructed hold what sal generates, so both are
+	// gitignored; an entry the .gitignore already has is left as it is
 	gitignorePath := filepath.Join(cwd, ".gitignore")
-	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
-		err = os.WriteFile(gitignorePath, []byte(".sal/data\n"), 0644)
-		if err != nil {
-			return err
+	content, err := os.ReadFile(gitignorePath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	ignored := string(content)
+	for _, entry := range []string{".sal/data", ".sal/constructed"} {
+		if strings.Contains(ignored, entry) {
+			continue
 		}
-	} else if err == nil {
-		// check if .sal/data is already in .gitignore
-		content, err := os.ReadFile(gitignorePath)
-		if err != nil {
-			return err
+		if ignored != "" && !strings.HasSuffix(ignored, "\n") {
+			ignored += "\n"
 		}
-		if !strings.Contains(string(content), ".sal/data") {
-			f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_WRONLY, 0644)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = f.Close() }()
-			if _, err := f.WriteString("\n.sal/data\n"); err != nil {
-				return err
-			}
+		ignored += entry + "\n"
+	}
+	if ignored != string(content) {
+		if err := os.WriteFile(gitignorePath, []byte(ignored), 0644); err != nil {
+			return err
 		}
 	}
 

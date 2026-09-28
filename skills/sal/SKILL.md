@@ -38,6 +38,11 @@ sal serve --with-ui      # http://localhost:8080 with SPARQL, SQL, map, and stat
 snapshot; `sal run` is a debugging command that re-runs the module tasks on top of the last build and
 warns that it is one.
 
+Every SPARQL `CONSTRUCT` query in `sparql/` (a `.rq` or `.sparql` file) is run by `sal build` over
+everything the build gathered, and the triples it constructs are committed in the same snapshot.
+`sal construct` runs the same queries against the last build and only writes what they construct to
+`.sal/constructed/<query>.ttl`, which is wiped on every run; it never changes the table.
+
 ## Writing RDF that validates
 
 - Every prefixed term is checked against the vocabulary its prefix names, so `schema:nameee` is an

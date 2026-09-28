@@ -57,7 +57,7 @@ func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCo
 	ctx, span := telemetry.Start(ctx, "iceberg.write", attribute.String("sal.iceberg.warehouse", cfg.Warehouse), attribute.String("sal.iceberg.namespace", cfg.Namespace))
 	defer func() { telemetry.End(span, err) }()
 
-	graph = stabilizeBlankNodes(graph)
+	graph = StabilizeBlankNodes(graph)
 
 	arrowSchema, tableSchema, err := GetSchemas()
 	if err != nil {
