@@ -372,13 +372,21 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 	// the CONSTRUCT queries run last, over everything the build has gathered,
 	// and what they construct joins the graph before it is committed, so the
 	// sources, the module output, and the constructed triples are one snapshot
-	if finalGraph, err = MaterializeConstructs(ctx, finalGraph, projectDir, constructs); err != nil {
+	finalGraph, staged, err := MaterializeConstructs(ctx, finalGraph, projectDir, constructs, cfg.Format)
+	if err != nil {
 		return nil, err
 	}
+	// whatever happens to the build from here, the branch it was staged on
+	// does not outlive it
+	defer func() {
+		if err := staged.Discard(ctx); err != nil {
+			slog.Warn("failed to remove the staged build", "error", err)
+		}
+	}()
 
 	// every module downloaded so far, both the ones validation dereferenced for
 	// their vocabulary and the ones materialization ran, is recorded in the table
-	if err := ExportGraph(ctx, finalGraph, cfg.Format, hash, resolver.Downloaded()); err != nil {
+	if err := ExportGraph(ctx, finalGraph, cfg.Format, hash, resolver.Downloaded(), staged); err != nil {
 		return nil, err
 	}
 

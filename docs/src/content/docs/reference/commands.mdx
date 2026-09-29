@@ -305,7 +305,7 @@ WHERE     { ?a schema:knows ?b }
 - A file is a query when it ends in `.rq` or `.sparql`, in `sparql/` or a directory under it. A file holding a `SELECT` is left alone.
 - A query that does not parse, or that uses syntax the [SPARQL engine](/sal/reference/sparql-engine/#construct) does not translate, fails the build before anything is fetched or run, naming the file.
 - Every query reads the build as it stood before any query ran, so a query never sees what another constructed and the order they run in does not matter.
-- The queries are answered by the same SPARQL to SQL translation `sal serve` uses, which reads a table. The build is staged in a temporary table for them to read, and the project's own table is written once, afterwards.
+- The queries are answered by the same SPARQL to SQL translation `sal serve` uses, which reads a table. The build is staged on a branch of the project's own table, `sal-staging`, for them to read. Only the triples the table does not hold yet are written, and the build commits those same files with the constructed triples as one snapshot, so nothing is copied. The branch and its snapshot are removed before the build finishes, whether or not it succeeded.
 - Constructed triples are not checked against the project's vocabularies, the same as module output.
 - The queries are hashed with the source files, so changing one changes the `sal.hash` the table records.
 
