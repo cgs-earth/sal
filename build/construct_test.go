@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/apache/iceberg-go/table"
+	"github.com/cgs-earth/sal/build/load"
 	"github.com/cgs-earth/sal/construct"
 	"github.com/cgs-earth/sal/pkg"
-	salsparql "github.com/cgs-earth/sal/query/sparql"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
@@ -48,9 +50,9 @@ func installStagedConstructRunner(t *testing.T) *stagedConstructRunner {
 	t.Helper()
 	runner := &stagedConstructRunner{}
 	original := stageGraph
-	stageGraph = func(_ context.Context, graph *rdflibgo.Graph) (construct.Runner, func(), error) {
+	stageGraph = func(_ context.Context, graph *rdflibgo.Graph, _ GraphExportFormat) (construct.Runner, *load.StagedGraph, func(), error) {
 		runner.staged = graph
-		return runner, func() {}, nil
+		return runner, nil, func() {}, nil
 	}
 	t.Cleanup(func() { stageGraph = original })
 	return runner
@@ -161,36 +163,69 @@ func TestBuildWithoutConstructQueriesStagesNothing(t *testing.T) {
 }
 
 // installRealStaging lets a build stage its graph exactly as it does outside a
-// test, writing the temporary Iceberg table, and swaps only the DuckDB runner
+// test, on a branch of the project's table, and swaps only the DuckDB runner
 // over that table for the fake, since DuckDB's extensions cannot be
-// downloaded here. It returns the fake and the staged table's path.
-func installRealStaging(t *testing.T) (*stagedConstructRunner, *string) {
+// downloaded here. It returns the fake and what the last build staged.
+func installRealStaging(t *testing.T, runner construct.Runner) *load.StagedGraph {
 	t.Helper()
-	runner := &stagedConstructRunner{}
-	stagedPath := new(string)
+	last := &load.StagedGraph{}
 	original := stageGraph
-	stageGraph = func(ctx context.Context, graph *rdflibgo.Graph) (construct.Runner, func(), error) {
-		real, cleanup, err := original(ctx, graph)
+	stageGraph = func(ctx context.Context, graph *rdflibgo.Graph, format GraphExportFormat) (construct.Runner, *load.StagedGraph, func(), error) {
+		_, staged, cleanup, err := original(ctx, graph, format)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		*stagedPath = real.(salsparql.DuckDBRunner).TablePath
-		runner.staged = graph
-		return runner, cleanup, nil
+		*last = *staged
+		if fake, ok := runner.(*stagedConstructRunner); ok {
+			fake.staged = graph
+		}
+		return runner, staged, cleanup, nil
 	}
 	t.Cleanup(func() { stageGraph = original })
-	return runner, stagedPath
+	return last
 }
 
-// TestBuildWritesTheGraphTwiceButCommitsOneSnapshot guards the one thing the
-// staging must never do: reach the project's table. The graph is written to
-// Iceberg twice, once staged for the CONSTRUCT queries and once for real, and
-// the project's table still gains exactly one snapshot holding everything.
-func TestBuildWritesTheGraphTwiceButCommitsOneSnapshot(t *testing.T) {
+// requireNothingStagedIsLeft checks that a build left the project's table
+// with no trace of its staging: no branch, and no file in the table's data
+// directory that the table does not refer to.
+func requireNothingStagedIsLeft(t *testing.T, tbl *table.Table) {
+	t.Helper()
+	for name := range tbl.Metadata().Refs() {
+		require.NotEqual(t, load.StagingBranch, name)
+	}
+	referenced := map[string]struct{}{}
+	fs, err := tbl.FS(context.Background())
+	require.NoError(t, err)
+	for _, snapshot := range tbl.Metadata().Snapshots() {
+		manifests, err := snapshot.Manifests(fs)
+		require.NoError(t, err)
+		for _, manifest := range manifests {
+			for entry, err := range manifest.Entries(fs, false) {
+				require.NoError(t, err)
+				referenced[strings.TrimPrefix(entry.DataFile().FilePath(), "file://")] = struct{}{}
+			}
+		}
+	}
+	dataDir := filepath.Join(strings.TrimPrefix(tbl.Location(), "file://"), "data")
+	require.NoError(t, filepath.WalkDir(dataDir, func(path string, entry os.DirEntry, err error) error {
+		if err == nil && !entry.IsDir() {
+			require.Contains(t, referenced, path)
+		}
+		return err
+	}))
+}
+
+// TestBuildStagesOnABranchAndCommitsOneSnapshot guards the one thing the
+// staging must never do: move the main branch of the project's table. The
+// build is staged in the project's own table, on a branch, and the table
+// still gains exactly one snapshot holding everything, made of the data files
+// the staging wrote plus the constructed triples.
+func TestBuildStagesOnABranchAndCommitsOneSnapshot(t *testing.T) {
 	git := newRunTestProject(t, pinsTestSource)
 	servePinsTestVocabulary(t)
 	installFakeModuleRunner(t, &testContainerRunner{})
-	runner, stagedPath := installRealStaging(t)
+	runner := &stagedConstructRunner{}
+	staged := installRealStaging(t, runner)
 	commitConstructQuery(t, git, "aliases.rq", constructTestQuery)
 
 	graph, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
@@ -198,49 +233,53 @@ func TestBuildWritesTheGraphTwiceButCommitsOneSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, runner.runs)
 
-	// the staged table was written outside the project and is gone again
+	// the build was staged in the project's table, which is the only one
 	dataDir, err := pkg.SalDataDir()
 	require.NoError(t, err)
-	require.NotEmpty(t, *stagedPath)
-	require.NotContains(t, *stagedPath, dataDir)
-	require.NoDirExists(t, *stagedPath)
 	tables, err := pkg.IcebergTablePaths(dataDir)
 	require.NoError(t, err)
-	require.Len(t, tables, 1)
+	require.Equal(t, []string{staged.TablePath}, tables)
 
 	tbl, err := pkg.GetSalIcebergTable()
 	require.NoError(t, err)
 	require.Len(t, tbl.Metadata().Snapshots(), 1)
+	require.NotEqual(t, staged.SnapshotID, tbl.CurrentSnapshot().SnapshotID)
+	require.Nil(t, tbl.CurrentSnapshot().ParentSnapshotID)
 	require.Equal(t, fmt.Sprint(graph.Len()), tbl.CurrentSnapshot().Summary.Properties["added-records"])
 	require.Equal(t, fmt.Sprint(graph.Len()), tbl.CurrentSnapshot().Summary.Properties["total-records"])
+	requireNothingStagedIsLeft(t, tbl)
 	require.True(t, graphHasTriple(graph, "https://github.com/cgs-earth/sal-run-test-project/widgets/1", "https://vocab.test/things#alias", "A widget"))
 }
 
 // TestEveryBuildWithConstructQueriesAddsOneSnapshot checks the same across
 // builds: a build that changes what the queries construct adds one snapshot
-// to the table, and a build that changes nothing adds none.
+// to the table, whose parent is the snapshot of the build before it, and a
+// build that changes nothing adds none.
 func TestEveryBuildWithConstructQueriesAddsOneSnapshot(t *testing.T) {
 	git := newRunTestProject(t, pinsTestSource)
 	servePinsTestVocabulary(t)
 	installFakeModuleRunner(t, &testContainerRunner{})
-	installRealStaging(t)
+	installRealStaging(t, &stagedConstructRunner{})
 	commitConstructQuery(t, git, "aliases.rq", constructTestQuery)
-	snapshots := func() int {
+	built := func() *table.Table {
 		tbl, err := pkg.GetSalIcebergTable()
 		require.NoError(t, err)
-		return len(tbl.Metadata().Snapshots())
+		requireNothingStagedIsLeft(t, tbl)
+		return tbl
 	}
 
 	_, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
 	require.NoError(t, err)
-	require.Equal(t, 1, snapshots())
+	require.Len(t, built().Metadata().Snapshots(), 1)
+	first := built().CurrentSnapshot().SnapshotID
 
 	// the first build pinned the vocabulary into .sal/config.jsonld
 	git("add", "-A")
 	git("commit", "-m", "pin vocabularies")
 	_, err = (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
 	require.NoError(t, err)
-	require.Equal(t, 1, snapshots())
+	require.Len(t, built().Metadata().Snapshots(), 1)
+	require.Equal(t, first, built().CurrentSnapshot().SnapshotID)
 
 	cwd, err := os.Getwd()
 	require.NoError(t, err)
@@ -249,41 +288,66 @@ func TestEveryBuildWithConstructQueriesAddsOneSnapshot(t *testing.T) {
 	git("commit", "-m", "another widget")
 	graph, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
 	require.NoError(t, err)
-	require.Equal(t, 2, snapshots())
+	require.Len(t, built().Metadata().Snapshots(), 2)
+	require.Equal(t, first, *built().CurrentSnapshot().ParentSnapshotID)
+	require.Equal(t, "3", built().CurrentSnapshot().Summary.Properties["added-records"])
 	require.True(t, graphHasTriple(graph, "https://github.com/cgs-earth/sal-run-test-project/widgets/2", "https://vocab.test/things#alias", "Another widget"))
 }
 
 // TestBuildCommitsNothingWhenAConstructQueryFails checks the other half of
-// the build being atomic: the queries run before the project's table is
-// written, so a query that fails leaves no snapshot behind, not one holding
-// the sources without what should have been constructed from them.
+// the build being atomic: the queries run before the main branch of the
+// project's table is written, so a query that fails leaves no snapshot
+// behind, not one holding the sources without what should have been
+// constructed from them, and the table the staging created is gone again.
 func TestBuildCommitsNothingWhenAConstructQueryFails(t *testing.T) {
 	git := newRunTestProject(t, pinsTestSource)
 	servePinsTestVocabulary(t)
 	installFakeModuleRunner(t, &testContainerRunner{})
-	original := stageGraph
-	var stagedPath string
-	stageGraph = func(ctx context.Context, graph *rdflibgo.Graph) (construct.Runner, func(), error) {
-		real, cleanup, err := original(ctx, graph)
-		if err != nil {
-			return nil, nil, err
-		}
-		stagedPath = real.(salsparql.DuckDBRunner).TablePath
-		return failingConstructRunner{}, cleanup, nil
-	}
-	t.Cleanup(func() { stageGraph = original })
+	installRealStaging(t, failingConstructRunner{})
 	commitConstructQuery(t, git, "aliases.rq", constructTestQuery)
 
 	_, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
 
 	require.ErrorIs(t, err, os.ErrDeadlineExceeded)
 	require.ErrorContains(t, err, "aliases.rq")
-	require.NoDirExists(t, stagedPath)
 	dataDir, err := pkg.SalDataDir()
 	require.NoError(t, err)
 	tables, err := pkg.IcebergTablePaths(dataDir)
 	require.NoError(t, err)
 	require.Empty(t, tables)
+}
+
+// TestAFailedConstructQueryLeavesTheLastBuildAsItWas checks the same for a
+// project that was built before: the table keeps the snapshot of the last
+// build as its only one, and nothing the failed build staged is left in it.
+func TestAFailedConstructQueryLeavesTheLastBuildAsItWas(t *testing.T) {
+	git := newRunTestProject(t, pinsTestSource)
+	servePinsTestVocabulary(t)
+	installFakeModuleRunner(t, &testContainerRunner{})
+	_, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	require.NoError(t, err)
+	tbl, err := pkg.GetSalIcebergTable()
+	require.NoError(t, err)
+	lastBuild := tbl.CurrentSnapshot().SnapshotID
+
+	git("add", "-A")
+	git("commit", "-m", "pin vocabularies")
+	installRealStaging(t, failingConstructRunner{})
+	commitConstructQuery(t, git, "aliases.rq", constructTestQuery)
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(cwd, "data.ttl"), []byte(pinsTestSource+"\n<widgets/2> a things:Widget ;\n    things:label \"Another widget\" .\n"), 0644))
+	git("add", "-A")
+	git("commit", "-m", "another widget")
+
+	_, err = (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+
+	require.ErrorIs(t, err, os.ErrDeadlineExceeded)
+	tbl, err = pkg.GetSalIcebergTable()
+	require.NoError(t, err)
+	require.Len(t, tbl.Metadata().Snapshots(), 1)
+	require.Equal(t, lastBuild, tbl.CurrentSnapshot().SnapshotID)
+	requireNothingStagedIsLeft(t, tbl)
 }
 
 type failingConstructRunner struct{}

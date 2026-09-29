@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -47,7 +48,13 @@ type LoadConfig struct {
 }
 
 // WriteGraphToIceberg writes an RDF graph into the configured Iceberg triples table.
-func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig, customMetadata map[string]string) (err error) {
+func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig, customMetadata map[string]string) error {
+	return writeGraphToIceberg(ctx, graph, cfg, customMetadata, nil)
+}
+
+// writeGraphToIceberg is WriteGraphToIceberg for a graph that may have been
+// staged first, whose data files the commit then reuses.
+func writeGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig, customMetadata map[string]string, staged *StagedGraph) (err error) {
 	if graph == nil {
 		return fmt.Errorf("load graph: missing graph")
 	}
@@ -78,7 +85,7 @@ func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCo
 		return err
 	}
 
-	err = processGraph(ctx, graph, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize)
+	err = processGraph(ctx, graph, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, staged)
 	if err != nil {
 		return err
 	}
@@ -101,7 +108,9 @@ func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCo
 	return pkg.SetTagOfLatestSnapshot(tbl, cat)
 }
 
-// processGraph writes an RDF graph to Iceberg data files, then commits them in one snapshot.
+// processGraph writes an RDF graph to Iceberg data files, then commits them in
+// one snapshot. The data files a staged graph already wrote are committed as
+// they are, and only the triples they do not hold are written.
 func processGraph(
 	ctx context.Context,
 	graph *rdflibgo.Graph,
@@ -109,6 +118,7 @@ func processGraph(
 	tableIdent table.Identifier,
 	arrowSchema *arrow.Schema,
 	batchSize int,
+	staged *StagedGraph,
 ) error {
 	tbl, err := cat.LoadTable(ctx, tableIdent)
 	if err != nil {
@@ -125,11 +135,26 @@ func processGraph(
 	}
 	slog.Info("Applying Iceberg triple diff", "added", len(diff.toAdd), "removed", len(diff.toDrop), "unchanged", diff.unchanged)
 
-	dataFiles, rows, err := writeGraph(ctx, tbl, graph, arrowSchema, batchSize, diff.toAdd)
-	if err != nil {
-		return err
+	toWrite := diff.toAdd
+	dataFiles := staged.reusableFiles(diff.toAdd)
+	if len(dataFiles) > 0 {
+		toWrite = map[string]struct{}{}
+		for hash := range diff.toAdd {
+			if _, ok := staged.hashes[hash]; !ok {
+				toWrite[hash] = struct{}{}
+			}
+		}
+		slog.Info("Reusing the data files the build was staged in", "data_files", len(dataFiles), "triples", len(staged.hashes))
 	}
-	return commitGraphDelta(ctx, tbl, dataFiles, rows, diff.toDrop)
+	if len(toWrite) > 0 {
+		written, _, err := writeGraph(ctx, tbl, graph, arrowSchema, batchSize, toWrite)
+		if err != nil {
+			return err
+		}
+		dataFiles = append(slices.Clone(dataFiles), written...)
+	}
+	_, err = commitGraphDelta(ctx, tbl, table.MainBranch, dataFiles, int64(len(diff.toAdd)), diff.toDrop)
+	return err
 }
 
 // writeGraph writes all triples in graph to Iceberg data files without parallelism.
@@ -175,7 +200,8 @@ func appendGraph(
 	if err != nil {
 		return err
 	}
-	return commitGraphDelta(ctx, tbl, dataFiles, rows, nil)
+	_, err = commitGraphDelta(ctx, tbl, table.MainBranch, dataFiles, rows, nil)
+	return err
 }
 
 type graphTableDiff struct {
@@ -296,20 +322,21 @@ func readExistingTripleHashes(ctx context.Context, tbl *table.Table) (map[string
 	return hashes, nil
 }
 
-// commitGraphDelta commits appended data files and equality deletes in one Iceberg snapshot.
-func commitGraphDelta(ctx context.Context, tbl *table.Table, dataFiles []iceberg.DataFile, rows int64, toDrop []existingTriple) (err error) {
+// commitGraphDelta commits appended data files and equality deletes in one
+// Iceberg snapshot on a branch of the table, and returns the table as committed.
+func commitGraphDelta(ctx context.Context, tbl *table.Table, branch string, dataFiles []iceberg.DataFile, rows int64, toDrop []existingTriple) (_ *table.Table, err error) {
 	if len(dataFiles) == 0 && len(toDrop) == 0 {
-		return fmt.Errorf("no triples found")
+		return nil, fmt.Errorf("no triples found")
 	}
 	ctx, span := telemetry.Start(ctx, "iceberg.commit", attribute.Int("sal.iceberg.data_files", len(dataFiles)), attribute.Int64("sal.triples.added", rows), attribute.Int("sal.triples.removed", len(toDrop)))
 	defer func() { telemetry.End(span, err) }()
 
-	txn := tbl.NewTransaction()
+	txn := tbl.NewTransactionOnBranch(branch)
 	var deleteFiles []iceberg.DataFile
 	if len(toDrop) > 0 {
 		deleteFiles, err = writeTripleHashDeletes(ctx, txn, tbl.Schema(), toDrop)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -317,14 +344,15 @@ func commitGraphDelta(ctx context.Context, tbl *table.Table, dataFiles []iceberg
 	rowDelta.AddRows(dataFiles...)
 	rowDelta.AddDeletes(deleteFiles...)
 	if err := rowDelta.Commit(ctx); err != nil {
-		return fmt.Errorf("stage row delta: %w", err)
+		return nil, fmt.Errorf("stage row delta: %w", err)
 	}
 
-	if _, err := txn.Commit(ctx); err != nil {
-		return fmt.Errorf("commit row delta: %w", err)
+	committed, err := txn.Commit(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("commit row delta: %w", err)
 	}
-	slog.Info("Successfully committed iceberg row delta", "added", rows, "removed", len(toDrop), "data_files", len(dataFiles), "delete_files", len(deleteFiles))
-	return nil
+	slog.Info("Successfully committed iceberg row delta", "branch", branch, "added", rows, "removed", len(toDrop), "data_files", len(dataFiles), "delete_files", len(deleteFiles))
+	return committed, nil
 }
 
 func writeTripleHashDeletes(ctx context.Context, txn *table.Transaction, schema *iceberg.Schema, triples []existingTriple) ([]iceberg.DataFile, error) {

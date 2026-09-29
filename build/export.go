@@ -25,7 +25,10 @@ const (
 // Export graph takes in a rdflib format graph struct and
 // serializes it to disk in the specified format. modules are the SAL modules
 // the build downloaded, which are recorded in the Iceberg table metadata.
-func ExportGraph(ctx context.Context, graph *rdflibgo.Graph, format GraphExportFormat, hash string, modules []string) error {
+// staged is the build as MaterializeConstructs staged it in the project's
+// table, whose data files an Iceberg export commits rather than writing them
+// again; it is nil for a build that staged nothing there.
+func ExportGraph(ctx context.Context, graph *rdflibgo.Graph, format GraphExportFormat, hash string, modules []string, staged *load.StagedGraph) error {
 
 	switch format {
 	case "nq":
@@ -49,11 +52,7 @@ func ExportGraph(ctx context.Context, graph *rdflibgo.Graph, format GraphExportF
 			slog.Info("Saved built RDF data to " + fullOutPath)
 		}
 	case "iceberg":
-		dataDir, err := pkg.SalDataDir()
-		if err != nil {
-			return err
-		}
-		gitProject, err := pkg.GitProjectName()
+		cfg, err := projectLoadConfig()
 		if err != nil {
 			return err
 		}
@@ -61,21 +60,39 @@ func ExportGraph(ctx context.Context, graph *rdflibgo.Graph, format GraphExportF
 		if err != nil {
 			return err
 		}
-		err = load.WriteGraphToIceberg(ctx, graph, &load.LoadConfig{
-			BatchSize:          131072,
-			ParquetCompression: "snappy",
-			Warehouse:          dataDir,
-			Namespace:          gitProject,
-		}, properties)
+		if staged != nil {
+			err = staged.Commit(ctx, graph, properties)
+		} else {
+			err = load.WriteGraphToIceberg(ctx, graph, cfg, properties)
+		}
 		if err != nil {
 			return err
 		}
-		slog.Info("Saved built RDF data to Iceberg", "warehouse", dataDir, "namespace", gitProject)
+		slog.Info("Saved built RDF data to Iceberg", "warehouse", cfg.Warehouse, "namespace", cfg.Namespace)
 	default:
 		return fmt.Errorf("unknown output format: '%s'. Must be iceberg or nq", format)
 	}
 
 	return nil
+}
+
+// projectLoadConfig is how a build writes the project's triples table, both
+// when it stages the build there and when it commits it.
+func projectLoadConfig() (*load.LoadConfig, error) {
+	dataDir, err := pkg.SalDataDir()
+	if err != nil {
+		return nil, err
+	}
+	gitProject, err := pkg.GitProjectName()
+	if err != nil {
+		return nil, err
+	}
+	return &load.LoadConfig{
+		BatchSize:          131072,
+		ParquetCompression: "snappy",
+		Warehouse:          dataDir,
+		Namespace:          gitProject,
+	}, nil
 }
 
 // icebergTableProperties describes a build in the Iceberg table metadata. The
