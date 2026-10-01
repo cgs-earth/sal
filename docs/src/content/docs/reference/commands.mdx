@@ -30,8 +30,9 @@ Initializes the repository as a [SAL module](/sal/reference/salmodule-descriptio
 - `ontology.jsonld`, a skeleton of the document the module's `salmodule ontology` command prints: a `@context` binding the prefixes it uses and a `@graph` holding an `owl:Ontology` node followed by one `owl:Class` that is a subclass of `salmodule:Task`. The ontology node is `"@id": "."`, its `dc:title` is the git repository name, and its `dc:creator` is the configured git `user.name`; `owl:versionInfo` and every other string start blank for you to fill in.
 - A `Dockerfile` holding only a comment reminding you that the image must stream JSON-LD to standard out per the salmodule specification.
 - A `.dockerignore` holding only a comment saying it excludes files from the module container.
+- `.vscode/salmodule-ontology.schema.json`, the [JSON Schema for a SAL module ontology](/sal/reference/salmodule-json-schema/), and a `json.schemas` entry in `.vscode/settings.json` applying it to `ontology.jsonld`, so that VS Code and any other editor reading that setting flags a missing ontology node, a task class that is not a subclass of a `salmodule:` task class, a `sh:nodeKind` that is not one of SHACL's, or a constraint `sal` refuses in a `salmodule:stdoutShape` while you type. An existing `settings.json` keeps everything it has and gains only the entry; one that `sal` cannot parse as JSON, because it holds comments for instance, is left alone with a warning showing the entry to add by hand.
 
-A file that already exists is left unchanged, so the flag is safe to re-run.
+A file that already exists is left unchanged, so the flag is safe to re-run. The schema copy is the one exception, since it is `sal`'s rather than the module's: a newer `sal` rewrites it.
 
 So that the ontology starts with a worked example rather than blank fields, `sal init --salmodule` asks three questions about one task the module will offer: a unique ID with no spaces or special characters (it becomes the class's `@id` and the `@type` a project instance uses), a human readable name (`rdfs:label`), and a comment about what the task does (`rdfs:comment`). An ID with a space or punctuation is asked for again. The task class's `salmodule:taskShape` then becomes a `sh:NodeShape` targeting that class with an empty `sh:property` list, ready for the constraints on the task's configuration properties:
 
@@ -76,7 +77,7 @@ Comment describing what the task does: Fetches every station in a region and emi
 }
 ```
 
-Pass `--bare` to skip the questions. The task class is then written with every string blank and `"salmodule:taskShape": {}`, which is also what you get when standard input is not a terminal.
+Pass `--bare` to skip the questions. The task class is then written with every string blank and `"salmodule:taskShape": {}`, which is also what you get when standard input is not a terminal. The schema flags each of those blanks in the editor until it is filled in.
 
 ```sh
 sal init --salmodule --bare

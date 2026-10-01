@@ -2,6 +2,7 @@ package initialization
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/salmodule"
+	"github.com/cgs-earth/sal/specs"
 )
 
 //go:embed sal_config_example.jsonld
@@ -163,6 +165,9 @@ func (cmd *InitCmd) Run() error {
 			return err
 		}
 		if err := writeSalModuleFiles(cwd, ontology); err != nil {
+			return err
+		}
+		if err := writeEditorSchema(cwd); err != nil {
 			return err
 		}
 	}
@@ -334,5 +339,63 @@ func writeSalModuleFiles(dir string, ontology string) error {
 		}
 		slog.Info("created " + file.name)
 	}
+	return nil
+}
+
+// editorSchemaURL is where .vscode/settings.json points VS Code for the
+// schema, relative to the workspace root the settings file sits under.
+const editorSchemaURL = "./.vscode/" + specs.SalModuleOntologySchemaFile
+
+// writeEditorSchema copies the SAL module ontology JSON Schema into .vscode
+// and registers it in .vscode/settings.json for ontology.jsonld, so that an
+// editor checks the ontology against the SAL Module specification as it is
+// written. The schema copy is sal's, not the module's, so a stale copy is
+// rewritten; the settings file is the module's, so an existing one gains
+// only the json.schemas entry, and one sal cannot parse (settings.json may
+// hold comments) is left alone with a warning saying what to add by hand.
+func writeEditorSchema(dir string) error {
+	vscodeDir := filepath.Join(dir, ".vscode")
+	if err := os.MkdirAll(vscodeDir, 0755); err != nil {
+		return err
+	}
+	schemaPath := filepath.Join(vscodeDir, specs.SalModuleOntologySchemaFile)
+	if existing, err := os.ReadFile(schemaPath); err != nil && !os.IsNotExist(err) {
+		return err
+	} else if !bytes.Equal(existing, specs.SalModuleOntologySchema) {
+		if err := os.WriteFile(schemaPath, specs.SalModuleOntologySchema, 0644); err != nil {
+			return err
+		}
+		slog.Info("created .vscode/" + specs.SalModuleOntologySchemaFile)
+	}
+
+	entry := map[string]any{
+		"fileMatch": []any{"/ontology.jsonld"},
+		"url":       editorSchemaURL,
+	}
+	settingsPath := filepath.Join(vscodeDir, "settings.json")
+	settings := map[string]any{}
+	content, err := os.ReadFile(settingsPath)
+	switch {
+	case err != nil && !os.IsNotExist(err):
+		return err
+	case err == nil:
+		if strings.Contains(string(content), editorSchemaURL) {
+			return nil
+		}
+		if err := json.Unmarshal(content, &settings); err != nil {
+			slog.Warn(".vscode/settings.json could not be parsed as JSON; add the schema to it yourself", "json.schemas", entry)
+			return nil
+		}
+	}
+	schemas, _ := settings["json.schemas"].([]any)
+	settings["json.schemas"] = append(schemas, entry)
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(settingsPath, append(out, '\n'), 0644); err != nil {
+		return err
+	}
+	slog.Info("registered the schema for ontology.jsonld in .vscode/settings.json")
 	return nil
 }

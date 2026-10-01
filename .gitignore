@@ -14,3 +14,4 @@ sal-cli
 # committed, so they can never show output the CLI no longer produces.
 docs/demos/.bin/
 docs/public/demos/
+.sal/constructed
