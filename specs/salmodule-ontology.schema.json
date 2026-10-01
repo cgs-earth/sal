@@ -1,0 +1,1163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/cgs-earth/sal/main/specs/salmodule-ontology.schema.json",
+  "title": "SAL module ontology",
+  "description": "The JSON-LD document a SAL module prints in response to `salmodule ontology`, and the ontology.jsonld that `sal init --salmodule` scaffolds. It is one object with a @context binding every prefix the module uses and a @graph holding an owl:Ontology node named \".\" followed by the module's own terms: at least one owl:Class that is a subclass of a salmodule task class, the properties that configure it, and any SHACL shapes those classes carry. Relative @id values resolve against the project's salmodule://HOST/OWNER/REPO/ prefix. Nodes of a kind the schema does not describe are allowed and left unchecked.",
+  "type": "object",
+  "required": [
+    "@context",
+    "@graph"
+  ],
+  "properties": {
+    "@context": {
+      "$ref": "#/$defs/context"
+    },
+    "@graph": {
+      "$ref": "#/$defs/graph"
+    }
+  },
+  "additionalProperties": false,
+  "errorMessage": "A SAL module ontology is an object holding only @context and @graph",
+  "$defs": {
+    "context": {
+      "type": "object",
+      "description": "The prefixes the document uses. sal injects this @context into every JSON node a task writes, so any key a task emits must resolve through it too. It must bind salmodule and owl; rdfs, sh, xsd, rdf, and skos are checked against their well known IRIs when present.",
+      "required": [
+        "salmodule",
+        "owl"
+      ],
+      "properties": {
+        "salmodule": {
+          "const": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#",
+          "description": "The SAL Module ontology, which defines the task classes and shape annotations a module uses."
+        },
+        "owl": {
+          "const": "http://www.w3.org/2002/07/owl#"
+        },
+        "rdfs": {
+          "const": "http://www.w3.org/2000/01/rdf-schema#"
+        },
+        "rdf": {
+          "const": "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+        },
+        "sh": {
+          "const": "http://www.w3.org/ns/shacl#",
+          "description": "SHACL, needed as soon as a task class declares a salmodule:taskShape, salmodule:stdinShape, or salmodule:stdoutShape."
+        },
+        "xsd": {
+          "const": "http://www.w3.org/2001/XMLSchema#"
+        },
+        "skos": {
+          "const": "http://www.w3.org/2004/02/skos/core#"
+        },
+        "@version": {
+          "const": 1.1
+        },
+        "@language": {
+          "type": "string"
+        },
+        "@base": {
+          "not": {},
+          "errorMessage": "Do not set @base: sal resolves the module's relative terms against the project's salmodule:// prefix"
+        },
+        "@vocab": {
+          "not": {},
+          "errorMessage": "Do not set @vocab: a key a task emits must be an explicit prefixed term so that it resolves the same way in every project"
+        }
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/termDefinition"
+      }
+    },
+    "termDefinition": {
+      "description": "A prefix mapped to a namespace IRI, or an expanded JSON-LD term definition.",
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\S+$"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "@id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "@type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "@container": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "@list",
+                    "@set",
+                    "@index",
+                    "@language",
+                    "@id",
+                    "@type",
+                    "@graph"
+                  ]
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "@language": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "@reverse": {
+              "type": "string"
+            },
+            "@prefix": {
+              "type": "boolean"
+            },
+            "@protected": {
+              "type": "boolean"
+            },
+            "@context": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "graph": {
+      "type": "array",
+      "description": "The ontology's nodes. Exactly one is the owl:Ontology node, and at least one is an owl:Class directly subclassing salmodule:Task, salmodule:NodeProcessor, salmodule:NodeProducer, or salmodule:NodeConsumer.",
+      "minItems": 2,
+      "items": {
+        "$ref": "#/$defs/node"
+      },
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "@type"
+            ],
+            "properties": {
+              "@type": {
+                "$ref": "#/$defs/isOntology"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1,
+          "errorMessage": "@graph must hold exactly one node typed owl:Ontology, named \"@id\": \".\""
+        },
+        {
+          "contains": {
+            "$ref": "#/$defs/declaresTaskClass"
+          },
+          "errorMessage": "@graph must hold at least one owl:Class whose rdfs:subClassOf is salmodule:Task, salmodule:NodeProcessor, salmodule:NodeProducer, or salmodule:NodeConsumer"
+        }
+      ]
+    },
+    "isOntology": {
+      "anyOf": [
+        {
+          "const": "owl:Ontology"
+        },
+        {
+          "type": "array",
+          "contains": {
+            "const": "owl:Ontology"
+          }
+        }
+      ]
+    },
+    "isClass": {
+      "anyOf": [
+        {
+          "const": "owl:Class"
+        },
+        {
+          "type": "array",
+          "contains": {
+            "const": "owl:Class"
+          }
+        }
+      ]
+    },
+    "isProperty": {
+      "anyOf": [
+        {
+          "enum": [
+            "owl:DatatypeProperty",
+            "owl:ObjectProperty",
+            "owl:AnnotationProperty",
+            "rdf:Property"
+          ]
+        },
+        {
+          "type": "array",
+          "contains": {
+            "enum": [
+              "owl:DatatypeProperty",
+              "owl:ObjectProperty",
+              "owl:AnnotationProperty",
+              "rdf:Property"
+            ]
+          }
+        }
+      ]
+    },
+    "isNodeShape": {
+      "anyOf": [
+        {
+          "const": "sh:NodeShape"
+        },
+        {
+          "type": "array",
+          "contains": {
+            "const": "sh:NodeShape"
+          }
+        }
+      ]
+    },
+    "isPropertyShape": {
+      "anyOf": [
+        {
+          "const": "sh:PropertyShape"
+        },
+        {
+          "type": "array",
+          "contains": {
+            "const": "sh:PropertyShape"
+          }
+        }
+      ]
+    },
+    "isDatatype": {
+      "anyOf": [
+        {
+          "const": "rdfs:Datatype"
+        },
+        {
+          "type": "array",
+          "contains": {
+            "const": "rdfs:Datatype"
+          }
+        }
+      ]
+    },
+    "taskBaseClass": {
+      "type": "object",
+      "required": [
+        "@id"
+      ],
+      "properties": {
+        "@id": {
+          "enum": [
+            "salmodule:Task",
+            "salmodule:NodeProcessor",
+            "salmodule:NodeProducer",
+            "salmodule:NodeConsumer"
+          ]
+        }
+      }
+    },
+    "declaresTaskClass": {
+      "type": "object",
+      "required": [
+        "@type",
+        "rdfs:subClassOf"
+      ],
+      "properties": {
+        "@type": {
+          "$ref": "#/$defs/isClass"
+        },
+        "rdfs:subClassOf": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/taskBaseClass"
+            },
+            {
+              "type": "array",
+              "contains": {
+                "$ref": "#/$defs/taskBaseClass"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": [
+        "@id"
+      ],
+      "properties": {
+        "@id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/term"
+            },
+            {
+              "const": "."
+            }
+          ]
+        },
+        "@type": {
+          "$ref": "#/$defs/typeValue"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "@type"
+            ],
+            "properties": {
+              "@type": {
+                "$ref": "#/$defs/isOntology"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/ontologyNode"
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "@type"
+            ],
+            "properties": {
+              "@type": {
+                "$ref": "#/$defs/isClass"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/classNode"
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "@type"
+            ],
+            "properties": {
+              "@type": {
+                "$ref": "#/$defs/isProperty"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/propertyNode"
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "@type"
+            ],
+            "properties": {
+              "@type": {
+                "$ref": "#/$defs/isNodeShape"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/nodeShape"
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "@type"
+            ],
+            "properties": {
+              "@type": {
+                "$ref": "#/$defs/isPropertyShape"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/propertyShape"
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "@type"
+            ],
+            "properties": {
+              "@type": {
+                "$ref": "#/$defs/isDatatype"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/datatypeNode"
+          }
+        }
+      ]
+    },
+    "ontologyNode": {
+      "type": "object",
+      "description": "The node describing the module itself. Its @id is \".\", which resolves to the module's own salmodule:// namespace.",
+      "required": [
+        "@id",
+        "@type"
+      ],
+      "properties": {
+        "@id": {
+          "const": ".",
+          "description": "Always \".\": the ontology is the module's namespace itself.",
+          "errorMessage": "The owl:Ontology node is named \"@id\": \".\""
+        },
+        "@type": {
+          "$ref": "#/$defs/isOntology"
+        },
+        "dc:title": {
+          "$ref": "#/$defs/literal"
+        },
+        "dc:creator": {
+          "$ref": "#/$defs/literal"
+        },
+        "dc:description": {
+          "$ref": "#/$defs/literal"
+        },
+        "dc:date": {
+          "$ref": "#/$defs/literal"
+        },
+        "dcterms:title": {
+          "$ref": "#/$defs/literal"
+        },
+        "dcterms:creator": {
+          "$ref": "#/$defs/literal"
+        },
+        "dcterms:description": {
+          "$ref": "#/$defs/literal"
+        },
+        "rdfs:label": {
+          "$ref": "#/$defs/literal"
+        },
+        "rdfs:comment": {
+          "$ref": "#/$defs/literal"
+        },
+        "owl:versionInfo": {
+          "$ref": "#/$defs/literal"
+        },
+        "owl:imports": {
+          "$ref": "#/$defs/iriReferences"
+        },
+        "salmodule:taskInstanceEnvVar": {
+          "type": "string",
+          "description": "The environment variable sal passes the task instance in when it invokes `salmodule run`. Defaults to SALMODULE_TASK_INSTANCE when the ontology does not declare it.",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "patternErrorMessage": "An environment variable name holds only letters, digits, and underscores and does not start with a digit"
+        },
+        "salmodule:baseCommand": {
+          "not": {},
+          "errorMessage": "salmodule:baseCommand is declared by the SAL Module ontology itself; sal always invokes a module as `salmodule ontology` and `salmodule run`"
+        },
+        "salmodule:ontologyCommand": {
+          "not": {},
+          "errorMessage": "salmodule:ontologyCommand is declared by the SAL Module ontology itself; sal always invokes a module as `salmodule ontology`"
+        },
+        "salmodule:runCommand": {
+          "not": {},
+          "errorMessage": "salmodule:runCommand is declared by the SAL Module ontology itself; sal always invokes a module as `salmodule run`"
+        },
+        "salmodule:protocolScheme": {
+          "not": {},
+          "errorMessage": "salmodule:protocolScheme is declared by the SAL Module ontology itself"
+        }
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/propertyKey"
+      }
+    },
+    "classNode": {
+      "type": "object",
+      "description": "An owl:Class the module declares. A class whose rdfs:subClassOf is a salmodule task class, directly or through another class of this ontology, is a task a project can configure and run; its salmodule:taskShape, salmodule:stdinShape, and salmodule:stdoutShape describe the task instance, what it reads, and what it writes.",
+      "required": [
+        "@id"
+      ],
+      "properties": {
+        "@id": {
+          "$ref": "#/$defs/term"
+        },
+        "@type": {
+          "$ref": "#/$defs/isClass"
+        },
+        "rdfs:label": {
+          "$ref": "#/$defs/literal"
+        },
+        "rdfs:comment": {
+          "$ref": "#/$defs/literal"
+        },
+        "rdfs:subClassOf": {
+          "$ref": "#/$defs/iriReferences",
+          "description": "The class this one specializes. A task class names salmodule:Task, salmodule:NodeProcessor, salmodule:NodeProducer, salmodule:NodeConsumer, or another task class of this ontology.",
+          "errorMessage": "rdfs:subClassOf is an IRI reference, written {\"@id\": \"salmodule:Task\"}; a bare string is a literal that sal ignores"
+        },
+        "rdfs:seeAlso": {
+          "$ref": "#/$defs/iriReferences"
+        },
+        "owl:equivalentClass": {},
+        "owl:disjointWith": {
+          "$ref": "#/$defs/iriReferences"
+        },
+        "salmodule:taskShape": {
+          "$ref": "#/$defs/shapeValues",
+          "description": "The sh:NodeShape a task instance of this class must conform to: the configuration properties a project sets on the instance and their constraints. Usually targets this class with sh:targetClass."
+        },
+        "salmodule:stdinShape": {
+          "$ref": "#/$defs/shapeValues",
+          "description": "The sh:NodeShape of each newline delimited JSON node the task reads from stdin. Declaring it makes the class a salmodule:NodeConsumer, or with stdoutShape a salmodule:NodeProcessor."
+        },
+        "salmodule:stdoutShape": {
+          "$ref": "#/$defs/stdoutShapeValues",
+          "description": "The sh:NodeShape of each newline delimited JSON node the task writes to stdout. sal enforces it line by line as the task runs, with the ontology's @context injected first, and the first violation stops the container. It may use any SHACL Core constraint except sh:languageIn, sh:uniqueLang, sh:disjoint, sh:qualifiedValueShapesDisjoint, and sh:sparql."
+        },
+        "salmodule:taskInstanceEnvVar": {
+          "not": {},
+          "errorMessage": "salmodule:taskInstanceEnvVar belongs on the owl:Ontology node, not on a class"
+        }
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/propertyKey"
+      }
+    },
+    "propertyNode": {
+      "type": "object",
+      "description": "A property the module declares, usually one that configures a task instance. A property the ontology does not declare never reaches the task, so declare every configuration key here, ideally with rdfs:domain naming the task class and rdfs:range naming the datatype or class of its values.",
+      "required": [
+        "@id"
+      ],
+      "properties": {
+        "@id": {
+          "$ref": "#/$defs/term"
+        },
+        "@type": {
+          "$ref": "#/$defs/isProperty"
+        },
+        "rdfs:label": {
+          "$ref": "#/$defs/literal"
+        },
+        "rdfs:comment": {
+          "$ref": "#/$defs/literal"
+        },
+        "rdfs:domain": {
+          "$ref": "#/$defs/iriReferences",
+          "errorMessage": "rdfs:domain is an IRI reference, written {\"@id\": \"MyTask\"}"
+        },
+        "rdfs:range": {
+          "$ref": "#/$defs/iriReferences",
+          "errorMessage": "rdfs:range is an IRI reference, written {\"@id\": \"xsd:integer\"}"
+        },
+        "rdfs:subPropertyOf": {
+          "$ref": "#/$defs/iriReferences"
+        },
+        "rdfs:seeAlso": {
+          "$ref": "#/$defs/iriReferences"
+        },
+        "owl:inverseOf": {
+          "$ref": "#/$defs/iriReferences"
+        }
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/propertyKey"
+      }
+    },
+    "datatypeNode": {
+      "type": "object",
+      "description": "An rdfs:Datatype the module declares for literals it reads or writes.",
+      "required": [
+        "@id"
+      ],
+      "properties": {
+        "@id": {
+          "$ref": "#/$defs/term"
+        },
+        "@type": {
+          "$ref": "#/$defs/isDatatype"
+        },
+        "rdfs:label": {
+          "$ref": "#/$defs/literal"
+        },
+        "rdfs:comment": {
+          "$ref": "#/$defs/literal"
+        }
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/propertyKey"
+      }
+    },
+    "shapeValues": {
+      "description": "One shape or several: each written inline as a sh:NodeShape, or referencing a sh:NodeShape node elsewhere in @graph by its @id alone.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/shapeValue"
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/shapeValue"
+          }
+        }
+      ]
+    },
+    "shapeValue": {
+      "type": "object",
+      "if": {
+        "required": [
+          "@type"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/nodeShape"
+      },
+      "else": {
+        "required": [
+          "@id"
+        ],
+        "maxProperties": 1,
+        "properties": {
+          "@id": {
+            "$ref": "#/$defs/term"
+          }
+        },
+        "errorMessage": "A shape is either written inline with \"@type\": \"sh:NodeShape\", or references a sh:NodeShape node in @graph by its \"@id\" alone"
+      }
+    },
+    "stdoutShapeValues": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/stdoutShapeValue"
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/stdoutShapeValue"
+          }
+        }
+      ]
+    },
+    "stdoutShapeValue": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/shapeValue"
+        },
+        {
+          "$ref": "#/$defs/supportedOnStdout"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "sh:property": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/supportedOnStdout"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/supportedOnStdout"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "supportedOnStdout": {
+      "type": "object",
+      "description": "The SHACL constraint parameters sal refuses in a salmodule:stdoutShape. A shape using one fails when the task is run, so it is flagged here instead. Only the shape and the property shapes directly under its sh:property are checked.",
+      "properties": {
+        "sh:languageIn": {
+          "not": {},
+          "errorMessage": "sal does not support sh:languageIn in a salmodule:stdoutShape"
+        },
+        "sh:uniqueLang": {
+          "not": {},
+          "errorMessage": "sal does not support sh:uniqueLang in a salmodule:stdoutShape"
+        },
+        "sh:disjoint": {
+          "not": {},
+          "errorMessage": "sal does not support sh:disjoint in a salmodule:stdoutShape"
+        },
+        "sh:qualifiedValueShapesDisjoint": {
+          "not": {},
+          "errorMessage": "sal does not support sh:qualifiedValueShapesDisjoint in a salmodule:stdoutShape"
+        },
+        "sh:sparql": {
+          "not": {},
+          "errorMessage": "sal does not support sh:sparql in a salmodule:stdoutShape"
+        }
+      }
+    },
+    "nodeShape": {
+      "type": "object",
+      "description": "A SHACL node shape: what it targets, the property shapes it holds, and any constraints on the node itself.",
+      "required": [
+        "@type"
+      ],
+      "properties": {
+        "@id": {
+          "$ref": "#/$defs/term"
+        },
+        "@type": {
+          "$ref": "#/$defs/isNodeShape",
+          "errorMessage": "A node shape is typed sh:NodeShape"
+        },
+        "sh:targetClass": {
+          "$ref": "#/$defs/iriReferences",
+          "description": "The class whose instances the shape applies to: the task class for a taskShape, or the @type of the nodes a task reads or writes for a stdinShape or stdoutShape.",
+          "errorMessage": "sh:targetClass is an IRI reference, written {\"@id\": \"schema:Place\"}"
+        },
+        "sh:targetNode": {
+          "$ref": "#/$defs/iriReferences"
+        },
+        "sh:targetSubjectsOf": {
+          "$ref": "#/$defs/iriReferences"
+        },
+        "sh:targetObjectsOf": {
+          "$ref": "#/$defs/iriReferences"
+        },
+        "sh:property": {
+          "description": "The property shapes of the node, each constraining one sh:path.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/propertyShapeValue"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/propertyShapeValue"
+              }
+            }
+          ]
+        },
+        "sh:closed": {
+          "type": "boolean"
+        },
+        "sh:ignoredProperties": {
+          "$ref": "#/$defs/rdfList"
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/shapeConstraints"
+        }
+      ],
+      "propertyNames": {
+        "$ref": "#/$defs/shapeKey"
+      }
+    },
+    "propertyShapeValue": {
+      "type": "object",
+      "if": {
+        "required": [
+          "sh:path"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/propertyShape"
+      },
+      "else": {
+        "required": [
+          "@id"
+        ],
+        "maxProperties": 1,
+        "properties": {
+          "@id": {
+            "$ref": "#/$defs/term"
+          }
+        },
+        "errorMessage": "A property shape is either written inline with an sh:path, or references a sh:PropertyShape node in @graph by its \"@id\" alone"
+      }
+    },
+    "propertyShape": {
+      "type": "object",
+      "description": "A SHACL property shape: the constraints on the values of one property of the node.",
+      "required": [
+        "sh:path"
+      ],
+      "properties": {
+        "@id": {
+          "$ref": "#/$defs/term"
+        },
+        "@type": {
+          "$ref": "#/$defs/isPropertyShape"
+        },
+        "sh:path": {
+          "$ref": "#/$defs/iriReference",
+          "description": "The property the shape constrains, written {\"@id\": \"schema:name\"}. The reference may carry the property's own declaration inline, such as its @type, rdfs:domain, and rdfs:range.",
+          "errorMessage": "sh:path is an IRI reference, written {\"@id\": \"schema:name\"}"
+        },
+        "sh:minCount": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "sh:maxCount": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "sh:name": {
+          "$ref": "#/$defs/literal"
+        },
+        "sh:description": {
+          "$ref": "#/$defs/literal"
+        },
+        "sh:order": {
+          "$ref": "#/$defs/numericLiteral"
+        },
+        "sh:group": {
+          "$ref": "#/$defs/iriReference"
+        },
+        "sh:defaultValue": {},
+        "sh:equals": {
+          "$ref": "#/$defs/iriReference"
+        },
+        "sh:disjoint": {
+          "$ref": "#/$defs/iriReference"
+        },
+        "sh:lessThan": {
+          "$ref": "#/$defs/iriReference"
+        },
+        "sh:lessThanOrEquals": {
+          "$ref": "#/$defs/iriReference"
+        },
+        "sh:uniqueLang": {
+          "type": "boolean"
+        },
+        "sh:languageIn": {
+          "$ref": "#/$defs/rdfList"
+        },
+        "sh:qualifiedValueShape": {
+          "$ref": "#/$defs/shapeValue"
+        },
+        "sh:qualifiedMinCount": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "sh:qualifiedMaxCount": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "sh:qualifiedValueShapesDisjoint": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/shapeConstraints"
+        }
+      ],
+      "propertyNames": {
+        "$ref": "#/$defs/shapeKey"
+      }
+    },
+    "shapeConstraints": {
+      "description": "The SHACL Core constraint parameters either kind of shape may carry.",
+      "type": "object",
+      "properties": {
+        "sh:class": {
+          "$ref": "#/$defs/iriReferences",
+          "errorMessage": "sh:class is an IRI reference, written {\"@id\": \"schema:Place\"}"
+        },
+        "sh:datatype": {
+          "$ref": "#/$defs/iriReference",
+          "errorMessage": "sh:datatype is an IRI reference, written {\"@id\": \"xsd:string\"}"
+        },
+        "sh:nodeKind": {
+          "type": "object",
+          "required": [
+            "@id"
+          ],
+          "properties": {
+            "@id": {
+              "enum": [
+                "sh:IRI",
+                "sh:BlankNode",
+                "sh:Literal",
+                "sh:BlankNodeOrIRI",
+                "sh:BlankNodeOrLiteral",
+                "sh:IRIOrLiteral"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "errorMessage": "sh:nodeKind is one of sh:IRI, sh:BlankNode, sh:Literal, sh:BlankNodeOrIRI, sh:BlankNodeOrLiteral, or sh:IRIOrLiteral, written {\"@id\": \"sh:IRI\"}"
+        },
+        "sh:minExclusive": {
+          "$ref": "#/$defs/numericLiteral"
+        },
+        "sh:minInclusive": {
+          "$ref": "#/$defs/numericLiteral"
+        },
+        "sh:maxExclusive": {
+          "$ref": "#/$defs/numericLiteral"
+        },
+        "sh:maxInclusive": {
+          "$ref": "#/$defs/numericLiteral"
+        },
+        "sh:minLength": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "sh:maxLength": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "sh:pattern": {
+          "type": "string"
+        },
+        "sh:flags": {
+          "type": "string"
+        },
+        "sh:in": {
+          "$ref": "#/$defs/rdfList",
+          "description": "The allowed values, as an RDF list: {\"@list\": [...]}."
+        },
+        "sh:hasValue": {
+          "$ref": "#/$defs/valueOrReference"
+        },
+        "sh:node": {
+          "$ref": "#/$defs/shapeValues"
+        },
+        "sh:not": {
+          "$ref": "#/$defs/shapeValue"
+        },
+        "sh:and": {
+          "$ref": "#/$defs/shapeList"
+        },
+        "sh:or": {
+          "$ref": "#/$defs/shapeList"
+        },
+        "sh:xone": {
+          "$ref": "#/$defs/shapeList"
+        },
+        "sh:message": {
+          "$ref": "#/$defs/literal",
+          "description": "What sal reports when the constraint is violated."
+        },
+        "sh:severity": {
+          "type": "object",
+          "required": [
+            "@id"
+          ],
+          "properties": {
+            "@id": {
+              "enum": [
+                "sh:Info",
+                "sh:Warning",
+                "sh:Violation"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "errorMessage": "sh:severity is sh:Info, sh:Warning, or sh:Violation, written {\"@id\": \"sh:Warning\"}"
+        },
+        "sh:deactivated": {
+          "type": "boolean"
+        },
+        "sh:sparql": {},
+        "rdfs:label": {
+          "$ref": "#/$defs/literal"
+        },
+        "rdfs:comment": {
+          "$ref": "#/$defs/literal"
+        }
+      }
+    },
+    "shapeList": {
+      "type": "object",
+      "required": [
+        "@list"
+      ],
+      "properties": {
+        "@list": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/shapeValue"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "errorMessage": "sh:and, sh:or, and sh:xone take an RDF list of shapes: {\"@list\": [ ... ]}"
+    },
+    "rdfList": {
+      "type": "object",
+      "description": "An RDF list, written {\"@list\": [...]}. A plain JSON array would be a set of values rather than a list.",
+      "required": [
+        "@list"
+      ],
+      "properties": {
+        "@list": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/valueOrReference"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "errorMessage": "An RDF list is written {\"@list\": [ ... ]}; a plain array is a set of values, not a list"
+    },
+    "typeValue": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/term"
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/term"
+          }
+        }
+      ]
+    },
+    "term": {
+      "type": "string",
+      "description": "A relative term of this module, such as FetchStations, which resolves against the project's salmodule:// prefix, or a prefixed or absolute IRI such as schema:Place.",
+      "minLength": 1,
+      "pattern": "^([A-Za-z_][A-Za-z0-9_.-]*|[A-Za-z][A-Za-z0-9+.-]*:\\S+)$",
+      "patternErrorMessage": "A term is a relative name with no spaces or punctuation, such as FetchStations, or a prefixed or absolute IRI such as schema:Place"
+    },
+    "propertyKey": {
+      "type": "string",
+      "pattern": "^(@[a-z]+|[A-Za-z][A-Za-z0-9_.-]*:[^\\s:]*|[A-Za-z_][A-Za-z0-9_.-]*)$",
+      "patternErrorMessage": "A key is a JSON-LD keyword such as @id, a prefixed term such as sh:path, or a relative term of this module"
+    },
+    "iriReference": {
+      "type": "object",
+      "description": "A reference to a node by IRI, written {\"@id\": \"...\"}. Further keys describe that node inline.",
+      "required": [
+        "@id"
+      ],
+      "properties": {
+        "@id": {
+          "$ref": "#/$defs/term"
+        }
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/propertyKey"
+      }
+    },
+    "iriReferences": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/iriReference"
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/iriReference"
+          }
+        }
+      ]
+    },
+    "valueObject": {
+      "type": "object",
+      "description": "A typed or language tagged literal.",
+      "required": [
+        "@value"
+      ],
+      "properties": {
+        "@value": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "@type": {
+          "$ref": "#/$defs/term"
+        },
+        "@language": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "literal": {
+      "description": "A string, a typed or language tagged literal object, or several of either.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/valueObject"
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/valueObject"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "nonNegativeInteger": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "$ref": "#/$defs/valueObject"
+        }
+      ],
+      "errorMessage": "A count is a non-negative integer"
+    },
+    "numericLiteral": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/valueObject"
+        }
+      ]
+    },
+    "valueOrReference": {
+      "anyOf": [
+        {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        {
+          "$ref": "#/$defs/valueObject"
+        },
+        {
+          "$ref": "#/$defs/iriReference"
+        }
+      ]
+    },
+    "shapeKey": {
+      "type": "string",
+      "pattern": "^(@[a-z]+|[A-Za-z][A-Za-z0-9_.-]*:[^\\s:]*)$",
+      "patternErrorMessage": "A key in a shape is a JSON-LD keyword such as @id or a prefixed term such as sh:path"
+    }
+  }
+}

@@ -1,6 +1,7 @@
 package initialization
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -9,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/cgs-earth/sal/salmodule"
+	"github.com/cgs-earth/sal/specs"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/stretchr/testify/require"
 )
 
@@ -62,6 +65,86 @@ func TestInitWithoutSalModuleWritesNoModuleFiles(t *testing.T) {
 	require.NoFileExists(t, filepath.Join(dir, "ontology.jsonld"))
 	require.NoFileExists(t, filepath.Join(dir, "Dockerfile"))
 	require.NoFileExists(t, filepath.Join(dir, ".dockerignore"))
+	require.NoDirExists(t, filepath.Join(dir, ".vscode"))
+}
+
+// readSettings parses the .vscode/settings.json init wrote into dir.
+func readSettings(t *testing.T, dir string) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(dir, ".vscode", "settings.json"))
+	require.NoError(t, err)
+	var settings map[string]any
+	require.NoError(t, json.Unmarshal(raw, &settings))
+	return settings
+}
+
+// schemaEntry is the json.schemas entry init registers for ontology.jsonld.
+var schemaEntry = map[string]any{
+	"fileMatch": []any{"/ontology.jsonld"},
+	"url":       "./.vscode/salmodule-ontology.schema.json",
+}
+
+func TestInitSalModuleWritesTheOntologySchemaForTheEditor(t *testing.T) {
+	dir := newGitRepo(t)
+	require.NoError(t, (&InitCmd{SalModule: true, Bare: true}).Run())
+
+	schema, err := os.ReadFile(filepath.Join(dir, ".vscode", "salmodule-ontology.schema.json"))
+	require.NoError(t, err)
+	require.Equal(t, specs.SalModuleOntologySchema, schema)
+	require.Equal(t, map[string]any{"json.schemas": []any{schemaEntry}}, readSettings(t, dir))
+}
+
+func TestInitSalModuleAddsTheSchemaToExistingEditorSettings(t *testing.T) {
+	dir := newGitRepo(t)
+	require.NoError(t, os.Mkdir(filepath.Join(dir, ".vscode"), 0755))
+	existing := `{"editor.tabSize": 2, "json.schemas": [{"fileMatch": ["/package.json"], "url": "https://json.schemastore.org/package.json"}]}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".vscode", "settings.json"), []byte(existing), 0644))
+
+	require.NoError(t, (&InitCmd{SalModule: true, Bare: true}).Run())
+
+	require.Equal(t, map[string]any{
+		"editor.tabSize": float64(2),
+		"json.schemas": []any{
+			map[string]any{"fileMatch": []any{"/package.json"}, "url": "https://json.schemastore.org/package.json"},
+			schemaEntry,
+		},
+	}, readSettings(t, dir))
+}
+
+func TestInitSalModuleRegistersTheSchemaOnlyOnce(t *testing.T) {
+	dir := newGitRepo(t)
+	require.NoError(t, (&InitCmd{SalModule: true, Bare: true}).Run())
+	require.NoError(t, (&InitCmd{SalModule: true, Bare: true}).Run())
+
+	require.Equal(t, map[string]any{"json.schemas": []any{schemaEntry}}, readSettings(t, dir))
+}
+
+func TestInitSalModuleRewritesAStaleSchemaCopy(t *testing.T) {
+	dir := newGitRepo(t)
+	schemaPath := filepath.Join(dir, ".vscode", "salmodule-ontology.schema.json")
+	require.NoError(t, os.Mkdir(filepath.Join(dir, ".vscode"), 0755))
+	require.NoError(t, os.WriteFile(schemaPath, []byte("{}"), 0644))
+
+	require.NoError(t, (&InitCmd{SalModule: true, Bare: true}).Run())
+
+	schema, err := os.ReadFile(schemaPath)
+	require.NoError(t, err)
+	require.Equal(t, specs.SalModuleOntologySchema, schema)
+}
+
+func TestInitSalModuleLeavesUnparseableEditorSettingsAlone(t *testing.T) {
+	dir := newGitRepo(t)
+	settingsPath := filepath.Join(dir, ".vscode", "settings.json")
+	existing := "{\n  // comments are allowed in settings.json\n  \"editor.tabSize\": 2\n}\n"
+	require.NoError(t, os.Mkdir(filepath.Join(dir, ".vscode"), 0755))
+	require.NoError(t, os.WriteFile(settingsPath, []byte(existing), 0644))
+
+	require.NoError(t, (&InitCmd{SalModule: true, Bare: true}).Run())
+
+	content, err := os.ReadFile(settingsPath)
+	require.NoError(t, err)
+	require.Equal(t, existing, string(content))
+	require.FileExists(t, filepath.Join(dir, ".vscode", "salmodule-ontology.schema.json"))
 }
 
 func TestInitGitignoresGeneratedDirectories(t *testing.T) {
@@ -215,4 +298,39 @@ func TestInitSalModuleLeavesExistingFilesAlone(t *testing.T) {
 	require.Equal(t, existing, string(dockerfile))
 	require.FileExists(t, filepath.Join(dir, "ontology.jsonld"))
 	require.FileExists(t, filepath.Join(dir, ".dockerignore"))
+}
+
+// validateAgainstSchema checks the ontology.jsonld init wrote into dir against
+// the JSON Schema it also wrote, which is how an editor will check it.
+func validateAgainstSchema(t *testing.T, dir string) error {
+	t.Helper()
+	schemaDocument, err := jsonschema.UnmarshalJSON(bytes.NewReader(specs.SalModuleOntologySchema))
+	require.NoError(t, err)
+	compiler := jsonschema.NewCompiler()
+	require.NoError(t, compiler.AddResource(specs.SalModuleOntologySchemaFile, schemaDocument))
+	schema, err := compiler.Compile(specs.SalModuleOntologySchemaFile)
+	require.NoError(t, err)
+	raw, err := os.ReadFile(filepath.Join(dir, "ontology.jsonld"))
+	require.NoError(t, err)
+	ontology, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	require.NoError(t, err)
+	return schema.Validate(ontology)
+}
+
+func TestInitSalModuleSampleTaskConformsToTheSchema(t *testing.T) {
+	dir := newGitRepo(t)
+	answerPrompts(t, "FetchStations", "Fetch weather stations", "Fetches every station in a region")
+	require.NoError(t, (&InitCmd{SalModule: true}).Run())
+
+	require.NoError(t, validateAgainstSchema(t, dir))
+}
+
+func TestInitSalModuleBareSkeletonIsFlaggedBySchemaUntilFilledIn(t *testing.T) {
+	dir := newGitRepo(t)
+	require.NoError(t, (&InitCmd{SalModule: true, Bare: true}).Run())
+
+	err := validateAgainstSchema(t, dir)
+
+	require.ErrorContains(t, err, "/@graph/1/@id")
+	require.ErrorContains(t, err, "/@graph/1/salmodule:taskShape")
 }

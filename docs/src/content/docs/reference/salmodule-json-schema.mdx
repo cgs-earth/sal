@@ -1,0 +1,35 @@
+---
+title: SAL Module JSON Schema
+description: JSON Schema for the ontology document a SAL module prints.
+---
+
+import { Code } from '@astrojs/starlight/components';
+import schema from '../../../../../specs/salmodule-ontology.schema.json?raw';
+
+A SAL module's ontology is the JSON-LD document its `salmodule ontology` command prints, and the `ontology.jsonld` that [`sal init --salmodule`](/sal/reference/commands/#sal-init---salmodule) scaffolds. It is not an open ended graph: the [SAL Module specification](/sal/reference/salmodule-description/) fixes its shape, and this JSON Schema (draft 2020-12) describes that shape so that an editor can check the document as it is written.
+
+The schema requires:
+
+- A `@context` object binding `salmodule` and `owl` to their namespaces, with `rdfs`, `sh`, `xsd`, `rdf`, and `skos` checked against theirs when present. `@base` and `@vocab` are refused, since `sal` resolves the module's relative terms against the project's `salmodule://` prefix and a task's output keys must resolve the same way in every project.
+- A `@graph` holding exactly one `owl:Ontology` node named `"@id": "."`, and at least one `owl:Class` whose `rdfs:subClassOf` is `salmodule:Task`, `salmodule:NodeProcessor`, `salmodule:NodeProducer`, or `salmodule:NodeConsumer`.
+- Every node to have an `@id` that is a relative term with no spaces, such as `FetchStations`, or a prefixed or absolute IRI. IRI-valued properties such as `rdfs:subClassOf`, `rdfs:domain`, `rdfs:range`, `sh:path`, `sh:datatype`, and `sh:targetClass` are written as `{"@id": "..."}`; a bare string there is a literal that `sal` ignores, so the schema refuses it.
+- `salmodule:taskShape`, `salmodule:stdinShape`, and `salmodule:stdoutShape` on a class to be a `sh:NodeShape` written inline, a reference by `@id` to one elsewhere in the graph, or an array of either. The SHACL Core constraint parameters are typed (`sh:minCount` is a non-negative integer, `sh:nodeKind` and `sh:severity` are one of SHACL's, `sh:in` and `sh:languageIn` are RDF lists written `{"@list": [...]}`), and every key inside a shape must be a JSON-LD keyword or a prefixed term, so a `minCount` that lost its `sh:` prefix is caught. A `salmodule:stdoutShape`, or a property shape directly under it, may not use `sh:languageIn`, `sh:uniqueLang`, `sh:disjoint`, `sh:qualifiedValueShapesDisjoint`, or `sh:sparql`, which `sal` refuses when it runs the task.
+
+Everything else is open. A node of a kind the schema does not describe, a class or property annotation the schema does not list, a SHACL parameter from an extension vocabulary, or a shape nested under `sh:node` is allowed and left unchecked; the schema only has to agree with what `sal` parses, which is RDF, so it never refuses a document on a term it does not know. It also cannot follow `rdfs:subClassOf` through the module's own classes, so a module whose task classes all inherit from a base class of its own still needs that base class to subclass a `salmodule:` task class directly.
+
+`sal init --salmodule` writes the schema to `.vscode/salmodule-ontology.schema.json` and registers it in `.vscode/settings.json`. To use it from another project or editor, point a `json.schemas` entry, or the equivalent, at that file or at the copy in the `sal` repository:
+
+```json
+{
+  "json.schemas": [
+    {
+      "fileMatch": ["/ontology.jsonld"],
+      "url": "https://raw.githubusercontent.com/cgs-earth/sal/main/specs/salmodule-ontology.schema.json"
+    }
+  ]
+}
+```
+
+The schema is kept in `specs/salmodule-ontology.schema.json` alongside the [SAL Module TTL Spec](/sal/reference/salmodule-ttl-spec/) and is rendered here verbatim.
+
+<Code code={schema} lang="json" class="ttl-spec" />
