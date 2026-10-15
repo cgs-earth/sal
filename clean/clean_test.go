@@ -121,7 +121,7 @@ func createTableWithSnapshots(t *testing.T, count int) (*hadoop.Catalog, *table.
 func graphForSnapshot(i int) *rdflibgo.Graph {
 	graph := rdflibgo.NewGraph()
 	predicate := rdflibgo.NewURIRefUnsafe("http://example.com/p")
-	graph.Add(
+	pkg.AddTriple(graph,
 		rdflibgo.NewURIRefUnsafe("http://example.com/s"),
 		predicate,
 		rdflibgo.NewLiteral(fmt.Sprintf("value-%d", i)),

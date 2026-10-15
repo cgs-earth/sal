@@ -73,7 +73,7 @@ func TestImportOntologiesMergesEveryImport(t *testing.T) {
 	fetch := func(iri string) (*rdflibgo.Graph, error) {
 		requested = append(requested, iri)
 		imported := rdflibgo.NewGraph()
-		imported.Add(
+		pkg.AddTriple(imported,
 			rdflibgo.NewURIRefUnsafe(iri+"#Thing"),
 			rdflibgo.RDF.Type,
 			rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"),
@@ -88,7 +88,7 @@ func TestImportOntologiesMergesEveryImport(t *testing.T) {
 	// one statement per import; the project ontology's own statements arrive
 	// with it as a source file rather than from here
 	require.Equal(t, 2, graphTripleCount(graph))
-	require.True(t, graph.Contains(
+	require.True(t, pkg.Contains(graph,
 		rdflibgo.NewURIRefUnsafe("https://example.com/onto1#Thing"),
 		rdflibgo.RDF.Type,
 		rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"),
@@ -161,13 +161,13 @@ func TestImportOntologiesPullsAnOciArtifactAndKeepsItOutOfTheGraph(t *testing.T)
 	project := rdflibgo.NewURIRefUnsafe(ontologyTestBase)
 	imports := rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#imports")
 	artifact := rdflibgo.NewURIRefUnsafe("oci://ghcr.io/cgs-earth/sal:e57e9af")
-	graph.Add(project, imports, rdflibgo.NewURIRefUnsafe("https://example.com/onto1"))
-	graph.Add(project, imports, artifact)
+	pkg.AddTriple(graph, project, imports, rdflibgo.NewURIRefUnsafe("https://example.com/onto1"))
+	pkg.AddTriple(graph, project, imports, artifact)
 
 	var pulled []string
 	fetch := func(iri string) (*rdflibgo.Graph, error) {
 		imported := rdflibgo.NewGraph()
-		imported.Add(rdflibgo.NewURIRefUnsafe(iri+"#Thing"), rdflibgo.RDF.Type, rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"))
+		pkg.AddTriple(imported, rdflibgo.NewURIRefUnsafe(iri+"#Thing"), rdflibgo.RDF.Type, rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"))
 		return imported, nil
 	}
 	pull := func(iri string) error {
@@ -180,9 +180,9 @@ func TestImportOntologiesPullsAnOciArtifactAndKeepsItOutOfTheGraph(t *testing.T)
 	require.Equal(t, []string{"oci://ghcr.io/cgs-earth/sal:e57e9af"}, pulled)
 	// the artifact reference is gone from the graph, while the ontology import
 	// sitting next to it in the same file is untouched and was merged
-	require.False(t, graph.Contains(project, imports, artifact))
-	require.True(t, graph.Contains(project, imports, rdflibgo.NewURIRefUnsafe("https://example.com/onto1")))
-	require.True(t, graph.Contains(
+	require.False(t, pkg.Contains(graph, project, imports, artifact))
+	require.True(t, pkg.Contains(graph, project, imports, rdflibgo.NewURIRefUnsafe("https://example.com/onto1")))
+	require.True(t, pkg.Contains(graph,
 		rdflibgo.NewURIRefUnsafe("https://example.com/onto1#Thing"),
 		rdflibgo.RDF.Type,
 		rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"),
@@ -203,7 +203,7 @@ func TestImportOntologiesMergesASalModuleOntology(t *testing.T) {
 	fetch := func(iri string) (*rdflibgo.Graph, error) {
 		requested = append(requested, iri)
 		imported := rdflibgo.NewGraph()
-		imported.Add(
+		pkg.AddTriple(imported,
 			rdflibgo.NewURIRefUnsafe(iri+"/EducationalHistoryFinder"),
 			rdflibgo.RDF.Type,
 			rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"),
@@ -215,7 +215,7 @@ func TestImportOntologiesMergesASalModuleOntology(t *testing.T) {
 	require.NoError(t, importOntologies(graph, path, ontologyTestBase, fetch, failOnPull(t)))
 
 	require.Equal(t, []string{"salmodule://github.com/adplincinst/sample-salmodule-1"}, requested)
-	require.True(t, graph.Contains(
+	require.True(t, pkg.Contains(graph,
 		rdflibgo.NewURIRefUnsafe("salmodule://github.com/adplincinst/sample-salmodule-1/EducationalHistoryFinder"),
 		rdflibgo.RDF.Type,
 		rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"),

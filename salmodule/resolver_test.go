@@ -157,7 +157,7 @@ func TestResolverBuildsEachModuleOnlyOnce(t *testing.T) {
 	require.NoError(t, err)
 	_, err = resolver.Ontology(context.Background(), ref)
 	require.NoError(t, err)
-	_, err = resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), nil)
+	_, err = resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), nil, nil)
 	require.NoError(t, err)
 
 	require.Len(t, runner.builds, 1)
@@ -276,7 +276,7 @@ func TestResolverRunTaskPassesTaskInstanceThroughEnvironment(t *testing.T) {
 	ref, err := ParseModuleIRI(testModuleNamespace)
 	require.NoError(t, err)
 
-	_, err = newTestResolver(runner).RunTask(context.Background(), ref, "MODULE_TASK", `{"@id":"x"}`, t.TempDir(), nil)
+	_, err = newTestResolver(runner).RunTask(context.Background(), ref, "MODULE_TASK", `{"@id":"x"}`, t.TempDir(), nil, nil)
 
 	require.NoError(t, err)
 	require.Equal(t, []string{`MODULE_TASK={"@id":"x"}`}, runner.runs[0].env)
@@ -312,4 +312,35 @@ func TestResolverReportsCloneFailures(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "clone SAL module")
 	require.Contains(t, err.Error(), "repository not found")
+}
+
+// A private or missing repository makes git ask for credentials, which the
+// resolver disables so that the build fails with advice instead of waiting
+// on a prompt nobody can see.
+func TestResolverExplainsACloneThatNeedsCredentials(t *testing.T) {
+	resolver := &Resolver{
+		Runner: &fakeRunner{},
+		Command: func(context.Context, string, string, ...string) ([]byte, error) {
+			return nil, fmt.Errorf("git clone failed: fatal: could not read Username for 'https://github.com': terminal prompts disabled")
+		},
+	}
+	ref, err := ParseModuleIRI(testModuleNamespace)
+	require.NoError(t, err)
+
+	_, err = resolver.Ontology(context.Background(), ref)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "could not read Username")
+	require.Contains(t, err.Error(), "private or does not exist")
+	require.Contains(t, err.Error(), "gh auth setup-git")
+}
+
+// runCommand itself refuses to let git prompt, whatever askpass helper the
+// environment installs.
+func TestRunCommandDisablesGitPrompts(t *testing.T) {
+	t.Setenv("GIT_ASKPASS", "/usr/bin/false")
+	out, err := runCommand(context.Background(), "", "sh", "-c", `printf '%s|%s|%s' "$GIT_TERMINAL_PROMPT" "$GIT_ASKPASS" "$SSH_ASKPASS"`)
+
+	require.NoError(t, err)
+	require.Equal(t, "0||", string(out))
 }

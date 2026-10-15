@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/cgs-earth/sal/build/validate"
+	"github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
@@ -33,7 +34,7 @@ func NewTermsHaveClassDefinitions(g *rdflibgo.Graph, baseForRelativePaths string
 	localTypes := map[string]bool{}
 	subClasses := map[string][]rdflibgo.URIRef{}
 
-	g.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(g, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		if subj, ok := triple.Subject.(rdflibgo.URIRef); ok && strings.HasPrefix(subj.Value(), baseForRelativePaths) {
 			localSubjects[subj.Value()] = true
 		}

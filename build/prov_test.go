@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/salmodule"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
@@ -43,8 +44,8 @@ func TestAppendBlobProvenanceDescribesTheDirectoriesTheBlobStoreRecords(t *testi
 	require.True(t, graphHasTriple(graph, "urn:sha256:1111", "http://www.w3.org/2000/01/rdf-schema#label", "file:///out/catalog/"))
 	require.True(t, graphHasTriple(graph, "urn:sha256:1111", "http://purl.org/dc/terms/identifier", "1111/"))
 	require.True(t, graphHasTriple(graph, "urn:sha256:1111", "http://www.w3.org/2000/01/rdf-schema#comment", "Represents the directory file:///out/catalog/ a SAL module task copied out of its container."))
-	require.True(t, graph.Contains(rdflibgo.NewURIRefUnsafe("urn:sha256:1111"), rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#versionIRI"), rdflibgo.NewURIRefUnsafe("urn:sha256:1111")))
-	require.True(t, graph.Contains(rdflibgo.NewURIRefUnsafe("urn:sha256:1111"), rdflibgo.NewURIRefUnsafe("http://purl.org/dc/terms/source"), rdflibgo.NewURIRefUnsafe("salmodule://github.com/test/module")))
+	require.True(t, pkg.Contains(graph, rdflibgo.NewURIRefUnsafe("urn:sha256:1111"), rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#versionIRI"), rdflibgo.NewURIRefUnsafe("urn:sha256:1111")))
+	require.True(t, pkg.Contains(graph, rdflibgo.NewURIRefUnsafe("urn:sha256:1111"), rdflibgo.NewURIRefUnsafe("http://purl.org/dc/terms/source"), rdflibgo.NewURIRefUnsafe("salmodule://github.com/test/module")))
 }
 
 func TestAppendBlobProvenanceAddsNothingWithoutAProvFile(t *testing.T) {
@@ -54,7 +55,7 @@ func TestAppendBlobProvenanceAddsNothingWithoutAProvFile(t *testing.T) {
 	require.NoError(t, appendBlobProvenance(graph))
 
 	var count int
-	graph.Triples(nil, nil, nil)(func(rdflibgo.Triple) bool {
+	pkg.Triples(graph, nil, nil, nil)(func(rdflibgo.Triple) bool {
 		count++
 		return true
 	})

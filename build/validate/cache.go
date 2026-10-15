@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/pkg/telemetry"
 	"github.com/cgs-earth/sal/salmodule"
 	rdflibgo "github.com/tggo/goRDFlib"
@@ -222,15 +223,15 @@ func parseVocabularyRDF(body []byte, base string, format rdfFormat) (*rdflibgo.G
 	g := rdflibgo.NewGraph(rdflibgo.WithBase(base))
 	switch format {
 	case rdfXMLFormat:
-		if err := rdfxml.Parse(g, bytes.NewReader(body), rdfxml.WithBase(base)); err != nil {
+		if err := rdfxml.Parse(context.Background(), g, bytes.NewReader(body), rdfxml.WithBase(base)); err != nil {
 			return nil, err
 		}
 	case turtleFormat:
-		if err := turtle.Parse(g, bytes.NewReader(body), turtle.WithBase(base)); err != nil {
+		if err := turtle.Parse(context.Background(), g, bytes.NewReader(body), turtle.WithBase(base)); err != nil {
 			return nil, err
 		}
 	case jsonLDFormat:
-		if err := jsonld.Parse(g, bytes.NewReader(body), jsonld.WithBase(base), jsonld.WithUnboundedLines()); err != nil {
+		if err := jsonld.Parse(context.Background(), g, bytes.NewReader(body), jsonld.WithBase(base), jsonld.WithUnboundedLines()); err != nil {
 			return nil, err
 		}
 	default:
@@ -243,13 +244,13 @@ func parseVocabularyRDF(body []byte, base string, format rdfFormat) (*rdflibgo.G
 // after it has been parsed into an RDF graph.
 func extractVocabularyTermsFromGraph(g *rdflibgo.Graph) map[string]bool {
 	terms := map[string]bool{}
-	g.Namespaces()(func(_ string, ns rdflibgo.URIRef) bool {
+	pkg.Namespaces(g)(func(_ string, ns rdflibgo.URIRef) bool {
 		if ns.Value() != "" {
 			terms[ns.Value()] = true
 		}
 		return true
 	})
-	g.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(g, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		if subj, ok := triple.Subject.(rdflibgo.URIRef); ok {
 			terms[subj.Value()] = true
 		}

@@ -191,7 +191,7 @@ func TestWriteOntologyKeepsStatementsTheTemplateDoesNotCover(t *testing.T) {
 	require.Equal(t, []string{"https://example.com/onto1"}, rewritten.Imports)
 	require.Equal(t, "My Ontology", rewritten.Title)
 	creator := rdflibgo.NewURIRefUnsafe(dcNamespace + "creator")
-	require.True(t, rewritten.Graph.Contains(rdflibgo.NewURIRefUnsafe(testBase), creator, rdflibgo.NewLiteral("A Person")))
+	require.True(t, pkg.Contains(rewritten.Graph, rdflibgo.NewURIRefUnsafe(testBase), creator, rdflibgo.NewLiteral("A Person")))
 }
 
 func TestWriteOntologyReplacesAnExistingTitleInAFileWithExtraStatements(t *testing.T) {
@@ -216,7 +216,7 @@ func TestWriteOntologyReplacesAnExistingTitleInAFileWithExtraStatements(t *testi
 	require.Equal(t, "New Title", rewritten.Title)
 	var titles int
 	title := dcTitle
-	rewritten.Graph.Triples(nil, &title, nil)(func(rdflibgo.Triple) bool {
+	pkg.Triples(rewritten.Graph, nil, &title, nil)(func(rdflibgo.Triple) bool {
 		titles++
 		return true
 	})

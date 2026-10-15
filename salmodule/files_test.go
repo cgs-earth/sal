@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/turtle"
@@ -29,7 +30,28 @@ func runTestTask(t *testing.T, runner *fakeRunner, blobDir string) (TaskResult, 
 	t.Helper()
 	ref, err := ParseModuleIRI(testModuleNamespace)
 	require.NoError(t, err)
-	return newTestResolver(runner).RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", blobDir, nil)
+	return newTestResolver(runner).RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", blobDir, nil, nil)
+}
+
+// collectLines is a TaskOutputSink that keeps every line it is handed.
+func collectLines(into *[]string) TaskOutputSink {
+	return func(line []byte, _ int) error {
+		*into = append(*into, string(line))
+		return nil
+	}
+}
+
+// fileTriplesOf finds the triples of a graph that name a file:/// IRI, which
+// the parser collects as it reads a task's output.
+func fileTriplesOf(graph *rdflibgo.Graph) []rdflibgo.Triple {
+	var triples []rdflibgo.Triple
+	pkg.Triples(graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+		if isFileIRI(triple.Subject) || isFileIRI(triple.Object) {
+			triples = append(triples, triple)
+		}
+		return true
+	})
+	return triples
 }
 
 func TestRunTaskCopiesFilesTheOutputNamesIntoTheBlobStore(t *testing.T) {
@@ -43,7 +65,7 @@ func TestRunTaskCopiesFilesTheOutputNamesIntoTheBlobStore(t *testing.T) {
 	result, err := runTestTask(t, runner, blobDir)
 
 	require.NoError(t, err)
-	require.Equal(t, runner.runOutput, string(result.Output))
+	require.Equal(t, int64(len(runner.runOutput)), result.OutputBytes)
 	require.Equal(t, []CopiedFile{{
 		ContainerPath: "/tmp/test.txt",
 		Source:        testModuleIRI,
@@ -110,19 +132,47 @@ func TestRunTaskFailsWhenANamedFileCannotBeCopied(t *testing.T) {
 	require.Empty(t, entries)
 }
 
-// The output a task wrote before failing is still returned, since a task
+// The output a task wrote before failing still reaches the sink, since a task
 // reports its own errors on stdout before exiting non-zero.
-func TestRunTaskReturnsTheOutputOfAFailedContainer(t *testing.T) {
+func TestRunTaskHandsTheOutputOfAFailedContainerToTheSink(t *testing.T) {
 	runner := &fakeRunner{
 		ontology:  testOntology,
 		runOutput: `{"@type":"salmodule:Error","rdfs:comment":"boom"}` + "\n",
 		runErr:    os.ErrClosed,
 	}
+	ref, err := ParseModuleIRI(testModuleNamespace)
+	require.NoError(t, err)
+	var lines []string
 
-	result, err := runTestTask(t, runner, t.TempDir())
+	result, err := newTestResolver(runner).RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), nil, collectLines(&lines))
 
 	require.ErrorIs(t, err, os.ErrClosed)
-	require.Equal(t, runner.runOutput, string(result.Output))
+	require.Equal(t, []string{`{"@type":"salmodule:Error","rdfs:comment":"boom"}`}, lines)
+	require.Equal(t, int64(len(runner.runOutput)), result.OutputBytes)
+}
+
+// A sink that refuses a line stops the task where a shape violation would,
+// and nothing after that line is read.
+func TestRunTaskStopsAtTheFirstLineTheSinkRefuses(t *testing.T) {
+	runner := &fakeRunner{
+		ontology:  testOntology,
+		runOutput: `{"@id":"a"}` + "\n" + `{"@id":"b"}` + "\n" + `{"@id":"c"}` + "\n",
+	}
+	ref, err := ParseModuleIRI(testModuleNamespace)
+	require.NoError(t, err)
+	var lines []int
+	refuseSecond := func(_ []byte, lineNumber int) error {
+		lines = append(lines, lineNumber)
+		if lineNumber == 2 {
+			return os.ErrInvalid
+		}
+		return nil
+	}
+
+	_, err = newTestResolver(runner).RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), nil, refuseSecond)
+
+	require.ErrorIs(t, err, os.ErrInvalid)
+	require.Equal(t, []int{1, 2}, lines)
 }
 
 func TestContainerFilePathDecodesTheIRI(t *testing.T) {
@@ -158,19 +208,19 @@ func TestContainerFilePathRejectsAFileIRIWithAHost(t *testing.T) {
 // linkTestFiles is LinkCopiedFiles for a test that only cares that it succeeds.
 func linkTestFiles(t *testing.T, graph *rdflibgo.Graph, files []CopiedFile, blobDir string) {
 	t.Helper()
-	require.NoError(t, LinkCopiedFiles(graph, files, blobDir))
+	require.NoError(t, LinkCopiedFiles(graph, fileTriplesOf(graph), files, blobDir))
 }
 
 func parseTestTurtle(t *testing.T, content string) *rdflibgo.Graph {
 	t.Helper()
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase("https://example.test/project/"))
-	require.NoError(t, turtle.Parse(graph, bytes.NewReader([]byte(content)), turtle.WithBase("https://example.test/project/")))
+	require.NoError(t, turtle.Parse(context.Background(), graph, bytes.NewReader([]byte(content)), turtle.WithBase("https://example.test/project/")))
 	return graph
 }
 
 func graphTriples(graph *rdflibgo.Graph) []string {
 	var triples []string
-	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		object := triple.Object.String()
 		if literal, ok := triple.Object.(rdflibgo.Literal); ok {
 			object = `"` + literal.Lexical() + `"`
@@ -225,7 +275,7 @@ func TestLinkCopiedFilesRejectsAFileObjectThatWasNotCopied(t *testing.T) {
 		<dataset> schema:hasPart <file://host/tmp/test.txt> .
 	`)
 
-	err := LinkCopiedFiles(graph, nil, t.TempDir())
+	err := LinkCopiedFiles(graph, fileTriplesOf(graph), nil, t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "file://host/tmp/test.txt")
@@ -519,11 +569,11 @@ func TestProvenanceAppendProvenanceDescribesEveryRecordedCopy(t *testing.T) {
 	require.Equal(t, 1, provenance.AppendProvenance(graph))
 
 	subject := rdflibgo.NewURIRefUnsafe("urn:sha256:1111")
-	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(owlVersionIRI), subject))
-	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(rdfsLabelIRI), rdflibgo.NewLiteral("file:///out/catalog/")))
-	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(dctermsIdentifierIRI), rdflibgo.NewLiteral("1111/")))
-	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(dctermsSourceIRI), rdflibgo.NewURIRefUnsafe(testModuleIRI)))
-	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(dctermsModifiedIRI), rdflibgo.NewLiteral("2026-09-10T14:26:05Z", rdflibgo.WithDatatype(rdflibgo.XSDDateTime))))
+	require.True(t, pkg.Contains(graph, subject, rdflibgo.NewURIRefUnsafe(owlVersionIRI), subject))
+	require.True(t, pkg.Contains(graph, subject, rdflibgo.NewURIRefUnsafe(rdfsLabelIRI), rdflibgo.NewLiteral("file:///out/catalog/")))
+	require.True(t, pkg.Contains(graph, subject, rdflibgo.NewURIRefUnsafe(dctermsIdentifierIRI), rdflibgo.NewLiteral("1111/")))
+	require.True(t, pkg.Contains(graph, subject, rdflibgo.NewURIRefUnsafe(dctermsSourceIRI), rdflibgo.NewURIRefUnsafe(testModuleIRI)))
+	require.True(t, pkg.Contains(graph, subject, rdflibgo.NewURIRefUnsafe(dctermsModifiedIRI), rdflibgo.NewLiteral("2026-09-10T14:26:05Z", rdflibgo.WithDatatype(rdflibgo.XSDDateTime))))
 	require.Contains(t, graphTriples(graph), `urn:sha256:1111 `+rdfsCommentIRI+` "Represents the directory file:///out/catalog/ a task of the SAL module `+testModuleIRI+` copied out of its container as of 2026-09-10T14:26:05Z. urn:sha256:1111 is the SHA-256 of its contents, and the directory is served whole as a zip archive under that digest."`)
 	require.Len(t, graphTriples(graph), 6)
 }

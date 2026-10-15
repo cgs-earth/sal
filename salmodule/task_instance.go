@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
@@ -40,7 +41,7 @@ func (o *ModuleOntology) nodeObject(graph *rdflibgo.Graph, subject rdflibgo.Subj
 	seen[subject.String()] = true
 
 	values := map[string][]any{}
-	graph.Triples(subject, nil, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(graph, subject, nil, nil)(func(triple rdflibgo.Triple) bool {
 		if triple.Predicate.Equal(rdflibgo.RDF.Type) {
 			if object, ok := triple.Object.(rdflibgo.URIRef); ok && strings.HasPrefix(object.Value(), o.Namespace) {
 				node["@type"] = o.compact(object.Value())
@@ -81,10 +82,9 @@ func (o *ModuleOntology) nodeObject(graph *rdflibgo.Graph, subject rdflibgo.Subj
 func (o *ModuleOntology) instanceValue(graph *rdflibgo.Graph, object rdflibgo.Term, seen map[string]bool) any {
 	if list, ok := object.(rdflibgo.Subject); ok && isList(graph, object) {
 		items := []any{}
-		rdflibgo.NewCollection(graph, list).Iter()(func(item rdflibgo.Term) bool {
+		for item := range pkg.ListItems(graph, list) {
 			items = append(items, o.instanceValue(graph, item, seen))
-			return true
-		})
+		}
 		return items
 	}
 	switch object := object.(type) {
@@ -118,7 +118,7 @@ func isList(graph *rdflibgo.Graph, term rdflibgo.Term) bool {
 		return false
 	}
 	found := false
-	graph.Triples(head, &rdflibgo.RDF.First, nil)(func(rdflibgo.Triple) bool {
+	pkg.Triples(graph, head, &rdflibgo.RDF.First, nil)(func(rdflibgo.Triple) bool {
 		found = true
 		return false
 	})

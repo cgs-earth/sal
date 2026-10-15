@@ -1,6 +1,7 @@
 package load
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -15,17 +16,17 @@ import (
 func TestGraphRecordReaderStreamsGraphTriples(t *testing.T) {
 	graph := rdflibgo.NewGraph()
 	predicate := rdflibgo.NewURIRefUnsafe("http://example.com/p")
-	graph.Add(
+	pkg.AddTriple(graph,
 		rdflibgo.NewURIRefUnsafe("http://example.com/s1"),
 		predicate,
 		rdflibgo.NewLiteral("one"),
 	)
-	graph.Add(
+	pkg.AddTriple(graph,
 		rdflibgo.NewBNode("subject"),
 		predicate,
 		rdflibgo.NewURIRefUnsafe("http://example.com/o2"),
 	)
-	graph.Add(
+	pkg.AddTriple(graph,
 		rdflibgo.NewURIRefUnsafe("http://example.com/s3"),
 		predicate,
 		rdflibgo.NewLiteral("three", rdflibgo.WithLang("en")),
@@ -78,37 +79,37 @@ func TestGraphRecordReaderStreamsGraphTriples(t *testing.T) {
 func TestGraphRecordReaderSerializesObjectColumns(t *testing.T) {
 	graph := rdflibgo.NewGraph()
 	predicate := rdflibgo.NewURIRefUnsafe("http://example.com/p")
-	graph.Add(
+	pkg.AddTriple(graph,
 		rdflibgo.NewURIRefUnsafe("http://example.com/s1"),
 		predicate,
 		rdflibgo.NewURIRefUnsafe("http://example.com/o"),
 	)
-	graph.Add(
+	pkg.AddTriple(graph,
 		rdflibgo.NewURIRefUnsafe("http://example.com/s2"),
 		predicate,
 		rdflibgo.NewLiteral("42.5", rdflibgo.WithDatatype(rdflibgo.XSDDouble)),
 	)
-	graph.Add(
+	pkg.AddTriple(graph,
 		rdflibgo.NewURIRefUnsafe("http://example.com/s3"),
 		predicate,
 		rdflibgo.NewLiteral("label"),
 	)
-	graph.Add(
+	pkg.AddTriple(graph,
 		rdflibgo.NewURIRefUnsafe("http://example.com/s4"),
 		predicate,
 		rdflibgo.NewLiteral("POINT (1 2)", rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(geoSPARQLWKTLiteral))),
 	)
-	graph.Add(
+	pkg.AddTriple(graph,
 		rdflibgo.NewURIRefUnsafe("http://example.com/s5"),
 		predicate,
 		rdflibgo.NewLiteral("42", rdflibgo.WithDatatype(rdflibgo.XSDInteger)),
 	)
-	graph.Add(
+	pkg.AddTriple(graph,
 		rdflibgo.NewURIRefUnsafe("http://example.com/s6"),
 		predicate,
 		rdflibgo.NewLiteral("-8", rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(pkg.XSDByte))),
 	)
-	graph.Add(
+	pkg.AddTriple(graph,
 		rdflibgo.NewURIRefUnsafe("http://example.com/s7"),
 		predicate,
 		rdflibgo.NewLiteral("2002-05-30T09:30:10-06:00", rdflibgo.WithDatatype(rdflibgo.XSDDateTime)),
@@ -216,12 +217,12 @@ func TestGraphRecordReaderSerializesObjectColumns(t *testing.T) {
 func TestAppendObjectFieldsKeepsUnparseableTypedLiteralsAsStrings(t *testing.T) {
 	graph := rdflibgo.NewGraph()
 	predicate := rdflibgo.NewURIRefUnsafe("http://example.com/p")
-	graph.Add(
+	pkg.AddTriple(graph,
 		rdflibgo.NewURIRefUnsafe("http://example.com/s1"),
 		predicate,
 		rdflibgo.NewLiteral("4200", rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(pkg.XSDByte))),
 	)
-	graph.Add(
+	pkg.AddTriple(graph,
 		rdflibgo.NewURIRefUnsafe("http://example.com/s2"),
 		predicate,
 		rdflibgo.NewLiteral("2002-05-30T09:30:10", rdflibgo.WithDatatype(rdflibgo.XSDDateTime)),
@@ -322,7 +323,7 @@ func TestStabilizeBlankNodesStabilizesBlankNodeHashes(t *testing.T) {
 
 func TestStabilizeBlankNodesPreservesRelativeIRIs(t *testing.T) {
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase("https://example.test/base/"))
-	graph.Add(
+	pkg.AddTriple(graph,
 		rdflibgo.NewURIRefUnsafe("Organization001"),
 		rdflibgo.NewURIRefUnsafe("https://schema.org/worksFor"),
 		rdflibgo.NewURIRefUnsafe("org/acme"),
@@ -348,9 +349,9 @@ func graphWithGeometryBlankNode(id string) *rdflibgo.Graph {
 	graph := rdflibgo.NewGraph()
 	subject := rdflibgo.NewURIRefUnsafe("http://example.com/place")
 	blank := rdflibgo.NewBNode(id)
-	graph.Add(subject, rdflibgo.NewURIRefUnsafe("http://www.opengis.net/ont/geosparql#hasGeometry"), blank)
-	graph.Add(blank, rdflibgo.RDF.Type, rdflibgo.NewURIRefUnsafe("http://www.opengis.net/ont/sf#MultiPolygon"))
-	graph.Add(blank, rdflibgo.NewURIRefUnsafe("http://www.opengis.net/ont/geosparql#asWKT"), rdflibgo.NewLiteral("POINT (1 2)", rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(geoSPARQLWKTLiteral))))
+	pkg.AddTriple(graph, subject, rdflibgo.NewURIRefUnsafe("http://www.opengis.net/ont/geosparql#hasGeometry"), blank)
+	pkg.AddTriple(graph, blank, rdflibgo.RDF.Type, rdflibgo.NewURIRefUnsafe("http://www.opengis.net/ont/sf#MultiPolygon"))
+	pkg.AddTriple(graph, blank, rdflibgo.NewURIRefUnsafe("http://www.opengis.net/ont/geosparql#asWKT"), rdflibgo.NewLiteral("POINT (1 2)", rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(geoSPARQLWKTLiteral))))
 	return graph
 }
 
@@ -359,17 +360,51 @@ func graphWithNestedBlankNodes(locationID string, addressID string) *rdflibgo.Gr
 	subject := rdflibgo.NewURIRefUnsafe("http://example.com/place")
 	location := rdflibgo.NewBNode(locationID)
 	address := rdflibgo.NewBNode(addressID)
-	graph.Add(subject, rdflibgo.NewURIRefUnsafe("https://schema.org/location"), location)
-	graph.Add(location, rdflibgo.NewURIRefUnsafe("https://schema.org/address"), address)
-	graph.Add(address, rdflibgo.NewURIRefUnsafe("https://schema.org/streetAddress"), rdflibgo.NewLiteral("100 Example Street"))
+	pkg.AddTriple(graph, subject, rdflibgo.NewURIRefUnsafe("https://schema.org/location"), location)
+	pkg.AddTriple(graph, location, rdflibgo.NewURIRefUnsafe("https://schema.org/address"), address)
+	pkg.AddTriple(graph, address, rdflibgo.NewURIRefUnsafe("https://schema.org/streetAddress"), rdflibgo.NewLiteral("100 Example Street"))
 	return graph
 }
 
 func tripleHashes(graph *rdflibgo.Graph) map[string]struct{} {
 	hashes := map[string]struct{}{}
-	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		hashes[tripleHashForTriple(triple)] = struct{}{}
 		return true
 	})
 	return hashes
+}
+
+func TestStabilizeBlankNodesStabilizesACycleOfBlankNodes(t *testing.T) {
+	first := graphWithBlankNodeCycle("a", 3)
+	second := graphWithBlankNodeCycle("b", 3)
+
+	StabilizeBlankNodes(first)
+	StabilizeBlankNodes(second)
+
+	require.Equal(t, tripleHashes(first), tripleHashes(second))
+	require.Equal(t, 3, pkg.GraphLen(first), "every node of the cycle keeps its own label")
+}
+
+// A blank node leading to another never gets a signature that repeats from
+// one pass to the next, so the refinement has to stop on the partition it
+// induces rather than on the signatures themselves; otherwise a cycle costs a
+// pass per blank node, each over every blank node triple.
+func TestStabilizeBlankNodesConvergesOnALongCycleOfBlankNodes(t *testing.T) {
+	graph := graphWithBlankNodeCycle("c", 20000)
+
+	start := time.Now()
+	StabilizeBlankNodes(graph)
+
+	require.Less(t, time.Since(start), 10*time.Second)
+	require.Equal(t, 20000, pkg.GraphLen(graph))
+}
+
+func graphWithBlankNodeCycle(prefix string, length int) *rdflibgo.Graph {
+	graph := rdflibgo.NewGraph()
+	next := rdflibgo.NewURIRefUnsafe("https://example.test/next")
+	for i := 0; i < length; i++ {
+		pkg.AddTriple(graph, rdflibgo.NewBNode(fmt.Sprintf("%s%d", prefix, i)), next, rdflibgo.NewBNode(fmt.Sprintf("%s%d", prefix, (i+1)%length)))
+	}
+	return graph
 }

@@ -2,10 +2,12 @@ package validate
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"regexp"
 
+	"github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/turtle"
 )
@@ -26,7 +28,7 @@ func turtleDeclaredPrefixNames(content []byte) map[string]bool {
 func turtleDeclaredPrefixes(g *rdflibgo.Graph, content []byte) map[string]string {
 	declared := turtleDeclaredPrefixNames(content)
 	prefixes := map[string]string{}
-	g.Namespaces()(func(prefix string, ns rdflibgo.URIRef) bool {
+	pkg.Namespaces(g)(func(prefix string, ns rdflibgo.URIRef) bool {
 		if declared[prefix] {
 			prefixes[prefix] = ns.Value()
 		}
@@ -49,7 +51,7 @@ func parseTurtleFile(path string, base string) (*rdfDocument, error) {
 
 	var terms []UsedTermsInFile
 	g := rdflibgo.NewGraph(rdflibgo.WithBase(base))
-	err = turtle.Parse(g, bytes.NewReader(content), turtle.WithProvenance(
+	err = turtle.Parse(context.Background(), g, bytes.NewReader(content), turtle.WithProvenance(
 		func(s rdflibgo.Subject, p rdflibgo.URIRef, o rdflibgo.Term, lineNum int) {
 			appendRDFTerm(&terms, s, lineNum)
 			appendRDFTerm(&terms, p, lineNum)

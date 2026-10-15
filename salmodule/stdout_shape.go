@@ -2,12 +2,14 @@ package salmodule
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
 
+	"github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/jsonld"
 	"github.com/tggo/goRDFlib/shacl"
@@ -60,7 +62,7 @@ type StdoutValidator struct {
 // apply to stdout. A shape using a constraint SAL does not support is an error.
 //
 // base is what a relative IRI in the output resolves against, the project
-// namespace, the same base GraphFromTaskOutput is given, so a shape sees the
+// namespace, the same base TaskOutputParser is given, so a shape sees the
 // node exactly as it will be committed.
 func (o *ModuleOntology) StdoutValidator(classIRI string, base string) (*StdoutValidator, error) {
 	shapeNodes := o.stdoutShapes(classIRI)
@@ -71,7 +73,9 @@ func (o *ModuleOntology) StdoutValidator(classIRI string, base string) (*StdoutV
 	shapes := shacl.NewGraph()
 	seen := map[string]bool{}
 	for _, node := range shapeNodes {
-		o.collectShape(node, shapes, seen)
+		if err := o.collectShape(node, shapes, seen); err != nil {
+			return nil, err
+		}
 	}
 	for _, parameter := range unsupportedShapeConstraints {
 		predicate := shacl.IRI(shacl.SH + parameter)
@@ -102,7 +106,7 @@ func (o *ModuleOntology) stdoutShapes(classIRI string) []rdflibgo.Term {
 			continue
 		}
 		seen[class] = true
-		o.graph.Triples(rdflibgo.NewURIRefUnsafe(class), &predicate, nil)(func(triple rdflibgo.Triple) bool {
+		pkg.Triples(o.graph, rdflibgo.NewURIRefUnsafe(class), &predicate, nil)(func(triple rdflibgo.Triple) bool {
 			shapes = append(shapes, triple.Object)
 			return true
 		})
@@ -114,24 +118,29 @@ func (o *ModuleOntology) stdoutShapes(classIRI string) []rdflibgo.Term {
 // collectShape copies the shape at node into shapes together with everything
 // reachable from it: its property shapes, the lists behind sh:in or sh:or, and
 // any shape it refers to by IRI.
-func (o *ModuleOntology) collectShape(node rdflibgo.Term, shapes *shacl.Graph, seen map[string]bool) {
+func (o *ModuleOntology) collectShape(node rdflibgo.Term, shapes *shacl.Graph, seen map[string]bool) error {
 	subject, ok := node.(rdflibgo.Subject)
 	if !ok || seen[subject.String()] {
-		return
+		return nil
 	}
 	seen[subject.String()] = true
 
 	var triples []rdflibgo.Triple
-	o.graph.Triples(subject, nil, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(o.graph, subject, nil, nil)(func(triple rdflibgo.Triple) bool {
 		triples = append(triples, triple)
 		return true
 	})
 	for _, triple := range triples {
-		shapes.Add(shaclTerm(triple.Subject), shaclTerm(triple.Predicate), shaclTerm(triple.Object))
+		if err := shapes.Add(context.Background(), shaclTerm(triple.Subject), shaclTerm(triple.Predicate), shaclTerm(triple.Object)); err != nil {
+			return err
+		}
 		if !slices.Contains(shapeAnnotationProperties, triple.Predicate.Value()) {
-			o.collectShape(triple.Object, shapes, seen)
+			if err := o.collectShape(triple.Object, shapes, seen); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 // shaclTerm converts a goRDFlib term to the validator's own term type, filling
@@ -157,7 +166,7 @@ func shaclTerm(t rdflibgo.Term) shacl.Term {
 
 // ValidateLine checks one node of a task's output, the JSON written on line
 // lineNumber of its stdout, against the shapes. The module's @context is
-// injected and the node parsed the way GraphFromTaskOutput parses the whole
+// injected and the node parsed the way TaskOutputParser parses the whole
 // output, so what is validated is the RDF the node will become. A violation is
 // returned as a StdoutShapeError; a result of any lesser severity is logged
 // and does not fail the line.

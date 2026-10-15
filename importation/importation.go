@@ -162,13 +162,13 @@ func ReadOntology(path string, base string) (*Ontology, error) {
 	}
 
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase(base))
-	if err := jsonld.Parse(graph, bytes.NewReader(standalone), jsonld.WithBase(base)); err != nil {
+	if err := jsonld.Parse(context.Background(), graph, bytes.NewReader(standalone), jsonld.WithBase(base)); err != nil {
 		return nil, fmt.Errorf("%s: invalid JSON-LD: %w", path, err)
 	}
 
 	ontology := &Ontology{IRI: base, Base: base, Graph: graph}
 	rdfType := rdflibgo.RDF.Type
-	graph.Triples(nil, &rdfType, owlOntology)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(graph, nil, &rdfType, owlOntology)(func(triple rdflibgo.Triple) bool {
 		subject, ok := triple.Subject.(rdflibgo.URIRef)
 		if !ok {
 			return true
@@ -178,7 +178,7 @@ func ReadOntology(path string, base string) (*Ontology, error) {
 	})
 
 	subject := rdflibgo.NewURIRefUnsafe(ontology.IRI)
-	graph.Triples(subject, &dcTitle, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(graph, subject, &dcTitle, nil)(func(triple rdflibgo.Triple) bool {
 		literal, ok := triple.Object.(rdflibgo.Literal)
 		if !ok {
 			return true
@@ -186,14 +186,14 @@ func ReadOntology(path string, base string) (*Ontology, error) {
 		ontology.Title = literal.Lexical()
 		return false
 	})
-	graph.Triples(subject, &owlImports, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(graph, subject, &owlImports, nil)(func(triple rdflibgo.Triple) bool {
 		if object, ok := triple.Object.(rdflibgo.URIRef); ok {
 			ontology.Imports = append(ontology.Imports, object.Value())
 		}
 		return true
 	})
 	sort.Strings(ontology.Imports)
-	graph.Triples(subject, &rdfsComment, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(graph, subject, &rdfsComment, nil)(func(triple rdflibgo.Triple) bool {
 		literal, ok := triple.Object.(rdflibgo.Literal)
 		if !ok {
 			return true
@@ -247,24 +247,24 @@ func SerializeOntology(ontology *Ontology) ([]byte, error) {
 	}
 
 	graph := ontology.Graph
-	graph.Bind("dc", rdflibgo.NewURIRefUnsafe(dcNamespace))
-	graph.Bind("owl", rdflibgo.NewURIRefUnsafe(owlNamespace))
+	pkg.Bind(graph, "dc", rdflibgo.NewURIRefUnsafe(dcNamespace))
+	pkg.Bind(graph, "owl", rdflibgo.NewURIRefUnsafe(owlNamespace))
 	subject := rdflibgo.NewURIRefUnsafe(ontology.IRI)
-	graph.Add(subject, rdflibgo.RDF.Type, owlOntology)
+	pkg.AddTriple(graph, subject, rdflibgo.RDF.Type, owlOntology)
 	if ontology.Title != "" {
 		// Set rather than Add so that --title replaces the recorded title
-		graph.Set(subject, dcTitle, rdflibgo.NewLiteral(ontology.Title))
+		pkg.SetTriple(graph, subject, dcTitle, rdflibgo.NewLiteral(ontology.Title))
 	}
 	for _, iri := range ontology.Imports {
-		graph.Add(subject, owlImports, rdflibgo.NewURIRefUnsafe(iri))
+		pkg.AddTriple(graph, subject, owlImports, rdflibgo.NewURIRefUnsafe(iri))
 	}
 	if ontology.Comment != "" {
-		graph.Bind("rdfs", rdflibgo.NewURIRefUnsafe(rdfsNamespace))
-		graph.Set(subject, rdfsComment, rdflibgo.NewLiteral(ontology.Comment))
+		pkg.Bind(graph, "rdfs", rdflibgo.NewURIRefUnsafe(rdfsNamespace))
+		pkg.SetTriple(graph, subject, rdfsComment, rdflibgo.NewLiteral(ontology.Comment))
 	}
 
 	var buf bytes.Buffer
-	if err := jsonld.Serialize(graph, &buf, jsonld.WithBase(ontology.Base)); err != nil {
+	if err := jsonld.Serialize(context.Background(), graph, &buf, jsonld.WithBase(ontology.Base)); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
@@ -275,7 +275,7 @@ func SerializeOntology(ontology *Ontology) ([]byte, error) {
 func (ontology *Ontology) hasExtraStatements() bool {
 	subject := rdflibgo.NewURIRefUnsafe(ontology.IRI)
 	extra := false
-	ontology.Graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(ontology.Graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		if !triple.Subject.Equal(subject) {
 			extra = true
 			return false

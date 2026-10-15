@@ -272,9 +272,17 @@ The catalog lists one collection, the triples table, carrying the [STAC Iceberg 
 A build is the one operation that produces a snapshot of the data product, so it also runs every SAL module task the source files declare and commits what the modules produced in the same snapshot as the sources.
 For each module's referenced task instance(s), `sal build` clones the module's repository, builds the `Dockerfile` in its repository root,
 and invokes the module's run command with the task instance serialized from the instance's RDF properties.
+The clone never prompts for credentials: a private repository is cloned only when a git credential helper already holds a token for it
+(`gh auth setup-git` configures one), and otherwise the build fails saying so rather than waiting on a prompt.
 The newline delimited JSON the module writes to stdout is converted to triples and committed alongside the
 sources. A relative IRI in that output resolves against the project's namespace, not the module's, so a task's
 output is named as the project's own data unless the module wrote absolute IRIs.
+The output is converted as the task writes it, in batches of lines, and is never held whole, so what a task costs
+in memory is what its triples cost in the graph being built rather than what its JSON costs on top of them. A
+task that produces tens of millions of triples still needs the graph to fit in memory, since a build validates,
+diffs, and writes the whole graph at once; setting Go's `GOMEMLIMIT` environment variable, for example
+`GOMEMLIMIT=24GiB sal build`, makes the garbage collector work harder as that limit nears rather than let the
+process grow past it.
 A `file:///` IRI in that output names a file inside the container; `sal build` copies it into `.sal/data/blobs`
 under its SHA-256 digest while the task runs, rewrites the reference to `urn:sha256:{digest}`, and describes the
 copy with the `file:///` IRI the task wrote as `rdfs:label`, its modification time as `dcterms:modified`, its digest as `owl:versionIRI`,

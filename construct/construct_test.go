@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/turtle"
@@ -120,18 +121,18 @@ func TestRunWritesEachQueryAsTurtleAndReturnsTheMergedGraph(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, []string{constructQuery, constructQuery}, runner.queries)
-	require.Equal(t, 2, merged.Len())
+	require.Equal(t, 2, pkg.GraphLen(merged))
 	for _, name := range []string{"aliases.ttl", filepath.Join("nested", "more.ttl")} {
 		file, err := os.Open(filepath.Join(dir, ".sal", "constructed", name))
 		require.NoError(t, err)
 		written := rdflibgo.NewGraph()
-		require.NoError(t, turtle.Parse(written, file))
+		require.NoError(t, turtle.Parse(context.Background(), written, file))
 		require.NoError(t, file.Close())
-		require.Equal(t, 2, written.Len())
+		require.Equal(t, 2, pkg.GraphLen(written))
 		content, err := os.ReadFile(filepath.Join(dir, ".sal", "constructed", name))
 		require.NoError(t, err)
 		require.Contains(t, string(content), "ex:knows ex:b")
-		require.True(t, written.Contains(rdflibgo.NewURIRefUnsafe("http://example.org/a"), rdflibgo.NewURIRefUnsafe("http://example.org/knows"), rdflibgo.NewURIRefUnsafe("http://example.org/b")))
+		require.True(t, pkg.Contains(written, rdflibgo.NewURIRefUnsafe("http://example.org/a"), rdflibgo.NewURIRefUnsafe("http://example.org/knows"), rdflibgo.NewURIRefUnsafe("http://example.org/b")))
 	}
 }
 
@@ -159,7 +160,7 @@ func TestRunWithoutQueriesOnlyWipes(t *testing.T) {
 	merged, err := Run(context.Background(), nil, dir, nil)
 
 	require.NoError(t, err)
-	require.Equal(t, 0, merged.Len())
+	require.Equal(t, 0, pkg.GraphLen(merged))
 	require.NoDirExists(t, filepath.Join(dir, ".sal", "constructed"))
 }
 

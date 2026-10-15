@@ -26,6 +26,12 @@ type CommandRunner func(ctx context.Context, dir string, name string, args ...st
 func runCommand(ctx context.Context, dir string, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
+	// git asks for credentials on the terminal, or through the askpass helper
+	// an IDE's terminal installs, when a repository is private or missing;
+	// with its output captured here that looks like a build that hangs, so
+	// the prompts are disabled and the failure reported instead. A
+	// credential helper that already holds a token is still consulted.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("%s %s failed: %s: %w", name, strings.Join(args, " "), strings.TrimSpace(string(out)), err)
@@ -135,35 +141,37 @@ func (r *Resolver) Ontology(ctx context.Context, ref ModuleRef) (_ *ModuleOntolo
 	return ontology, nil
 }
 
-// TaskResult is what running a module task produced: the newline delimited
-// JSON it wrote to stdout, and the files and directories it named with
-// file:/// IRIs, copied out of the container into the blob store.
+// TaskResult is what running a module task produced: how much newline
+// delimited JSON it wrote to stdout, which went to the sink line by line, and
+// the files and directories it named with file:/// IRIs, copied out of the
+// container into the blob store.
 type TaskResult struct {
-	Output []byte
-	Files  []CopiedFile
+	OutputBytes int64
+	Files       []CopiedFile
 }
 
 // RunTask invokes the module's run command with taskInstance supplied through
-// the environment variable the module's ontology declares, and returns the
-// newline delimited JSON the task wrote to stdout together with the files it
-// named with file:/// IRIs, which are copied out of the container into blobDir
-// as the output arrives: a file named by its SHA-256 digest, a directory
-// (a path ending in a slash) verbatim under its own path. The container is
-// kept until every copy has finished.
+// the environment variable the module's ontology declares. Each line of the
+// newline delimited JSON the task writes to stdout is handed to sink as it is
+// read, so the output is never held whole, and the files the lines name with
+// file:/// IRIs are copied out of the container into blobDir as the output
+// arrives: a file named by its SHA-256 digest, a directory (a path ending in a
+// slash) verbatim under its own path. The container is kept until every copy
+// has finished.
 //
-// Whatever the task wrote is returned even when the container fails, because a
-// task reports its own failures as salmodule:Error nodes on stdout before
-// exiting non-zero; those messages describe the failure far better than the
-// container's exit status does.
+// Every line the task wrote reaches the sink even when the container fails,
+// because a task reports its own failures as salmodule:Error nodes on stdout
+// before exiting non-zero; those messages describe the failure far better
+// than the container's exit status does.
 //
 // A non-nil validator checks each line as it arrives, before any file the line
-// names is copied. The first line that fails ends the run: the container is
-// stopped, copies still in flight are abandoned, and the StdoutShapeError is
-// returned in place of whatever the task wrote.
-func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, envVar string, taskInstance string, blobDir string, validator *StdoutValidator) (result TaskResult, err error) {
+// names is copied or the sink sees it. The first line that fails, or that the
+// sink refuses, ends the run: the container is stopped, copies still in flight
+// are abandoned, and the error is returned in place of a result.
+func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, envVar string, taskInstance string, blobDir string, validator *StdoutValidator, sink TaskOutputSink) (result TaskResult, err error) {
 	ctx, span := telemetry.Start(ctx, "salmodule.run_task", attribute.String("sal.module", ref.Namespace))
 	defer func() {
-		span.SetAttributes(attribute.Int("sal.module.output_bytes", len(result.Output)), attribute.Int("sal.module.files_copied", len(result.Files)))
+		span.SetAttributes(attribute.Int64("sal.module.output_bytes", result.OutputBytes), attribute.Int("sal.module.files_copied", len(result.Files)))
 		telemetry.End(span, err)
 	}()
 	err = r.runModuleCommand(ctx, ref, []string{envVar + "=" + taskInstance}, RunCommand, func(ctx context.Context, stdout io.Reader, files ContainerFiles) error {
@@ -173,20 +181,27 @@ func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, envVar string, ta
 		copyCtx, cancelCopies := context.WithCancel(ctx)
 		defer cancelCopies()
 		copier := &fileCopier{dir: blobDir, source: strings.TrimSuffix(ref.Namespace, "/"), files: files}
-		var output bytes.Buffer
+		reject := func(err error) error {
+			cancelCopies()
+			_, _ = copier.wait()
+			return err
+		}
 		reader := bufio.NewReader(stdout)
 		for lineNumber := 1; ; lineNumber++ {
 			line, err := reader.ReadBytes('\n')
-			output.Write(line)
+			result.OutputBytes += int64(len(line))
 			if trimmed := bytes.TrimSpace(line); len(trimmed) > 0 {
 				if validator != nil {
 					if err := validator.ValidateLine(trimmed, lineNumber); err != nil {
-						cancelCopies()
-						_, _ = copier.wait()
-						return err
+						return reject(err)
 					}
 				}
 				copier.observe(copyCtx, trimmed)
+				if sink != nil {
+					if err := sink(trimmed, lineNumber); err != nil {
+						return reject(err)
+					}
+				}
 			}
 			if errors.Is(err, io.EOF) {
 				break
@@ -195,7 +210,6 @@ func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, envVar string, ta
 				return fmt.Errorf("read output of %s: %w", ref.Namespace, err)
 			}
 		}
-		result.Output = output.Bytes()
 
 		copied, err := copier.wait()
 		if err != nil {
@@ -284,6 +298,9 @@ func (r *Resolver) image(ctx context.Context, ref ModuleRef) (_ string, err erro
 	_, err = command(cloneCtx, "", "git", "clone", "--depth", "1", ref.CloneURL, repoDir)
 	telemetry.End(cloneSpan, err)
 	if err != nil {
+		if strings.Contains(err.Error(), "could not read Username") || strings.Contains(err.Error(), "Authentication failed") {
+			return "", fmt.Errorf("clone SAL module %s: %w\n%s is private or does not exist; sal clones modules without prompting for credentials, so make the repository public or store a token in a git credential helper (for example with `gh auth setup-git`)", ref.Namespace, err, ref.CloneURL)
+		}
 		return "", fmt.Errorf("clone SAL module %s: %w", ref.Namespace, err)
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "Dockerfile")); err != nil {

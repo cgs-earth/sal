@@ -12,6 +12,7 @@ import (
 	"github.com/cgs-earth/sal/build/validate"
 	"github.com/cgs-earth/sal/construct"
 	"github.com/cgs-earth/sal/pkg"
+	"github.com/cgs-earth/sal/pkg/compactstore"
 	"github.com/cgs-earth/sal/pkg/telemetry"
 	"github.com/cgs-earth/sal/salmodule"
 	rdflibgo "github.com/tggo/goRDFlib"
@@ -279,7 +280,10 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 	// checking the terms is where every vocabulary is fetched, and where a
 	// module a file references is cloned and built, so it is a span of its own
 	validateCtx, validateSpan := telemetry.Start(ctx, "build.validate_sources", attribute.Int("sal.documents", len(docs)))
-	finalGraph := rdflibgo.NewGraph(rdflibgo.WithBase(base))
+	// the graph a build commits holds everything the sources, the imports, and
+	// the module tasks produce, which can run to tens of millions of triples,
+	// so it is kept in the compact store rather than goRDFlib's own
+	finalGraph := rdflibgo.NewGraph(rdflibgo.WithBase(base), rdflibgo.WithStore(compactstore.New()))
 	for _, doc := range docs {
 		// TODO do this in parallel.
 		graph, err := validator.Validate(validateCtx, doc)

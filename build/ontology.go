@@ -103,7 +103,7 @@ func importOntologies(graph *rdflibgo.Graph, path string, base string, fetch fun
 // graphTripleCount counts the statements of a graph.
 func graphTripleCount(graph *rdflibgo.Graph) int {
 	var count int
-	graph.Triples(nil, nil, nil)(func(rdflibgo.Triple) bool {
+	pkg.Triples(graph, nil, nil, nil)(func(rdflibgo.Triple) bool {
 		count++
 		return true
 	})
@@ -116,7 +116,7 @@ func graphTripleCount(graph *rdflibgo.Graph) int {
 // project's ontology node in .sal/config.jsonld stays the record of what was imported.
 func dropImportStatement(graph *rdflibgo.Graph, iri string) {
 	imports := rdflibgo.NewURIRefUnsafe(owlImportsIRI)
-	graph.Remove(nil, &imports, rdflibgo.NewURIRefUnsafe(iri))
+	pkg.RemoveTriples(graph, nil, &imports, rdflibgo.NewURIRefUnsafe(iri))
 }
 
 const owlImportsIRI = "http://www.w3.org/2002/07/owl#imports"

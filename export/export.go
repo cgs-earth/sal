@@ -45,7 +45,7 @@ func (cmd *ExportCmd) Run() error {
 		if pending == 0 {
 			return nil
 		}
-		if err := nt.Serialize(batch, out); err != nil {
+		if err := nt.Serialize(ctx, batch, out); err != nil {
 			return fmt.Errorf("export: %w", err)
 		}
 		batch = rdflibgo.NewGraph()
@@ -56,7 +56,7 @@ func (cmd *ExportCmd) Run() error {
 	// object_geometry is rendered to WKT by ST_AsText, which needs spatial loaded.
 	err = runner.StreamSQL(ctx, salsparql.ExportSQL, true, func(row []sql.NullString) error {
 		object := ObjectTerm(row[2:])
-		batch.Add(SubjectTerm(row[0].String), rdflibgo.NewURIRefUnsafe(row[1].String), object)
+		pkg.AddTriple(batch, SubjectTerm(row[0].String), rdflibgo.NewURIRefUnsafe(row[1].String), object)
 		pending++
 		if pending >= exportBatchSize {
 			return flush()

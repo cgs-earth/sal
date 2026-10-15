@@ -282,14 +282,14 @@ func TestAppendProvenanceAddsAnOntologyNodeForEveryPin(t *testing.T) {
 	pins.AppendProvenance(graph)
 
 	subject := rdflibgo.NewURIRefUnsafe(testVocabularyNamespace)
-	require.True(t, graph.Contains(subject, rdflibgo.RDF.Type, rdflibgo.NewURIRefUnsafe(owlNamespaceIRI+"Ontology")))
-	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(rdfsNamespaceIRI+"label"), rdflibgo.NewLiteral(testVocabularyNamespace)))
-	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(owlNamespaceIRI+"versionIRI"), rdflibgo.NewURIRefUnsafe("urn:sha256:"+digest)))
-	require.True(t, graph.Contains(subject, rdflibgo.NewURIRefUnsafe(dctermsNamespaceIRI+"format"), rdflibgo.NewLiteral(mediaType)))
+	require.True(t, pkg.Contains(graph, subject, rdflibgo.RDF.Type, rdflibgo.NewURIRefUnsafe(owlNamespaceIRI+"Ontology")))
+	require.True(t, pkg.Contains(graph, subject, rdflibgo.NewURIRefUnsafe(rdfsNamespaceIRI+"label"), rdflibgo.NewLiteral(testVocabularyNamespace)))
+	require.True(t, pkg.Contains(graph, subject, rdflibgo.NewURIRefUnsafe(owlNamespaceIRI+"versionIRI"), rdflibgo.NewURIRefUnsafe("urn:sha256:"+digest)))
+	require.True(t, pkg.Contains(graph, subject, rdflibgo.NewURIRefUnsafe(dctermsNamespaceIRI+"format"), rdflibgo.NewLiteral(mediaType)))
 
 	var modifiedCount int
 	predicate := rdflibgo.NewURIRefUnsafe(dctermsNamespaceIRI + "modified")
-	graph.Triples(subject, &predicate, nil)(func(rdflibgo.Triple) bool {
+	pkg.Triples(graph, subject, &predicate, nil)(func(rdflibgo.Triple) bool {
 		modifiedCount++
 		return true
 	})
@@ -301,7 +301,7 @@ func TestAppendProvenanceAddsNothingForAnEmptyStore(t *testing.T) {
 	EphemeralVocabularies().AppendProvenance(graph)
 
 	var count int
-	graph.Triples(nil, nil, nil)(func(rdflibgo.Triple) bool {
+	pkg.Triples(graph, nil, nil, nil)(func(rdflibgo.Triple) bool {
 		count++
 		return true
 	})

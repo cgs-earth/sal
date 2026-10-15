@@ -10,6 +10,7 @@ import (
 	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/catalog/hadoop"
 	"github.com/apache/iceberg-go/table"
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
@@ -20,7 +21,7 @@ var stageTestPredicate = rdflibgo.NewURIRefUnsafe("http://example.com/p")
 func stageTestGraph(names ...string) *rdflibgo.Graph {
 	graph := rdflibgo.NewGraph()
 	for _, name := range names {
-		graph.Add(rdflibgo.NewURIRefUnsafe("http://example.com/"+name), stageTestPredicate, rdflibgo.NewLiteral(name))
+		pkg.AddTriple(graph, rdflibgo.NewURIRefUnsafe("http://example.com/"+name), stageTestPredicate, rdflibgo.NewLiteral(name))
 	}
 	return graph
 }
@@ -43,7 +44,7 @@ func stageTestTable(t *testing.T, cfg *LoadConfig) *table.Table {
 // would hold it.
 func graphHashes(graph *rdflibgo.Graph) map[string]struct{} {
 	hashes := map[string]struct{}{}
-	StabilizeBlankNodes(graph).Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(StabilizeBlankNodes(graph), nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		hashes[tripleHashForTriple(triple)] = struct{}{}
 		return true
 	})
@@ -206,13 +207,13 @@ func TestCommitWritesAgainWhatChangedSinceItWasStaged(t *testing.T) {
 	cfg := stageTestConfig(t)
 	graph := func() *rdflibgo.Graph {
 		graph := stageTestGraph("keep")
-		graph.Add(rdflibgo.NewBNode("b"), stageTestPredicate, rdflibgo.NewLiteral("blank"))
+		pkg.AddTriple(graph, rdflibgo.NewBNode("b"), stageTestPredicate, rdflibgo.NewLiteral("blank"))
 		return graph
 	}
 	staged, err := StageGraph(ctx, graph(), cfg)
 	require.NoError(t, err)
 	final := graph()
-	final.Add(rdflibgo.NewBNode("b"), stageTestPredicate, rdflibgo.NewLiteral("constructed"))
+	pkg.AddTriple(final, rdflibgo.NewBNode("b"), stageTestPredicate, rdflibgo.NewLiteral("constructed"))
 
 	require.NoError(t, staged.Commit(ctx, final, nil))
 	require.NoError(t, staged.Discard(ctx))

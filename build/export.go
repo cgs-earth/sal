@@ -47,7 +47,7 @@ func ExportGraph(ctx context.Context, graph *rdflibgo.Graph, format GraphExportF
 		}
 		defer func() { _ = file.Close() }()
 
-		err = nq.Serialize(graph, file)
+		err = nq.Serialize(ctx, graph, file)
 		if err == nil {
 			slog.Info("Saved built RDF data to " + fullOutPath)
 		}

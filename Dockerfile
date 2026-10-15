@@ -6,7 +6,7 @@
 # run it with.
 ARG DEMO=false
 
-FROM golang:1.25-bookworm AS imports
+FROM golang:1.26-bookworm AS imports
 
 WORKDIR /app
 COPY . .
@@ -28,7 +28,7 @@ RUN GOPROXY=off go list -e -f '{{join .Imports "\n"}}' ./... 2>/dev/null \
 # target platform is what keeps that simple: BuildKit runs this stage under
 # emulation for a cross build rather than needing a cross compiler installed. The
 # push_to_ghcr workflow only builds linux/amd64, so nothing is emulated in CI.
-FROM golang:1.25-bookworm AS go-builder
+FROM golang:1.26-bookworm AS go-builder
 
 WORKDIR /app
 

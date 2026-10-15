@@ -257,16 +257,16 @@ func (p *PinnedVocabularies) AppendProvenance(graph *rdflibgo.Graph) {
 	for _, id := range p.IDs() {
 		entry := p.entries[id]
 		subject := rdflibgo.NewURIRefUnsafe(id)
-		graph.Add(subject, rdflibgo.RDF.Type, owlOntology)
+		pkg.AddTriple(graph, subject, rdflibgo.RDF.Type, owlOntology)
 		// the namespace IRI is the name a vocabulary is known by
-		graph.Add(subject, label, rdflibgo.NewLiteral(id))
-		graph.Add(subject, versionIRI, rdflibgo.NewURIRefUnsafe(entry.Scheme+entry.Version))
+		pkg.AddTriple(graph, subject, label, rdflibgo.NewLiteral(id))
+		pkg.AddTriple(graph, subject, versionIRI, rdflibgo.NewURIRefUnsafe(entry.Scheme+entry.Version))
 		if entry.MediaType != "" {
-			graph.Add(subject, format, rdflibgo.NewLiteral(entry.MediaType))
+			pkg.AddTriple(graph, subject, format, rdflibgo.NewLiteral(entry.MediaType))
 		}
 		if !entry.Modified.IsZero() {
-			graph.Add(subject, modified, rdflibgo.NewLiteral(entry.Modified.Format(time.RFC3339), rdflibgo.WithDatatype(rdflibgo.XSDDateTime)))
-			graph.Add(subject, comment, rdflibgo.NewLiteral(pinnedVocabularyComment(id, entry.Modified)))
+			pkg.AddTriple(graph, subject, modified, rdflibgo.NewLiteral(entry.Modified.Format(time.RFC3339), rdflibgo.WithDatatype(rdflibgo.XSDDateTime)))
+			pkg.AddTriple(graph, subject, comment, rdflibgo.NewLiteral(pinnedVocabularyComment(id, entry.Modified)))
 		}
 	}
 }

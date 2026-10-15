@@ -229,7 +229,7 @@ func TestRunTaskStopsAtTheFirstLineThatViolatesTheStdoutShape(t *testing.T) {
 	validator, err := ontology.StdoutValidator(testModuleNamespace+"PlaceFinder", testProjectBase)
 	require.NoError(t, err)
 
-	_, err = resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), validator)
+	_, err = resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), validator, nil)
 
 	var shapeErr StdoutShapeError
 	require.True(t, errors.As(err, &shapeErr), err)
@@ -253,8 +253,10 @@ func TestRunTaskValidatesEveryLineWhenAllConform(t *testing.T) {
 	validator, err := ontology.StdoutValidator(testModuleNamespace+"PlaceFinder", testProjectBase)
 	require.NoError(t, err)
 
-	result, err := resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), validator)
+	var lines []string
+	result, err := resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), validator, collectLines(&lines))
 
 	require.NoError(t, err)
-	require.Equal(t, runner.runOutput, string(result.Output))
+	require.Len(t, lines, 2)
+	require.Equal(t, int64(len(runner.runOutput)), result.OutputBytes)
 }

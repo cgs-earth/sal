@@ -15,6 +15,7 @@ import (
 	"github.com/apache/iceberg-go/catalog/hadoop"
 	"github.com/apache/iceberg-go/table"
 	"github.com/cgs-earth/sal/build/load"
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
@@ -51,11 +52,11 @@ func writeStacTestTable(t *testing.T, graph *rdflibgo.Graph) *table.Table {
 func stacTestGraph(withGeometries bool) *rdflibgo.Graph {
 	graph := rdflibgo.NewGraph()
 	widget := rdflibgo.NewURIRefUnsafe("https://example.com/widgets/1")
-	graph.Add(widget, rdflibgo.NewURIRefUnsafe("https://schema.org/name"), rdflibgo.NewLiteral("A widget"))
+	pkg.AddTriple(graph, widget, rdflibgo.NewURIRefUnsafe("https://schema.org/name"), rdflibgo.NewLiteral("A widget"))
 	if withGeometries {
 		asWKT := rdflibgo.NewURIRefUnsafe("http://www.opengis.net/ont/geosparql#asWKT")
-		graph.Add(widget, asWKT, rdflibgo.NewLiteral("POINT (1 2)", rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(wktLiteralDatatype))))
-		graph.Add(rdflibgo.NewURIRefUnsafe("https://example.com/widgets/2"), asWKT, rdflibgo.NewLiteral("LINESTRING (3 4, -5 6)", rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(wktLiteralDatatype))))
+		pkg.AddTriple(graph, widget, asWKT, rdflibgo.NewLiteral("POINT (1 2)", rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(wktLiteralDatatype))))
+		pkg.AddTriple(graph, rdflibgo.NewURIRefUnsafe("https://example.com/widgets/2"), asWKT, rdflibgo.NewLiteral("LINESTRING (3 4, -5 6)", rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(wktLiteralDatatype))))
 	}
 	return graph
 }

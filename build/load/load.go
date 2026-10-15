@@ -2,10 +2,12 @@ package load
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -138,10 +140,10 @@ func processGraph(
 	toWrite := diff.toAdd
 	dataFiles := staged.reusableFiles(diff.toAdd)
 	if len(dataFiles) > 0 {
-		toWrite = map[string]struct{}{}
-		for hash := range diff.toAdd {
-			if _, ok := staged.hashes[hash]; !ok {
-				toWrite[hash] = struct{}{}
+		toWrite = map[tripleDigest]struct{}{}
+		for digest := range diff.toAdd {
+			if _, ok := staged.hashes[digest]; !ok {
+				toWrite[digest] = struct{}{}
 			}
 		}
 		slog.Info("Reusing the data files the build was staged in", "data_files", len(dataFiles), "triples", len(staged.hashes))
@@ -164,7 +166,7 @@ func writeGraph(
 	graph *rdflibgo.Graph,
 	arrowSchema *arrow.Schema,
 	batchSize int,
-	hashes map[string]struct{},
+	hashes map[tripleDigest]struct{},
 ) (_ []iceberg.DataFile, _ int64, err error) {
 	ctx, span := telemetry.Start(ctx, "iceberg.write_data_files")
 	defer func() { telemetry.End(span, err) }()
@@ -194,7 +196,7 @@ func appendGraph(
 	graph *rdflibgo.Graph,
 	arrowSchema *arrow.Schema,
 	batchSize int,
-	hashes map[string]struct{},
+	hashes map[tripleDigest]struct{},
 ) error {
 	dataFiles, rows, err := writeGraph(ctx, tbl, graph, arrowSchema, batchSize, hashes)
 	if err != nil {
@@ -205,17 +207,25 @@ func appendGraph(
 }
 
 type graphTableDiff struct {
-	toAdd     map[string]struct{}
+	toAdd     map[tripleDigest]struct{}
 	toDrop    []existingTriple
 	unchanged int
 }
 
+// existingTriple is a row of the table as the diff needs it: its hash and
+// predicate, which an equality delete names it by, and whether the graph being
+// written still holds it.
 type existingTriple struct {
 	hash      string
 	predicate string
+	seen      bool
 }
 
 // diffGraphAgainstTable compares new graph triple hashes against hashes already in Iceberg.
+// The graph is walked once, marking every row of the table it still holds, so
+// that the rows to drop are the ones left unmarked; no second set of the
+// graph's hashes is built, since a graph of millions of triples makes that set
+// as large as the table's own.
 func diffGraphAgainstTable(ctx context.Context, tbl *table.Table, graph *rdflibgo.Graph) (_ *graphTableDiff, err error) {
 	ctx, span := telemetry.Start(ctx, "iceberg.diff")
 	defer func() { telemetry.End(span, err) }()
@@ -224,22 +234,25 @@ func diffGraphAgainstTable(ctx context.Context, tbl *table.Table, graph *rdflibg
 		return nil, err
 	}
 
-	diff := &graphTableDiff{toAdd: map[string]struct{}{}}
-	newHashes := map[string]struct{}{}
-	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
-		hash := tripleHashForTriple(triple)
-		newHashes[hash] = struct{}{}
-		if _, ok := existing[hash]; ok {
-			diff.unchanged++
+	diff := &graphTableDiff{toAdd: map[tripleDigest]struct{}{}}
+	pkg.Triples(graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+		digest := tripleDigestForTriple(triple)
+		if row, ok := existing[digest]; ok {
+			if !row.seen {
+				diff.unchanged++
+				row.seen = true
+				existing[digest] = row
+			}
 			return true
 		}
-		diff.toAdd[hash] = struct{}{}
+		diff.toAdd[digest] = struct{}{}
 		return true
 	})
 
-	for hash, triple := range existing {
-		if _, ok := newHashes[hash]; !ok {
-			diff.toDrop = append(diff.toDrop, triple)
+	for digest, row := range existing {
+		if !row.seen {
+			row.hash = hex.EncodeToString(digest[:])
+			diff.toDrop = append(diff.toDrop, row)
 		}
 	}
 	span.SetAttributes(
@@ -253,8 +266,12 @@ func diffGraphAgainstTable(ctx context.Context, tbl *table.Table, graph *rdflibg
 }
 
 // readExistingTriples scans the minimal columns needed to diff and delete rows.
-func readExistingTriples(ctx context.Context, tbl *table.Table) (map[string]existingTriple, error) {
-	triples := map[string]existingTriple{}
+// A hash is kept as its 32 bytes rather than the 64 hex characters the column
+// holds, and the predicates, of which a table has few, are shared between the
+// rows that carry them, so a table of millions of rows is held as compactly
+// as it can be while the graph is diffed against it.
+func readExistingTriples(ctx context.Context, tbl *table.Table) (map[tripleDigest]existingTriple, error) {
+	triples := map[tripleDigest]existingTriple{}
 	if tbl.CurrentSnapshot() == nil {
 		return triples, nil
 	}
@@ -266,6 +283,7 @@ func readExistingTriples(ctx context.Context, tbl *table.Table) (map[string]exis
 	if err != nil {
 		return nil, fmt.Errorf("scan existing triple hashes: %w", err)
 	}
+	predicates := map[string]string{}
 	for rec, err := range records {
 		if err != nil {
 			return nil, fmt.Errorf("read existing triple hashes: %w", err)
@@ -284,8 +302,19 @@ func readExistingTriples(ctx context.Context, tbl *table.Table) (map[string]exis
 			if hashColumn.IsNull(i) || predicateColumn.IsNull(i) {
 				continue
 			}
-			hash := hashColumn.Value(i)
-			triples[hash] = existingTriple{hash: hash, predicate: predicateColumn.Value(i)}
+			var digest tripleDigest
+			if n, err := hex.Decode(digest[:], []byte(hashColumn.Value(i))); err != nil || n != len(digest) {
+				rec.Release()
+				return nil, fmt.Errorf("read existing triple hashes: %q is not a SHA-256 triple_hash", hashColumn.Value(i))
+			}
+			// the column's strings are views into the record's buffers, which
+			// a kept string would hold in memory whole
+			predicate, ok := predicates[predicateColumn.Value(i)]
+			if !ok {
+				predicate = strings.Clone(predicateColumn.Value(i))
+				predicates[predicate] = predicate
+			}
+			triples[digest] = existingTriple{predicate: predicate}
 		}
 		rec.Release()
 	}
@@ -309,15 +338,16 @@ func existingTripleColumnIndexes(schema *arrow.Schema) (int, int, error) {
 	return hashIndex, predicateIndex, nil
 }
 
-// readExistingTripleHashes scans triple hashes from the current Iceberg table.
+// readExistingTripleHashes scans triple hashes from the current Iceberg table,
+// as the hex strings the triple_hash column holds.
 func readExistingTripleHashes(ctx context.Context, tbl *table.Table) (map[string]struct{}, error) {
 	triples, err := readExistingTriples(ctx, tbl)
 	if err != nil {
 		return nil, err
 	}
 	hashes := map[string]struct{}{}
-	for hash := range triples {
-		hashes[hash] = struct{}{}
+	for digest := range triples {
+		hashes[hex.EncodeToString(digest[:])] = struct{}{}
 	}
 	return hashes, nil
 }

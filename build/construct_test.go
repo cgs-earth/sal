@@ -31,7 +31,7 @@ type stagedConstructRunner struct {
 func (r *stagedConstructRunner) Construct(_ context.Context, _ string, rowFn func([]sql.NullString) error) error {
 	r.runs++
 	var err error
-	r.staged.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(r.staged, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		if triple.Predicate.Value() != "https://vocab.test/things#label" {
 			return true
 		}
@@ -245,8 +245,8 @@ func TestBuildStagesOnABranchAndCommitsOneSnapshot(t *testing.T) {
 	require.Len(t, tbl.Metadata().Snapshots(), 1)
 	require.NotEqual(t, staged.SnapshotID, tbl.CurrentSnapshot().SnapshotID)
 	require.Nil(t, tbl.CurrentSnapshot().ParentSnapshotID)
-	require.Equal(t, fmt.Sprint(graph.Len()), tbl.CurrentSnapshot().Summary.Properties["added-records"])
-	require.Equal(t, fmt.Sprint(graph.Len()), tbl.CurrentSnapshot().Summary.Properties["total-records"])
+	require.Equal(t, fmt.Sprint(pkg.GraphLen(graph)), tbl.CurrentSnapshot().Summary.Properties["added-records"])
+	require.Equal(t, fmt.Sprint(pkg.GraphLen(graph)), tbl.CurrentSnapshot().Summary.Properties["total-records"])
 	requireNothingStagedIsLeft(t, tbl)
 	require.True(t, graphHasTriple(graph, "https://github.com/cgs-earth/sal-run-test-project/widgets/1", "https://vocab.test/things#alias", "A widget"))
 }

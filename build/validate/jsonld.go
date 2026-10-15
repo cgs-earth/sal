@@ -2,6 +2,7 @@ package validate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,7 +77,7 @@ func parseJSONLDContent(content []byte, displayPath string, base string) (*rdfDo
 	}
 
 	g := rdflibgo.NewGraph(rdflibgo.WithBase(base))
-	err = jsonld.Parse(g, bytes.NewReader(content), jsonld.WithBase(base), jsonld.WithDocumentLoader(piprateld.NewCachingDocumentLoader(piprateVocabularyBaseDocumentLoader{next: piprateld.NewDefaultDocumentLoader(nil)})))
+	err = jsonld.Parse(context.Background(), g, bytes.NewReader(content), jsonld.WithBase(base), jsonld.WithDocumentLoader(piprateld.NewCachingDocumentLoader(piprateVocabularyBaseDocumentLoader{next: piprateld.NewDefaultDocumentLoader(nil)})))
 	if err != nil {
 		return nil, fmt.Errorf("%s: invalid JSON-LD: %w", path, err)
 	}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
@@ -133,21 +134,21 @@ func (p *Provenance) AppendProvenance(graph *rdflibgo.Graph) int {
 			continue
 		}
 		subject := rdflibgo.NewURIRefUnsafe(node.VersionIRI.ID)
-		graph.Add(subject, rdflibgo.NewURIRefUnsafe(owlVersionIRI), subject)
+		pkg.AddTriple(graph, subject, rdflibgo.NewURIRefUnsafe(owlVersionIRI), subject)
 		if node.Label != "" {
-			graph.Add(subject, rdflibgo.NewURIRefUnsafe(rdfsLabelIRI), rdflibgo.NewLiteral(node.Label))
+			pkg.AddTriple(graph, subject, rdflibgo.NewURIRefUnsafe(rdfsLabelIRI), rdflibgo.NewLiteral(node.Label))
 		}
 		if path := node.blobPath(); path != "" {
-			graph.Add(subject, rdflibgo.NewURIRefUnsafe(dctermsIdentifierIRI), rdflibgo.NewLiteral(path))
+			pkg.AddTriple(graph, subject, rdflibgo.NewURIRefUnsafe(dctermsIdentifierIRI), rdflibgo.NewLiteral(path))
 		}
 		if node.Source != nil && node.Source.ID != "" {
-			graph.Add(subject, rdflibgo.NewURIRefUnsafe(dctermsSourceIRI), rdflibgo.NewURIRefUnsafe(node.Source.ID))
+			pkg.AddTriple(graph, subject, rdflibgo.NewURIRefUnsafe(dctermsSourceIRI), rdflibgo.NewURIRefUnsafe(node.Source.ID))
 		}
 		if node.Modified.Value != "" {
-			graph.Add(subject, rdflibgo.NewURIRefUnsafe(dctermsModifiedIRI), rdflibgo.NewLiteral(node.Modified.Value, rdflibgo.WithDatatype(rdflibgo.XSDDateTime)))
+			pkg.AddTriple(graph, subject, rdflibgo.NewURIRefUnsafe(dctermsModifiedIRI), rdflibgo.NewLiteral(node.Modified.Value, rdflibgo.WithDatatype(rdflibgo.XSDDateTime)))
 		}
 		if node.Comment != "" {
-			graph.Add(subject, rdflibgo.NewURIRefUnsafe(rdfsCommentIRI), rdflibgo.NewLiteral(node.Comment))
+			pkg.AddTriple(graph, subject, rdflibgo.NewURIRefUnsafe(rdfsCommentIRI), rdflibgo.NewLiteral(node.Comment))
 		}
 		described++
 	}

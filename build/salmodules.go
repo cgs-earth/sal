@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sort"
 
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/pkg/telemetry"
 	"github.com/cgs-earth/sal/salmodule"
 	rdflibgo "github.com/tggo/goRDFlib"
@@ -33,7 +34,7 @@ func findSalModuleTasks(graph *rdflibgo.Graph) ([]salModuleTask, error) {
 	moduleTypes := map[string][]string{}
 	declaredTasks := map[string]bool{}
 
-	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		key := triple.Subject.String()
 		subjects[key] = triple.Subject
 
@@ -148,12 +149,19 @@ func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmo
 	if validator != nil {
 		slog.Info("Validating the output of " + task.classIRI + " against its salmodule:stdoutShape")
 	}
-	result, runErr := resolver.RunTask(ctx, task.ref, ontology.TaskInstanceEnvVar, taskInstance, blobDir, validator)
-	moduleGraph, err := ontology.GraphFromTaskOutput(result.Output, graph.Base())
+	// the output is parsed into the graph being built as the task writes it,
+	// never held whole, so a task may produce more than fits in memory as
+	// JSON; a task that fails leaves what it wrote so far in a graph the
+	// failed build discards anyway
+	before := pkg.GraphLen(graph)
+	parser := ontology.NewTaskOutputParser(graph, graph.Base())
+	result, runErr := resolver.RunTask(ctx, task.ref, ontology.TaskInstanceEnvVar, taskInstance, blobDir, validator, parser.Line)
+	// whatever was read before the task ended is parsed even when it failed:
 	// a line that violates the output shape stopped the task, so nothing
 	// after it was read; a failing task reports why it failed as
 	// salmodule:Error nodes before it exits, so those messages are
 	// preferred over the container's exit status
+	err = parser.Finish()
 	var shapeErr salmodule.StdoutShapeError
 	var taskErr salmodule.TaskError
 	switch {
@@ -166,18 +174,15 @@ func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmo
 	case err != nil:
 		return false, fmt.Errorf("run: %w", err)
 	}
-	if err := salmodule.LinkCopiedFiles(moduleGraph, result.Files, blobDir); err != nil {
+	if err := salmodule.LinkCopiedFiles(graph, parser.FileTriples(), result.Files, blobDir); err != nil {
 		return false, fmt.Errorf("run: %w", err)
 	}
 
-	var materialized int
-	moduleGraph.Triples(nil, nil, nil)(func(rdflibgo.Triple) bool {
-		materialized++
-		return true
-	})
-	mergeGraph(graph, moduleGraph)
+	materialized := pkg.GraphLen(graph) - before
 	span.SetAttributes(attribute.Int("sal.triples.materialized", materialized), attribute.Int("sal.module.files_copied", len(result.Files)))
 	slog.Info(fmt.Sprintf("Materialized %d triples from %s", materialized, task.classIRI))
-	slog.Info(fmt.Sprintf("Copied %d files from %s into %s", len(result.Files), task.classIRI, blobDir))
+	if len(result.Files) > 0 {
+		slog.Info(fmt.Sprintf("Copied %d files from %s into %s", len(result.Files), task.classIRI, blobDir))
+	}
 	return true, nil
 }

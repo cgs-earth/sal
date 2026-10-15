@@ -172,17 +172,17 @@ func Run(ctx context.Context, runner Runner, projectDir string, queries []Query)
 		if err != nil {
 			return nil, err
 		}
-		err = turtle.Serialize(graph, file)
+		err = turtle.Serialize(ctx, graph, file)
 		if closeErr := file.Close(); err == nil {
 			err = closeErr
 		}
 		if err != nil {
 			return nil, fmt.Errorf("construct: write %s: %w", outPath, err)
 		}
-		slog.Info(fmt.Sprintf("Constructed %d triples from %s into %s", graph.Len(), query.Path, outPath))
+		slog.Info(fmt.Sprintf("Constructed %d triples from %s into %s", pkg.GraphLen(graph), query.Path, outPath))
 
-		graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
-			merged.Add(triple.Subject, triple.Predicate, triple.Object)
+		pkg.Triples(graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+			pkg.AddTriple(merged, triple.Subject, triple.Predicate, triple.Object)
 			return true
 		})
 	}
@@ -196,16 +196,16 @@ func constructGraph(ctx context.Context, runner Runner, query Query) (_ *rdflibg
 	defer func() { telemetry.End(span, err) }()
 	graph := rdflibgo.NewGraph()
 	for prefix, namespace := range query.Prefixes {
-		graph.Bind(prefix, rdflibgo.NewURIRefUnsafe(namespace))
+		pkg.Bind(graph, prefix, rdflibgo.NewURIRefUnsafe(namespace))
 	}
 	err = runner.Construct(ctx, query.Text, func(row []sql.NullString) error {
-		graph.Add(export.SubjectTerm(row[0].String), rdflibgo.NewURIRefUnsafe(row[1].String), export.ObjectTerm(row[2:]))
+		pkg.AddTriple(graph, export.SubjectTerm(row[0].String), rdflibgo.NewURIRefUnsafe(row[1].String), export.ObjectTerm(row[2:]))
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", query.Path, err)
 	}
-	span.SetAttributes(attribute.Int("sal.triples.constructed", graph.Len()))
+	span.SetAttributes(attribute.Int("sal.triples.constructed", pkg.GraphLen(graph)))
 	return graph, nil
 }
 

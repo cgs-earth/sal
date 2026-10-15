@@ -1,6 +1,7 @@
 package salmodule
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -18,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
@@ -134,9 +136,14 @@ type fileCopier struct {
 // once the module's @context is applied; a value that turns out not to be an
 // IRI at all is discarded again when the graph is linked.
 func (c *fileCopier) observe(ctx context.Context, line []byte) {
+	// decoding every line would cost more than the whole parse of the
+	// output does, and most lines name no file at all
+	if !bytes.Contains(line, []byte(fileIRIPrefix)) {
+		return
+	}
 	var node any
 	if err := json.Unmarshal(line, &node); err != nil {
-		// an unparseable line is reported by GraphFromTaskOutput with its line number
+		// an unparseable line is reported by TaskOutputParser with its line number
 		return
 	}
 	for _, iri := range fileIRIs(node) {
@@ -352,7 +359,7 @@ func (c *fileCopier) wait() ([]CopiedFile, error) {
 	return files, nil
 }
 
-// LinkCopiedFiles rewrites every file:/// IRI in a task's graph, as subject or
+// LinkCopiedFiles rewrites every file:/// IRI in a task's output, as subject or
 // object, to the urn:sha256: IRI of the copy that was made of it and describes
 // each copy the way a pinned vocabulary's provenance node is described: the
 // file:/// IRI the task wrote as rdfs:label, when it was written as
@@ -365,20 +372,14 @@ func (c *fileCopier) wait() ([]CopiedFile, error) {
 // IRI, because the task wrote the path as a literal, is removed again and
 // warned about. Every copy that is kept is appended to the blob store's
 // prov.jsonld under blobDir, which is the log of everything module tasks have
-// handed over.
-func LinkCopiedFiles(graph *rdflibgo.Graph, files []CopiedFile, blobDir string) error {
+// handed over. fileTriples are the triples of graph that name a file:/// IRI,
+// which TaskOutputParser collects as the output is parsed so that the graph,
+// which holds far more than the task's output, is never scanned for them.
+func LinkCopiedFiles(graph *rdflibgo.Graph, fileTriples []rdflibgo.Triple, files []CopiedFile, blobDir string) error {
 	byPath := map[string]CopiedFile{}
 	for _, file := range files {
 		byPath[file.ContainerPath] = file
 	}
-
-	var fileTriples []rdflibgo.Triple
-	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
-		if isFileIRI(triple.Subject) || isFileIRI(triple.Object) {
-			fileTriples = append(fileTriples, triple)
-		}
-		return true
-	})
 
 	referenced := map[string]bool{}
 	link := func(term rdflibgo.Term) (rdflibgo.Term, error) {
@@ -397,12 +398,12 @@ func LinkCopiedFiles(graph *rdflibgo.Graph, files []CopiedFile, blobDir string) 
 		copy := rdflibgo.NewURIRefUnsafe(file.IRI())
 		if !referenced[containerPath] {
 			referenced[containerPath] = true
-			graph.Add(copy, rdflibgo.NewURIRefUnsafe(rdfsLabelIRI), rdflibgo.NewLiteral(file.FileIRI()))
-			graph.Add(copy, rdflibgo.NewURIRefUnsafe(dctermsModifiedIRI), rdflibgo.NewLiteral(file.Modified.Format(time.RFC3339), rdflibgo.WithDatatype(rdflibgo.XSDDateTime)))
-			graph.Add(copy, rdflibgo.NewURIRefUnsafe(dctermsIdentifierIRI), rdflibgo.NewLiteral(file.BlobPath))
-			graph.Add(copy, rdflibgo.NewURIRefUnsafe(owlVersionIRI), copy)
+			pkg.AddTriple(graph, copy, rdflibgo.NewURIRefUnsafe(rdfsLabelIRI), rdflibgo.NewLiteral(file.FileIRI()))
+			pkg.AddTriple(graph, copy, rdflibgo.NewURIRefUnsafe(dctermsModifiedIRI), rdflibgo.NewLiteral(file.Modified.Format(time.RFC3339), rdflibgo.WithDatatype(rdflibgo.XSDDateTime)))
+			pkg.AddTriple(graph, copy, rdflibgo.NewURIRefUnsafe(dctermsIdentifierIRI), rdflibgo.NewLiteral(file.BlobPath))
+			pkg.AddTriple(graph, copy, rdflibgo.NewURIRefUnsafe(owlVersionIRI), copy)
 			if file.Source != "" {
-				graph.Add(copy, rdflibgo.NewURIRefUnsafe(dctermsSourceIRI), rdflibgo.NewURIRefUnsafe(file.Source))
+				pkg.AddTriple(graph, copy, rdflibgo.NewURIRefUnsafe(dctermsSourceIRI), rdflibgo.NewURIRefUnsafe(file.Source))
 			}
 		}
 		return copy, nil
@@ -416,8 +417,8 @@ func LinkCopiedFiles(graph *rdflibgo.Graph, files []CopiedFile, blobDir string) 
 		if err != nil {
 			return err
 		}
-		graph.Remove(triple.Subject, &triple.Predicate, triple.Object)
-		graph.Add(subject.(rdflibgo.Subject), triple.Predicate, object)
+		pkg.RemoveTriples(graph, triple.Subject, &triple.Predicate, triple.Object)
+		pkg.AddTriple(graph, subject.(rdflibgo.Subject), triple.Predicate, object)
 	}
 
 	var kept []CopiedFile

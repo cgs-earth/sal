@@ -1,6 +1,6 @@
 module github.com/cgs-earth/sal
 
-go 1.25.9
+go 1.26
 
 require (
 	charm.land/bubbletea/v2 v2.0.8
@@ -16,11 +16,11 @@ require (
 	github.com/moby/moby/api v1.55.0
 	github.com/moby/moby/client v0.5.1
 	github.com/opencontainers/image-spec v1.1.1
-	github.com/piprate/json-gold v0.8.0
+	github.com/piprate/json-gold v0.9.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.44.0
-	github.com/tggo/goRDFlib v0.1.12
+	github.com/tggo/goRDFlib v0.9.1
 	github.com/twmb/avro v1.8.0
 	github.com/twpayne/go-geom v1.6.1
 	go.opentelemetry.io/contrib/instrumentation/host v0.70.0

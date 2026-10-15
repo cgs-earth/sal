@@ -2,6 +2,7 @@ package salmodule
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -40,7 +41,7 @@ func taskInstanceFor(t *testing.T, project string) string {
 	require.NoError(t, err)
 
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase(testProjectBase))
-	require.NoError(t, turtle.Parse(graph, bytes.NewReader([]byte(project)), turtle.WithBase(testProjectBase)))
+	require.NoError(t, turtle.Parse(context.Background(), graph, bytes.NewReader([]byte(project)), turtle.WithBase(testProjectBase)))
 
 	instance, err := ontology.TaskInstance(graph, rdflibgo.NewURIRefUnsafe(testProjectBase+"Finder"), testModuleNamespace+"EducationalHistoryFinder")
 	require.NoError(t, err)

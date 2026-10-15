@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/salmodule"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
@@ -106,7 +107,7 @@ func TestPinnedGraphResolvesAModuleOntologyAgainstTheModuleNamespace(t *testing.
 	graph, err := PinnedGraph(context.Background(), EphemeralVocabularies(), "salmodule://www.github.com/test/history-getter")
 
 	require.NoError(t, err)
-	require.True(t, graph.Contains(
+	require.True(t, pkg.Contains(graph,
 		rdflibgo.NewURIRefUnsafe("salmodule://www.github.com/test/history-getter/EducationalHistoryFinder"),
 		rdflibgo.RDF.Type,
 		rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"),

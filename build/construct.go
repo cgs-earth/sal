@@ -10,6 +10,7 @@ import (
 
 	"github.com/cgs-earth/sal/build/load"
 	"github.com/cgs-earth/sal/construct"
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/pkg/telemetry"
 	salsparql "github.com/cgs-earth/sal/query/sparql"
 	rdflibgo "github.com/tggo/goRDFlib"
@@ -98,9 +99,9 @@ func MaterializeConstructs(ctx context.Context, graph *rdflibgo.Graph, projectDi
 	if err != nil {
 		return nil, nil, errors.Join(err, stagedGraph.Discard(ctx))
 	}
-	before := staged.Len()
+	before := pkg.GraphLen(staged)
 	mergeGraph(staged, constructed)
-	span.SetAttributes(attribute.Int("sal.triples.constructed", staged.Len()-before))
-	slog.Info(fmt.Sprintf("Added %d triples constructed by %d SPARQL CONSTRUCT queries", staged.Len()-before, len(queries)))
+	span.SetAttributes(attribute.Int("sal.triples.constructed", pkg.GraphLen(staged)-before))
+	slog.Info(fmt.Sprintf("Added %d triples constructed by %d SPARQL CONSTRUCT queries", pkg.GraphLen(staged)-before, len(queries)))
 	return staged, stagedGraph, nil
 }

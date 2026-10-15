@@ -9,6 +9,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
@@ -18,7 +19,7 @@ type graphRecordReader struct {
 	schema    *arrow.Schema
 	pool      memory.Allocator
 	triples   []rdflibgo.Triple
-	hashes    map[string]struct{}
+	hashes    map[tripleDigest]struct{}
 	batchSize int
 
 	index   int
@@ -33,14 +34,14 @@ func newGraphRecordReader(graph *rdflibgo.Graph, schema *arrow.Schema, batchSize
 }
 
 // newFilteredGraphRecordReader writes only triples whose hash is present in hashes.
-func newFilteredGraphRecordReader(graph *rdflibgo.Graph, schema *arrow.Schema, batchSize int, hashes map[string]struct{}) *graphRecordReader {
+func newFilteredGraphRecordReader(graph *rdflibgo.Graph, schema *arrow.Schema, batchSize int, hashes map[tripleDigest]struct{}) *graphRecordReader {
 	r := &graphRecordReader{
 		schema:    schema,
 		pool:      memory.NewGoAllocator(),
 		hashes:    hashes,
 		batchSize: batchSize,
 	}
-	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		r.triples = append(r.triples, triple)
 		return true
 	})
@@ -111,9 +112,9 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 		subject := storedSubject(triple.Subject)
 		predicate := triple.Predicate.String()
 		object := graphTripleObject(triple.Object)
-		hashValue := tripleHash(subject, predicate, object.o, object.oDatatype, object.oLanguage)
+		digest := digestTriple(subject, predicate, object.o, object.oDatatype, object.oLanguage)
 		if r.hashes != nil {
-			if _, ok := r.hashes[hashValue]; !ok {
+			if _, ok := r.hashes[digest]; !ok {
 				continue
 			}
 		}
@@ -131,7 +132,7 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 		// language are distinct rows, matching what object_type and
 		// object_language record.
 		lastIndex := r.schema.NumFields() - 1
-		builder.Field(lastIndex).(*array.StringBuilder).Append(hashValue)
+		builder.Field(lastIndex).(*array.StringBuilder).Append(hex.EncodeToString(digest[:]))
 		count++
 		r.rows++
 	}
@@ -142,13 +143,19 @@ func (r *graphRecordReader) nextBatch() (arrow.RecordBatch, error) {
 	return builder.NewRecordBatch(), nil
 }
 
-// tripleHash returns a stable SHA-256 row identifier from the RDF triple
+// tripleDigest is the SHA-256 that identifies a row, as its bytes. The
+// triple_hash column holds it hex encoded; the diff and the write filter keep
+// it like this, at half the size and without a pointer for the garbage
+// collector to follow, since they hold one for every triple of the build.
+type tripleDigest [sha256.Size]byte
+
+// digestTriple returns a stable SHA-256 row identifier from the RDF triple
 // terms. The object's datatype and language tag are part of the identity
 // (both empty for an IRI or a blank node object, and the language empty for
 // any literal but an rdf:langString), since the table stores them in
 // object_type and object_language and a literal with the same lexical form
 // but a different datatype or language is a different triple.
-func tripleHash(subject string, predicate string, object string, datatype string, language string) string {
+func digestTriple(subject string, predicate string, object string, datatype string, language string) tripleDigest {
 	hash := sha256.New()
 	_, _ = hash.Write([]byte("subject="))
 	_, _ = hash.Write([]byte(subject))
@@ -160,12 +167,25 @@ func tripleHash(subject string, predicate string, object string, datatype string
 	_, _ = hash.Write([]byte(datatype))
 	_, _ = hash.Write([]byte("\nlanguage="))
 	_, _ = hash.Write([]byte(language))
-	return hex.EncodeToString(hash.Sum(nil))
+	var digest tripleDigest
+	hash.Sum(digest[:0])
+	return digest
+}
+
+// tripleHash is digestTriple as the hex string the triple_hash column holds.
+func tripleHash(subject string, predicate string, object string, datatype string, language string) string {
+	digest := digestTriple(subject, predicate, object, datatype, language)
+	return hex.EncodeToString(digest[:])
+}
+
+func tripleDigestForTriple(triple rdflibgo.Triple) tripleDigest {
+	object := graphTripleObject(triple.Object)
+	return digestTriple(storedSubject(triple.Subject), triple.Predicate.String(), object.o, object.oDatatype, object.oLanguage)
 }
 
 func tripleHashForTriple(triple rdflibgo.Triple) string {
-	object := graphTripleObject(triple.Object)
-	return tripleHash(storedSubject(triple.Subject), triple.Predicate.String(), object.o, object.oDatatype, object.oLanguage)
+	digest := tripleDigestForTriple(triple)
+	return hex.EncodeToString(digest[:])
 }
 
 // storedSubject renders a subject the way the triples table stores it: a blank

@@ -16,9 +16,9 @@ func TestAllNewTypesHaveRdfClassTypes(t *testing.T) {
 	thing := rdflibgo.NewURIRefUnsafe(base + "Thing")
 	thingType := rdflibgo.NewURIRefUnsafe(base + "ThingType")
 
-	g.Add(thing, rdflibgo.RDF.Type, thingType)
-	g.Add(thingType, rdflibgo.RDF.Type, rdflibgo.RDFS.Class)
-	g.Add(thingType, rdflibgo.RDFS.SubClassOf, rdflibgo.RDFS.Class)
+	pkg.AddTriple(g, thing, rdflibgo.RDF.Type, thingType)
+	pkg.AddTriple(g, thingType, rdflibgo.RDF.Type, rdflibgo.RDFS.Class)
+	pkg.AddTriple(g, thingType, rdflibgo.RDFS.SubClassOf, rdflibgo.RDFS.Class)
 
 	require.NoError(t, NewTermsHaveClassDefinitions(g, base))
 }
@@ -30,7 +30,7 @@ func TestAllNewTypesHaveRdfClassTypesRequiresTypeForLocalSubjects(t *testing.T) 
 	g := rdflibgo.NewGraph(rdflibgo.WithBase(base))
 	thing := rdflibgo.NewURIRefUnsafe(base + "Thing")
 
-	g.Add(thing, rdflibgo.RDFS.Label, rdflibgo.NewLiteral("Thing"))
+	pkg.AddTriple(g, thing, rdflibgo.RDFS.Label, rdflibgo.NewLiteral("Thing"))
 
 	err = NewTermsHaveClassDefinitions(g, base)
 	require.Error(t, err)
@@ -47,8 +47,8 @@ func TestAllNewTypesHaveRdfClassTypesRequiresLocalTypesToSubclassRDFSClass(t *te
 	thing := rdflibgo.NewURIRefUnsafe(base + "Thing")
 	thingType := rdflibgo.NewURIRefUnsafe(base + "ThingType")
 
-	g.Add(thing, rdflibgo.RDF.Type, thingType)
-	g.Add(thingType, rdflibgo.RDF.Type, rdflibgo.RDFS.Class)
+	pkg.AddTriple(g, thing, rdflibgo.RDF.Type, thingType)
+	pkg.AddTriple(g, thingType, rdflibgo.RDF.Type, rdflibgo.RDFS.Class)
 
 	err = NewTermsHaveClassDefinitions(g, base)
 	require.Error(t, err)
@@ -66,11 +66,11 @@ func TestAllNewTypesHaveRdfClassTypesAllowsTransitiveSubclass(t *testing.T) {
 	thingType := rdflibgo.NewURIRefUnsafe(base + "ThingType")
 	parentType := rdflibgo.NewURIRefUnsafe(base + "ParentType")
 
-	g.Add(thing, rdflibgo.RDF.Type, thingType)
-	g.Add(thingType, rdflibgo.RDF.Type, rdflibgo.RDFS.Class)
-	g.Add(thingType, rdflibgo.RDFS.SubClassOf, parentType)
-	g.Add(parentType, rdflibgo.RDF.Type, rdflibgo.RDFS.Class)
-	g.Add(parentType, rdflibgo.RDFS.SubClassOf, rdflibgo.RDFS.Class)
+	pkg.AddTriple(g, thing, rdflibgo.RDF.Type, thingType)
+	pkg.AddTriple(g, thingType, rdflibgo.RDF.Type, rdflibgo.RDFS.Class)
+	pkg.AddTriple(g, thingType, rdflibgo.RDFS.SubClassOf, parentType)
+	pkg.AddTriple(g, parentType, rdflibgo.RDF.Type, rdflibgo.RDFS.Class)
+	pkg.AddTriple(g, parentType, rdflibgo.RDFS.SubClassOf, rdflibgo.RDFS.Class)
 
 	require.NoError(t, NewTermsHaveClassDefinitions(g, base))
 }

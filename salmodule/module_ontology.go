@@ -2,10 +2,12 @@ package salmodule
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/cgs-earth/sal/pkg"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/jsonld"
 )
@@ -53,7 +55,7 @@ func parseModuleOntology(namespace string, document []byte) (*ModuleOntology, er
 	}
 
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase(namespace))
-	if err := jsonld.Parse(graph, bytes.NewReader(document), jsonld.WithBase(namespace), jsonld.WithUnboundedLines()); err != nil {
+	if err := jsonld.Parse(context.Background(), graph, bytes.NewReader(document), jsonld.WithBase(namespace), jsonld.WithUnboundedLines()); err != nil {
 		return nil, fmt.Errorf("parse ontology of %s: %w", namespace, err)
 	}
 
@@ -75,7 +77,7 @@ func parseModuleOntology(namespace string, document []byte) (*ModuleOntology, er
 func taskInstanceEnvVar(graph *rdflibgo.Graph) string {
 	name := DefaultTaskInstanceEnvVar
 	ontologies := map[string]bool{}
-	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		if triple.Predicate.Equal(rdflibgo.RDF.Type) && triple.Object.Equal(rdflibgo.OWL.Ontology) {
 			if subject, ok := triple.Subject.(rdflibgo.URIRef); ok {
 				ontologies[subject.Value()] = true
@@ -84,7 +86,7 @@ func taskInstanceEnvVar(graph *rdflibgo.Graph) string {
 		return true
 	})
 
-	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		if triple.Predicate.Value() != Namespace+"taskInstanceEnvVar" {
 			return true
 		}
@@ -104,7 +106,7 @@ func taskInstanceEnvVar(graph *rdflibgo.Graph) string {
 // its direct superclasses.
 func subClassParents(graph *rdflibgo.Graph) map[string][]string {
 	parents := map[string][]string{}
-	graph.Triples(nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+	pkg.Triples(graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		if !isSubClassOfPredicate(triple.Predicate.Value()) {
 			return true
 		}

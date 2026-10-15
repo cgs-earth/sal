@@ -37,7 +37,7 @@ type StagedGraph struct {
 	cfg   *LoadConfig
 	// dataFiles hold the triples in hashes, the ones the table lacked
 	dataFiles []iceberg.DataFile
-	hashes    map[string]struct{}
+	hashes    map[tripleDigest]struct{}
 	// onBranch is whether a snapshot was committed to the staging branch
 	onBranch bool
 	// createdTable is whether staging is what created the table
@@ -154,12 +154,12 @@ func (s *StagedGraph) Commit(ctx context.Context, graph *rdflibgo.Graph, customM
 // them is one the commit adds. A staged triple the final graph no longer
 // holds, which is a blank node renamed because it gained a triple, cannot be
 // deleted in the snapshot that adds its file, so such files are not reused.
-func (s *StagedGraph) reusableFiles(toAdd map[string]struct{}) []iceberg.DataFile {
+func (s *StagedGraph) reusableFiles(toAdd map[tripleDigest]struct{}) []iceberg.DataFile {
 	if s == nil {
 		return nil
 	}
-	for hash := range s.hashes {
-		if _, ok := toAdd[hash]; !ok {
+	for digest := range s.hashes {
+		if _, ok := toAdd[digest]; !ok {
 			slog.Info("Writing the staged triples again since some of them changed after the build was staged")
 			return nil
 		}

@@ -2,9 +2,11 @@ package export
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"testing"
 
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/nt"
@@ -144,14 +146,14 @@ func TestObjectTermReadsTheStoredBlankNodePrefixAsABlankNode(t *testing.T) {
 // handed to the same N-Triples serializer the export command writes with.
 func TestExportedTriplesSerializeAsValidNTriples(t *testing.T) {
 	graph := rdflibgo.NewGraph()
-	graph.Add(
+	pkg.AddTriple(graph,
 		SubjectTerm("http://example.org/s"),
 		rdflibgo.NewURIRefUnsafe("http://example.org/p"),
 		ObjectTerm(objectCols{float: valid("3.5"), typ: valid("http://www.w3.org/2001/XMLSchema#double")}.row()),
 	)
 
 	var out bytes.Buffer
-	require.NoError(t, nt.Serialize(graph, &out))
+	require.NoError(t, nt.Serialize(context.Background(), graph, &out))
 	require.Equal(t,
 		"<http://example.org/s> <http://example.org/p> \"3.5\"^^<http://www.w3.org/2001/XMLSchema#double> .\n",
 		out.String())

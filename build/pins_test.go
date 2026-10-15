@@ -12,6 +12,7 @@ import (
 	"github.com/apache/iceberg-go/catalog/hadoop"
 	"github.com/apache/iceberg-go/table"
 	"github.com/cgs-earth/sal/build/validate"
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
@@ -101,7 +102,7 @@ func TestBuildPinsEveryVocabularyItResolved(t *testing.T) {
 	var versionIRIs int
 	subject := rdflibgo.NewURIRefUnsafe("https://vocab.test/things#")
 	predicate := rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#versionIRI")
-	graph.Triples(subject, &predicate, nil)(func(rdflibgo.Triple) bool {
+	pkg.Triples(graph, subject, &predicate, nil)(func(rdflibgo.Triple) bool {
 		versionIRIs++
 		return true
 	})
@@ -208,7 +209,7 @@ func TestBuildWritesThePinButNotTheStatementsOfAVocabularyItDoesNotImport(t *tes
 	require.Contains(t, rows, "https://vocab.test/things# http://www.w3.org/2002/07/owl#versionIRI")
 	require.NotContains(t, rows, "https://vocab.test/things#Widget "+rdfType)
 	require.NotContains(t, rows, "https://vocab.test/things#label "+rdfType)
-	require.False(t, graph.Contains(
+	require.False(t, pkg.Contains(graph,
 		rdflibgo.NewURIRefUnsafe("https://vocab.test/things#Widget"),
 		rdflibgo.RDF.Type,
 		rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#Class"),

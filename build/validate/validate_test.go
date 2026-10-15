@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
@@ -156,7 +157,7 @@ func TestPinnedGraphMergesTheVersionTheProjectPinned(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Zero(t, fetches)
-	require.True(t, graph.Contains(
+	require.True(t, pkg.Contains(graph,
 		rdflibgo.NewURIRefUnsafe("https://vocab.test/onto#Thing"),
 		rdflibgo.RDF.Type,
 		rdflibgo.NewURIRefUnsafe(owlNamespaceIRI+"Class"),
@@ -203,7 +204,7 @@ func TestPinnedGraphDereferencesANamespaceThroughItsDocumentURL(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, []string{"https://vocab.test/things"}, requested)
-	require.True(t, graph.Contains(
+	require.True(t, pkg.Contains(graph,
 		rdflibgo.NewURIRefUnsafe(testVocabularyNamespace+"Widget"),
 		rdflibgo.RDF.Type,
 		rdflibgo.NewURIRefUnsafe(owlNamespaceIRI+"Class"),
