@@ -1,0 +1,4 @@
+@prefix geoconnex: <salmodule://github.com/cgs-earth/geoconnex-salmodule/> .
+
+<HarvestGeoconnex> a geoconnex:JsonLdHarvester ;
+    geoconnex:includeSitemaps "ref:states", "usgs:monitoring_locations" .
