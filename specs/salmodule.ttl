@@ -156,6 +156,13 @@ salmodule:Error a owl:Class ;
                              salmodule:runCommand ;
                 skos:note "Instances of salmodule:Error represent error conditions that occur during the execution of a salmodule:Task within a SAL Module containerized application."@en .
 
+#################################################################
+#    OWL Axioms
+#    
+#    These classes are for reasoners. They are NOT meant to be 
+#    used directly (subclassed). 
+#    Please subclass salmodule:Task instead 
+#################################################################
 
 ###  https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#NodeConsumer
 salmodule:NodeConsumer a owl:Class ;
