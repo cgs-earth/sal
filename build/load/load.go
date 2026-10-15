@@ -229,11 +229,13 @@ type existingTriple struct {
 func diffGraphAgainstTable(ctx context.Context, tbl *table.Table, graph *rdflibgo.Graph) (_ *graphTableDiff, err error) {
 	ctx, span := telemetry.Start(ctx, "iceberg.diff")
 	defer func() { telemetry.End(span, err) }()
+	slog.Info("Reading the triple hashes the Iceberg table already holds")
 	existing, err := readExistingTriples(ctx, tbl)
 	if err != nil {
 		return nil, err
 	}
 
+	slog.Info("Comparing the graph against the Iceberg table", "graph_triples", pkg.GraphLen(graph), "table_rows", len(existing))
 	diff := &graphTableDiff{toAdd: map[tripleDigest]struct{}{}}
 	pkg.Triples(graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		digest := tripleDigestForTriple(triple)

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -33,7 +34,9 @@ func StabilizeBlankNodes(graph *rdflibgo.Graph) *rdflibgo.Graph {
 		return graph
 	}
 
+	slog.Info("Deriving stable blank node labels from the graph structure", "blank_node_triples", len(triples))
 	replacements := stableBlankNodeIDs(triples)
+	slog.Info("Rewriting the triples that touch a blank node under their stable labels", "blank_nodes", len(replacements), "blank_node_triples", len(triples))
 	// every old triple goes before any new one is added, since a renamed
 	// triple may spell the same as one not yet removed
 	for _, triple := range triples {
