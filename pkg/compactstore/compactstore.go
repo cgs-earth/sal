@@ -1,15 +1,17 @@
 // Package compactstore is an in-memory goRDFlib store that holds a large graph
 // in a fraction of the memory goRDFlib's own MemoryStore does.
 //
-// MemoryStore keeps three nested maps (subject → predicate → object, and the
-// two rotations) with the triple at every leaf. The inner maps are almost all
-// singletons, since most objects are literals that appear once, and a Go map
-// costs several hundred bytes however few entries it holds, so a triple costs
-// well over a kilobyte there. This store interns every distinct term once,
-// keeps each triple as three 32-bit ids, and indexes them with postings lists,
-// so a triple costs a few dozen bytes plus its share of the terms. It is what
-// `sal build` holds the graph it commits in; a module task that materializes
-// tens of millions of triples is only feasible with it.
+// MemoryStore keeps three nested indexes (subject → predicate → object, and
+// the two rotations) with the triple at every leaf. Up to goRDFlib v0.9.1 the
+// inner levels were Go maps, almost all of them singletons since most objects
+// are literals that appear once, and a map costs several hundred bytes however
+// few entries it holds, so a triple cost around 1.7 KB there. goRDFlib v0.9.2
+// keeps small inner levels in slices and brought that to around 640 bytes per
+// triple on a million triples with unique objects. This store interns every
+// distinct term once, keeps each triple as three 32-bit ids, and indexes them
+// with postings lists, so a triple costs a few dozen bytes plus its share of
+// the terms, around 530 bytes per triple on the same graph, most of it the
+// terms themselves. It is what `sal build` holds the graph it commits in.
 //
 // The store holds one unnamed graph and never fails on its own: the only
 // error it returns is that of a context that is already done when a call

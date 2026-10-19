@@ -526,8 +526,8 @@ github.com/testcontainers/testcontainers-go v0.44.0 h1:/Fwh6HY1mIikhnm9e7HwoxGyc
 github.com/testcontainers/testcontainers-go v0.44.0/go.mod h1:IcnwQrYTO86xHXu5bvMaBH7ATlbS3Qn1M1QWW3c66rE=
 github.com/testcontainers/testcontainers-go/modules/compose v0.44.0 h1:8YcW51jhgpkkiRVe10Wj9TCBthJmoNpU2fK5WSf7TQ8=
 github.com/testcontainers/testcontainers-go/modules/compose v0.44.0/go.mod h1:0du5YaH5n8Of4bDM/RwIt421Q14kvqrXZ0mB8EjuMoo=
-github.com/tggo/goRDFlib v0.9.1 h1:Yj/iD3oOMY66Jd9+3b99qDS9/yOInYLzBJBtqK1fNI0=
-github.com/tggo/goRDFlib v0.9.1/go.mod h1:f4ilqgKZ3UVc3HyChodTCDOlxLQMVgBvn2H7r+oOEtc=
+github.com/tggo/goRDFlib v0.9.2 h1:IcWneVetir7fZhjEemmals44I2uJYBXt0i1wEarIsmc=
+github.com/tggo/goRDFlib v0.9.2/go.mod h1:f4ilqgKZ3UVc3HyChodTCDOlxLQMVgBvn2H7r+oOEtc=
 github.com/tilt-dev/fsnotify v1.4.8-0.20220602155310-fff9c274a375 h1:QB54BJwA6x8QU9nHY3xJSZR2kX9bgpZekRKGkLTmEXA=
 github.com/tilt-dev/fsnotify v1.4.8-0.20220602155310-fff9c274a375/go.mod h1:xRroudyp5iVtxKqZCrA6n2TLFRBf8bmnjr1UD4x+z7g=
 github.com/tklauser/go-sysconf v0.4.0 h1:7H0uAN+7RkwWRaxhYXDLqa5V3LPrJeV8wmD9dRUgPQU=

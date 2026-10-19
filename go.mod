@@ -20,7 +20,7 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.44.0
-	github.com/tggo/goRDFlib v0.9.1
+	github.com/tggo/goRDFlib v0.9.2
 	github.com/twmb/avro v1.8.0
 	github.com/twpayne/go-geom v1.6.1
 	go.opentelemetry.io/contrib/instrumentation/host v0.70.0
