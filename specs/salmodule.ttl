@@ -192,8 +192,7 @@ salmodule:NodeProcessor a owl:Class ;
                                                                  ) ;
                                               a owl:Class
                                             ] ;
-                        rdfs:comment "An inferred class representing an entity that processes newline delimited JSON node streams via stdin/stdout within a SAL Module containerized application."@en ;
-                        rdfs:comment "Do NOT use this class directly to subclass your task. Used salmodule:Task instead. Intended for OWL Reasoner."@en ;
+                        rdfs:comment "An inferred class representing an entity that processes newline delimited JSON node streams via stdin/stdout within a SAL Module containerized application. Do NOT use this class directly to subclass your task. Used salmodule:Task instead. Intended for OWL Reasoner."@en ;
                         rdfs:label "Node Processor"@en .
 
 
@@ -207,7 +206,6 @@ salmodule:NodeProducer a owl:Class ;
                                                                 ) ;
                                              a owl:Class
                                            ] ;
-                       rdfs:comment "An inferred class representing an entity that produces a newline delimited JSON node stream to stdout within a SAL Module containerized application."@en ;
-                       rdfs:comment "Do NOT use this class directly to subclass your task. Used salmodule:Task instead. Intended for OWL Reasoner."@en ;
+                       rdfs:comment "An inferred class representing an entity that produces a newline delimited JSON node stream to stdout within a SAL Module containerized application. Do NOT use this class directly to subclass your task. Used salmodule:Task instead. Intended for OWL Reasoner."@en ;
                        rdfs:label "Node Producer"@en .
 
