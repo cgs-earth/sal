@@ -358,3 +358,17 @@ func TestUnknownParentFallsBackToTheRoot(t *testing.T) {
 	require.Len(t, tracker.Root().Children, 1)
 	require.NotNil(t, tracker.Phases()[4].Step)
 }
+
+func TestPanesAreNotShownInCI(t *testing.T) {
+	env := func(vars map[string]string) func(string) string {
+		return func(name string) string { return vars[name] }
+	}
+	// a terminal that is not CI; whether stdin and stderr are terminals is
+	// then up to the process, which under `go test` they are not
+	require.False(t, terminalSupported(env(map[string]string{"TERM": "xterm-256color", "CI": "false"})))
+	require.False(t, terminalSupported(env(map[string]string{"TERM": "xterm-256color", "CI": "true"})))
+	require.False(t, terminalSupported(env(map[string]string{"TERM": "xterm-256color", "GITHUB_ACTIONS": "true"})))
+	require.False(t, terminalSupported(env(map[string]string{"TERM": "xterm-256color", "GITLAB_CI": "true"})))
+	require.False(t, terminalSupported(env(map[string]string{"TERM": "dumb"})))
+	require.False(t, terminalSupported(env(map[string]string{})))
+}

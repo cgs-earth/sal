@@ -341,7 +341,7 @@ A yes/no question the build asks, such as whether to include a prefix whose name
 The panes close as soon as the build finishes, and a summary is printed in their place so the terminal keeps a record: how the build ended and after how long, the phases and steps with their times, and the path of the log file, which holds every line the Logs pane showed and is written under `/tmp/sal/logs` whether or not the panes were shown.
 An error that fails the build is still printed after the summary.
 
-The panes need stdin and stderr to be a terminal; a build run from a script or CI, or with its output redirected, logs to stderr as it always has, and `--no-tui` asks for that in a terminal too.
+The panes need stdin and stderr to be a terminal and open only outside CI; a build run from a script, with its output redirected, or on a CI runner (recognized by the `CI` variable every major provider sets, or the provider's own such as `GITHUB_ACTIONS` or `GITLAB_CI`, even when the runner attaches a pseudo-terminal) logs to stderr as it always has, and `--no-tui` asks for that in a terminal too.
 The progress pane reads the same spans [Telemetry](/sal/reference/telemetry/) describes, so what it shows is what a trace of the build records.
 
 ## `sal run`

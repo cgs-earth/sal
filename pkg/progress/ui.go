@@ -54,17 +54,37 @@ func New(command string, logFile io.Writer, logPath string) *UI {
 	}
 }
 
+// ciVariables are set by CI providers in every job they run. `CI` is the
+// convention most of them follow; the rest cover the providers that set only
+// their own name.
+var ciVariables = []string{"CI", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "CIRCLECI", "TRAVIS", "JENKINS_URL", "TF_BUILD", "TEAMCITY_VERSION", "CODEBUILD_BUILD_ID", "CLOUD_BUILD"}
+
 // TerminalSupported reports whether the panes can be shown: stdin and stderr
 // are both terminals, since the panes draw on stderr and read keys from
-// stdin, and the terminal is not a dumb one.
+// stdin, the terminal is a real one, and the process is not running in CI,
+// where nobody is watching and a log that scrolls is what the job keeps.
+// A CI runner that attaches a pseudo-terminal would otherwise open them.
 func TerminalSupported() bool {
+	return terminalSupported(os.Getenv)
+}
+
+// terminalSupported is TerminalSupported with the environment injectable.
+func terminalSupported(getenv func(string) string) bool {
+	for _, name := range ciVariables {
+		if value := getenv(name); value != "" && value != "false" && value != "0" {
+			return false
+		}
+	}
+	if term := getenv("TERM"); term == "" || term == "dumb" {
+		return false
+	}
 	for _, file := range []*os.File{os.Stdin, os.Stderr} {
 		info, err := file.Stat()
 		if err != nil || info.Mode()&os.ModeCharDevice == 0 {
 			return false
 		}
 	}
-	return os.Getenv("TERM") != "dumb"
+	return true
 }
 
 // LogWriter is where the slog handler writes while the panes are up: each
