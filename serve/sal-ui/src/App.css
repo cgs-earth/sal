@@ -13,8 +13,10 @@
   justify-content: space-between;
   gap: 16px;
   padding: 14px 24px;
-  background: var(--mantle);
-  border-bottom: var(--border-strong);
+  background: var(--glass-panel-header);
+  border-bottom: 1px solid var(--glass-panel-border);
+  backdrop-filter: var(--glass-panel-blur);
+  -webkit-backdrop-filter: var(--glass-panel-blur);
 }
 
 .brand {
@@ -24,21 +26,50 @@
   min-width: 0;
 }
 
+/* The mark wears the brand gradient, Fluvial Blue into Continental Green, with
+   Cream lettering; the same in both themes, since the gradient is the brand. */
 .brand-mark {
+  font-family: var(--font-display);
   font-size: 20px;
   font-weight: 800;
   letter-spacing: 0.14em;
-  color: var(--crust);
-  background: linear-gradient(135deg, var(--lavender), var(--sky));
+  color: var(--cgs-cream);
+  background: var(--gradient-brand);
   padding: 2px 10px;
   border-radius: var(--radius-sm);
+  text-decoration: none;
+}
+
+/* The mark links to the documentation; it brightens rather than underlining. */
+a.brand-mark:hover {
+  text-decoration: none;
+  filter: brightness(1.1);
 }
 
 .brand-sub {
-  color: var(--overlay2);
+  color: var(--text-muted);
   font-size: 12px;
   letter-spacing: 0.04em;
   text-transform: lowercase;
+}
+
+/* The right of the header: the table path and the theme toggle. */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.theme-toggle {
+  width: 30px;
+  height: 30px;
+  color: var(--text-muted);
+}
+
+.theme-toggle svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* The table path at the right of the header is a button that opens an input
@@ -62,7 +93,7 @@
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: none;
-  color: var(--subtext0);
+  color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 12px;
   cursor: pointer;
@@ -70,8 +101,8 @@
 
 .header-path:hover,
 .header-path:focus-visible {
-  border-color: var(--surface2);
-  background: var(--surface0);
+  border-color: var(--line-emphasis);
+  background: var(--bg-raised);
   color: var(--text);
   outline: none;
 }
@@ -90,12 +121,12 @@
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--overlay2);
+  color: var(--text-muted);
 }
 
 .header-path .table-kind.remote {
-  color: var(--peach);
-  border-color: var(--peach);
+  color: var(--warn-ink);
+  border-color: var(--warn-ink);
 }
 
 .header-table-form {
@@ -121,7 +152,7 @@
 }
 
 .header-table-hint code {
-  color: var(--teal);
+  color: var(--code);
 }
 
 .header-table-error {
@@ -136,9 +167,7 @@
   flex: none;
   padding: 3px 10px;
   border-radius: 999px;
-  background: var(--surface0);
-  border: var(--border-strong);
-  color: var(--lavender);
+  color: var(--accent-ink);
   font-family: var(--font-mono);
   font-size: 12px;
   white-space: nowrap;
@@ -150,7 +179,9 @@
   display: flex;
   gap: 4px;
   padding: 0 24px;
-  background: var(--mantle);
+  background: var(--glass-panel-header);
+  backdrop-filter: var(--glass-panel-blur);
+  -webkit-backdrop-filter: var(--glass-panel-blur);
   border-bottom: var(--border-strong);
 }
 
@@ -160,8 +191,8 @@
   border: none;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   background: transparent;
-  color: var(--overlay2);
-  font-family: inherit;
+  color: var(--text-muted);
+  font-family: var(--font-display);
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -171,12 +202,12 @@
 
 .tabs .tab:hover {
   color: var(--text);
-  background: var(--surface0);
+  background: var(--bg-raised);
 }
 
 .tabs .tab.active {
-  color: var(--lavender);
-  background: var(--base);
+  color: var(--accent-ink);
+  background: var(--glass-panel);
 }
 
 .tabs .tab.active::after {
@@ -184,23 +215,69 @@
   position: absolute;
   inset: auto 0 -1px 0;
   height: 2px;
-  background: var(--lavender);
+  background: var(--accent);
+}
+
+/* ---------- footer ---------- */
+
+/* The last child of the scrolling content: every tab body is at least the
+   content's height, so the footer sits below the fold and is seen only by
+   scrolling to the end. */
+.app-footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 14px 24px;
+  background: var(--glass-panel-header);
+  border-top: 1px solid var(--glass-panel-border);
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.app-footer a {
+  display: flex;
+  align-items: center;
+}
+
+/* One logo file per theme: the dark theme needs the version with white
+   lettering, so the pair is swapped here rather than in React. */
+.cgs-logo {
+  display: block;
+  height: 38px;
+  width: auto;
+}
+
+.cgs-logo-dark {
+  display: none;
+}
+
+:root[data-theme='dark'] .cgs-logo-light {
+  display: none;
+}
+
+:root[data-theme='dark'] .cgs-logo-dark {
+  display: block;
 }
 
 /* ---------- content ---------- */
 
+/* The content is the one scroll region: the tab bodies scroll it rather than
+   themselves, so the footer after them is part of the same scroll. */
 .content {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-height: 0;
-  background: var(--crust);
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .tab-body {
-  height: 100%;
-  min-height: 0;
+  flex: none;
+  min-height: 100%;
   padding: 20px 24px;
-  overflow-y: auto;
 }
 
 .tab-body.stats {
@@ -209,10 +286,14 @@
   gap: 18px;
 }
 
+/* The map and the module ontology fill the content's height exactly and scroll
+   inside their panels, so these two are fixed to it rather than grown past it. */
 .tab-body.map,
 .tab-body.module {
   display: grid;
   gap: 18px;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -221,7 +302,7 @@
    and, below it, whichever result plugin is active — a table, the graph, ...)
    and the page grows instead. Yasgui/Yasr have their own internal scroll
    regions built for a fixed-height widget; letting the panel size to its
-   content instead means the browser's own scrollbar covers the whole tab, not
+   content instead means the content's own scrollbar covers the whole tab, not
    just a cramped inner strip, and a mouse wheel over the graph only zooms it
    without trapping the rest of the page underneath. The blob tab is a single
    panel sized to its content, so it uses the same flow rather than stretching
@@ -232,7 +313,6 @@
   display: flex;
   flex-direction: column;
   gap: 18px;
-  overflow-y: auto;
 }
 
 .tab-body.split > .panel,
@@ -252,12 +332,24 @@
 
 /* ---------- panels ---------- */
 
+/* A panel is a sheet of frosted glass over the page's brand washes: a
+   translucent fill, the washes blurred through it, a bright hairline where
+   light catches its edge, and a soft shadow lifting it off the page. The stat
+   cards and the modal are the same sheet in other sizes. */
+.panel,
+.stat-card,
+.modal {
+  background: var(--glass-panel);
+  border: 1px solid var(--glass-panel-border);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--glass-shadow);
+  backdrop-filter: var(--glass-panel-blur);
+  -webkit-backdrop-filter: var(--glass-panel-blur);
+}
+
 .panel {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: var(--base);
-  border: var(--border);
   border-radius: var(--radius);
   overflow: hidden;
 }
@@ -269,19 +361,19 @@
   gap: 16px;
   flex: none;
   padding: 12px 16px;
-  background: var(--mantle);
-  border-bottom: var(--border);
+  background: var(--glass-panel-header);
+  border-bottom: 1px solid var(--glass-panel-border);
 }
 
 .panel-header h3 {
   font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.09em;
-  color: var(--lavender);
+  color: var(--accent-ink);
 }
 
 .panel-header p {
-  color: var(--overlay2);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -291,7 +383,7 @@
 }
 
 .panel-header code {
-  color: var(--teal);
+  color: var(--code);
 }
 
 .panel-header-actions {
@@ -315,20 +407,35 @@
 }
 
 .toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin-left: auto;
 }
 
 .editor-panel .toolbar {
   padding: 10px 16px;
-  border-top: var(--border);
-  background: var(--mantle);
+  border-top: 1px solid var(--glass-panel-border);
+  background: var(--glass-panel-header);
+}
+
+/* Buttons, icon buttons, chips, and badges keep their raised face, made a
+   little translucent so the panel glass shows through them, with a faint
+   light along the top edge; the blur is what makes the translucency read. */
+.button,
+.icon-button,
+.chip,
+.badge {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-outline);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
 }
 
 .button {
   padding: 6px 14px;
-  border: var(--border-strong);
   border-radius: var(--radius-sm);
-  background: var(--surface0);
   color: var(--text);
   font-family: inherit;
   font-size: 13px;
@@ -338,13 +445,13 @@
 }
 
 .button:hover:not(:disabled) {
-  background: var(--surface1);
-  border-color: var(--surface2);
+  background: var(--glass-bg-hover);
+  border-color: var(--line-emphasis);
 }
 
 .button:disabled,
 a.button[aria-disabled='true'] {
-  color: var(--overlay0);
+  color: var(--text-disabled);
   cursor: not-allowed;
 }
 
@@ -361,25 +468,25 @@ a.button[aria-disabled='true'] {
 
 .button.copied,
 .button.copied:hover:not(:disabled) {
-  border-color: var(--green);
-  color: var(--green);
+  border-color: var(--success);
+  color: var(--success);
 }
 
 .button.primary {
-  background: var(--lavender);
-  border-color: var(--lavender);
-  color: var(--crust);
+  background: color-mix(in srgb, var(--accent) 88%, transparent);
+  border-color: var(--accent);
+  color: var(--accent-text);
 }
 
 .button.primary:hover:not(:disabled) {
-  background: var(--blue);
-  border-color: var(--blue);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 .button.primary:disabled {
-  background: var(--surface1);
-  border-color: var(--surface1);
-  color: var(--overlay1);
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+  color: var(--text-faint);
 }
 
 .chips {
@@ -392,7 +499,7 @@ a.button[aria-disabled='true'] {
 
 .chips-label {
   align-self: center;
-  color: var(--overlay1);
+  color: var(--text-faint);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -400,10 +507,8 @@ a.button[aria-disabled='true'] {
 
 .chip {
   padding: 3px 10px;
-  border: var(--border-strong);
   border-radius: 999px;
-  background: transparent;
-  color: var(--subtext0);
+  color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 11px;
   cursor: pointer;
@@ -411,23 +516,23 @@ a.button[aria-disabled='true'] {
 }
 
 .chip:hover {
-  color: var(--crust);
-  background: var(--sky);
-  border-color: var(--sky);
+  color: var(--accent-text);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 .hint {
-  color: var(--overlay1);
+  color: var(--text-faint);
   font-size: 12px;
 }
 
 kbd {
   padding: 1px 5px;
-  border: 1px solid var(--surface2);
+  border: 1px solid var(--line-emphasis);
   border-bottom-width: 2px;
   border-radius: 4px;
-  background: var(--surface0);
-  color: var(--subtext0);
+  background: var(--bg-raised);
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -465,18 +570,18 @@ kbd {
 
 .empty {
   padding: 20px 16px;
-  color: var(--overlay1);
+  color: var(--text-faint);
   font-size: 13px;
 }
 
 .error-banner {
   margin: 12px 16px;
   padding: 10px 14px;
-  border: 1px solid var(--red);
+  border: 1px solid var(--danger);
   border-left-width: 4px;
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--red) 12%, var(--base));
-  color: var(--red);
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-panel));
+  color: var(--danger);
   font-family: var(--font-mono);
   font-size: 12px;
   white-space: pre-wrap;
@@ -497,7 +602,7 @@ kbd {
 }
 
 .table-path .label {
-  color: var(--overlay1);
+  color: var(--text-faint);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -514,7 +619,7 @@ kbd {
 }
 
 .table-path code {
-  color: var(--teal);
+  color: var(--code);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -532,26 +637,31 @@ kbd {
   flex-direction: column;
   gap: 2px;
   padding: 14px 16px;
-  background: var(--base);
-  border: var(--border);
   border-radius: var(--radius);
-  border-left: 3px solid var(--accent, var(--lavender));
+  border-left: 3px solid var(--stripe);
 }
 
-.stat-card[data-accent='lavender'] {
-  --accent: var(--lavender);
+/* Each card takes a brand color: the pure color for its stripe, and the same
+   color as the figure, deepened where the light theme needs the contrast. */
+.stat-card[data-accent='green'] {
+  --stripe: var(--chart-green);
+  --figure: var(--chart-green-ink);
 }
 .stat-card[data-accent='blue'] {
-  --accent: var(--blue);
+  --stripe: var(--chart-blue);
+  --figure: var(--chart-blue-ink);
 }
-.stat-card[data-accent='teal'] {
-  --accent: var(--teal);
+.stat-card[data-accent='sky'] {
+  --stripe: var(--chart-sky);
+  --figure: var(--chart-sky-ink);
 }
-.stat-card[data-accent='peach'] {
-  --accent: var(--peach);
+.stat-card[data-accent='yellow'] {
+  --stripe: var(--chart-yellow);
+  --figure: var(--chart-yellow-ink);
 }
-.stat-card[data-accent='mauve'] {
-  --accent: var(--mauve);
+.stat-card[data-accent='gray'] {
+  --stripe: var(--chart-gray);
+  --figure: var(--chart-gray-ink);
 }
 
 .stat-value {
@@ -559,11 +669,11 @@ kbd {
   font-size: 26px;
   font-weight: 700;
   line-height: 1.2;
-  color: var(--accent);
+  color: var(--figure);
 }
 
 .stat-label {
-  color: var(--overlay2);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -596,8 +706,8 @@ kbd {
   top: 0;
   z-index: 1;
   padding: 8px 12px;
-  background: var(--surface0);
-  border-bottom: 1px solid var(--surface2);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--line-emphasis);
   color: var(--text);
   font-weight: 700;
   text-align: left;
@@ -607,8 +717,8 @@ kbd {
 .result-table td {
   max-width: 460px;
   padding: 6px 12px;
-  border-bottom: 1px solid var(--surface0);
-  color: var(--subtext1);
+  border-bottom: 1px solid var(--line);
+  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -616,27 +726,27 @@ kbd {
 }
 
 .result-table tbody tr:nth-child(even) td {
-  background: color-mix(in srgb, var(--mantle) 55%, transparent);
+  background: color-mix(in srgb, var(--bg-sunken) 55%, transparent);
 }
 
 .result-table tbody tr:hover td {
-  background: var(--surface0);
+  background: var(--bg-raised);
   color: var(--text);
 }
 
 .result-table .row-number {
   width: 1%;
-  color: var(--overlay0);
+  color: var(--text-disabled);
   text-align: right;
   user-select: none;
 }
 
 .result-table .iri {
-  color: var(--sky);
+  color: var(--link);
 }
 
 .result-table .null {
-  color: var(--overlay0);
+  color: var(--text-disabled);
 }
 
 /* ---------- modules ---------- */
@@ -654,7 +764,7 @@ kbd {
   padding: 6px 12px;
   border: var(--border-strong);
   border-radius: var(--radius-sm);
-  background: var(--crust);
+  background: var(--bg-input);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 13px;
@@ -662,11 +772,11 @@ kbd {
 
 .module-input:focus {
   outline: none;
-  border-color: var(--lavender);
+  border-color: var(--accent);
 }
 
 .module-input::placeholder {
-  color: var(--overlay0);
+  color: var(--text-disabled);
 }
 
 .module-hint {
@@ -674,7 +784,7 @@ kbd {
 }
 
 .module-hint code {
-  color: var(--teal);
+  color: var(--code);
 }
 
 .icon-button {
@@ -684,24 +794,22 @@ kbd {
   width: 26px;
   height: 26px;
   padding: 0;
-  border: var(--border-strong);
   border-radius: var(--radius-sm);
-  background: var(--surface0);
-  color: var(--subtext0);
+  color: var(--text-muted);
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
 .icon-button:hover {
-  background: var(--surface1);
-  border-color: var(--surface2);
+  background: var(--glass-bg-hover);
+  border-color: var(--line-emphasis);
   color: var(--text);
 }
 
 .icon-button.copied,
 .icon-button.copied:hover {
-  color: var(--green);
-  border-color: var(--green);
+  color: var(--success);
+  border-color: var(--success);
 }
 
 .json-scroll {
@@ -727,7 +835,7 @@ kbd {
 }
 
 .blob-toggle code {
-  color: var(--teal);
+  color: var(--code);
 }
 
 /* The listing is a native disclosure: a details element cannot be laid out as a
@@ -750,7 +858,7 @@ kbd {
 .blob-list-summary h3::before {
   display: inline-block;
   width: 1em;
-  color: var(--overlay1);
+  color: var(--text-faint);
   content: '▸';
   transition: transform 120ms ease;
 }
@@ -760,11 +868,11 @@ kbd {
 }
 
 .blob-list-summary:hover h3 {
-  color: var(--blue);
+  color: var(--link);
 }
 
 .blob-list-summary:focus-visible {
-  outline: 2px solid var(--lavender);
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
@@ -773,7 +881,7 @@ kbd {
 }
 
 .blob-list-hint a {
-  color: var(--sky);
+  color: var(--link);
 }
 
 .blob-list-scroll {
@@ -818,8 +926,8 @@ kbd {
   width: 300px;
   padding: 14px 16px;
   overflow-y: auto;
-  background: var(--mantle);
-  border-right: var(--border);
+  background: var(--glass-panel-header);
+  border-right: 1px solid var(--glass-panel-border);
 }
 
 .map-control-group {
@@ -833,7 +941,7 @@ kbd {
 }
 
 .map-control-group .hint code {
-  color: var(--teal);
+  color: var(--code);
 }
 
 .map-chips {
@@ -841,20 +949,20 @@ kbd {
 }
 
 .chip.active {
-  color: var(--crust);
-  background: var(--lavender);
-  border-color: var(--lavender);
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .chip:disabled {
-  color: var(--overlay0);
+  color: var(--text-disabled);
   cursor: not-allowed;
 }
 
 .chip:disabled:hover {
-  background: transparent;
-  border-color: var(--surface1);
-  color: var(--overlay0);
+  background: var(--glass-bg);
+  border-color: var(--glass-outline);
+  color: var(--text-disabled);
 }
 
 .map-bbox-grid {
@@ -870,7 +978,7 @@ kbd {
 }
 
 .map-bbox-field span {
-  color: var(--overlay1);
+  color: var(--text-faint);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -892,13 +1000,13 @@ kbd {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--subtext0);
+  color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
 }
 
 .toggle input {
-  accent-color: var(--lavender);
+  accent-color: var(--accent);
 }
 
 /* The ? button and the note it opens under a panel header. */
@@ -911,16 +1019,16 @@ kbd {
 }
 
 .help-button.active {
-  border-color: var(--lavender);
-  color: var(--lavender);
+  border-color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .help-panel {
   flex: none;
   padding: 10px 16px;
-  background: var(--mantle);
+  background: var(--glass-panel-header);
   border-bottom: var(--border);
-  color: var(--subtext0);
+  color: var(--text-muted);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -934,7 +1042,7 @@ kbd {
 }
 
 .help-panel code {
-  color: var(--teal);
+  color: var(--code);
 }
 
 .map-link {
@@ -949,41 +1057,41 @@ kbd {
   position: relative;
   flex: 1;
   min-width: 0;
-  background: var(--crust);
+  background: var(--bg);
 }
 
 /* MapLibre's own chrome is styled for a light page; recolor it to the theme. */
 .map-canvas .maplibregl-ctrl-group {
-  background: var(--surface0);
+  background: var(--bg-raised);
   border: var(--border-strong);
   box-shadow: none;
 }
 
 .map-canvas .maplibregl-ctrl-group button + button {
-  border-top-color: var(--surface1);
+  border-top-color: var(--line-strong);
 }
 
 .map-canvas .maplibregl-ctrl button .maplibregl-ctrl-icon {
-  filter: invert(0.85);
+  filter: var(--map-ctrl-icon-filter);
 }
 
 .map-canvas .maplibregl-ctrl-attrib,
 .map-canvas .maplibregl-ctrl-scale {
-  background: color-mix(in srgb, var(--mantle) 80%, transparent);
-  color: var(--subtext0);
-  border-color: var(--surface2);
+  background: color-mix(in srgb, var(--bg-sunken) 80%, transparent);
+  color: var(--text-muted);
+  border-color: var(--line-emphasis);
   font-size: 11px;
 }
 
 .map-canvas .maplibregl-ctrl-attrib a {
-  color: var(--sky);
+  color: var(--link);
 }
 
 .map-popup .maplibregl-popup-content {
   max-height: 320px;
   padding: 10px 24px 10px 12px;
   overflow: auto;
-  background: var(--surface0);
+  background: var(--bg-raised);
   border: var(--border-strong);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
@@ -991,7 +1099,7 @@ kbd {
 }
 
 .map-popup .maplibregl-popup-close-button {
-  color: var(--overlay2);
+  color: var(--text-muted);
   font-size: 18px;
 }
 
@@ -1001,8 +1109,8 @@ kbd {
 }
 
 .map-popup .maplibregl-popup-tip {
-  border-top-color: var(--surface0);
-  border-bottom-color: var(--surface0);
+  border-top-color: var(--line);
+  border-bottom-color: var(--line);
 }
 
 .map-popup-table {
@@ -1013,7 +1121,7 @@ kbd {
 
 .map-popup-table th {
   padding: 3px 10px 3px 0;
-  color: var(--lavender);
+  color: var(--accent-ink);
   font-weight: 600;
   text-align: left;
   vertical-align: top;
@@ -1022,12 +1130,121 @@ kbd {
 
 .map-popup-table td {
   padding: 3px 0;
-  color: var(--subtext1);
+  color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
 
 .map-popup-table a {
-  color: var(--sky);
+  color: var(--link);
+}
+
+/* ---------- modals: the example query picker ---------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12vh 16px 16px;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: min(680px, 100%);
+  max-height: 70vh;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--glass-panel-header);
+  border-bottom: 1px solid var(--glass-panel-border);
+}
+
+.modal-header h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--accent-ink);
+}
+
+.modal-search {
+  flex: none;
+  margin: 12px 16px 0;
+  padding: 8px 12px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+
+.sample-list {
+  flex: 1;
+  min-height: 0;
+  margin: 8px 0 0;
+  padding: 0 8px;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.sample-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.sample-item.selected {
+  background: var(--bg-raised);
+  border-left-color: var(--accent);
+}
+
+.sample-name {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sample-name mark {
+  background: transparent;
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+.sample-preview {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sample-item.selected .sample-preview {
+  color: var(--text-muted);
+}
+
+.sample-empty {
+  padding: 16px 10px;
+  color: var(--text-faint);
+}
+
+.modal-hint {
+  flex: none;
+  padding: 10px 16px;
+  border-top: var(--border);
 }
 
 /* ---------- sparql ---------- */
@@ -1073,7 +1290,7 @@ kbd {
   min-width: 0;
   border: var(--border-strong);
   border-radius: var(--radius-sm);
-  background: var(--mantle);
+  background: var(--bg-sunken);
   overflow: hidden;
 }
 
@@ -1089,7 +1306,7 @@ kbd {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.09em;
-  color: var(--lavender);
+  color: var(--accent-ink);
 }
 
 .sql-preview-copy {
@@ -1129,8 +1346,8 @@ kbd {
   gap: 18px;
   flex-wrap: wrap;
   padding: 8px 10px;
-  background: var(--mantle);
-  border: 1px solid var(--surface1);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
 }
 
@@ -1138,29 +1355,29 @@ kbd {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--subtext0);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
 .graph-settings-value {
   min-width: 3.2em;
-  color: var(--overlay1);
+  color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: 11px;
 }
 
 .graph-settings-reset {
   padding: 4px 10px;
-  border: 1px solid var(--surface2);
+  border: 1px solid var(--line-emphasis);
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--subtext0);
+  color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
 }
 
 .graph-settings-reset:hover {
-  background: var(--surface0);
+  background: var(--bg-raised);
   color: var(--text);
 }
 
@@ -1172,19 +1389,19 @@ kbd {
   position: relative;
   height: 640px;
   width: 100%;
-  background: var(--mantle);
-  border: 1px solid var(--surface1);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-strong);
   border-radius: 10px;
   overflow: hidden;
   /* @react-sigma's own stylesheet reads these as CSS custom properties (its `div.react-sigma`
      fills this wrapper exactly, so its default white background/controls are what's actually
      visible, not the background set above) — :root defines them at #fff/#000, so they're
      redefined here to inherit down into that child instead. */
-  --sigma-background-color: var(--mantle);
-  --sigma-controls-background-color: var(--surface0);
-  --sigma-controls-background-color-hover: var(--surface1);
-  --sigma-controls-border-color: var(--surface2);
-  --sigma-controls-color: var(--lavender);
+  --sigma-background-color: var(--bg-sunken);
+  --sigma-controls-background-color: var(--bg-raised);
+  --sigma-controls-background-color-hover: var(--line-strong);
+  --sigma-controls-border-color: var(--line-emphasis);
+  --sigma-controls-color: var(--accent);
 }
 
 .graph-loading {
@@ -1193,18 +1410,18 @@ kbd {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: var(--subtext0);
+  color: var(--text-muted);
   font-size: 13px;
-  background: var(--mantle);
-  border: 1px solid var(--surface1);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-strong);
   border-radius: 10px;
 }
 
 .graph-spinner {
   width: 16px;
   height: 16px;
-  border: 2px solid var(--surface1);
-  border-top-color: var(--lavender);
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: graph-spin 0.7s linear infinite;
 }
@@ -1217,9 +1434,9 @@ kbd {
 
 .graph-empty-state {
   padding: 28px 20px;
-  border: 1px dashed var(--surface2);
+  border: 1px dashed var(--line-emphasis);
   border-radius: var(--radius-sm);
-  color: var(--subtext0);
+  color: var(--text-muted);
   text-align: center;
 }
 
@@ -1229,7 +1446,7 @@ kbd {
 
 .graph-empty-reason {
   margin-top: 8px !important;
-  color: var(--overlay1);
+  color: var(--text-faint);
   font-size: 13px;
 }
 
@@ -1240,7 +1457,7 @@ kbd {
   gap: 12px;
   flex-wrap: wrap;
   font-size: 12px;
-  color: var(--subtext0);
+  color: var(--text-muted);
 }
 
 .graph-legend {
@@ -1264,7 +1481,7 @@ kbd {
 }
 
 .graph-stats {
-  color: var(--overlay1);
+  color: var(--text-faint);
 }
 
 .graph-tooltip {
@@ -1273,8 +1490,8 @@ kbd {
   z-index: 10;
   max-width: 320px;
   padding: 5px 9px;
-  background: var(--surface0);
-  border: 1px solid var(--surface2);
+  background: var(--bg-raised);
+  border: 1px solid var(--line-emphasis);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
   color: var(--text);
@@ -1286,7 +1503,7 @@ kbd {
 
 .graph-tooltip-kind {
   display: block;
-  color: var(--overlay1);
+  color: var(--text-faint);
   font-family: var(--font-sans);
   font-size: 10px;
   text-transform: uppercase;
@@ -1300,8 +1517,8 @@ kbd {
   flex-direction: column;
   min-width: 180px;
   padding: 4px;
-  background: var(--surface0);
-  border: 1px solid var(--surface2);
+  background: var(--bg-raised);
+  border: 1px solid var(--line-emphasis);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
   transform: translate(4px, 4px);
@@ -1320,5 +1537,5 @@ kbd {
 }
 
 .graph-context-menu-item:hover {
-  background: var(--surface1);
+  background: var(--bg-hover);
 }

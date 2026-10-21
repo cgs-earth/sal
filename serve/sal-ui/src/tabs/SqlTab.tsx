@@ -6,8 +6,9 @@ import { Prec } from '@codemirror/state'
 import { runSQL, type ImportedTable, type NamedQuery, type QueryResult } from '../api'
 import { ResultTable } from '../components/ResultTable'
 import { ShareLinkButton } from '../components/ShareLinkButton'
+import { SampleQueryPicker } from '../components/SampleQueryPicker'
 import { toCSV } from '../csv'
-import { catppuccin } from '../theme'
+import { editorExtensions } from '../theme'
 import { publishResult } from '../results'
 
 const DEFAULT_SQL = 'SELECT *\nFROM triples\nLIMIT 20'
@@ -134,7 +135,7 @@ export function SqlTab({
           },
         ]),
       ),
-      ...catppuccin,
+      ...editorExtensions,
     ],
     [schema],
   )
@@ -173,22 +174,9 @@ export function SqlTab({
             .
           </p>
         </header>
-        <div className="chips">
-          {samplesFor(tablePath, sampleQueries).map((sample) => (
-            <button
-              key={sample.name}
-              type="button"
-              className="chip"
-              title={sample.sql}
-              onClick={() => setStatement(sample.sql)}
-            >
-              {sample.name}
-            </button>
-          ))}
-        </div>
         <div className="editor">
           {/* theme="none" keeps the package from injecting its default light theme,
-              which would otherwise win over the Catppuccin theme in `extensions`. */}
+              which would otherwise win over the theme in `extensions`. */}
           <CodeMirror
             value={statement}
             height="100%"
@@ -205,6 +193,10 @@ export function SqlTab({
             <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Enter</kbd>
           </span>
           <span className="toolbar-actions">
+            <SampleQueryPicker
+              samples={samplesFor(tablePath, sampleQueries).map((sample) => ({ name: sample.name, text: sample.sql }))}
+              onPick={(sample) => setStatement(sample.text)}
+            />
             <ShareLinkButton tab="SQL" query={() => statementRef.current} />
           </span>
         </div>

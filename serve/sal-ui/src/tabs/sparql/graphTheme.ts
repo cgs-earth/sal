@@ -1,11 +1,12 @@
 import type { NodeHoverDrawingFunction } from 'sigma/rendering'
-import { mocha } from '../../theme'
+import { currentTheme, graphPalette } from '../../theme'
 
 /**
  * Sigma's built-in hover renderer (drawDiscNodeHover) hardcodes a white label-pill
  * background (`context.fillStyle = "#FFF"`) with no way to theme it via settings or
- * CSS — it's a canvas draw call, not styled DOM. This is a copy of its geometry with
- * Catppuccin Mocha colors instead, so hovering a node doesn't flash white on a dark canvas.
+ * CSS — it's a canvas draw call, not styled DOM. This is a copy of its geometry in
+ * the page theme's colors instead, read on each draw so a theme switch takes
+ * effect on the next hover, so hovering a node doesn't flash white on a dark canvas.
  */
 export const drawNodeHover: NodeHoverDrawingFunction = (context, data, settings) => {
   const size = settings.labelSize
@@ -13,11 +14,12 @@ export const drawNodeHover: NodeHoverDrawingFunction = (context, data, settings)
   const weight = settings.labelWeight
   context.font = `${weight} ${size}px ${font}`
 
-  context.fillStyle = mocha.surface0
+  const palette = graphPalette(currentTheme())
+  context.fillStyle = palette.hoverBackground
   context.shadowOffsetX = 0
   context.shadowOffsetY = 0
   context.shadowBlur = 8
-  context.shadowColor = 'rgba(0, 0, 0, 0.6)'
+  context.shadowColor = palette.hoverShadow
 
   const PADDING = 2
   if (typeof data.label === 'string') {
@@ -47,7 +49,7 @@ export const drawNodeHover: NodeHoverDrawingFunction = (context, data, settings)
   context.shadowBlur = 0
 
   if (data.label) {
-    context.fillStyle = mocha.text
+    context.fillStyle = palette.label
     context.fillText(data.label, data.x + data.size + 3, data.y + size / 3)
   }
 }

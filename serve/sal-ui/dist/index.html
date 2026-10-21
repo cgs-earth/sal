@@ -4,10 +4,24 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="light dark" />
     <title>SAL</title>
-    <script type="module" crossorigin src="/assets/index-D8XMFGeZ.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DJmG95KX.css">
+    <!-- Sets the theme before the first paint, so a remembered dark theme never
+         flashes light. theme.ts owns the key and the attribute from here on. -->
+    <script>
+      (function () {
+        var theme
+        try {
+          theme = localStorage.getItem('sal-ui.theme')
+        } catch (e) {}
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+        }
+        document.documentElement.dataset.theme = theme
+      })()
+    </script>
+    <script type="module" crossorigin src="/assets/index-BVkxxcme.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CgLlYGDP.css">
   </head>
   <body>
     <div id="root"></div>

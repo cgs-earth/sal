@@ -1,44 +1,218 @@
-/* Catppuccin Mocha, deliberately high contrast: crust page, base panels, text foreground. */
+/*
+ * The Center for Geospatial Solutions palette, as the brand guidelines give it,
+ * and the two themes built from it. Everything else in the app reads only the
+ * semantic properties (--bg, --text, --accent, ...) that the theme blocks set;
+ * the brand constants are here so a theme block can say which brand color a
+ * role takes.
+ *
+ * The light theme is the palette as the guidelines pair it: Pavement Gray text
+ * on Cream, Cumulus Gray for edges and quiet surfaces, Fluvial Blue for what is
+ * interactive. A brand color used as small text on a light surface is mixed
+ * toward Pavement Gray until it clears the 4.5:1 contrast the guidelines ask
+ * for; the pure color is kept for fills, borders, and large figures.
+ *
+ * The dark theme has no brand dark beyond Pavement Gray, so its surfaces are
+ * deep tints of that gray and Cream is the text; Continental Green takes the
+ * interactive role, since it reads better on those surfaces than Fluvial Blue.
+ * The deep shades are the ones docs/src/styles/cgs.css settled on for the
+ * documentation site, so the two look like one product.
+ *
+ * `<html data-theme>` chooses between them. index.html sets it before the first
+ * paint from what theme.ts remembered, or the system preference.
+ */
 :root {
-  --rosewater: #f5e0dc;
-  --flamingo: #f2cdcd;
-  --pink: #f5c2e7;
-  --mauve: #cba6f7;
-  --red: #f38ba8;
-  --maroon: #eba0ac;
-  --peach: #fab387;
-  --yellow: #f9e2af;
-  --green: #a6e3a1;
-  --teal: #94e2d5;
-  --sky: #89dceb;
-  --sapphire: #74c7ec;
-  --blue: #89b4fa;
-  --lavender: #b4befe;
-  --text: #cdd6f4;
-  --subtext1: #bac2de;
-  --subtext0: #a6adc8;
-  --overlay2: #9399b2;
-  --overlay1: #7f849c;
-  --overlay0: #6c7086;
-  --surface2: #585b70;
-  --surface1: #45475a;
-  --surface0: #313244;
-  --base: #1e1e2e;
-  --mantle: #181825;
-  --crust: #11111b;
+  --cgs-continental-green: #46ab9d;
+  --cgs-fluvial-blue: #2c84b9;
+  --cgs-rayleigh-blue: #86c1e2;
+  --cgs-cumulus-gray: #c9dee8;
+  --cgs-prairie-yellow: #f9c609;
+  --cgs-cream: #fefcf5;
+  --cgs-slate-gray: #82848b;
+  --cgs-pavement-gray: #48535b;
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* The brand gradient, Fluvial Blue into Continental Green. */
+  --gradient-brand: linear-gradient(135deg, var(--cgs-fluvial-blue), var(--cgs-continental-green));
+
+  /* District Pro for display text and Aptos for body copy, when the machine has
+     them; the fallbacks are the clean sans-serifs the guidelines allow. */
+  --font-display: 'District Pro', 'Aptos', 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-sans: 'Aptos', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', 'Menlo', 'Consolas', monospace;
 
   --radius: 10px;
   --radius-sm: 6px;
-  --border: 1px solid var(--surface0);
-  --border-strong: 1px solid var(--surface1);
-  --shadow: 0 12px 32px rgb(0 0 0 / 45%);
+  --border: 1px solid var(--line);
+  --border-strong: 1px solid var(--line-strong);
 
-  color-scheme: dark;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+
+  /* ---------- light ---------- */
+
+  color-scheme: light;
+
+  --bg: var(--cgs-cream);
+  --bg-sunken: #f2f7fa;
+  --bg-panel: #ffffff;
+  --bg-raised: #e8f0f5;
+  --bg-hover: #dfeaf1;
+  --bg-input: #ffffff;
+
+  --line: color-mix(in srgb, var(--cgs-cumulus-gray) 55%, #ffffff);
+  --line-strong: var(--cgs-cumulus-gray);
+  --line-emphasis: color-mix(in srgb, var(--cgs-cumulus-gray) 55%, var(--cgs-slate-gray));
+  --line-highlight: color-mix(in srgb, var(--cgs-cumulus-gray) 30%, transparent);
+
+  --text: var(--cgs-pavement-gray);
+  --text-secondary: color-mix(in srgb, var(--cgs-pavement-gray) 75%, var(--cgs-slate-gray));
+  --text-muted: color-mix(in srgb, var(--cgs-pavement-gray) 40%, var(--cgs-slate-gray));
+  --text-faint: var(--cgs-slate-gray);
+  --text-disabled: color-mix(in srgb, var(--cgs-slate-gray) 55%, var(--cgs-cumulus-gray));
+
+  /* Fluvial Blue is the interactive color: fills take it as is, text on a light
+     surface takes it deepened toward Pavement Gray. */
+  --accent: var(--cgs-fluvial-blue);
+  --accent-hover: #1b5b83;
+  --accent-text: #ffffff;
+  --accent-ink: #1b5b83;
+  --link: var(--accent-ink);
+  /* Continental Green, deepened the same way, marks code and identifiers. */
+  --code: #1f5e55;
+  --success: var(--code);
+  --warn: var(--cgs-prairie-yellow);
+  --warn-ink: #6b5303;
+  /* The palette has no red, and an error has to be one. */
+  --danger: #b3261e;
+  --selection: color-mix(in srgb, var(--cgs-rayleigh-blue) 45%, transparent);
+  --shadow: 0 12px 32px rgb(72 83 91 / 18%);
+
+  /* The page is lit by soft washes of the brand colors behind everything, so
+     the frosted surfaces below have something to blur and show through. */
+  --ambient-blue: rgb(44 132 185 / 20%);
+  --ambient-green: rgb(70 171 157 / 20%);
+  --ambient-yellow: rgb(249 198 9 / 12%);
+
+  /* Panels, cards, the header, and the modal are translucent and blurred.
+     Buttons, chips, and badges are the raised surface at partial opacity:
+     the same colors as before, letting a little of the panel through. */
+  --glass-panel: rgb(255 255 255 / 58%);
+  --glass-panel-header: rgb(255 255 255 / 34%);
+  --glass-panel-border: rgb(255 255 255 / 75%);
+  --glass-bg: color-mix(in srgb, var(--bg-raised) 70%, transparent);
+  --glass-bg-hover: color-mix(in srgb, var(--bg-hover) 75%, transparent);
+  --glass-outline: color-mix(in srgb, var(--line-strong) 85%, transparent);
+  --glass-highlight: rgb(255 255 255 / 70%);
+  --glass-shadow: 0 2px 10px rgb(72 83 91 / 10%);
+  --glass-blur: blur(10px) saturate(1.15);
+  --glass-panel-blur: blur(22px) saturate(1.25);
+
+  /* Syntax colors for both editors: the brand hues, taken to their deep shades
+     so every token clears 4.5:1 on the editor's surface, and one hue per kind
+     of token a query is read by: keywords blue, IRIs and column names green,
+     variables yellow, literals peach, comments gray. */
+  --syntax-keyword: #0f4f78;
+  --syntax-string: #9a3a12;
+  --syntax-number: #9a3a12;
+  --syntax-comment: #6b7780;
+  --syntax-function: #0f4f78;
+  --syntax-type: #7a4b00;
+  --syntax-property: #176b5e;
+  --syntax-variable: #7a4b00;
+  --syntax-punctuation: #5f6b73;
+
+  /* The stat cards' accents: a brand color for the stripe, and the same color
+     as a figure, deepened where the light surface needs it. */
+  --chart-green: var(--cgs-continental-green);
+  --chart-green-ink: var(--code);
+  --chart-blue: var(--cgs-fluvial-blue);
+  --chart-blue-ink: var(--accent-ink);
+  --chart-sky: var(--cgs-rayleigh-blue);
+  --chart-sky-ink: #3d6f8c;
+  --chart-yellow: var(--cgs-prairie-yellow);
+  --chart-yellow-ink: var(--warn-ink);
+  --chart-gray: var(--cgs-slate-gray);
+  --chart-gray-ink: var(--text-secondary);
+
+  /* MapLibre's own controls are drawn for a light page. The graph's and the
+     map's own colors are in theme.ts, since a canvas cannot read a var(). */
+  --map-ctrl-icon-filter: none;
+}
+
+/* ---------- dark ---------- */
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* A darker page under lighter panels, and brighter secondary text, so the
+     structure reads at a glance rather than as one dim surface. */
+  --bg: #0f1417;
+  --bg-sunken: #0b0f12;
+  --bg-panel: #1a2228;
+  --bg-raised: #27333b;
+  --bg-hover: #34434d;
+  --bg-input: #0b0f12;
+
+  --line: #2b373f;
+  --line-strong: #46555f;
+  --line-emphasis: #627480;
+  --line-highlight: rgb(255 255 255 / 5%);
+
+  --text: var(--cgs-cream);
+  --text-secondary: #d8e6ee;
+  --text-muted: #aabfca;
+  --text-faint: #93a6b1;
+  --text-disabled: #6e808b;
+
+  --accent: var(--cgs-continental-green);
+  --accent-hover: #6ccfc0;
+  --accent-text: #0b0f12;
+  --accent-ink: #62c7b8;
+  --link: #9ad0ee;
+  --code: #9ad0ee;
+  --success: #62c7b8;
+  --warn: var(--cgs-prairie-yellow);
+  --warn-ink: var(--cgs-prairie-yellow);
+  --danger: #f59a93;
+  --selection: color-mix(in srgb, var(--cgs-fluvial-blue) 50%, transparent);
+  --shadow: 0 12px 32px rgb(0 0 0 / 55%);
+
+  --ambient-blue: rgb(44 132 185 / 30%);
+  --ambient-green: rgb(70 171 157 / 24%);
+  --ambient-yellow: rgb(249 198 9 / 9%);
+
+  --glass-panel: rgb(26 34 40 / 62%);
+  --glass-panel-header: rgb(255 255 255 / 4%);
+  --glass-panel-border: rgb(255 255 255 / 12%);
+  --glass-bg: color-mix(in srgb, var(--bg-raised) 72%, transparent);
+  --glass-bg-hover: color-mix(in srgb, var(--bg-hover) 78%, transparent);
+  --glass-outline: color-mix(in srgb, var(--line-strong) 85%, transparent);
+  --glass-highlight: rgb(255 255 255 / 7%);
+  --glass-shadow: 0 2px 10px rgb(0 0 0 / 35%);
+
+  /* The same hue families as the light editor, lifted toward Cream so they
+     stand off the near-black editor surface. */
+  --syntax-keyword: #8fd0f8;
+  --syntax-string: #ffb38a;
+  --syntax-number: #ffb38a;
+  --syntax-comment: #8a9ca6;
+  --syntax-function: #8fd0f8;
+  --syntax-type: #ffd166;
+  --syntax-property: #6fe0cc;
+  --syntax-variable: #ffd166;
+  --syntax-punctuation: #aabfca;
+
+  --chart-green: var(--cgs-continental-green);
+  --chart-green-ink: #62c7b8;
+  --chart-blue: var(--cgs-fluvial-blue);
+  --chart-blue-ink: #6fb6e0;
+  --chart-sky: var(--cgs-rayleigh-blue);
+  --chart-sky-ink: var(--cgs-rayleigh-blue);
+  --chart-yellow: var(--cgs-prairie-yellow);
+  --chart-yellow-ink: var(--cgs-prairie-yellow);
+  --chart-gray: var(--cgs-slate-gray);
+  --chart-gray-ink: #d8e6ee;
+
+  --map-ctrl-icon-filter: invert(0.85);
 }
 
 * {
@@ -53,7 +227,14 @@ body,
 }
 
 body {
-  background: var(--crust);
+  /* The brand washes are fixed to the viewport, so the glass above them blurs
+     the same light wherever the page has scrolled to. */
+  background:
+    radial-gradient(60% 55% at 12% 8%, var(--ambient-blue), transparent 70%),
+    radial-gradient(50% 50% at 88% 18%, var(--ambient-green), transparent 70%),
+    radial-gradient(45% 40% at 55% 100%, var(--ambient-yellow), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-sans);
   font-size: 14px;
@@ -66,6 +247,7 @@ h2,
 h3,
 h4 {
   margin: 0;
+  font-family: var(--font-display);
   font-weight: 650;
   letter-spacing: -0.01em;
 }
@@ -81,7 +263,7 @@ pre {
 }
 
 a {
-  color: var(--blue);
+  color: var(--link);
   text-decoration: none;
 }
 
@@ -90,7 +272,7 @@ a:hover {
 }
 
 :focus-visible {
-  outline: 2px solid var(--lavender);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -100,15 +282,15 @@ a:hover {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--mantle);
+  background: var(--bg-sunken);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--surface1);
-  border: 2px solid var(--mantle);
+  background: var(--line-strong);
+  border: 2px solid var(--bg-sunken);
   border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--surface2);
+  background: var(--line-emphasis);
 }

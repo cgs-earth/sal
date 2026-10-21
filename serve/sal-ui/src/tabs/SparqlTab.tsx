@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Yasgui from '@zazuko/yasgui'
 import '@zazuko/yasgui/build/yasgui.min.css'
-import '../yasgui-catppuccin.css'
+import '../yasgui-theme.css'
 import { translateSparql, type QueryResult } from '../api'
 import { ShareLinkButton } from '../components/ShareLinkButton'
+import { SampleQueryPicker } from '../components/SampleQueryPicker'
 import { registerGraphPlugin } from './sparql/GraphPlugin'
 import { setQueryRunner, setQueryTextGetter } from './sparql/sparqlBridge'
 import { SqlPreview, type Translation } from './sparql/SqlPreview'
@@ -429,6 +430,11 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
         <header className="panel-header">
           <h3>SPARQL</h3>
           <div className="panel-header-actions">
+            <SampleQueryPicker
+              compact
+              samples={samples.map((sample) => ({ name: sample.name, text: sample.query }))}
+              onPick={(sample) => loadSample({ name: sample.name, query: sample.text })}
+            />
             <label className="toggle sql-toggle" title="Show the DuckDB SQL the query translates to">
               <input type="checkbox" checked={showSql} onChange={(event) => toggleShowSql(event.target.checked)} />
               Show SQL
@@ -465,13 +471,6 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
             </ul>
           </div>
         )}
-        <div className="chips">
-          {samples.map((sample) => (
-            <button key={sample.name} type="button" className="chip" onClick={() => loadSample(sample)}>
-              {sample.name}
-            </button>
-          ))}
-        </div>
         {/* The host stays mounted whether or not the SQL pane is shown, since
             the Yasgui instance lives in it. With the pane on, the workspace
             puts the two side by side when it is wide enough and stacks them

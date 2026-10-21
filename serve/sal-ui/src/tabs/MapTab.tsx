@@ -6,6 +6,7 @@ import { fetchExtent, fetchGeometries, type BBox, type GeoJSONFeature } from '..
 import { boundsOf, boxPolygon, featuresFromResult, type MapFeature } from '../geo'
 import { useResults, type ResultSource } from '../results'
 import { pathForTab, visit } from '../routing'
+import { mapPalette, useTheme, type MapPalette, type Theme } from '../theme'
 
 /**
  * What the map draws: the last result of one of the editors, or a bounding box
@@ -33,19 +34,22 @@ const FIT_PADDING = 48
 
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] }
 
-const BASEMAP = 'https://tiles.openfreemap.org/styles/fiord'
-
-// Catppuccin Mocha, matching theme.ts; MapLibre paint wants literal colors, not CSS variables.
-const SKY = '#89dceb'
-const PEACH = '#fab387'
-const MAUVE = '#cba6f7'
-const GREEN = '#a6e3a1'
-const CRUST = '#11111b'
+/** A dark and a light basemap, so the map follows the page theme. */
+const BASEMAP: Record<Theme, string> = {
+  dark: 'https://tiles.openfreemap.org/styles/fiord',
+  light: 'https://tiles.openfreemap.org/styles/positron',
+}
 
 /** The layers a click on a feature is looked up in, topmost first. */
 const FEATURE_LAYERS = ['features-point', 'features-line', 'features-fill']
 
-function addLayers(map: maplibregl.Map) {
+/**
+ * Adds the sources and layers the tab draws into. MapLibre paint wants literal
+ * colors, not CSS variables, so they come from the theme's palette; a theme
+ * switch loads the other basemap, which drops these, and they are added again
+ * in the other palette.
+ */
+function addLayers(map: maplibregl.Map, { feature, extent, point, pointStroke, box }: MapPalette) {
   map.addSource('extent', { type: 'geojson', data: EMPTY })
   map.addSource('bbox', { type: 'geojson', data: EMPTY })
   map.addSource('features', { type: 'geojson', data: EMPTY })
@@ -53,27 +57,27 @@ function addLayers(map: maplibregl.Map) {
     id: 'extent-fill',
     type: 'fill',
     source: 'extent',
-    paint: { 'fill-color': GREEN, 'fill-opacity': 0.08 },
+    paint: { 'fill-color': extent, 'fill-opacity': 0.08 },
   })
   map.addLayer({
     id: 'extent-line',
     type: 'line',
     source: 'extent',
-    paint: { 'line-color': GREEN, 'line-width': 1.5, 'line-dasharray': [4, 3] },
+    paint: { 'line-color': extent, 'line-width': 1.5, 'line-dasharray': [4, 3] },
   })
   map.addLayer({
     id: 'features-fill',
     type: 'fill',
     source: 'features',
     filter: ['match', ['geometry-type'], ['Polygon', 'MultiPolygon'], true, false],
-    paint: { 'fill-color': SKY, 'fill-opacity': 0.22 },
+    paint: { 'fill-color': feature, 'fill-opacity': 0.22 },
   })
   map.addLayer({
     id: 'features-line',
     type: 'line',
     source: 'features',
     filter: ['match', ['geometry-type'], ['Polygon', 'MultiPolygon', 'LineString', 'MultiLineString'], true, false],
-    paint: { 'line-color': SKY, 'line-width': 2 },
+    paint: { 'line-color': feature, 'line-width': 2 },
   })
   map.addLayer({
     id: 'features-point',
@@ -82,8 +86,8 @@ function addLayers(map: maplibregl.Map) {
     filter: ['match', ['geometry-type'], ['Point', 'MultiPoint'], true, false],
     paint: {
       'circle-radius': 6,
-      'circle-color': PEACH,
-      'circle-stroke-color': CRUST,
+      'circle-color': point,
+      'circle-stroke-color': pointStroke,
       'circle-stroke-width': 1.5,
     },
   })
@@ -91,7 +95,7 @@ function addLayers(map: maplibregl.Map) {
     id: 'bbox-line',
     type: 'line',
     source: 'bbox',
-    paint: { 'line-color': MAUVE, 'line-width': 2, 'line-dasharray': [2, 2] },
+    paint: { 'line-color': box, 'line-width': 2, 'line-dasharray': [2, 2] },
   })
 }
 
@@ -172,7 +176,12 @@ export function MapTab() {
   const container = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const popupRef = useRef<maplibregl.Popup | null>(null)
-  const [ready, setReady] = useState(false)
+  // Counts the basemap styles that have loaded: 0 until the first one has, and
+  // one more for each theme switch, since a new style starts without the
+  // sources the effects below draw into and they have to be filled again.
+  const [styleVersion, setStyleVersion] = useState(0)
+  const [theme] = useTheme()
+  const appliedTheme = useRef(theme)
 
   const [source, setSource] = useState<MapSource>(() => persisted.source ?? results.latest ?? 'bbox')
   const [inputs, setInputs] = useState<BBoxInputs>(() => persisted.inputs ?? ['', '', '', ''])
@@ -231,7 +240,7 @@ export function MapTab() {
     if (!parent) return
     const map = new maplibregl.Map({
       container: parent,
-      style: BASEMAP,
+      style: BASEMAP[appliedTheme.current],
       center: [0, 20],
       zoom: 1,
       attributionControl: { compact: true },
@@ -243,9 +252,10 @@ export function MapTab() {
     map.on('error', (event) => {
       if (!('tile' in event)) console.error(event.error)
     })
-    map.on('load', () => {
-      addLayers(map)
-      setReady(true)
+    // Fires for the first style and again for each one setStyle loads.
+    map.on('style.load', () => {
+      addLayers(map, mapPalette(appliedTheme.current))
+      setStyleVersion((version) => version + 1)
     })
     map.on('click', (event) => {
       const hits = map.queryRenderedFeatures(event.point, { layers: FEATURE_LAYERS })
@@ -272,10 +282,18 @@ export function MapTab() {
       popupRef.current?.remove()
       popupRef.current = null
       mapRef.current = null
-      setReady(false)
+      setStyleVersion(0)
       map.remove()
     }
   }, [])
+
+  // The basemap follows the theme; the layers come back through 'style.load'.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || appliedTheme.current === theme) return
+    appliedTheme.current = theme
+    map.setStyle(BASEMAP[theme])
+  }, [theme])
 
   // The extent is read once per visit: it seeds the first box when none has
   // been typed, and it is what the extent toggle draws.
@@ -306,30 +324,30 @@ export function MapTab() {
   // query, so an empty answer still shows where was asked, else to the features.
   useEffect(() => {
     const map = mapRef.current
-    if (!ready || !map) return
+    if (styleVersion === 0 || !map) return
     const features = shown?.features ?? []
     setData(map, 'features', { type: 'FeatureCollection', features })
     const target = source === 'bbox' && boxResult ? boxResult.box : boundsOf(features)
     if (target) {
       map.fitBounds([target[0], target[1], target[2], target[3]], { padding: 48, maxZoom: 14, duration: 500 })
     }
-  }, [ready, shown, source, boxResult])
+  }, [styleVersion, shown, source, boxResult])
 
   useEffect(() => {
     const map = mapRef.current
-    if (!ready || !map) return
+    if (styleVersion === 0 || !map) return
     setData(map, 'bbox', showBox && box ? boxPolygon(box) : EMPTY)
-  }, [ready, showBox, box])
+  }, [styleVersion, showBox, box])
 
   useEffect(() => {
     const map = mapRef.current
-    if (!ready || !map) return
+    if (styleVersion === 0 || !map) return
     const visible = showExtent && extent?.geometry ? extent : null
     setData(map, 'extent', visible ? (visible as Feature) : EMPTY)
     if (visible?.bbox && !shown?.features.length) {
       map.fitBounds([visible.bbox[0], visible.bbox[1], visible.bbox[2], visible.bbox[3]], { padding: 48, maxZoom: 14 })
     }
-  }, [ready, showExtent, extent, shown])
+  }, [styleVersion, showExtent, extent, shown])
 
   const setInput = (index: number, value: string) => {
     setInputs((current) => current.map((v, i) => (i === index ? value : v)) as BBoxInputs)

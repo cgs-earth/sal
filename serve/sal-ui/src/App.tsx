@@ -5,6 +5,7 @@ import { SqlTab } from './tabs/SqlTab'
 import { ModulesTab } from './tabs/ModulesTab'
 import { BlobsTab } from './tabs/BlobsTab'
 import { TablePath } from './components/TablePath'
+import { ThemeToggle } from './components/ThemeToggle'
 import { TABS, useRoute } from './routing'
 import './App.css'
 
@@ -60,19 +61,23 @@ export function App() {
     <div className="app">
       <header className="app-header">
         <div className="brand">
-          <span className="brand-mark">SAL</span>
-          <span className="brand-sub">semantic accessibility layer</span>
+          <a className="brand-mark" href="https://cgs-earth.github.io/sal/" target="_blank" rel="noreferrer" title="SAL documentation">
+            SAL
+          </a>
         </div>
-        {/* Shown as soon as the server has said which table it reads, not only
-            once stats have loaded, so a remote table whose stats fail can still
-            be switched away from. */}
-        {remoteTablePath !== null && (
-          <TablePath
-            tablePath={remoteTablePath || stats?.tablePath || 'the local table'}
-            remoteTablePath={remoteTablePath}
-            onSwitched={onTableSwitched}
-          />
-        )}
+        <div className="header-actions">
+          {/* Shown as soon as the server has said which table it reads, not only
+              once stats have loaded, so a remote table whose stats fail can still
+              be switched away from. */}
+          {remoteTablePath !== null && (
+            <TablePath
+              tablePath={remoteTablePath || stats?.tablePath || 'the local table'}
+              remoteTablePath={remoteTablePath}
+              onSwitched={onTableSwitched}
+            />
+          )}
+          <ThemeToggle />
+        </div>
       </header>
 
       <nav className="tabs" role="tablist">
@@ -117,6 +122,18 @@ export function App() {
             <MapTab />
           </Suspense>
         )}
+        {/* Inside the scrolling content rather than under it, so the footer is
+            only reached by scrolling past the end of a tab and never takes a
+            strip of the viewport from the editors and the map. */}
+        <footer className="app-footer">
+          <span>Maintained by the Center for Geospatial Solutions</span>
+          <a href="https://cgsearth.org/" target="_blank" rel="noreferrer" title="Center for Geospatial Solutions">
+            {/* One logo file per theme: the dark theme needs the white lettering.
+                App.css shows whichever one reads against the active theme. */}
+            <img className="cgs-logo cgs-logo-light" src="/cgs-logo.png" alt="Center for Geospatial Solutions" />
+            <img className="cgs-logo cgs-logo-dark" src="/cgs-logo-dark.png" alt="" />
+          </a>
+        </footer>
       </main>
     </div>
   )

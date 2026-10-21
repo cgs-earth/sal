@@ -5,15 +5,15 @@ import { EdgeArrowProgram } from 'sigma/rendering'
 import type { Parser } from '@zazuko/yasr'
 import { buildGraph, isGraphFailure, type GraphEdgeAttributes, type GraphNodeAttributes, type NodeKind } from './graphData'
 import { drawNodeHover } from './graphTheme'
-import { mocha } from '../../theme'
+import { graphPalette, useTheme } from '../../theme'
 import { buildTermQuery, canQueryFromNode } from './graphTermQuery'
 import { getCurrentQueryText, runGeneratedQuery } from './sparqlBridge'
 
-const LEGEND: Array<{ kind: NodeKind; label: string; swatch: keyof typeof mocha }> = [
-  { kind: 'uri', label: 'IRI', swatch: 'blue' },
-  { kind: 'blank', label: 'Blank node', swatch: 'peach' },
-  { kind: 'literal', label: 'Literal', swatch: 'green' },
-  { kind: 'root', label: 'Queried resource', swatch: 'mauve' },
+const LEGEND: Array<{ kind: NodeKind; label: string }> = [
+  { kind: 'uri', label: 'IRI' },
+  { kind: 'blank', label: 'Blank node' },
+  { kind: 'literal', label: 'Literal' },
+  { kind: 'root', label: 'Queried resource' },
 ]
 
 /**
@@ -216,7 +216,14 @@ export function GraphView({ vars, bindings }: { vars: string[]; bindings: Parser
   // the same lifetime as the rest of this component's state.
   const [labelSize, setLabelSize] = useState(DEFAULT_LABEL_SIZE)
   const [spacing, setSpacing] = useState(DEFAULT_SPACING)
-  const result = useMemo(() => buildGraph(vars, bindings, { queryText: getCurrentQueryText() }), [vars, bindings])
+  // The palette is baked into the node attributes, so a theme switch rebuilds
+  // the graph; Sigma is rebuilt on the new settings either way.
+  const [theme] = useTheme()
+  const palette = useMemo(() => graphPalette(theme), [theme])
+  const result = useMemo(
+    () => buildGraph(vars, bindings, { queryText: getCurrentQueryText(), palette }),
+    [vars, bindings, palette],
+  )
 
   if (isGraphFailure(result)) {
     return (
@@ -291,17 +298,17 @@ export function GraphView({ vars, bindings }: { vars: string[]; bindings: Parser
               renderEdgeLabels: true,
               defaultEdgeType: 'arrow',
               edgeProgramClasses: { arrow: EdgeArrowProgram },
-              labelColor: { color: mocha.text },
+              labelColor: { color: palette.label },
               labelSize,
-              edgeLabelColor: { color: mocha.subtext0 },
+              edgeLabelColor: { color: palette.edgeLabel },
               edgeLabelSize: Math.round(labelSize * 0.83),
               // Sigma always scales a graph's node coordinates to fill the camera frame
               // (see the comment on layout() in graphData.ts), so stagePadding — applied
               // after that fit, not before — is what actually makes "Node spacing" shrink
               // or spread a graph, for a 2-node graph exactly as much as a 200-node one.
               stagePadding: Math.round(BASE_STAGE_PADDING / spacing),
-              defaultNodeColor: mocha.blue,
-              defaultEdgeColor: mocha.overlay2,
+              defaultNodeColor: palette.uri,
+              defaultEdgeColor: palette.edge,
               defaultDrawNodeHover: drawNodeHover,
               // Sigma skips edge hit-testing by default (it's pricier than node picking);
               // without this, hovering an edge/arrow never fires enterEdge at all.
@@ -326,7 +333,7 @@ export function GraphView({ vars, bindings }: { vars: string[]; bindings: Parser
         <div className="graph-legend">
           {LEGEND.filter((entry) => kindsPresent.has(entry.kind)).map((entry) => (
             <span key={entry.kind} className="graph-legend-item">
-              <span className="graph-legend-swatch" style={{ background: mocha[entry.swatch] }} />
+              <span className="graph-legend-swatch" style={{ background: palette[entry.kind] }} />
               {entry.kind === 'root' && rootLabel ? rootLabel : entry.label}
             </span>
           ))}
