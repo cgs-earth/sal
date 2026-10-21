@@ -173,6 +173,13 @@ export function SqlTab({
             )}
             .
           </p>
+          <div className="panel-header-actions">
+            <SampleQueryPicker
+              compact
+              samples={samplesFor(tablePath, sampleQueries).map((sample) => ({ name: sample.name, text: sample.sql }))}
+              onPick={(sample) => setStatement(sample.text)}
+            />
+          </div>
         </header>
         <div className="editor">
           {/* theme="none" keeps the package from injecting its default light theme,
@@ -193,10 +200,6 @@ export function SqlTab({
             <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Enter</kbd>
           </span>
           <span className="toolbar-actions">
-            <SampleQueryPicker
-              samples={samplesFor(tablePath, sampleQueries).map((sample) => ({ name: sample.name, text: sample.sql }))}
-              onPick={(sample) => setStatement(sample.text)}
-            />
             <ShareLinkButton tab="SQL" query={() => statementRef.current} />
           </span>
         </div>

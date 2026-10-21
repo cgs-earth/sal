@@ -518,9 +518,8 @@
 }
 
 .yasgui .yasr .yasr_header .yasr-share {
-  padding: 3px 10px;
-  font-size: 12px;
-  white-space: nowrap;
+  width: 28px;
+  height: 28px;
 }
 
 .yasgui .yasr .dataTables_wrapper,

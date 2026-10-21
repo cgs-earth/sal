@@ -335,7 +335,8 @@ a.brand-mark:hover {
 /* A panel is a sheet of frosted glass over the page's brand washes: a
    translucent fill, the washes blurred through it, a bright hairline where
    light catches its edge, and a soft shadow lifting it off the page. The stat
-   cards and the modal are the same sheet in other sizes. */
+   cards are the same sheet in another size; the modal is the same sheet made
+   nearly opaque, since it sits over text that would otherwise read through. */
 .panel,
 .stat-card,
 .modal {
@@ -344,6 +345,11 @@ a.brand-mark:hover {
   box-shadow: inset 0 1px 0 var(--glass-highlight), var(--glass-shadow);
   backdrop-filter: var(--glass-panel-blur);
   -webkit-backdrop-filter: var(--glass-panel-blur);
+}
+
+.modal {
+  background: var(--glass-modal);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow);
 }
 
 .panel {
@@ -391,6 +397,12 @@ a.brand-mark:hover {
   align-items: center;
   gap: 10px;
   margin-left: auto;
+}
+
+/* After the header's caption the actions sit flush against it, and the
+   caption is what takes the free space. */
+.panel-header > p + .panel-header-actions {
+  margin-left: 0;
 }
 
 /* ---------- controls ---------- */
@@ -810,6 +822,23 @@ kbd {
 .icon-button.copied:hover {
   color: var(--success);
   border-color: var(--success);
+}
+
+.icon-button.empty,
+.icon-button.empty:hover {
+  color: var(--warn-ink);
+  border-color: var(--warn-ink);
+}
+
+/* The copy link button in a toolbar matches the height of the buttons beside it. */
+.share-link {
+  width: 30px;
+  height: 30px;
+}
+
+.share-link svg {
+  width: 16px;
+  height: 16px;
 }
 
 .json-scroll {

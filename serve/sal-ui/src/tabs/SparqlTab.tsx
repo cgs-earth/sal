@@ -484,7 +484,7 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
         {createPortal(
           <ShareLinkButton
             tab="SPARQL"
-            className="button yasr-share"
+            className="yasr-share"
             query={() => yasgui.current?.getTab()?.getQuery() ?? ''}
           />,
           shareHost,

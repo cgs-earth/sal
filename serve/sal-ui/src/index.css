@@ -96,6 +96,7 @@
      Buttons, chips, and badges are the raised surface at partial opacity:
      the same colors as before, letting a little of the panel through. */
   --glass-panel: rgb(255 255 255 / 58%);
+  --glass-modal: rgb(255 255 255 / 93%);
   --glass-panel-header: rgb(255 255 255 / 34%);
   --glass-panel-border: rgb(255 255 255 / 75%);
   --glass-bg: color-mix(in srgb, var(--bg-raised) 70%, transparent);
@@ -181,6 +182,7 @@
   --ambient-yellow: rgb(249 198 9 / 9%);
 
   --glass-panel: rgb(26 34 40 / 62%);
+  --glass-modal: rgb(26 34 40 / 94%);
   --glass-panel-header: rgb(255 255 255 / 4%);
   --glass-panel-border: rgb(255 255 255 / 12%);
   --glass-bg: color-mix(in srgb, var(--bg-raised) 72%, transparent);
