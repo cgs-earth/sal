@@ -53,8 +53,15 @@ func LocateTriplesTable() (TriplesTable, error) {
 }
 
 // Runner opens a DuckDB runner over the table, after checking that the table
-// has the object columns every query in this package reads.
+// has the object columns every query in this package reads. A remote table is
+// checked through DuckDB, since no local catalog can load it.
 func (t TriplesTable) Runner(ctx context.Context, limit int) (DuckDBRunner, error) {
+	if t.Remote() {
+		if err := VerifyRemoteObjectColumns(ctx, t.Path); err != nil {
+			return DuckDBRunner{}, err
+		}
+		return DuckDBRunner{TablePath: t.Path, Limit: limit}, nil
+	}
 	if err := VerifyObjectColumns(ctx, t.Warehouse, t.Namespace); err != nil {
 		return DuckDBRunner{}, err
 	}

@@ -1,9 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
-import { fetchStats, type TableStats } from './api'
+import { fetchStats, fetchTable, type TableStats } from './api'
 import { StatsTab } from './tabs/StatsTab'
 import { SqlTab } from './tabs/SqlTab'
 import { ModulesTab } from './tabs/ModulesTab'
 import { BlobsTab } from './tabs/BlobsTab'
+import { TablePath } from './components/TablePath'
 import { TABS, useRoute } from './routing'
 import './App.css'
 
@@ -18,6 +19,9 @@ export function App() {
   const [stats, setStats] = useState<TableStats | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  // The remote table the server's queries read, '' for the project's own; the
+  // header shows which and switches it. Null until the server has said.
+  const [remoteTablePath, setRemoteTablePath] = useState<string | null>(null)
 
   const loadStats = useCallback(async (signal?: AbortSignal) => {
     setLoading(true)
@@ -35,8 +39,22 @@ export function App() {
   useEffect(() => {
     const controller = new AbortController()
     void loadStats(controller.signal)
+    fetchTable(controller.signal)
+      .then((table) => setRemoteTablePath(table.remoteTablePath))
+      .catch(() => setRemoteTablePath(''))
     return () => controller.abort()
   }, [loadStats])
+
+  // Every tab reads the table through the server, so a switch is followed by
+  // reloading the stats the tabs are seeded from; the tabs' own results stay
+  // until they are run again.
+  const onTableSwitched = useCallback(
+    (table: string) => {
+      setRemoteTablePath(table)
+      void loadStats()
+    },
+    [loadStats],
+  )
 
   return (
     <div className="app">
@@ -45,13 +63,15 @@ export function App() {
           <span className="brand-mark">SAL</span>
           <span className="brand-sub">semantic accessibility layer</span>
         </div>
-        {stats && (
-          <div className="header-meta">
-            <span className="badge">{new Intl.NumberFormat().format(stats.triples)} triples</span>
-            <code className="header-path" title={stats.tablePath}>
-              {stats.tablePath}
-            </code>
-          </div>
+        {/* Shown as soon as the server has said which table it reads, not only
+            once stats have loaded, so a remote table whose stats fail can still
+            be switched away from. */}
+        {remoteTablePath !== null && (
+          <TablePath
+            tablePath={remoteTablePath || stats?.tablePath || 'the local table'}
+            remoteTablePath={remoteTablePath}
+            onSwitched={onTableSwitched}
+          />
         )}
       </header>
 

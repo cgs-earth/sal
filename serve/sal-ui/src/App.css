@@ -41,20 +41,95 @@
   text-transform: lowercase;
 }
 
-.header-meta {
+/* The table path at the right of the header is a button that opens an input
+   for a table on object storage, so the queries can be pointed at an uploaded
+   data product without serving it from elsewhere. */
+.header-table {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
   min-width: 0;
+  max-width: 52vw;
 }
 
 .header-path {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
   color: var(--subtext0);
+  font-family: var(--font-mono);
   font-size: 12px;
+  cursor: pointer;
+}
+
+.header-path:hover,
+.header-path:focus-visible {
+  border-color: var(--surface2);
+  background: var(--surface0);
+  color: var(--text);
+  outline: none;
+}
+
+.header-path code {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 46vw;
+}
+
+.header-path .table-kind {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: var(--border-strong);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--overlay2);
+}
+
+.header-path .table-kind.remote {
+  color: var(--peach);
+  border-color: var(--peach);
+}
+
+.header-table-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.header-table-form .module-input {
+  width: 36vw;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.header-table-form .module-input:disabled {
+  opacity: 0.6;
+}
+
+.header-table-hint {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.header-table-hint code {
+  color: var(--teal);
+}
+
+.header-table-error {
+  margin: 0;
+  padding: 4px 10px;
+  max-width: 100%;
+  font-size: 11px;
+  text-align: right;
 }
 
 .badge {

@@ -106,6 +106,40 @@ async function failure(response: Response): Promise<Error> {
   return new Error(body.trim() || `${response.status} ${response.statusText}`)
 }
 
+/** The table the server's queries read: a table on object storage, or the project's own when empty. */
+export type TableLocation = {
+  /** The gs://, s3://, r2://, az://, or https:// root of the remote table, or '' for the local table. */
+  remoteTablePath: string
+}
+
+/** The remote table schemes the server accepts, which is what the header's input says it takes. */
+export const REMOTE_TABLE_SCHEMES = ['s3://', 'gs://', 'r2://', 'az://', 'https://']
+
+export async function fetchTable(signal?: AbortSignal): Promise<TableLocation> {
+  const response = await fetch('/api/table', { signal })
+  if (!response.ok) throw await failure(response)
+  return (await response.json()) as TableLocation
+}
+
+/**
+ * Points every query the server answers, SPARQL, SQL, stats, and geometries
+ * alike, at the triples table at remoteTablePath, or back at the project's
+ * own table when it is empty. The server opens the table before switching, so
+ * a location it cannot read as a triples table rejects with its error and
+ * leaves the current table in place. Only object storage is accepted; a path
+ * on the server's own machine is refused.
+ */
+export async function switchTable(remoteTablePath: string, signal?: AbortSignal): Promise<TableLocation> {
+  const response = await fetch('/api/table', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ remoteTablePath }),
+    signal,
+  })
+  if (!response.ok) throw await failure(response)
+  return (await response.json()) as TableLocation
+}
+
 export async function fetchStats(signal?: AbortSignal): Promise<TableStats> {
   const response = await fetch('/api/stats', { signal })
   if (!response.ok) throw await failure(response)

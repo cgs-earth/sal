@@ -54,7 +54,7 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 	statements := make([]string, 0, len(statsSections)+1)
 	statements = append(statements, countsSQL())
 	for _, section := range statsSections {
-		sql, err := InfoSQL(section, r.TablePath)
+		sql, err := r.InfoSQL(ctx, section)
 		if err != nil {
 			return TableStats{}, err
 		}
@@ -73,7 +73,13 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 	if err != nil {
 		return TableStats{}, err
 	}
-	stats.Vocabularies = vocabulariesResult()
+	// the vocabulary listing comes from the project's own .sal/config.jsonld,
+	// which says nothing about a table on object storage
+	if !isRemoteTablePath(r.TablePath) {
+		stats.Vocabularies = vocabulariesResult()
+	} else {
+		stats.Vocabularies = Result{Header: importation.VocabularyTableHeader}
+	}
 	stats.ImportedTables = r.Imports
 	if len(r.Imports) > 0 {
 		stats.SampleQueries = append(stats.SampleQueries, NamedQuery{
@@ -204,9 +210,56 @@ func parseCount(value string) int64 {
 	return count
 }
 
-// InfoSQL returns the DuckDB query behind a `sal query --info` option against the `triples` view.
-func InfoSQL(info string, tablePath string) (string, error) {
-	escapedTablePath := strings.ReplaceAll(tablePath, "'", "''")
+// InfoSQL returns the DuckDB query behind a `sal query --info` option against
+// the `triples` view. The properties and snapshots options read the table's
+// latest metadata file, which is found through the version hint first, so
+// that they work on a table on object storage too; see latestMetadataFile.
+func (r DuckDBRunner) InfoSQL(ctx context.Context, info string) (string, error) {
+	switch info {
+	case "properties", "snapshots":
+		metadataFile, err := r.latestMetadataFile(ctx)
+		if err != nil {
+			return "", err
+		}
+		return infoSQL(info, r.TablePath, metadataFile)
+	default:
+		return infoSQL(info, r.TablePath, "")
+	}
+}
+
+// latestMetadataFile is the path of the table's current metadata file, as
+// read_text can read it. The Hadoop catalog iceberg-go writes a built table
+// with, and `sal upload`, both leave the current version number in
+// metadata/version-hint.text, so the file is named from that rather than by
+// globbing metadata/*.metadata.json: a glob lists a directory, which the
+// generic HTTP reader behind an https:// table cannot do. A local table whose
+// hint cannot be read falls back to the glob, which the DuckDB queries then
+// order by version themselves.
+func (r DuckDBRunner) latestMetadataFile(ctx context.Context) (string, error) {
+	// the hint is read without the triples view, which there is no need to
+	// create or replace just to read one file
+	db, err := instance.prepare(ctx, "", nil, false)
+	if err != nil {
+		return "", err
+	}
+	_, rows, err := queryRows(ctx, db, fmt.Sprintf("SELECT content FROM read_text('%s/metadata/version-hint.text')", escapeSQLLiteral(r.TablePath)))
+	if err == nil && len(rows) == 1 && strings.TrimSpace(rows[0][0]) != "" {
+		return r.TablePath + "/metadata/v" + strings.TrimSpace(rows[0][0]) + ".metadata.json", nil
+	}
+	if isRemoteTablePath(r.TablePath) {
+		if err == nil {
+			err = fmt.Errorf("metadata/version-hint.text is empty")
+		}
+		return "", fmt.Errorf("read the current metadata version of the triples table at %s: %w", r.TablePath, err)
+	}
+	return r.TablePath + "/metadata/*.metadata.json", nil
+}
+
+// infoSQL is InfoSQL over an explicit metadata file, a single path or a glob,
+// which the properties and snapshots queries read.
+func infoSQL(info string, tablePath string, metadataFile string) (string, error) {
+	escapedTablePath := escapeSQLLiteral(tablePath)
+	escapedMetadataFile := escapeSQLLiteral(metadataFile)
 	switch info {
 	case "", "head":
 		return "SELECT * FROM triples LIMIT 20", nil
@@ -216,7 +269,7 @@ WITH latest_metadata AS (
 	SELECT
 		filename,
 		content::JSON AS metadata_json
-	FROM read_text('%s/metadata/*.metadata.json')
+	FROM read_text('%s')
 	ORDER BY regexp_extract(filename, 'v([0-9]+)\.metadata\.json', 1)::BIGINT DESC
 	LIMIT 1
 )
@@ -225,7 +278,7 @@ SELECT
 	json_extract_string(prop.value, '$') AS value
 FROM latest_metadata,
 json_each(json_extract(metadata_json, '$.properties')) AS prop
-ORDER BY prop.key`, escapedTablePath), nil
+ORDER BY prop.key`, escapedMetadataFile), nil
 	case "snapshots":
 		return fmt.Sprintf(`
 WITH snapshots AS (
@@ -236,7 +289,7 @@ latest_metadata AS (
 	SELECT
 		filename,
 		content::JSON AS metadata_json
-	FROM read_text('%s/metadata/*.metadata.json')
+	FROM read_text('%s')
 	ORDER BY regexp_extract(filename, 'v([0-9]+)\.metadata\.json', 1)::BIGINT DESC
 	LIMIT 1
 ),
@@ -254,7 +307,7 @@ SELECT
 	tags.tags
 FROM snapshots
 LEFT JOIN tags ON tags.snapshot_id = snapshots.snapshot_id
-ORDER BY snapshots.sequence_number DESC`, escapedTablePath, escapedTablePath), nil
+ORDER BY snapshots.sequence_number DESC`, escapedTablePath, escapedMetadataFile), nil
 	case "column-stats":
 		return fmt.Sprintf("SELECT * FROM iceberg_column_stats('%s')", escapedTablePath), nil
 	default:

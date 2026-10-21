@@ -1,6 +1,9 @@
 package sparql
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -77,18 +80,18 @@ func TestModulesFromPropertiesIgnoresMalformedJSON(t *testing.T) {
 }
 
 func TestInfoSQLRejectsUnknownInfo(t *testing.T) {
-	_, err := InfoSQL("bogus", "/tmp/table")
+	_, err := infoSQL("bogus", "/tmp/table", "")
 
 	require.ErrorContains(t, err, "unknown info option")
 	require.NotContains(t, err.Error(), "tags")
 }
 
 func TestInfoSQLBuildsSnapshotsQueryWithTags(t *testing.T) {
-	query, err := InfoSQL("snapshots", "/tmp/table")
+	query, err := infoSQL("snapshots", "/tmp/table", "/tmp/table/metadata/v3.metadata.json")
 
 	require.NoError(t, err)
 	require.Contains(t, query, "FROM iceberg_snapshots('/tmp/table')")
-	require.Contains(t, query, "read_text('/tmp/table/metadata/*.metadata.json')")
+	require.Contains(t, query, "read_text('/tmp/table/metadata/v3.metadata.json')")
 	require.Contains(t, query, "json_each(json_extract(metadata_json, '$.refs'))")
 	require.Contains(t, query, "WHERE json_extract_string(ref.value, '$.type') = 'tag'")
 	require.Contains(t, query, "string_agg(ref.key, ', ' ORDER BY ref.key) AS tags")
@@ -96,13 +99,13 @@ func TestInfoSQLBuildsSnapshotsQueryWithTags(t *testing.T) {
 }
 
 func TestInfoSQLRejectsTagsInfo(t *testing.T) {
-	_, err := InfoSQL("tags", "/tmp/table")
+	_, err := infoSQL("tags", "/tmp/table", "")
 
 	require.ErrorContains(t, err, "unknown info option")
 }
 
 func TestInfoSQLEscapesSingleQuotesInTablePath(t *testing.T) {
-	query, err := InfoSQL("column-stats", "/tmp/o'brien/triples")
+	query, err := infoSQL("column-stats", "/tmp/o'brien/triples", "")
 
 	require.NoError(t, err)
 	require.Contains(t, query, "iceberg_column_stats('/tmp/o''brien/triples')")
@@ -110,4 +113,31 @@ func TestInfoSQLEscapesSingleQuotesInTablePath(t *testing.T) {
 
 func TestCountsSQLCountsDistinctObjectsAcrossTheTypedColumns(t *testing.T) {
 	require.Contains(t, countsSQL(), "COUNT(DISTINCT "+objectText("triples")+")")
+}
+
+func TestLatestMetadataFileReadsTheVersionHint(t *testing.T) {
+	table := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(table, "metadata"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(table, "metadata", "version-hint.text"), []byte("7\n"), 0o644))
+
+	file, err := DuckDBRunner{TablePath: table}.latestMetadataFile(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, table+"/metadata/v7.metadata.json", file)
+}
+
+func TestLatestMetadataFileFallsBackToTheGlobForALocalTableWithoutAHint(t *testing.T) {
+	table := t.TempDir()
+
+	file, err := DuckDBRunner{TablePath: table}.latestMetadataFile(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, table+"/metadata/*.metadata.json", file)
+}
+
+func TestLatestMetadataFileFailsForARemoteTableWithoutAHint(t *testing.T) {
+	_, err := DuckDBRunner{TablePath: "gs://sal-no-such-bucket-for-tests/sal/triples"}.latestMetadataFile(context.Background())
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "read the current metadata version of the triples table at gs://sal-no-such-bucket-for-tests/sal/triples")
 }
