@@ -74,9 +74,7 @@ build_demo_data() {
 	# ontology is fetched at build time, so a container with no route to
 	# schema.org fails here rather than serving a table without it.
 
-	#### COMMENTED OUT FOR TIME BEING SINCE purl IS DOWN
-	#### TODO: UNCOMMENT ONCE BACK UP
-	# /app/sal import "https://schema.org/"
+	/app/sal import "https://schema.org/"
 	git add -A
 	# build refuses to snapshot a tree with uncommitted changes. The SAL module
 	# task in portolan_export.ttl is left for the second build to run, see
