@@ -1,9 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
-import { fetchStats, type TableStats } from './api'
+import { fetchStats, fetchTable, type TableStats } from './api'
 import { StatsTab } from './tabs/StatsTab'
 import { SqlTab } from './tabs/SqlTab'
 import { ModulesTab } from './tabs/ModulesTab'
 import { BlobsTab } from './tabs/BlobsTab'
+import { TablePath } from './components/TablePath'
+import { ThemeToggle } from './components/ThemeToggle'
 import { TABS, useRoute } from './routing'
 import './App.css'
 
@@ -18,6 +20,9 @@ export function App() {
   const [stats, setStats] = useState<TableStats | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  // The remote table the server's queries read, '' for the project's own; the
+  // header shows which and switches it. Null until the server has said.
+  const [remoteTablePath, setRemoteTablePath] = useState<string | null>(null)
 
   const loadStats = useCallback(async (signal?: AbortSignal) => {
     setLoading(true)
@@ -35,24 +40,44 @@ export function App() {
   useEffect(() => {
     const controller = new AbortController()
     void loadStats(controller.signal)
+    fetchTable(controller.signal)
+      .then((table) => setRemoteTablePath(table.remoteTablePath))
+      .catch(() => setRemoteTablePath(''))
     return () => controller.abort()
   }, [loadStats])
+
+  // Every tab reads the table through the server, so a switch is followed by
+  // reloading the stats the tabs are seeded from; the tabs' own results stay
+  // until they are run again.
+  const onTableSwitched = useCallback(
+    (table: string) => {
+      setRemoteTablePath(table)
+      void loadStats()
+    },
+    [loadStats],
+  )
 
   return (
     <div className="app">
       <header className="app-header">
         <div className="brand">
-          <span className="brand-mark">SAL</span>
-          <span className="brand-sub">semantic accessibility layer</span>
+          <a className="brand-mark" href="https://cgs-earth.github.io/sal/" target="_blank" rel="noreferrer" title="SAL documentation">
+            SAL
+          </a>
         </div>
-        {stats && (
-          <div className="header-meta">
-            <span className="badge">{new Intl.NumberFormat().format(stats.triples)} triples</span>
-            <code className="header-path" title={stats.tablePath}>
-              {stats.tablePath}
-            </code>
-          </div>
-        )}
+        <div className="header-actions">
+          {/* Shown as soon as the server has said which table it reads, not only
+              once stats have loaded, so a remote table whose stats fail can still
+              be switched away from. */}
+          {remoteTablePath !== null && (
+            <TablePath
+              tablePath={remoteTablePath || stats?.tablePath || 'the local table'}
+              remoteTablePath={remoteTablePath}
+              onSwitched={onTableSwitched}
+            />
+          )}
+          <ThemeToggle />
+        </div>
       </header>
 
       <nav className="tabs" role="tablist">
@@ -97,6 +122,18 @@ export function App() {
             <MapTab />
           </Suspense>
         )}
+        {/* Inside the scrolling content rather than under it, so the footer is
+            only reached by scrolling past the end of a tab and never takes a
+            strip of the viewport from the editors and the map. */}
+        <footer className="app-footer">
+          <span>Maintained by the Center for Geospatial Solutions</span>
+          <a href="https://cgsearth.org/" target="_blank" rel="noreferrer" title="Center for Geospatial Solutions">
+            {/* One logo file per theme: the dark theme needs the white lettering.
+                App.css shows whichever one reads against the active theme. */}
+            <img className="cgs-logo cgs-logo-light" src="/cgs-logo.png" alt="Center for Geospatial Solutions" />
+            <img className="cgs-logo cgs-logo-dark" src="/cgs-logo-dark.png" alt="" />
+          </a>
+        </footer>
       </main>
     </div>
   )

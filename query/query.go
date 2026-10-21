@@ -42,7 +42,7 @@ func (cmd *QueryCmd) Run() error {
 	if cmd.SnapshotDiff != "" {
 		infoQuery, err = queryForSnapshotDiff(ctx, table.Warehouse, table.Namespace, table.Path, cmd.SnapshotDiff)
 	} else {
-		infoQuery, err = salsparql.InfoSQL(cmd.Info, table.Path)
+		infoQuery, err = runner.InfoSQL(ctx, cmd.Info)
 	}
 	if err != nil {
 		return err

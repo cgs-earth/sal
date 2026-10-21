@@ -3,7 +3,7 @@ import CodeMirror from '@uiw/react-codemirror'
 import { PostgreSQL, sql } from '@codemirror/lang-sql'
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import { catppuccin } from '../../theme'
+import { editorExtensions } from '../../theme'
 
 /** What the SQL pane has to show for the query the SPARQL editor currently holds. */
 export type Translation =
@@ -24,7 +24,7 @@ export function SqlPreview({ translation, height }: { translation: Translation; 
       sql({ dialect: PostgreSQL, upperCaseKeywords: true }),
       EditorState.readOnly.of(true),
       EditorView.editable.of(false),
-      ...catppuccin,
+      ...editorExtensions,
     ],
     [],
   )

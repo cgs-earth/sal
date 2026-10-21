@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "cgs-design": {
+      "source": "cgs-earth/cgs-design-skill",
+      "sourceType": "github",
+      "skillPath": "cgs-design/SKILL.md",
+      "computedHash": "bf9bd376acb7fac5a1fbb7d70b42f4cf3b9c84e4489ca326764d8d8bc83603ed"
+    }
+  }
+}

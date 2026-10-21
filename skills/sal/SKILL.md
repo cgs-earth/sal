@@ -74,16 +74,20 @@ Imports are recorded on the project ontology node in `.sal/config.jsonld` and fe
 
 A SAL module is a git repository with a Dockerfile that produces triples on demand. Reference it with
 a `salmodule://[HOST/]OWNER/REPO/` prefix, which must end in a slash, and type an instance with a
-class from the module's ontology plus a task base class:
+class from the module's ontology; add `salmodule:Task` when the module's ontology does not already
+declare that class a task:
 
 ```turtle
 @prefix salmodule: <https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#> .
 @prefix states: <salmodule://github.com/cgs-earth/python-geoconnex/> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
-<GeoconnexStates> a states:GeoconnexReferenceFeatureStates, salmodule:NodeProcessor ;
+<GeoconnexStates> a states:GeoconnexReferenceFeatureStates, salmodule:Task ;
     states:maxRetries "5"^^xsd:integer .
 ```
+
+- Never type an instance `salmodule:NodeProducer`, `salmodule:NodeConsumer`, or `salmodule:NodeProcessor`:
+  those are inferred from the shapes a task class declares, and `sal build` warns when a project asserts one.
 
 - Configure the task only with properties the module's own vocabulary defines; anything else on the
   instance is ignored when the task instance is serialized.

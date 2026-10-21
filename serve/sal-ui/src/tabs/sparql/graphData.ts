@@ -1,5 +1,6 @@
 import Graph from 'graphology'
 import type { Parser } from '@zazuko/yasr'
+import type { GraphPalette } from '../../theme'
 
 export type NodeKind = 'uri' | 'literal' | 'blank' | 'root'
 
@@ -52,12 +53,6 @@ export function isGraphFailure(result: GraphBuildSuccess | GraphBuildFailure): r
 // query could hand the force-directed layout tens of thousands of rows.
 const MAX_ROWS = 2000
 
-const NODE_COLOR: Record<NodeKind, string> = {
-  uri: '#89b4fa', // mocha.blue
-  blank: '#fab387', // mocha.peach
-  literal: '#a6e3a1', // mocha.green
-  root: '#cba6f7', // mocha.mauve
-}
 
 const NODE_SIZE: Record<NodeKind, number> = {
   uri: 7,
@@ -65,8 +60,6 @@ const NODE_SIZE: Record<NodeKind, number> = {
   literal: 4.5,
   root: 10,
 }
-
-const EDGE_COLOR = '#7f849c' // mocha.overlay1
 
 const SYNTHETIC_SUBJECT_ID = 'root:subject'
 const SYNTHETIC_OBJECT_ID = 'root:object'
@@ -280,9 +273,11 @@ function layout(graph: TripleGraph) {
 export interface GraphBuildOptions {
   /** The raw SPARQL query text, used to recover a fixed subject/object's exact term for a root node's label. */
   queryText?: string
+  /** The theme's colors, baked into the node and edge attributes since Sigma paints a canvas. */
+  palette: GraphPalette
 }
 
-export function buildGraph(vars: string[], bindings: Parser.Binding[], options: GraphBuildOptions = {}): GraphBuildSuccess | GraphBuildFailure {
+export function buildGraph(vars: string[], bindings: Parser.Binding[], options: GraphBuildOptions): GraphBuildSuccess | GraphBuildFailure {
   if (bindings.length === 0) {
     return { reason: 'The query returned no rows to plot.' }
   }
@@ -304,6 +299,15 @@ export function buildGraph(vars: string[], bindings: Parser.Binding[], options: 
   const rows = rowsTruncated > 0 ? bindings.slice(0, MAX_ROWS) : bindings
 
   const graph: TripleGraph = new Graph({ multi: true, type: 'directed' })
+  // Sigma paints a canvas, so the colors are literal and baked into the
+  // attributes; GraphView rebuilds the graph when the theme changes.
+  const NODE_COLOR: Record<NodeKind, string> = {
+    uri: options.palette.uri,
+    blank: options.palette.blank,
+    literal: options.palette.literal,
+    root: options.palette.root,
+  }
+  const EDGE_COLOR = options.palette.edge
   let rowsUsed = 0
 
   const addRootNode = (id: string, described: { label: string; fullLabel: string }) => {

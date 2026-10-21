@@ -45,6 +45,12 @@ func findSalModuleTasks(graph *rdflibgo.Graph) ([]salModuleTask, error) {
 				}
 				if salmodule.IsTaskBaseClass(object.Value()) {
 					declaredTasks[key] = true
+					// the NodeProducer, NodeConsumer, and NodeProcessor classes are
+					// inferred from a task class's shapes, not asserted; a project
+					// that wants to say an instance is a task says salmodule:Task
+					if salmodule.IsInferredTaskClass(object.Value()) {
+						slog.Warn(triple.Subject.String() + " is typed " + object.Value() + ", which the SAL Module ontology infers from a task class's shapes rather than has declared; type it salmodule:Task, or leave the type to the module's own class")
+					}
 				}
 			}
 		}
@@ -139,7 +145,9 @@ func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmo
 	}
 
 	// the shape a task class declares for its output is enforced line by
-	// line as the task writes; a class without one is run unchecked
+	// line as the task writes. A class without one is run unchecked, with a
+	// warning: declaring what a task produces is part of the SAL Module
+	// contract, but a module that predates the shape is not failed for it
 	validator, err := ontology.StdoutValidator(task.classIRI, graph.Base())
 	if err != nil {
 		return false, fmt.Errorf("run: %w", err)
@@ -148,6 +156,8 @@ func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmo
 	slog.Info("Running SAL module task " + task.classIRI)
 	if validator != nil {
 		slog.Info("Validating the output of " + task.classIRI + " against its salmodule:stdoutShape")
+	} else {
+		slog.Warn(task.classIRI + " declares no salmodule:stdoutShape, so what its task writes is not validated; a SAL module should declare the shape of the nodes it produces")
 	}
 	// the output is parsed into the graph being built as the task writes it,
 	// never held whole, so a task may produce more than fits in memory as

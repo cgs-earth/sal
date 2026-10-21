@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/cgs-earth/sal/pkg"
@@ -60,6 +62,7 @@ func parseModuleOntology(namespace string, document []byte) (*ModuleOntology, er
 	}
 
 	parents := subClassParents(graph)
+	warnAboutInferredParents(parents)
 	return &ModuleOntology{
 		Namespace:          namespace,
 		Document:           document,
@@ -118,6 +121,27 @@ func subClassParents(graph *rdflibgo.Graph) map[string][]string {
 		return true
 	})
 	return parents
+}
+
+// warnAboutInferredParents logs a warning for each class the ontology declares
+// a direct subclass of salmodule:NodeProducer, NodeConsumer, or NodeProcessor.
+// The ontology defines those by axiom for a reasoner to infer from a task
+// class's shapes, so a module states what it produces and consumes by
+// subclassing salmodule:Task and declaring the shapes; the class is still
+// accepted as a task class so that an older module keeps working.
+func warnAboutInferredParents(parents map[string][]string) {
+	classes := make([]string, 0, len(parents))
+	for class := range parents {
+		classes = append(classes, class)
+	}
+	sort.Strings(classes)
+	for _, class := range classes {
+		for _, parent := range parents[class] {
+			if IsInferredTaskClass(parent) {
+				slog.Warn(class + " is declared a subclass of " + parent + ", which the SAL Module ontology defines as a class a reasoner infers from a task's salmodule:stdoutShape and salmodule:stdinShape rather than one to subclass; declare rdfs:subClassOf salmodule:Task and the shape of what the task produces instead")
+			}
+		}
+	}
 }
 
 // taskClasses returns every class the ontology declares, directly or

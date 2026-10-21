@@ -135,7 +135,7 @@
     },
     "graph": {
       "type": "array",
-      "description": "The ontology's nodes. Exactly one is the owl:Ontology node, and at least one is an owl:Class directly subclassing salmodule:Task, salmodule:NodeProcessor, salmodule:NodeProducer, or salmodule:NodeConsumer.",
+      "description": "The ontology's nodes. Exactly one is the owl:Ontology node, and at least one is an owl:Class directly subclassing salmodule:Task. salmodule:NodeProducer, salmodule:NodeConsumer, and salmodule:NodeProcessor are not accepted as parents: the ontology defines them by axiom for a reasoner to infer from a task class's salmodule:stdoutShape and salmodule:stdinShape.",
       "minItems": 2,
       "items": {
         "$ref": "#/$defs/node"
@@ -161,7 +161,7 @@
           "contains": {
             "$ref": "#/$defs/declaresTaskClass"
           },
-          "errorMessage": "@graph must hold at least one owl:Class whose rdfs:subClassOf is salmodule:Task, salmodule:NodeProcessor, salmodule:NodeProducer, or salmodule:NodeConsumer"
+          "errorMessage": "@graph must hold at least one owl:Class whose rdfs:subClassOf is salmodule:Task; salmodule:NodeProducer, salmodule:NodeConsumer, and salmodule:NodeProcessor are inferred from the shapes a task class declares, not subclassed"
         }
       ]
     },
@@ -260,12 +260,7 @@
       ],
       "properties": {
         "@id": {
-          "enum": [
-            "salmodule:Task",
-            "salmodule:NodeProcessor",
-            "salmodule:NodeProducer",
-            "salmodule:NodeConsumer"
-          ]
+          "const": "salmodule:Task"
         }
       }
     },

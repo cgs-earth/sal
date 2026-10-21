@@ -36,12 +36,17 @@ Print one JSON-LD document to stdout and exit 0. Requirements:
 - A node `{"@id": ".", "@type": "owl:Ontology"}` describing the module.
 - The module's own terms as relative IRIs (`"@id": "MyTask"`, `"@id": "maxRetries"`). They resolve
   against the project's `salmodule://.../` prefix, which is why that prefix must end in a slash.
-- At least one task class: an `owl:Class` with `rdfs:subClassOf` one of `salmodule:Task`,
-  `salmodule:NodeProcessor`, `salmodule:NodeProducer`, or `salmodule:NodeConsumer`.
+- At least one task class: an `owl:Class` with `rdfs:subClassOf` `salmodule:Task`. Do not subclass
+  `salmodule:NodeProducer`, `salmodule:NodeConsumer`, or `salmodule:NodeProcessor`: the ontology defines
+  those by OWL axiom as a `Task` whose class declares a `salmodule:stdoutShape`, a `stdinShape`, or both,
+  so a reasoner infers them from the shapes. `sal` still runs a module that subclasses one, with a warning,
+  and the JSON schema refuses it.
 - Every configuration property as an `owl:DatatypeProperty` or `owl:ObjectProperty`, ideally with
   `rdfs:domain` and `rdfs:range`. A property the ontology does not declare never reaches the task.
-- Optional SHACL shapes on the task class: `salmodule:taskShape` (what a valid instance looks like),
-  `salmodule:stdinShape`, and `salmodule:stdoutShape` (what the task consumes and produces).
+- SHACL shapes on the task class, which are how a module declares its contract: `salmodule:taskShape`
+  (what a valid instance looks like), `salmodule:stdinShape` (what the task consumes), and
+  `salmodule:stdoutShape` (what the task produces). A task that writes nodes to stdout should declare a
+  `salmodule:stdoutShape`; `sal build` warns when the class has none and runs the task unchecked.
   `salmodule:stdoutShape` is enforced: `sal build` validates every line the task writes against it, with the
   ontology's `@context` injected, and the first line that fails stops the container and fails the run with
   the shape's `sh:message`. Give the shape a target (`sh:targetClass` usually), and do not use

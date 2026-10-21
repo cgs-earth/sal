@@ -32,19 +32,35 @@ const (
 	IcebergTableProperty = "sal.salmodules"
 )
 
-// Task classes defined by the SAL Module ontology. A module declares its own
-// classes as subclasses of one of these.
-var taskBaseClasses = []string{
-	Namespace + "Task",
+// TaskClass is the class a module declares its own task classes as subclasses
+// of. It is the only one of the ontology's task classes meant to be subclassed.
+const TaskClass = Namespace + "Task"
+
+// inferredTaskClasses are the classes the SAL Module ontology defines by OWL
+// axiom rather than for use: a salmodule:Task whose class carries a
+// salmodule:stdoutShape is a NodeProducer, one with a stdinShape a
+// NodeConsumer, and one with both a NodeProcessor. They are what a reasoner
+// infers from the shapes a task class declares, not what a module subclasses,
+// and nothing in sal keys off them; sal reads every task's stdout and validates
+// it when the class declares a stdoutShape. They are still recognized so that a
+// module or project written against the earlier reading of the ontology keeps
+// working, with a warning.
+var inferredTaskClasses = []string{
 	Namespace + "NodeProcessor",
 	Namespace + "NodeProducer",
 	Namespace + "NodeConsumer",
 }
 
 // IsTaskBaseClass reports whether iri is one of the SAL Module ontology's own
-// task classes.
+// task classes, salmodule:Task or one of the classes inferred from it.
 func IsTaskBaseClass(iri string) bool {
-	return slices.Contains(taskBaseClasses, iri)
+	return iri == TaskClass || IsInferredTaskClass(iri)
+}
+
+// IsInferredTaskClass reports whether iri is one of the task classes the SAL
+// Module ontology defines for a reasoner to infer rather than to be subclassed.
+func IsInferredTaskClass(iri string) bool {
+	return slices.Contains(inferredTaskClasses, iri)
 }
 
 // ModuleRef is a SAL module dereferenced from a salmodule:// IRI.

@@ -60,11 +60,11 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
           </p>
 
           <div className="stat-grid">
-            <StatCard label="Triples" value={formatCount(stats.triples)} accent="lavender" />
+            <StatCard label="Triples" value={formatCount(stats.triples)} accent="green" />
             <StatCard label="Distinct subjects" value={formatCount(stats.subjects)} accent="blue" />
-            <StatCard label="Distinct predicates" value={formatCount(stats.predicates)} accent="teal" />
-            <StatCard label="Distinct objects" value={formatCount(stats.objects)} accent="peach" />
-            <StatCard label="Snapshots" value={formatCount(stats.snapshots.rows?.length ?? 0)} accent="mauve" />
+            <StatCard label="Distinct predicates" value={formatCount(stats.predicates)} accent="sky" />
+            <StatCard label="Distinct objects" value={formatCount(stats.objects)} accent="yellow" />
+            <StatCard label="Snapshots" value={formatCount(stats.snapshots.rows?.length ?? 0)} accent="gray" />
           </div>
 
           <Section title="Snapshots" caption="Every commit written to the Iceberg table, newest first.">

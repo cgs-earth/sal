@@ -116,14 +116,22 @@ func NewEndpoint(runner salsparql.SnapshotRunner, blobDir string, stacDir string
 // NewEndpointWithUI returns an HTTP handler serving the embedded SAL UI at / along
 // with the SPARQL endpoint, the JSON APIs the UI reads, the /blobs endpoint
 // serving the vocabulary and imported ontology documents pinned under blobDir,
-// and the /stac endpoint serving the STAC catalog under stacDir.
-func NewEndpointWithUI(runner UIRunner, blobDir string, stacDir string) (http.Handler, error) {
+// and the /stac endpoint serving the STAC catalog under stacDir. The queries
+// start on local, the project's own table, and /api/table can point them at a
+// table on object storage instead; the blob store and the STAC catalog are the
+// project's whichever table is queried.
+func NewEndpointWithUI(local UIRunner, blobDir string, stacDir string) (http.Handler, error) {
 	ui, err := uiHandler()
 	if err != nil {
 		return nil, err
 	}
+	// every query surface goes through the switch, so that pointing the UI at
+	// a table on object storage redirects the SPARQL endpoint, the SQL and
+	// stats APIs, and the geometry routes together
+	runner := &tableSwitch{local: local}
 	blobs := blobHandler{dir: blobDir}
 	mux := http.NewServeMux()
+	mux.Handle("/api/table", tableHandler{tables: runner})
 	// /sparql and /blobs name both an endpoint and a UI tab; browserRoute is what
 	// decides which of the two a request meant.
 	mux.Handle("/sparql", browserRoute{api: sparqlHandler{runner: runner}, ui: ui})

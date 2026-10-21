@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -56,10 +57,21 @@ const testProject = `
 	@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
 	<EducationFinder> a history:EducationalHistoryFinder ;
-		a salmodule:NodeProcessor ;
+		a salmodule:Task ;
 		schema:name "not a module property" ;
 		history:maxRetries "5"^^xsd:integer .
 `
+
+// captureWarnings routes slog's default logger into a buffer for the test, so a
+// warning can be asserted on.
+func captureWarnings(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	return &buf
+}
 
 type testContainerRunner struct {
 	ontology  string
@@ -437,6 +449,54 @@ const testShapedModuleOntology = `{
 // the shape a module declares for its task's output is enforced at run time,
 // and that the violation is what the user is told rather than anything about
 // the container.
+// Declaring what a task produces is part of the SAL Module contract, but a
+// module that declares no salmodule:stdoutShape is run unchecked with a
+// warning rather than refused, since modules predate the shape.
+func TestMaterializeSalModulesWarnsWhenTheTaskClassHasNoStdoutShape(t *testing.T) {
+	logs := captureWarnings(t)
+	graph := parseTestProject(t, testProject)
+	runner := &testContainerRunner{
+		ontology:  testModuleOntology,
+		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
+	}
+
+	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, tasksRun)
+	require.Contains(t, logs.String(), testModuleNamespace+"EducationalHistoryFinder declares no salmodule:stdoutShape")
+}
+
+func TestMaterializeSalModulesIsQuietWhenTheTaskClassHasAStdoutShape(t *testing.T) {
+	logs := captureWarnings(t)
+	graph := parseTestProject(t, testProject)
+	runner := &testContainerRunner{
+		ontology:  testShapedModuleOntology,
+		runOutput: `{"@id":"person/alice","@type":"schema:Person","schema:name":"Alice"}` + "\n",
+	}
+
+	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+
+	require.NoError(t, err)
+	require.NotContains(t, logs.String(), "stdoutShape")
+}
+
+// A project may type an instance salmodule:Task to say it is runnable. The
+// NodeProducer, NodeConsumer, and NodeProcessor classes are inferred, not
+// asserted, so typing an instance with one still counts but is warned about.
+func TestFindSalModuleTasksWarnsWhenAnInstanceIsTypedWithAnInferredClass(t *testing.T) {
+	logs := captureWarnings(t)
+	graph := parseTestProject(t, strings.Replace(testProject, "a salmodule:Task ;", "a salmodule:NodeProducer ;", 1))
+
+	tasks, err := findSalModuleTasks(graph)
+
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.True(t, tasks[0].declaredTask)
+	require.Contains(t, logs.String(), "is typed "+salmodule.Namespace+"NodeProducer")
+	require.Contains(t, logs.String(), "type it salmodule:Task")
+}
+
 func TestMaterializeSalModulesFailsWhenOutputViolatesTheStdoutShape(t *testing.T) {
 	graph := parseTestProject(t, testProject)
 	runner := &testContainerRunner{

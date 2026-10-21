@@ -76,7 +76,7 @@ func TestTaskInstanceCarriesTheModulesOwnProperties(t *testing.T) {
 func TestTaskInstanceOmitsPropertiesFromOtherVocabularies(t *testing.T) {
 	instance := taskInstanceFor(t, testInstancePrefixes+`
 		<Finder> a history:EducationalHistoryFinder ;
-			a salmodule:NodeProcessor ;
+			a salmodule:Task ;
 			schema:name "described for the project, not for the module" ;
 			salmodule:taskInstanceEnvVar "IGNORED" ;
 			history:maxRetries "5"^^xsd:integer .
