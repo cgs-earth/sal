@@ -40,7 +40,7 @@ Harmonize2 <--> User2
 
 ## Solution
 
-The Semantic Accessibility Layer system (SAL) is composed of a core module specification (SAL Module) and components that build on the specification. The SAL Module specification uses an ontology (SAL Ontology, `sal:`) to describe a common command-line usage interface for describing data models and exposed containerized application logic that operates on them using JSON-LD (RDF). It promotes interoperability at the point of acquisition by semantically unifying data, metadata, and application logic into a portable, referenceable module—laying the groundwork for the consistent reuse of source data across diverse systems. The SAL command-line interface tool (SAL CLI) enables users to create projects using familiar software development lifecycle stages, generating knowledge products using SAL CLI through orchestration of SAL Modules.  SAL enables users to co-create uniformly described portable knowledge products based on existing published sources that can serve as building blocks towards community-built knowledge networks. 
+The Semantic Accessibility Layer system (SAL) is composed of a core module specification (SAL Module) and components that build on the specification. The SAL Module specification uses an ontology (the SAL Module ontology, `salmodule:`) to describe a common command-line usage interface for describing data models and exposed containerized application logic that operates on them using JSON-LD (RDF). It promotes interoperability at the point of acquisition by semantically unifying data, metadata, and application logic into a portable, referenceable module—laying the groundwork for the consistent reuse of source data across diverse systems. The SAL command-line interface tool (SAL CLI) enables users to create projects using familiar software development lifecycle stages, generating knowledge products using SAL CLI through orchestration of SAL Modules.  SAL enables users to co-create uniformly described portable knowledge products based on existing published sources that can serve as building blocks towards community-built knowledge networks. 
 
 
 ```mermaid
@@ -63,7 +63,7 @@ KnowledgeProduct --context--> User2["User 2"]
 
 ### SAL Module Command Line Interface Usage
 
-The SAL Module specification consists of a JSON-LD based vocabulary [here](sal.jsonld) which describes a command line interface (CLI) usage specification for containers.  When implemented by a containerized application, a SAL Module compliant container implementation provides self-describing data models and exposed application logic to produce building blocks of highly contextualized data. This data can be retrieved using the SAL Module container as a standalone command or orchestrated through SAL CLI to produce knowledge products that can be published, shared, and (re)used. 
+The SAL Module specification consists of an OWL vocabulary, the [SAL Module ontology](/sal/reference/salmodule-ttl-spec/), which describes a command line interface (CLI) usage specification for containers.  When implemented by a containerized application, a SAL Module compliant container implementation provides self-describing data models and exposed application logic to produce building blocks of highly contextualized data. This data can be retrieved using the SAL Module container as a standalone command or orchestrated through SAL CLI to produce knowledge products that can be published, shared, and (re)used. 
 
 
 
@@ -76,7 +76,9 @@ SAL Module expects a compliant container to provide its ontology (i.e. vocabular
 
 `docker run IMAGE sal (ontology|vocabulary|vocab)`
 
-SAL Modules MUST declare and implement at least one `sal:NodeProcessor` subclass in their ontology. Each `sal:NodeProcessor` subclass MAY add the SAL annotation properties `sal:input`, `sal:output`, `sal:self` to their subclass declaration. The `sal:input` annotation property describes the SHACL `sh:NodeShape` that a `sal:NodeProcessor` instance(s) expects to receive. Conversely, `sal:output` describes the SHACL `sh:NodeShape` that a `sal:NodeProcessor` instance expects to produce. Finally,  `sal:self` describes the SHACL `sh:NodeShape` that an instance of the `sal:NodeProcessor` subclass instance should conform to.   
+SAL Modules MUST declare and implement at least one `salmodule:Task` subclass in their ontology. A task class declares its contract with three annotation properties, each valued by a SHACL `sh:NodeShape`: `salmodule:stdinShape` describes the JSON-LD node objects an instance of the class expects to receive on stdin, `salmodule:stdoutShape` describes the node objects it produces on stdout, and `salmodule:taskShape` describes what an instance of the class itself should conform to. A task class that writes node objects to stdout SHOULD declare a `salmodule:stdoutShape`; the SAL Project enforces the shape it declares and warns about a class that declares none. SAL Modules MUST be declarative about what their tasks consume and produce: the shapes are the contract, and nothing about how a task is run is read from anything else.
+
+The ontology also defines `salmodule:NodeProducer`, `salmodule:NodeConsumer`, and `salmodule:NodeProcessor`, by OWL axiom, as a `salmodule:Task` whose class declares a `salmodule:stdoutShape`, a `salmodule:stdinShape`, or both. They are inferred classes for a reasoner: a task class that declares a `stdoutShape` is a `NodeProducer` by that axiom, and a module MUST NOT subclass them directly or type its instances with them. A SAL Project still runs a module that does, with a warning, so that modules written before this was settled keep working.
 
 where...
 
@@ -84,108 +86,109 @@ IMAGE is the name of the docker image that adheres to the SAL Module command lin
 
 
 **Example 1**
-The following example displays the ontology for docker image `MYIMAGE` where a single `sh:NodeProcessor` subclass is defined ( i.e. `EducationalHistoryFinder`). that accepts JSON-LD node objects conforming to the SHACL shape `PersonShape` and produces JSON-LD node objects conforming to SHACL shape `PersonAndEducationShape`. Instances of  `EducationalHistoryFinder` execute the logic to augment a `schema:Person` node object with their educational background when given their first name, last name, and date of birth.   
+The following example displays the ontology for docker image `MYIMAGE` where a single `salmodule:Task` subclass is defined (i.e. `EducationalHistoryFinder`) that accepts JSON-LD node objects conforming to the SHACL shape `PersonShape` and produces JSON-LD node objects conforming to SHACL shape `PersonAndEducationShape`. Instances of `EducationalHistoryFinder` execute the logic to augment a `schema:Person` node object with their educational background when given their first name, last name, and date of birth. Since the class declares both a `stdinShape` and a `stdoutShape`, a reasoner infers that it is a `salmodule:NodeProcessor`; the ontology does not say so itself.
 
 ```
-$ docker run MYIMAGE sal ontology
+$ docker run MYIMAGE salmodule ontology
 {
-    "@context": { 
-        "schema":"https://schema.org/",
+    "@context": {
+        "schema": "https://schema.org/",
         "sh": "http://www.w3.org/ns/shacl#",
         "xsd": "http://www.w3.org/2001/XMLSchema#",
-        "sal":"https://w3id.org/datacequia/sal#",
+        "salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#",
         "owl": "http://www.w3.org/2002/07/owl#",
         "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
     },
     "@graph": [
         {
+            "@id": ".",
+            "@type": "owl:Ontology",
+            "rdfs:label": "Educational history"
+        },
+        {
             "@id": "PersonShape",
             "@type": "sh:NodeShape",
-            "sh:targetClass": {"@id":"schema:Person"},
+            "sh:targetClass": {"@id": "schema:Person"},
             "sh:property": [
                 {
-                    "sh:path": {"@id":"schema:givenName"},
-                    "sh:datatype": {"@id":"xsd:string"},
-                    "sh:minCount": 1,
-                    "sh:maxCount": 1
-                },
-                {
-                    "sh:path": {"@id":"schema:familyName"},
+                    "sh:path": {"@id": "schema:givenName"},
                     "sh:datatype": {"@id": "xsd:string"},
                     "sh:minCount": 1,
                     "sh:maxCount": 1
                 },
                 {
-                    "sh:path": {"@id":"schema:birthDate"},
-                    "sh:datatype": {"@id":"xsd:date"},
+                    "sh:path": {"@id": "schema:familyName"},
+                    "sh:datatype": {"@id": "xsd:string"},
                     "sh:minCount": 1,
                     "sh:maxCount": 1
-                }
-  ]
-
-        },      
-        {
-            "@id": "PersonAndEducationShape",
-            "@type": "sh:NodeShape",
-            "sh:targetClass": {"@id":"schema:Person"},
-            "sh:property" : [
-                {
-                    "sh:path": {"@id":"schema:givenName"},
-                    "sh:datatype": {"@id":"xsd:string"},
-                    "sh:minCount": 1,
-                    "sh:maxCount": 1
-                },
-                {
-                    "sh:path": {"@id","schema:familyName"},
-                    "sh:datatype": {"@id","xsd:string"},
-                    "sh:minCount": 1,
-                    "sh:maxCount": 1
-
                 },
                 {
                     "sh:path": {"@id": "schema:birthDate"},
-                    "sh:datatype": {"@id":"xsd:date"},
+                    "sh:datatype": {"@id": "xsd:date"},
                     "sh:minCount": 1,
                     "sh:maxCount": 1
-                   
-                },
-                {
-                    "sh:path": {"@id":"schema:alumniOf"},
-                    "sh:nodeKind": "sh:IRIOrBlankNode" 
                 }
             ]
-
+        },
+        {
+            "@id": "PersonAndEducationShape",
+            "@type": "sh:NodeShape",
+            "sh:targetClass": {"@id": "schema:Person"},
+            "sh:property": [
+                {
+                    "sh:path": {"@id": "schema:givenName"},
+                    "sh:datatype": {"@id": "xsd:string"},
+                    "sh:minCount": 1,
+                    "sh:maxCount": 1
+                },
+                {
+                    "sh:path": {"@id": "schema:familyName"},
+                    "sh:datatype": {"@id": "xsd:string"},
+                    "sh:minCount": 1,
+                    "sh:maxCount": 1
+                },
+                {
+                    "sh:path": {"@id": "schema:birthDate"},
+                    "sh:datatype": {"@id": "xsd:date"},
+                    "sh:minCount": 1,
+                    "sh:maxCount": 1
+                },
+                {
+                    "sh:path": {"@id": "schema:alumniOf"},
+                    "sh:nodeKind": {"@id": "sh:IRIOrBlankNode"}
+                }
+            ]
         },
         {
             "@id": "EducationalHistoryFinder",
             "@type": "owl:Class",
-            "rdfs:subClassOf": {"@id": "sal:NodeProcessor"},
-            "sal:input": {"@id":"PersonShape"},
-            "sal:output": {"@id":"PersonAndEducationShape"}
+            "rdfs:subClassOf": {"@id": "salmodule:Task"},
+            "salmodule:stdinShape": {"@id": "PersonShape"},
+            "salmodule:stdoutShape": {"@id": "PersonAndEducationShape"}
         }
-        ]
+    ]
 }
 
 $ 
 ```
 
-##### Run sal:NodeProcessor
+##### Run a task
 
 
-A SAL Module compliant container allows a user to run a defined instance of a `sal:NodeProcessor` subclass (node-processing instance) declared in it's ontology. These instances are passed to the container's `run` command using the `SALMODULE_TASK_INSTANCE` environment variable. The `sal:NodeProcessor` subclass instance serves to provide context to the sal:NodeProcessor runtime logic. 
+A SAL Module compliant container allows a user to run a defined instance of a `salmodule:Task` subclass declared in its ontology. These instances are passed to the container's `run` command using the `SALMODULE_TASK_INSTANCE` environment variable. The task instance serves to provide context to the task's runtime logic. 
 
-> Note: one simple example for adding `sal:NodeProcessor` properties may be to describe an external host's connection properties that are needed by the sal:NodeProcessor run(time) logic to connect to a data source.
+> Note: one simple example for adding properties to a task class may be to describe an external host's connection properties that are needed by the task's run(time) logic to connect to a data source.
 
 
-`docker run -e SALMODULE_TASK_INSTANCE="<sal:NodeProcessor node object instance>" MYIMAGE sal run`
+`docker run -e SALMODULE_TASK_INSTANCE="<task node object instance>" MYIMAGE salmodule run`
 
-Building on Example 1, The following example shows how an instance of `sal:NodeProcessor` subclass `EducationalHistoryFinder` is invoked from the command line. 
+Building on Example 1, The following example shows how an instance of the `salmodule:Task` subclass `EducationalHistoryFinder` is invoked from the command line. 
 
 Note: The response printed to 
 
 ```
 $ SALMODULE_TASK_INSTANCE='{"@id":"http://example.org/#pistolpete","@type":"EducationalHistoryFinder"}' 
-$ docker run MYIMAGE sal run -e SALMODULE_TASK_INSTANCE="${SALMODULE_TASK_INSTANCE}" 
+$ docker run -e SALMODULE_TASK_INSTANCE="${SALMODULE_TASK_INSTANCE}" MYIMAGE salmodule run
 {"@id":"http://example.org/#pistolpete","@type":"schema:Person","schema:givenName":"Frank","schema:familyName":"Eaton","schema:birthDate":{"@id":"xsd:date", "@value":"1888-09-17"},"schema:alumniOf":{"@id":"http://nmsu.edu/","@type":"schema:EducationalOrganization","schema:name": "New Mexico State University"}}
 $ 
 ```
@@ -232,7 +235,7 @@ LocalGitRepository -->> Docker:
 Docker -->> JSONLDProcessor: <SAL Module Image>
 deactivate Docker
 
-JSONLDProcessor ->> Docker: run <SAL Module Image> sal ontology
+JSONLDProcessor ->> Docker: run <SAL Module Image> salmodule ontology
 activate Docker
 Docker -->> JSONLDProcessor: ontology from stdout
 deactivate Docker

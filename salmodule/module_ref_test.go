@@ -60,3 +60,10 @@ func TestIsTaskBaseClassMatchesOntologyClasses(t *testing.T) {
 	require.True(t, IsTaskBaseClass(Namespace+"Task"))
 	require.False(t, IsTaskBaseClass(Namespace+"Error"))
 }
+
+func TestIsInferredTaskClassExcludesTask(t *testing.T) {
+	require.True(t, IsInferredTaskClass(Namespace+"NodeProducer"))
+	require.True(t, IsInferredTaskClass(Namespace+"NodeConsumer"))
+	require.True(t, IsInferredTaskClass(Namespace+"NodeProcessor"))
+	require.False(t, IsInferredTaskClass(Namespace+"Task"))
+}

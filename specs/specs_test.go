@@ -105,6 +105,16 @@ func TestSchemaRequiresATaskClass(t *testing.T) {
 	require.ErrorContains(t, err, "contains")
 }
 
+// The ontology defines NodeProducer, NodeConsumer, and NodeProcessor by axiom
+// for a reasoner to infer from a task class's shapes; a module declares a task
+// by subclassing salmodule:Task and the shapes, so the schema refuses the
+// inferred classes as parents even though sal still runs such a module.
+func TestSchemaRefusesAnInferredClassAsTheParent(t *testing.T) {
+	err := validate(t, strings.Replace(validOntology, `"rdfs:subClassOf": {"@id": "salmodule:Task"}`, `"rdfs:subClassOf": {"@id": "salmodule:NodeProducer"}`, 1))
+
+	require.ErrorContains(t, err, "salmodule:Task")
+}
+
 func TestSchemaRejectsASubClassOfWrittenAsAString(t *testing.T) {
 	err := validate(t, strings.Replace(validOntology, `"rdfs:subClassOf": {"@id": "salmodule:Task"}`, `"rdfs:subClassOf": "salmodule:Task"`, 1))
 

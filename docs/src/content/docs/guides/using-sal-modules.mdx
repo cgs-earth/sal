@@ -18,9 +18,15 @@ Declare it as a prefix and type an instance with one of the classes the module's
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
 <GeoconnexStates> a states:GeoconnexReferenceFeatureStates ;
-    a salmodule:NodeProcessor ;
+    a salmodule:Task ;
     states:maxRetries "5"^^xsd:integer .
 ```
+
+Typing the instance `salmodule:Task` is optional when the module's ontology already declares the class a
+subclass of `salmodule:Task`, which every module should. Do not type it `salmodule:NodeProducer`,
+`salmodule:NodeConsumer`, or `salmodule:NodeProcessor`: the SAL Module ontology defines those by OWL axiom as
+a `Task` whose class declares a `salmodule:stdoutShape`, a `stdinShape`, or both, so they are what a reasoner
+infers from the module's ontology rather than something a project asserts. `sal build` warns when it finds one.
 
 The prefix takes the form `salmodule://[HOST/]OWNER/REPO/`.
 `HOST` is optional and defaults to `github.com`.
@@ -111,9 +117,8 @@ data/module.ttl:5: undefined term states:GeoconnexReferenceFeatureStatess
 the sources. `sal build --without-sal-modules` commits the task's configuration into the data product without running
 anything, and [`sal run`](/sal/reference/commands/#sal-run) is a debugging command that runs the tasks again on top of
 the last build.
-An instance is only run when it is typed as a SAL Module task, either because the project's RDF types it as a
-`salmodule:NodeProcessor`, `salmodule:NodeProducer`, `salmodule:NodeConsumer`, or `salmodule:Task`, or because
-the module's own ontology declares its class as a subclass of one of those.
+An instance is only run when it is known to be a SAL Module task, either because the module's own ontology
+declares its class a subclass of `salmodule:Task` or because the project's RDF types it `salmodule:Task`.
 
 A task writes newline delimited JSON to stdout.
 SAL injects the module ontology's `@context` into each node so that its keys resolve to the module's vocabulary,
@@ -158,8 +163,10 @@ run: SAL module salmodule://github.com/owner/stations wrote a node on output lin
 ```
 
 Nothing the task wrote is committed. A result whose severity the shape lowers to `sh:Warning` or `sh:Info`
-is logged rather than fatal. A class without a `salmodule:stdoutShape` is run unchecked, and the check costs
-nothing then.
+is logged rather than fatal. A class without a `salmodule:stdoutShape` is run unchecked, and `sal build` logs
+a warning naming the class: declaring what a task produces is part of the SAL Module contract, and the shape
+is what makes a task class a `salmodule:NodeProducer` in the ontology's terms, but a module written before
+the shape existed is not refused for lacking it.
 
 Each line is validated on its own, so a shape can only describe the nodes of one line; the line's `@id` is
 resolved against your project's namespace, the same way it is when the output is committed. Standard SHACL
