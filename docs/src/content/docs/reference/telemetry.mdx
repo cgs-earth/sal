@@ -6,7 +6,7 @@ description: Tracing and metrics for the slow parts of a SAL build, run, or quer
 `sal` records [OpenTelemetry](https://opentelemetry.io/) traces around the steps that take time, and reports the memory and CPU the process used while they ran, so that a slow build or query can be read as a timeline rather than guessed at from the log.
 
 Nothing is exported unless the environment asks for it.
-A plain `sal build` pays only for spans that go nowhere.
+A plain `sal build` pays only for spans that go nowhere, except that the [progress pane](/sal/reference/commands/#progress-and-log-panes) it shows in a terminal reads the spans as they start and end, which is how it follows the build; the spans are still not exported.
 
 ## Turning it on
 
@@ -51,8 +51,10 @@ Under it:
 | `salmodule.clone` | The `git clone` of the module repository. | `sal.module.clone_url` |
 | `salmodule.build_image` | The `docker build` of the module's Dockerfile. | `sal.module.image` |
 | `salmodule.ontology` | Running the module's `salmodule ontology` command for its vocabulary. | `sal.module` |
+| `build.import_ontologies` | Fetching every `owl:imports` of the project ontology, with a `build.import_ontology` under it per import. Absent from a `sal validate` trace, which fetches none. | |
 | `build.import_ontology` | Fetching one `owl:imports` of the project ontology. | `sal.import` |
-| `salmodule.task` | One task instance from the module's ontology through to its triples merged into the graph. Absent from a `sal build --without-sal-modules` or `sal validate` trace, which run no task. | `sal.module`, `sal.module.task_class`, `sal.module.task`, `sal.triples.materialized`, `sal.module.files_copied` |
+| `build.materialize_modules` | Running every SAL module task the sources declare, with a `salmodule.task` under it per task. The counts are known up front, so a reader can tell how far along the tasks are. Absent from a `sal build --without-sal-modules` or `sal validate` trace. | `sal.module.tasks`, `sal.modules` |
+| `salmodule.task` | One task instance from the module's ontology through to its triples merged into the graph. | `sal.module`, `sal.module.task_class`, `sal.module.task`, `sal.triples.materialized`, `sal.module.files_copied` |
 | `salmodule.run_task` | The module's `salmodule run` command, from the container starting to the last `file:///` copy finishing. | `sal.module`, `sal.module.output_bytes`, `sal.module.files_copied` |
 | `build.construct` | Staging the build on a branch of the project's table and running the project's `CONSTRUCT` queries over it. The staging is an `iceberg.stage` under this span. Absent when the project has no `CONSTRUCT` query. | `sal.construct.queries`, `sal.triples.constructed` |
 | `iceberg.stage` | Writing what the table does not hold yet to the `sal-staging` branch, for the `CONSTRUCT` queries to read. It has an `iceberg.diff`, `iceberg.write_data_files`, and `iceberg.commit` of its own. | `sal.iceberg.warehouse`, `sal.iceberg.namespace` |

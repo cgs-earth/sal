@@ -20,6 +20,10 @@ import (
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"github.com/tggo/goRDFlib/turtle"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 const testModuleNamespace = "salmodule://www.github.com/test/history-getter/"
@@ -527,4 +531,36 @@ func TestMaterializeSalModulesMergesOutputThatConformsToTheStdoutShape(t *testin
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
 	require.True(t, graphHasTriple(graph, "https://example.test/project/person/alice", "https://schema.org/name", "Alice"))
+}
+
+// The span over every task says up front how many tasks and modules the
+// build has ahead of it, which is what the progress pane counts against.
+func TestMaterializeSalModulesSpanCountsTheTasksAndModules(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder)))
+	t.Cleanup(func() { otel.SetTracerProvider(previous) })
+	graph := parseTestProject(t, testProject)
+	runner := &testContainerRunner{
+		ontology:  testModuleOntology,
+		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
+	}
+
+	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	require.NoError(t, err)
+
+	var names []string
+	var attrs attribute.Set
+	for _, span := range recorder.Ended() {
+		names = append(names, span.Name())
+		if span.Name() == "build.materialize_modules" {
+			attrs = attribute.NewSet(span.Attributes()...)
+		}
+	}
+	require.Contains(t, names, "salmodule.task")
+	require.Equal(t, "build.materialize_modules", names[len(names)-1])
+	tasks, _ := attrs.Value("sal.module.tasks")
+	require.Equal(t, int64(1), tasks.AsInt64())
+	modules, _ := attrs.Value("sal.modules")
+	require.Equal(t, int64(1), modules.AsInt64())
 }

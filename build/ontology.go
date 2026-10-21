@@ -46,7 +46,11 @@ func projectOntologyContent(base string) ([]byte, error) {
 // kept out of the table entirely. The statements the ontology node makes
 // about the project itself arrive separately, validated directly from
 // projectOntologyContent rather than through this function.
-func ImportOntologies(ctx context.Context, graph *rdflibgo.Graph, pins *validate.PinnedVocabularies) error {
+func ImportOntologies(ctx context.Context, graph *rdflibgo.Graph, pins *validate.PinnedVocabularies) (err error) {
+	// one span covers every import, with a build.import_ontology under it per
+	// document fetched, so the progress pane has a step to count them against
+	ctx, span := telemetry.Start(ctx, "build.import_ontologies")
+	defer func() { telemetry.End(span, err) }()
 	path, err := pkg.SalConfigPath()
 	if err != nil {
 		return err

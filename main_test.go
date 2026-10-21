@@ -6,37 +6,49 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/cgs-earth/sal/build"
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewLogWriterWritesToStderrAndTempLogFile(t *testing.T) {
+func TestOpenLogFileWritesUnderTheTempDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	var stderr bytes.Buffer
 
-	writer, closeLog := newLogWriter(&stderr, tmpDir)
-	_, err := writer.Write([]byte("sal log entry\n"))
+	logFile, path := openLogFile(&stderr, tmpDir)
+	require.NotNil(t, logFile)
+	_, err := logFile.WriteString("sal log entry\n")
 	require.NoError(t, err)
-	closeLog()
+	require.NoError(t, logFile.Close())
 
-	require.Equal(t, "sal log entry\n", stderr.String())
-
-	// assert that the directory isn't empty
-	entries, err := os.ReadDir(tmpDir)
+	require.Empty(t, stderr.String())
+	require.Equal(t, filepath.Join(tmpDir, "sal", "logs"), filepath.Dir(path))
+	content, err := os.ReadFile(path)
 	require.NoError(t, err)
-	require.NotEmpty(t, entries)
+	require.Equal(t, "sal log entry\n", string(content))
 }
 
-func TestNewLogWriterFallsBackToStderrWhenTempLogDirectoryCannotBeCreated(t *testing.T) {
+func TestOpenLogFileReportsATempDirectoryThatCannotBeCreated(t *testing.T) {
 	tmpDir := t.TempDir()
 	blockingFile := filepath.Join(tmpDir, "not-a-directory")
 	require.NoError(t, os.WriteFile(blockingFile, []byte(""), 0644))
 
 	var stderr bytes.Buffer
-	writer, closeLog := newLogWriter(&stderr, blockingFile)
-	_, err := writer.Write([]byte("fallback log entry\n"))
-	require.NoError(t, err)
-	closeLog()
+	logFile, path := openLogFile(&stderr, blockingFile)
 
+	require.Nil(t, logFile)
+	require.Empty(t, path)
 	require.Contains(t, stderr.String(), "failed to create SAL log directory")
-	require.Contains(t, stderr.String(), "fallback log entry")
+}
+
+func TestOnlyBuildAndRunWorkUnderTheProgressPanes(t *testing.T) {
+	command, noTUI := progressCommand(args{Build: &build.BuildCmd{}})
+	require.Equal(t, "build", command)
+	require.False(t, noTUI)
+
+	command, noTUI = progressCommand(args{RunTasks: &build.RunCmd{NoTUI: true}})
+	require.Equal(t, "run", command)
+	require.True(t, noTUI)
+
+	command, _ = progressCommand(args{Validate: &build.ValidateCmd{}})
+	require.Empty(t, command)
 }

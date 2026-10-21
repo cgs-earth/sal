@@ -100,13 +100,20 @@ func findSalModuleTasks(graph *rdflibgo.Graph) ([]salModuleTask, error) {
 // blobDir's prov.jsonld, and the graph refers to either as urn:sha256:<digest>
 // in place of the container path. Nothing an earlier run copied is removed;
 // the blob store only grows until the user clears it.
-func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver *salmodule.Resolver, blobDir string) (int, error) {
+func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver *salmodule.Resolver, blobDir string) (tasksRun int, err error) {
 	tasks, err := findSalModuleTasks(graph)
 	if err != nil {
 		return 0, err
 	}
+	modules := map[string]bool{}
+	for _, task := range tasks {
+		modules[task.ref.Namespace] = true
+	}
+	// the span over every task says up front how many tasks and modules the
+	// build has ahead of it, which is what the progress pane counts against
+	ctx, span := telemetry.Start(ctx, "build.materialize_modules", attribute.Int("sal.module.tasks", len(tasks)), attribute.Int("sal.modules", len(modules)))
+	defer func() { telemetry.End(span, err) }()
 
-	tasksRun := 0
 	for _, task := range tasks {
 		ran, err := materializeTask(ctx, graph, resolver, blobDir, task)
 		if err != nil {

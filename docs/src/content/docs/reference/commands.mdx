@@ -244,6 +244,7 @@ Important flags:
 - `--no-cache`: resolve every vocabulary from its source again and re-pin it in `.sal/config.jsonld`.
 - `--allow-prefixes-without-slash-or-hash`: include a prefix whose namespace does not end in `/` or `#` without asking, as for [`sal validate`](#sal-validate).
 - `--without-sal-modules`: commit the configuration of every SAL module task the sources declare without running any of them; see [SAL module tasks](#sal-module-tasks) below.
+- `--no-tui`: write the log to stderr as it happens instead of opening the [progress and log panes](#progress-and-log-panes).
 
 `sal build` pins the exact version of every vocabulary the project resolves against, so a later build validates against the same versions this one did.
 A build that pinned something new writes `.sal/config.jsonld`, which belongs in Git; commit it before the next build, which otherwise refuses to run against a dirty working tree.
@@ -324,6 +325,25 @@ See [Data Layout](/sal/reference/data-layout/) for the generated table structure
 
 The validation, every module built or run, and the Iceberg diff and write are recorded as OpenTelemetry spans when an exporter is configured; see [Telemetry](/sal/reference/telemetry/).
 
+### Progress and log panes
+
+In a terminal, `sal build` and `sal run` work under two panes, one on screen at a time:
+
+- **Progress** lists the phases of the build in the order they happen, validating the sources, importing ontologies, running SAL module tasks, running `CONSTRUCT` queries, and writing the Iceberg table, each marked upcoming, running, done, failed, or skipped, with how long it has taken so far.
+  Under a running phase are the steps inside it as they happen, each with its own time: every document validated and vocabulary loaded, every module cloned, built, or reused from a cached image, every task run with how much it has written and how many files it has copied, every query, and the diff, Parquet write, and commit of the table.
+  A phase says how far it is, such as `3/7 documents` or `1/2 tasks · 2 modules`, and completed steps fold into one line counting them once more than a few have passed, so the pane stays a screen tall over hundreds of files.
+  A failed step shows the first lines of its error where it failed.
+- **Logs** is the log exactly as `sal build` writes it without the panes, wrapped to the terminal, following new lines as they arrive until you scroll up.
+
+`Tab`, `1`, or `2` switch panes, the arrow and page keys or the mouse wheel scroll the one on screen, `End` resumes following the log, and `Ctrl+C` cancels the build.
+A yes/no question the build asks, such as whether to include a prefix whose namespace ends in neither `/` nor `#`, appears above the help line and is answered with `y` or `n`.
+
+The panes close as soon as the build finishes, and a summary is printed in their place so the terminal keeps a record: how the build ended and after how long, the phases and steps with their times, and the path of the log file, which holds every line the Logs pane showed and is written under `/tmp/sal/logs` whether or not the panes were shown.
+An error that fails the build is still printed after the summary.
+
+The panes need stdin and stderr to be a terminal; a build run from a script or CI, or with its output redirected, logs to stderr as it always has, and `--no-tui` asks for that in a terminal too.
+The progress pane reads the same spans [Telemetry](/sal/reference/telemetry/) describes, so what it shows is what a trace of the build records.
+
 ## `sal run`
 
 Re-runs every SAL module task the project's RDF declares on top of the last build and commits the triples the modules produced as a new
@@ -349,6 +369,8 @@ is an error, since there is nothing to run.
 
 Like `sal build --force`, `sal run --force` skips both checks and should only be used for test or
 debugging runs.
+
+`sal run` works under the same [progress and log panes](#progress-and-log-panes) as `sal build`, and takes the same `--no-tui`.
 
 ## `sal construct`
 

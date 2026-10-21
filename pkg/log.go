@@ -6,9 +6,20 @@ import (
 	"strings"
 )
 
+// ConfirmPrompt, when set, answers Confirm's question in place of the
+// terminal. The progress panes of `sal build` set it while they own the
+// terminal, since a prompt read from stdin would never be seen under them.
+var ConfirmPrompt func(prompt string) bool
+
+// Confirm asks the user a yes/no question, on the terminal unless
+// ConfirmPrompt is set, and reports whether they answered yes.
 func Confirm(prompt string) bool {
 
 	Warnf("%s [y/N]", prompt)
+
+	if ConfirmPrompt != nil {
+		return ConfirmPrompt(prompt)
+	}
 
 	var input string
 	if _, err := fmt.Scanln(&input); err != nil {

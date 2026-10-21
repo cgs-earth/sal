@@ -20,6 +20,7 @@ import (
 	"github.com/cgs-earth/sal/get"
 	"github.com/cgs-earth/sal/importation"
 	"github.com/cgs-earth/sal/initialization"
+	"github.com/cgs-earth/sal/pkg/progress"
 	"github.com/cgs-earth/sal/pkg/telemetry"
 	"github.com/cgs-earth/sal/push"
 	"github.com/cgs-earth/sal/query"
@@ -65,26 +66,59 @@ func (args) Description() string {
 }
 
 func main() {
-
-	logWriter, closeLog := newLogWriter(os.Stderr, "/tmp")
-	defer closeLog()
-
-	slog.SetDefault(slog.New(
-		tint.NewHandler(logWriter, &tint.Options{
-			Level:      slog.LevelDebug,
-			TimeFormat: time.Kitchen,
-			AddSource:  true,
-		}),
-	))
-
 	if len(os.Args) == 1 {
 		os.Args = append(os.Args, "--help")
 	}
+	var cli args
+	arg.MustParse(&cli)
+
+	logFile, logPath := openLogFile(os.Stderr, "/tmp")
+	closeLog := func() {
+		if logFile == nil {
+			return
+		}
+		if err := logFile.Close(); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "failed to close SAL log file: %v\n", err)
+		}
+		logFile = nil
+	}
+	defer closeLog()
+
+	// `sal build` and `sal run` work under a progress pane and a log pane
+	// when the terminal can show them, with the log going to the pane and the
+	// file instead of stderr; every other command, a build asked not to with
+	// --no-tui, and a build whose stderr is not a terminal log to stderr as
+	// they go
+	var ui *progress.UI
+	if command, noTUI := progressCommand(cli); command != "" && !noTUI && progress.TerminalSupported() {
+		ui = progress.New(command, logFile, logPath)
+	}
+	logWriter := io.Writer(os.Stderr)
+	if logFile != nil {
+		logWriter = io.MultiWriter(os.Stderr, logFile)
+	}
+	logTo := func(w io.Writer) {
+		slog.SetDefault(slog.New(tint.NewHandler(w, &tint.Options{
+			Level:      slog.LevelDebug,
+			TimeFormat: time.Kitchen,
+			AddSource:  true,
+		})))
+	}
+	if ui != nil {
+		logTo(ui.LogWriter())
+	} else {
+		logTo(logWriter)
+	}
 
 	// traces and metrics are exported only when the environment asks for them;
-	// see pkg/telemetry. Whatever was recorded is flushed on every way out,
+	// see pkg/telemetry. The progress pane reads the same spans through a
+	// processor of its own. Whatever was recorded is flushed on every way out,
 	// which os.Exit would otherwise skip.
-	shutdownTelemetry, err := telemetry.Setup(context.Background())
+	var processors []telemetry.SpanProcessor
+	if ui != nil {
+		processors = append(processors, ui.SpanProcessor())
+	}
+	shutdownTelemetry, err := telemetry.Setup(context.Background(), processors...)
 	if err != nil {
 		slog.Error(err.Error())
 		closeLog()
@@ -97,12 +131,30 @@ func main() {
 		closeLog()
 		os.Exit(code)
 	}
+	// runUnderPanes runs a build or run under the panes when they are up,
+	// printing the summary once they close so the terminal keeps a record,
+	// and directly otherwise
+	runUnderPanes := func(work func() error) error {
+		if ui == nil {
+			return work()
+		}
+		err := ui.Run(work)
+		// whatever is logged from here on, such as the error that ends the
+		// command, has no pane to go to any more
+		logTo(logWriter)
+		ui.PrintSummary(os.Stderr)
+		if errors.Is(err, progress.ErrInterrupted) {
+			exit(130)
+		}
+		return err
+	}
 
-	var cli args
-	arg.MustParse(&cli)
 	switch {
 	case cli.Build != nil:
-		_, err = cli.Build.Run()
+		err = runUnderPanes(func() error {
+			_, err := cli.Build.Run()
+			return err
+		})
 		// Errors from build should be directly written to stdout
 		// not written as a log which adds extra noise
 		// Special errors like UncommittedChangesErr should be handled normally
@@ -112,7 +164,10 @@ func main() {
 			exit(1)
 		}
 	case cli.RunTasks != nil:
-		_, err = cli.RunTasks.Run()
+		err = runUnderPanes(func() error {
+			_, err := cli.RunTasks.Run()
+			return err
+		})
 		// like build, validation errors are printed directly while the state
 		// errors that tell the user to build again belong in the log
 		if err != nil && !errors.Is(err, build.ErrRunUncommittedChanges) && !errors.Is(err, build.ErrStaleDataProduct) {
@@ -167,23 +222,33 @@ func main() {
 	exit(0)
 }
 
-// newLogWriter writes logs to stderr and appends the same output to a temp log file.
-func newLogWriter(stderr io.Writer, tmpDir string) (io.Writer, func()) {
+// progressCommand names the subcommand that works under the progress and
+// log panes, "build" or "run", and whether it was asked not to with --no-tui.
+// Every other subcommand logs to stderr.
+func progressCommand(cli args) (command string, noTUI bool) {
+	switch {
+	case cli.Build != nil:
+		return "build", cli.Build.NoTUI
+	case cli.RunTasks != nil:
+		return "run", cli.RunTasks.NoTUI
+	}
+	return "", false
+}
+
+// openLogFile opens the file under tmpDir the invocation's log is appended
+// to, and returns it with its path. When the directory or the file cannot be
+// made, it says so on stderr and returns nil, and the log goes to stderr alone.
+func openLogFile(stderr io.Writer, tmpDir string) (*os.File, string) {
 	logDir := filepath.Join(tmpDir, "sal", "logs")
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		_, _ = fmt.Fprintf(stderr, "failed to create SAL log directory: %v\n", err)
-		return stderr, func() {}
+		return nil, ""
 	}
-	current_time := time.Now().Format(time.DateTime)
-	logFile, err := os.OpenFile(filepath.Join(logDir, fmt.Sprintf("%s_sal.log", current_time)), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	path := filepath.Join(logDir, fmt.Sprintf("%s_sal.log", time.Now().Format(time.DateTime)))
+	logFile, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "failed to open SAL log file: %v\n", err)
-		return stderr, func() {}
+		return nil, ""
 	}
-
-	return io.MultiWriter(stderr, logFile), func() {
-		if err := logFile.Close(); err != nil {
-			_, _ = fmt.Fprintf(stderr, "failed to close SAL log file: %v\n", err)
-		}
-	}
+	return logFile, path
 }

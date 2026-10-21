@@ -46,6 +46,7 @@ type BuildCmd struct {
 	NoCache                         bool              `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources and re-pin them in .sal/config.jsonld"`
 	AllowPrefixesWithoutSlashOrHash bool              `arg:"--allow-prefixes-without-slash-or-hash" help:"include a prefix whose namespace does not end in / or # without asking"`
 	WithoutSalModules               bool              `arg:"--without-sal-modules" help:"commit the SAL module task configuration the project declares without running any module task"`
+	NoTUI                           bool              `arg:"--no-tui" help:"write the log to stderr as it happens instead of opening the progress and log panes"`
 
 	// skip committing the built data to iceberg
 	skipCommit bool

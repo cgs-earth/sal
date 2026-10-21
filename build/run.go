@@ -16,6 +16,7 @@ type RunCmd struct {
 	Paths                           []string `arg:"positional" help:"RDF files declaring the SAL module tasks to run"`
 	Force                           bool     `arg:"--force" help:"run modules even if the git worktree is dirty or the data product was not built from the current commit"`
 	AllowPrefixesWithoutSlashOrHash bool     `arg:"--allow-prefixes-without-slash-or-hash" help:"include a prefix whose namespace does not end in / or # without asking"`
+	NoTUI                           bool     `arg:"--no-tui" help:"write the log to stderr as it happens instead of opening the progress and log panes"`
 }
 
 var ErrRunUncommittedChanges = errors.New("git repository has uncommitted changes; commit them and run `sal build` before `sal run`")

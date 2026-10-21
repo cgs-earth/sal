@@ -163,3 +163,30 @@ func TestEndLeavesASuccessfulSpanUnset(t *testing.T) {
 	require.Equal(t, codes.Unset, ended[0].Status().Code)
 	require.Empty(t, ended[0].Events())
 }
+
+// collectingProcessor remembers the names of the spans it saw end.
+type collectingProcessor struct {
+	ended []string
+}
+
+func (p *collectingProcessor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
+func (p *collectingProcessor) OnEnd(span sdktrace.ReadOnlySpan) {
+	p.ended = append(p.ended, span.Name())
+}
+func (p *collectingProcessor) Shutdown(context.Context) error   { return nil }
+func (p *collectingProcessor) ForceFlush(context.Context) error { return nil }
+
+func TestSetupInstallsAGivenProcessorWithoutAnExporter(t *testing.T) {
+	clearTelemetryEnv(t)
+	var console bytes.Buffer
+	processor := &collectingProcessor{}
+	shutdown, err := setup(context.Background(), &console, processor)
+	require.NoError(t, err)
+
+	_, span := Start(context.Background(), "test.step")
+	End(span, nil)
+	require.NoError(t, shutdown(context.Background()))
+
+	require.Equal(t, []string{"test.step"}, processor.ended)
+	require.Empty(t, console.String())
+}

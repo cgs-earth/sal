@@ -63,20 +63,25 @@ const defaultMetricInterval = 10 * time.Second
 // and metrics to be delivered, so an unreachable collector cannot hang a command.
 const shutdownTimeout = 5 * time.Second
 
+// SpanProcessor sees every span sal records as it starts and ends. It is how
+// the progress pane of `sal build` follows the build without an exporter.
+type SpanProcessor = sdktrace.SpanProcessor
+
 // Setup installs the OpenTelemetry SDK when the environment configures an
-// exporter and returns the function that flushes and stops it, which must run
-// before the process exits or the last spans and metrics are lost. With no
-// exporter configured, the global providers are left as no-ops and the returned
-// function does nothing.
-func Setup(ctx context.Context) (func(context.Context) error, error) {
-	return setup(ctx, os.Stderr)
+// exporter, or when the caller gives it a span processor of its own, and
+// returns the function that flushes and stops it, which must run before the
+// process exits or the last spans and metrics are lost. With no exporter
+// configured and no processor, the global providers are left as no-ops and the
+// returned function does nothing.
+func Setup(ctx context.Context, processors ...SpanProcessor) (func(context.Context) error, error) {
+	return setup(ctx, os.Stderr, processors...)
 }
 
 // setup is Setup with the console exporters' destination injectable for tests.
-func setup(ctx context.Context, console io.Writer) (func(context.Context) error, error) {
+func setup(ctx context.Context, console io.Writer, processors ...SpanProcessor) (func(context.Context) error, error) {
 	tracesExporter := exporterFor("OTEL_TRACES_EXPORTER", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 	metricsExporter := exporterFor("OTEL_METRICS_EXPORTER", "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
-	if tracesExporter == "none" && metricsExporter == "none" {
+	if tracesExporter == "none" && metricsExporter == "none" && len(processors) == 0 {
 		return func(context.Context) error { return nil }, nil
 	}
 
@@ -97,12 +102,21 @@ func setup(ctx context.Context, console io.Writer) (func(context.Context) error,
 	}))
 
 	var shutdowns []func(context.Context) error
+	// a processor of the caller's own, such as the progress pane's, makes the
+	// spans real even when nothing exports them
+	traceOptions := []sdktrace.TracerProviderOption{sdktrace.WithResource(res)}
+	for _, processor := range processors {
+		traceOptions = append(traceOptions, sdktrace.WithSpanProcessor(processor))
+	}
 	if tracesExporter != "none" {
 		exporter, err := newSpanExporter(ctx, tracesExporter, console)
 		if err != nil {
 			return nil, err
 		}
-		provider := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exporter), sdktrace.WithResource(res))
+		traceOptions = append(traceOptions, sdktrace.WithBatcher(exporter))
+	}
+	if tracesExporter != "none" || len(processors) > 0 {
+		provider := sdktrace.NewTracerProvider(traceOptions...)
 		otel.SetTracerProvider(provider)
 		shutdowns = append(shutdowns, provider.Shutdown)
 	}

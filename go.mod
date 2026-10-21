@@ -9,6 +9,8 @@ require (
 	github.com/apache/arrow-go/v18 v18.7.1-0.20260819174724-c21d503da7b9
 	github.com/apache/iceberg-go v0.6.1-0.20260819204557-80630b4df4a4
 	github.com/cgs-earth/json-gold v0.0.0-20260623123334-63cdb5b88cb8
+	github.com/charmbracelet/colorprofile v0.4.3
+	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/containerd/errdefs v1.0.0
 	github.com/duckdb/duckdb-go/v2 v2.10505.0
 	github.com/geoarrow/geoarrow-go v0.0.0-20260728193914-4ce71a7eb2c3
@@ -98,9 +100,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260703014108-f5a850f9c2b7 // indirect
-	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
