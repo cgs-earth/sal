@@ -1,4 +1,4 @@
-@prefix salmodule: <http://localhost:8000/salmodule.ttl#> . # <https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#> .
+@prefix salmodule:  <https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#> .
 @prefix dc: <http://purl.org/dc/elements/1.1/> .
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
