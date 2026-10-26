@@ -27,7 +27,12 @@ var salConfigTemplate string
 type InitCmd struct {
 	SalModule bool `arg:"--salmodule" help:"also scaffold the files a SAL module needs: ontology.jsonld, Dockerfile, and .dockerignore"`
 	Bare      bool `arg:"--bare" help:"with --salmodule, skip the prompts that fill in a sample task and leave the task class blank"`
+	UI        bool `arg:"--ui" help:"with --salmodule, open a form in the browser that checks and writes ontology.jsonld instead of asking at the prompt"`
 }
+
+// ErrUIWithoutSalModule is returned when --ui is passed without --salmodule,
+// since the form only writes a module's ontology.
+var ErrUIWithoutSalModule = errors.New("--ui only applies with --salmodule; it opens the form that writes a SAL module's ontology.jsonld")
 
 // stdin is where the sample task prompts read their answers from; tests
 // replace it.
@@ -46,6 +51,9 @@ type taskDetails struct {
 }
 
 func (cmd *InitCmd) Run() error {
+	if cmd.UI && !cmd.SalModule {
+		return ErrUIWithoutSalModule
+	}
 
 	// if cwd is home return an error
 	cwd, err := os.Getwd()
@@ -151,6 +159,14 @@ func (cmd *InitCmd) Run() error {
 		if err := os.WriteFile(gitignorePath, []byte(ignored), 0644); err != nil {
 			return err
 		}
+	}
+
+	// the form writes ontology.jsonld and the files next to it in place of the
+	// prompts, once the project itself is initialized, so a module whose
+	// ontology is still being filled in is already a SAL project
+	if cmd.SalModule && cmd.UI {
+		slog.Info("SAL project initialized at " + cwd)
+		return serveModuleInitUI(cwd)
 	}
 
 	if cmd.SalModule {

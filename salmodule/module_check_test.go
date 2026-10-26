@@ -51,7 +51,7 @@ func checkOntology(t *testing.T, old, new string) []string {
 	document := strings.Replace(checkTestOntology, old, new, 1)
 	require.NotEqual(t, checkTestOntology, document, "the test's edit changed nothing")
 	var messages []string
-	for _, err := range checkOntologyDocument("ontology.jsonld", []byte(document), checkTestNamespace) {
+	for _, err := range CheckOntologyDocument("ontology.jsonld", []byte(document), checkTestNamespace) {
 		require.IsType(t, ModuleError{}, err)
 		messages = append(messages, err.Error())
 	}
@@ -63,11 +63,11 @@ func TestCheckModuleAcceptsTheExampleModule(t *testing.T) {
 }
 
 func TestCheckOntologyAcceptsTheOntologyOfTheSalCLI(t *testing.T) {
-	require.Empty(t, checkOntologyDocument("sal_ontology.jsonld", []byte(salOntology), "salmodule://github.com/cgs-earth/sal/"))
+	require.Empty(t, CheckOntologyDocument("sal_ontology.jsonld", []byte(salOntology), "salmodule://github.com/cgs-earth/sal/"))
 }
 
 func TestCheckOntologyAcceptsAValidOntology(t *testing.T) {
-	require.Empty(t, checkOntologyDocument("ontology.jsonld", []byte(checkTestOntology), checkTestNamespace))
+	require.Empty(t, CheckOntologyDocument("ontology.jsonld", []byte(checkTestOntology), checkTestNamespace))
 }
 
 func TestIsModuleRootNeedsBothFiles(t *testing.T) {
@@ -178,7 +178,7 @@ func TestCheckOntologyAcceptsAKeyTheContextDefines(t *testing.T) {
 	document := strings.Replace(checkTestOntology, `"schema": "https://schema.org/",`, `"schema": "https://schema.org/", "comment": "rdfs:comment",`, 1)
 	document = strings.Replace(document, `"rdfs:comment": "Fetches every station in a region"`, `"comment": "Fetches every station in a region"`, 1)
 
-	require.Empty(t, checkOntologyDocument("ontology.jsonld", []byte(document), checkTestNamespace))
+	require.Empty(t, CheckOntologyDocument("ontology.jsonld", []byte(document), checkTestNamespace))
 }
 
 // The schema refuses such a key inside a shape as well, on the line of the
@@ -224,7 +224,7 @@ func TestCheckOntologyReportsAnIllFormedShapeTheSchemaCannotSee(t *testing.T) {
 	document = strings.Replace(document, `{"@id": "region", "@type": "owl:DatatypeProperty"`, `{"@id": "NameShape", "@type": "owl:Thing", "sh:minCount": 1},
     {"@id": "region", "@type": "owl:DatatypeProperty"`, 1)
 
-	problems := checkOntologyDocument("ontology.jsonld", []byte(document), checkTestNamespace)
+	problems := CheckOntologyDocument("ontology.jsonld", []byte(document), checkTestNamespace)
 
 	require.Len(t, problems, 1)
 	require.Equal(t, 26, problems[0].(ModuleError).Line)
@@ -245,7 +245,7 @@ func TestCheckOntologyReportsAnUnsupportedConstraintInAReferencedStdoutShape(t *
 	document = strings.Replace(document, `{"@id": "region", "@type": "owl:DatatypeProperty"`, `{"@id": "PlaceShape", "@type": "sh:NodeShape", "sh:property": [{"sh:path": {"@id": "schema:name"}, "sh:uniqueLang": true}]},
     {"@id": "region", "@type": "owl:DatatypeProperty"`, 1)
 
-	problems := checkOntologyDocument("ontology.jsonld", []byte(document), checkTestNamespace)
+	problems := CheckOntologyDocument("ontology.jsonld", []byte(document), checkTestNamespace)
 
 	require.Len(t, problems, 1)
 	require.Equal(t, ModuleError{Path: "ontology.jsonld", Line: 12, Message: "the salmodule:stdoutShape of " + checkTestNamespace + "StationFetcher uses sh:uniqueLang, which SAL does not support"}, problems[0])

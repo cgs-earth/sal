@@ -83,6 +83,24 @@ Pass `--bare` to skip the questions. The task class is then written with every s
 sal init --salmodule --bare
 ```
 
+### `sal init --salmodule --ui`
+
+Pass `--ui` to write `ontology.jsonld` from a form in your browser instead of answering the questions at the prompt. The project itself is initialized first, exactly as above; then `sal` serves the form on a localhost port it prints, opens it in your browser, and keeps running until you press `Ctrl+C`.
+
+```sh
+sal init --salmodule --ui
+```
+
+The form is a page of the same web UI `sal serve --with-ui` serves, in the same light and dark themes, and has a `?` beside each part saying what it is for. It asks for:
+
+- the module: `dc:title` and `dc:creator`, filled in from the git repository name and `user.name`, plus `owl:versionInfo` and an optional `rdfs:comment`;
+- the prefixes: the six every module ontology binds (`salmodule`, `owl`, `rdfs`, `dc`, `sh`, and `xsd`) are always there, and you add the ones your shapes refer to, `schema` for `https://schema.org/` say;
+- the tasks: each one an `owl:Class` subclassing `salmodule:Task`, with its ID, `rdfs:label`, and `rdfs:comment`, and an editor for each of its SHACL shapes, `salmodule:taskShape`, `salmodule:stdoutShape`, and `salmodule:stdinShape`, written as JSON-LD using the prefixes above. The task shape starts as the node shape targeting the task that the prompts write, and each editor has a button that inserts a worked example to edit from; an editor left empty declares no shape.
+
+The pane beside the form shows the `ontology.jsonld` that would be written, and it is checked as you type with the same rules [`sal validate --salmodule`](#sal-validate---salmodule) applies: the [JSON Schema](/sal/reference/salmodule-json-schema/), that every term of the module's own namespace is declared, that every shape is one `sal` can enforce, and that a shape's JSON parses at all. Each problem is listed and marked on the line it is about, and the **Write** button is enabled only once there are none. Writing creates `ontology.jsonld` with exactly the text shown, along with the `Dockerfile`, `.dockerignore`, and editor schema `sal init --salmodule` scaffolds, leaving any that already exist alone.
+
+The form creates an ontology and does not edit one. Once `ontology.jsonld` exists, the page says the module is initialized and offers no form, and that is also what it shows when the flag is passed in a module that already has one; to start over, delete the file and the page unlocks again. Edit a written ontology in your editor, where the schema `sal` registered checks it, and check it with `sal validate --salmodule`.
+
 ## `sal import`
 
 Records an external ontology in the project so that every build carries it.

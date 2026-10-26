@@ -95,7 +95,7 @@ export type GeometryQuery = {
 }
 
 /** Reads the `{"error": "..."}` body the Go handlers send, falling back to the status text. */
-async function failure(response: Response): Promise<Error> {
+export async function failure(response: Response): Promise<Error> {
   const body = await response.text()
   try {
     const parsed = JSON.parse(body) as { error?: string }

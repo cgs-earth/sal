@@ -80,15 +80,17 @@ func CheckModule(dir string, namespace string) []error {
 	if err != nil {
 		return append(problems, ModuleError{Path: path, Message: "a SAL module needs an ontology.jsonld in its root, the document its container prints in response to `" + BaseCommand + " " + OntologyCommand + "`"})
 	}
-	return append(problems, checkOntologyDocument(path, content, namespace)...)
+	return append(problems, CheckOntologyDocument(path, content, namespace)...)
 }
 
-// checkOntologyDocument runs every check CheckModule makes on the ontology
+// CheckOntologyDocument runs every check CheckModule makes on the ontology
 // document itself, reporting against path. The JSON Schema in specs/ is what
 // decides the structure, so the rules an editor applies while the document is
 // written are the ones sal applies here; the checks after it need the RDF the
-// document expands to, which the schema cannot see.
-func checkOntologyDocument(path string, content []byte, namespace string) []error {
+// document expands to, which the schema cannot see. `sal init --salmodule
+// --ui` runs it over the document its form assembles before writing it, so
+// the form refuses exactly what `sal validate --salmodule` would.
+func CheckOntologyDocument(path string, content []byte, namespace string) []error {
 	source, err := scanOntologySource(content)
 	if err != nil {
 		return []error{ModuleError{Path: path, Line: jsonErrorLine(content, err), Message: "invalid JSON: " + err.Error()}}
