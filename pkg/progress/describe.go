@@ -126,6 +126,26 @@ func describe(step *Step) (label string, detail string) {
 		}
 	case "duckdb.open":
 		label = "Open DuckDB"
+	case "docker.ping":
+		label = "Ping the docker daemon"
+	case "docker.image.build":
+		label = "Build the image"
+	case "docker.image.inspect":
+		label = "Look up the image"
+	case "docker.container.create":
+		label = "Create the container"
+	case "docker.container.start":
+		label = "Start the container"
+	case "docker.container.logs":
+		label = "Read the container's output"
+	case "docker.container.wait":
+		label = "Wait for the container to exit"
+	case "docker.container.kill":
+		label = "Kill the container"
+	case "docker.container.remove":
+		label = "Remove the container"
+	case "docker.container.copy":
+		label = "Copy files out of the container"
 	case "duckdb.load_spatial":
 		label = "Load the DuckDB spatial extension"
 	default:

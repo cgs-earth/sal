@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -163,4 +164,25 @@ func TestWalkDirectoryArchiveRefusesALink(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "neither a regular file nor a directory")
+}
+
+func TestDockerSpanNamesSayWhatTheRequestDoesNotWhichContainer(t *testing.T) {
+	name := func(method string, path string) string {
+		req, err := http.NewRequest(method, "http://docker"+path, nil)
+		require.NoError(t, err)
+		return dockerSpanName("", req)
+	}
+	id := "b461b3610992dde441cd81e78bc8b0dcacffcc19b72f92c4fd3fe4900b567629"
+	require.Equal(t, "docker.ping", name(http.MethodHead, "/_ping"))
+	require.Equal(t, "docker.image.build", name(http.MethodPost, "/v1.52/build"))
+	require.Equal(t, "docker.image.inspect", name(http.MethodGet, "/v1.52/images/ghcr.io/cgs-earth/geoconnex:abc123/json"))
+	require.Equal(t, "docker.container.create", name(http.MethodPost, "/v1.52/containers/create"))
+	require.Equal(t, "docker.container.start", name(http.MethodPost, "/v1.52/containers/"+id+"/start"))
+	require.Equal(t, "docker.container.logs", name(http.MethodGet, "/v1.52/containers/"+id+"/logs"))
+	require.Equal(t, "docker.container.wait", name(http.MethodPost, "/v1.52/containers/"+id+"/wait"))
+	require.Equal(t, "docker.container.kill", name(http.MethodPost, "/v1.52/containers/"+id+"/kill"))
+	require.Equal(t, "docker.container.copy", name(http.MethodGet, "/v1.52/containers/"+id+"/archive"))
+	require.Equal(t, "docker.container.remove", name(http.MethodDelete, "/v1.52/containers/"+id))
+	// a request the mapping does not know keeps the client's own name
+	require.Equal(t, "GET /v1.52/containers/json", name(http.MethodGet, "/v1.52/containers/json"))
 }
