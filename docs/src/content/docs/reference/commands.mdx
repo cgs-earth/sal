@@ -30,7 +30,7 @@ Initializes the repository as a [SAL module](/sal/reference/salmodule-descriptio
 - `ontology.jsonld`, a skeleton of the document the module's `salmodule ontology` command prints: a `@context` binding the prefixes it uses and a `@graph` holding an `owl:Ontology` node followed by one `owl:Class` that is a subclass of `salmodule:Task`. The ontology node is `"@id": "."`, its `dc:title` is the git repository name, and its `dc:creator` is the configured git `user.name`; `owl:versionInfo` and every other string start blank for you to fill in.
 - A `Dockerfile` holding only a comment reminding you that the image must stream JSON-LD to standard out per the salmodule specification.
 - A `.dockerignore` holding only a comment saying it excludes files from the module container.
-- `.vscode/salmodule-ontology.schema.json`, the [JSON Schema for a SAL module ontology](/sal/reference/salmodule-json-schema/), and a `json.schemas` entry in `.vscode/settings.json` applying it to `ontology.jsonld`, so that VS Code and any other editor reading that setting flags a missing ontology node, a task class that is not a subclass of a `salmodule:` task class, a `sh:nodeKind` that is not one of SHACL's, or a constraint `sal` refuses in a `salmodule:stdoutShape` while you type. An existing `settings.json` keeps everything it has and gains only the entry; one that `sal` cannot parse as JSON, because it holds comments for instance, is left alone with a warning showing the entry to add by hand.
+- `.vscode/salmodule-ontology.schema.json`, the [JSON Schema for a SAL module ontology](/sal/reference/salmodule-json-schema/), and a `json.schemas` entry in `.vscode/settings.json` applying it to `ontology.jsonld`, so that VS Code and any other editor reading that setting flags a missing ontology node, a task class that is not a subclass of a `salmodule:` task class, a `sh:nodeKind` that is not one of SHACL's, or a constraint `sal` refuses in a `salmodule:stdoutShape` while you type. An existing `settings.json` keeps everything it has and gains only the entry; one that `sal` cannot parse as JSON, because it holds comments for instance, is left alone with a warning showing the entry to add by hand. [`sal validate`](#sal-validate---salmodule) checks `ontology.jsonld` against the same schema, so what the editor flags and what `sal` refuses are one set of rules.
 
 A file that already exists is left unchanged, so the flag is safe to re-run. The schema copy is the one exception, since it is `sal`'s rather than the module's: a newer `sal` rewrites it.
 
@@ -200,6 +200,7 @@ Important flags:
 - `--format`: choose `iceberg` or `nq`; defaults to `iceberg`.
 - `--no-cache`: resolve every vocabulary from its source instead of from the versions pinned in `.sal/config.jsonld`.
 - `--allow-prefixes-without-slash-or-hash`: include a prefix whose namespace does not end in `/` or `#` without asking.
+- `--salmodule`: also check the project as a [SAL module](/sal/reference/salmodule-description/); implied when `ontology.jsonld` and a `Dockerfile` are both in the project root. See [`sal validate --salmodule`](#sal-validate---salmodule).
 
 `sal validate` reads the project's pinned vocabulary versions but never writes them; only `sal build` records a pin.
 Run outside a SAL project, it resolves vocabularies from their sources with nothing pinned at all.
@@ -224,6 +225,27 @@ schema.org is also resolved differently from other vocabularies: its namespace a
 
 Validating a file that references a SAL module clones and builds that module so its vocabulary can be checked.
 `sal validate` does not run module tasks; only `sal build` does.
+
+### `sal validate --salmodule`
+
+A [SAL module](/sal/reference/salmodule-description/) repository is a SAL project too, and `sal validate` checks it as one: `ontology.jsonld` is RDF like any other source file, so an undefined `sh:` or `owl:` term in it is reported the same way as in any other file.
+With `--salmodule`, or whenever the project root holds both an `ontology.jsonld` and a `Dockerfile`, it also checks the module itself, without building the image or running anything:
+
+- Both files exist. With `--salmodule` a missing one is an error; without the flag the module checks only run when both are there.
+- `ontology.jsonld` has the structure the specification requires, checked against the same [JSON Schema](/sal/reference/salmodule-json-schema/) that `sal init --salmodule` installs for the editor: a `@context` binding `salmodule` and `owl`, exactly one `owl:Ontology` node named `"@id": "."`, at least one `owl:Class` that is an `rdfs:subClassOf` of `salmodule:Task`, IRI references written as `{"@id": ...}`, SHACL constraint values of the right kind, and no constraint `sal` refuses in a `salmodule:stdoutShape`.
+- Every term of the module's own namespace that the document uses is declared: a relative `@id` that a shape, an `rdfs:domain`, an `rdfs:range`, or a `@type` refers to has a node in `@graph` with that `@id` and an `@type`.
+  A key that is neither prefixed nor defined in `@context` is reported too, since a JSON-LD processor drops such a key without a word.
+- Every SHACL shape is a well-formed shape for the implementation that enforces `salmodule:stdoutShape` when a task runs, and no `stdoutShape`, including one it refers to by `@id`, uses a constraint `sal` refuses.
+
+Each problem is reported with the file and the line it is on, the way an undefined term is:
+
+```
+ontology.jsonld:13: rdfs:subClassOf is an IRI reference, written {"@id": "salmodule:Task"}; a bare string is a literal that sal ignores
+ontology.jsonld:18: undefined term regionn: no node in @graph declares "@id": "regionn" with an @type
+```
+
+The module's relative terms resolve against the `salmodule://` namespace derived from the repository's git remote, `salmodule://github.com/OWNER/REPO/` for a repository on GitHub; a repository with no remote is checked under a placeholder namespace, which changes nothing about what is reported.
+Run with a single directory argument, `sal validate path/to/module`, the directory named is the one checked.
 
 ## `sal build`
 
