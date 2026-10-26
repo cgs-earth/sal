@@ -67,3 +67,23 @@ func TestIsInferredTaskClassExcludesTask(t *testing.T) {
 	require.True(t, IsInferredTaskClass(Namespace+"NodeProcessor"))
 	require.False(t, IsInferredTaskClass(Namespace+"Task"))
 }
+
+func TestModuleNamespaceForRemoteNamesTheRepositoryTheProjectWouldReference(t *testing.T) {
+	namespace, err := ModuleNamespaceForRemote("https://github.com/cgs-earth/sample-salmodule.git")
+
+	require.NoError(t, err)
+	require.Equal(t, "salmodule://github.com/cgs-earth/sample-salmodule/", namespace)
+}
+
+func TestModuleNamespaceForRemoteKeepsTheHost(t *testing.T) {
+	namespace, err := ModuleNamespaceForRemote("https://gitlab.example.org/group/module")
+
+	require.NoError(t, err)
+	require.Equal(t, "salmodule://gitlab.example.org/group/module/", namespace)
+}
+
+func TestModuleNamespaceForRemoteRejectsARemoteWithoutOwnerAndRepository(t *testing.T) {
+	_, err := ModuleNamespaceForRemote("https://github.com/module")
+
+	require.Error(t, err)
+}
