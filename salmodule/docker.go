@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // ContainerRunner builds and runs the container images that back SAL modules.
@@ -63,11 +65,44 @@ type dockerRunner struct {
 
 // newDockerRunner connects to the docker daemon described by the environment.
 func newDockerRunner() (*dockerRunner, error) {
-	cli, err := client.New(client.FromEnv)
+	cli, err := client.New(client.FromEnv, client.WithTraceOptions(otelhttp.WithSpanNameFormatter(dockerSpanName)))
 	if err != nil {
 		return nil, fmt.Errorf("connect to the docker daemon: %w", err)
 	}
 	return &dockerRunner{client: cli}, nil
+}
+
+// dockerSpanName names the span the docker client records around a daemon
+// request after what the request does, "docker.container.start", rather than
+// after its method and path as the client does by default, which spell out
+// the API version and the container id and so say nothing a reader of a trace
+// or of the progress pane wants. A request the mapping does not know keeps the
+// client's own name.
+func dockerSpanName(_ string, req *http.Request) string {
+	segments := strings.Split(strings.Trim(req.URL.Path, "/"), "/")
+	if len(segments) > 0 && strings.HasPrefix(segments[0], "v") && strings.Contains(segments[0], ".") {
+		segments = segments[1:]
+	}
+	switch {
+	case len(segments) == 1 && segments[0] == "_ping":
+		return "docker.ping"
+	case len(segments) == 1 && segments[0] == "build":
+		return "docker.image.build"
+	case len(segments) >= 3 && segments[0] == "images" && segments[len(segments)-1] == "json":
+		return "docker.image.inspect"
+	case len(segments) == 2 && segments[0] == "containers" && segments[1] == "create":
+		return "docker.container.create"
+	case len(segments) == 2 && segments[0] == "containers" && req.Method == http.MethodDelete:
+		return "docker.container.remove"
+	case len(segments) == 3 && segments[0] == "containers":
+		switch segments[2] {
+		case "start", "logs", "wait", "kill":
+			return "docker.container." + segments[2]
+		case "archive":
+			return "docker.container.copy"
+		}
+	}
+	return req.Method + " " + req.URL.Path
 }
 
 // BuildImage builds the Dockerfile in the root of contextDir and tags the result.

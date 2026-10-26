@@ -20,16 +20,31 @@ import (
 //go:embed all:sal-ui/dist
 var uiAssets embed.FS
 
-// uiHandler serves the embedded UI, falling back to index.html so that any path
-// the server does not own is handled by the app itself.
-func uiHandler() (http.Handler, error) {
+// ModuleInitUIPage is the page of the embedded app that `sal init --salmodule
+// --ui` serves: the form that writes a module's ontology.jsonld. It is a second
+// entry of the Vite build next to index.html, so it shares the app's theme,
+// components, and chunks.
+const ModuleInitUIPage = "salmodule-init.html"
+
+// ModuleInitUI serves the embedded app with the module init form as its page.
+// It is here rather than in the initialization package because the compiled
+// app is embedded from this package's directory, the only place an embed
+// directive can reach it from.
+func ModuleInitUI() (http.Handler, error) {
+	return uiHandler(ModuleInitUIPage)
+}
+
+// uiHandler serves the embedded UI with the given page as its index, falling
+// back to that page for any path the server does not own so that the app
+// handles it itself.
+func uiHandler(page string) (http.Handler, error) {
 	dist, err := fs.Sub(uiAssets, "sal-ui/dist")
 	if err != nil {
 		return nil, fmt.Errorf("read embedded UI assets: %w", err)
 	}
-	index, err := fs.ReadFile(dist, "index.html")
+	index, err := fs.ReadFile(dist, page)
 	if err != nil {
-		return nil, fmt.Errorf("embedded UI is missing index.html; run `make ui` to build it: %w", err)
+		return nil, fmt.Errorf("embedded UI is missing %s; run `make ui` to build it: %w", page, err)
 	}
 	files := http.FileServer(http.FS(dist))
 	compressed, err := compressUIAssets(dist)

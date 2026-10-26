@@ -1,8 +1,8 @@
 # sal-ui
 
-The web UI that `sal serve --with-ui` serves at `/`. It is a React + TypeScript app built
-with Vite and styled in the Center for Geospatial Solutions brand palette, in a light and a
-dark theme. The toggle in the header switches between them; the choice is kept in
+The web UI that `sal serve --with-ui` serves at `/`, and the module init form that
+`sal init --salmodule --ui` serves. It is a React + TypeScript app built with Vite and styled
+in the Center for Geospatial Solutions brand palette, in a light and a dark theme. The toggle in the header switches between them; the choice is kept in
 `localStorage` under `sal-ui.theme`, and an inline script in `index.html` applies it before
 the first paint so a remembered theme never flashes. With nothing remembered the system
 preference decides.
@@ -20,6 +20,14 @@ make ui   # from the repository root: npm ci && npm run build
 `.github/workflows/ui_build.yml` rebuilds the app in CI and fails if the committed `dist/`
 does not match the sources, so a stale UI cannot ship silently.
 
+## Two pages, one build
+
+`index.html` is the app `sal serve --with-ui` serves, and `salmodule-init.html` is the form
+`sal init --salmodule --ui` serves. Both are entries of the one Vite build (`vite.config.ts`),
+so they share the theme, the components, and the chunks, and `serve/ui.go` picks which page a
+server falls back to. The form's sources are under `src/init/`; it talks to the three
+`/api/init/*` endpoints the `initialization` package answers.
+
 ## Development
 
 Run the Go server in one terminal and Vite in another. Vite proxies `/api`, `/sparql`, and
@@ -28,6 +36,13 @@ Run the Go server in one terminal and Vite in another. Vite proxies `/api`, `/sp
 ```sh
 sal serve --with-ui   # terminal 1
 make ui_dev           # terminal 2, then open the URL Vite prints
+```
+
+For the module init form, run `sal init --salmodule --ui` in a module repository instead,
+point the proxy at the address it prints, and open `/salmodule-init.html` on Vite's port:
+
+```sh
+SAL_UI_API=http://127.0.0.1:PORT npm run dev
 ```
 
 ## Layout
@@ -41,6 +56,7 @@ make ui_dev           # terminal 2, then open the URL Vite prints
 | `src/App.css`           | App layout, panels, and result tables                        |
 | `src/yasgui-theme.css`  | Repaints YASGUI's fixed light theme in the page's tokens     |
 | `src/tabs/`             | One file per tab: Stats, SQL, SPARQL, Map                   |
+| `src/init/`             | The module init form: its entry, API, document assembly, and editors |
 
 The SPARQL tab is `lazy()`-loaded because YASGUI and its bundled CodeMirror 5 account for
 most of the build; keeping it out of the initial chunk halves what the app parses on load.

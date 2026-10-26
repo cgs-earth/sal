@@ -67,6 +67,8 @@ Under it:
 
 `sal construct` produces one trace, named `sal.construct`, with a `construct.query` and a `sparql.construct` span per query under it.
 
+Every request sal makes to the docker daemon while resolving or running a module is a span of its own under the step that made it, named after what the request does rather than after its path: `docker.image.build`, `docker.image.inspect`, `docker.container.create`, `docker.container.start`, `docker.container.logs`, `docker.container.wait`, `docker.container.kill`, `docker.container.remove`, `docker.container.copy`, and `docker.ping`. The HTTP attributes the docker client records, such as `url.full`, still name the container.
+
 A span whose step failed carries the error as its status and as an `exception` event, so a failed build shows where it stopped.
 
 `sal serve` produces one trace per request, named by the method and path, such as `POST /sparql` or `GET /v7847372623449923428/sparql`, and honours the [W3C trace context](https://www.w3.org/TR/trace-context/) headers a client sends, so a request made from an instrumented application joins that application's trace.

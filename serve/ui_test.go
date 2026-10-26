@@ -41,7 +41,7 @@ func largestUIAsset(t *testing.T) (string, []byte) {
 
 func newUIOnlyServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	handler, err := uiHandler()
+	handler, err := uiHandler("index.html")
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
