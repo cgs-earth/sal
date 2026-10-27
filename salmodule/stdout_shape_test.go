@@ -17,7 +17,7 @@ const testShapedOntology = `{
 		"owl": "http://www.w3.org/2002/07/owl#",
 		"rdfs": "http://www.w3.org/2000/01/rdf-schema#",
 		"sh": "http://www.w3.org/ns/shacl#",
-		"salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
+		"salmodule": "https://w3id.org/sal/salmodule#"
 	},
 	"@graph": [
 		{"@id": ".", "@type": "owl:Ontology"},
@@ -153,7 +153,7 @@ func TestStdoutValidatorRefusesUnsupportedConstraints(t *testing.T) {
 			"owl": "http://www.w3.org/2002/07/owl#",
 			"rdfs": "http://www.w3.org/2000/01/rdf-schema#",
 			"sh": "http://www.w3.org/ns/shacl#",
-			"salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
+			"salmodule": "https://w3id.org/sal/salmodule#"
 		},
 		"@graph": [
 			{
@@ -186,7 +186,7 @@ func TestStdoutValidatorDoesNotFailOnWarnings(t *testing.T) {
 			"owl": "http://www.w3.org/2002/07/owl#",
 			"rdfs": "http://www.w3.org/2000/01/rdf-schema#",
 			"sh": "http://www.w3.org/ns/shacl#",
-			"salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
+			"salmodule": "https://w3id.org/sal/salmodule#"
 		},
 		"@graph": [
 			{
