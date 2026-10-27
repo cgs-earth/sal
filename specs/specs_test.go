@@ -39,7 +39,7 @@ const validOntology = `{
     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
     "sh": "http://www.w3.org/ns/shacl#",
     "xsd": "http://www.w3.org/2001/XMLSchema#",
-    "salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
+    "salmodule": "https://w3id.org/sal/salmodule#"
   },
   "@graph": [
     {"@id": ".", "@type": "owl:Ontology", "rdfs:label": "Weather stations", "salmodule:taskInstanceEnvVar": "STATION_TASK"},
@@ -80,7 +80,7 @@ func TestSchemaAcceptsTheOntologyOfTheSalCLI(t *testing.T) {
 }
 
 func TestSchemaRequiresTheSalModulePrefix(t *testing.T) {
-	ontology := strings.Replace(validOntology, `"salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"`, `"sal": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"`, 1)
+	ontology := strings.Replace(validOntology, `"salmodule": "https://w3id.org/sal/salmodule#"`, `"sal": "https://w3id.org/sal/salmodule#"`, 1)
 
 	err := validate(t, ontology)
 

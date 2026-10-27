@@ -24,7 +24,7 @@ const validModuleOntology = `{
     "dc": "http://purl.org/dc/elements/1.1/",
     "owl": "http://www.w3.org/2002/07/owl#",
     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
-    "salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#",
+    "salmodule": "https://w3id.org/sal/salmodule#",
     "sh": "http://www.w3.org/ns/shacl#",
     "xsd": "http://www.w3.org/2001/XMLSchema#"
   },

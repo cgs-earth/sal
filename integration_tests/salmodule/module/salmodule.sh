@@ -13,7 +13,7 @@ ontology() {
         "schema": "https://schema.org/",
         "xsd": "http://www.w3.org/2001/XMLSchema#",
         "sh": "http://www.w3.org/ns/shacl#",
-        "salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
+        "salmodule": "https://w3id.org/sal/salmodule#"
     },
     "@graph": [
         {
