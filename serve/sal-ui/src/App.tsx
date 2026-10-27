@@ -6,6 +6,7 @@ import { ModulesTab } from './tabs/ModulesTab'
 import { BlobsTab } from './tabs/BlobsTab'
 import { TablePath } from './components/TablePath'
 import { ThemeToggle } from './components/ThemeToggle'
+import { LoadingState } from './components/LoadingState'
 import { TABS, useRoute } from './routing'
 import './App.css'
 
@@ -109,7 +110,7 @@ export function App() {
         )}
         {/* YASGUI restores its own query state from localStorage, so remounting is safe. */}
         {active === 'SPARQL' && (
-          <Suspense fallback={<p className="empty">Loading the SPARQL editor…</p>}>
+          <Suspense fallback={<LoadingState message="Loading the SPARQL editor…" delay={200} />}>
             <SparqlTab sharedQuery={sharedQuery} snapshots={stats?.snapshots ?? null} />
           </Suspense>
         )}
@@ -118,7 +119,7 @@ export function App() {
             tab on the new digest rather than leaving the old one in the form. */}
         {active === 'Blobs' && <BlobsTab key={`${blobHash ?? ''}|${renderBlob}`} hash={blobHash} render={renderBlob} />}
         {active === 'Map' && (
-          <Suspense fallback={<p className="empty">Loading the map…</p>}>
+          <Suspense fallback={<LoadingState message="Loading the map…" delay={200} />}>
             <MapTab />
           </Suspense>
         )}
