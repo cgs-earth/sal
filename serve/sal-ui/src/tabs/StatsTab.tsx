@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { STAC_COLLECTION_PATH, hasStacCatalog, stacViewerURL, type TableStats } from '../api'
 import { ResultTable } from '../components/ResultTable'
+import { LoadingState } from '../components/LoadingState'
 
 type StatsTabProps = {
   stats: TableStats | null
@@ -34,7 +35,7 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
   return (
     <div className="tab-body stats">
       {error && <p className="error-banner">{error}</p>}
-      {!stats && loading && <p className="empty">Reading Iceberg metadata…</p>}
+      {!stats && loading && <LoadingState message="Reading Iceberg metadata…" />}
 
       {stats && (
         <>
