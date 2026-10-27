@@ -1,6 +1,6 @@
 import { failure } from '../api'
 
-/** What `sal init --salmodule --ui` knows about the module it is initializing. */
+/** What `sal init --salmodule` knows about the module it is initializing. */
 export type InitStatus = {
   /** Whether ontology.jsonld already exists in the module root, which locks the form. */
   initialized: boolean
@@ -8,9 +8,9 @@ export type InitStatus = {
   ontologyPath: string
   /** The module's own salmodule:// namespace, derived from the git remote. */
   namespace: string
-  /** The git repository name, offered as the ontology's dc:title. */
+  /** The git repository name, offered as the ontology's dcterms:title. */
   title: string
-  /** The git user.name, offered as the ontology's dc:creator; empty when git has none. */
+  /** The git user.name, offered as the ontology's dcterms:creator; empty when git has none. */
   creator: string
 }
 

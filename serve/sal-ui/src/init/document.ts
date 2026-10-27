@@ -9,11 +9,11 @@
 /**
  * The prefixes every module ontology binds, the ones `sal init --salmodule`
  * writes without the form: the SAL module vocabulary itself, OWL and RDFS for
- * the ontology and class nodes, Dublin Core for the title and creator, SHACL
+ * the ontology and class nodes, Dublin Core Terms for the title and creator, SHACL
  * for the shapes, and XSD for the datatypes they constrain.
  */
 export const BASE_PREFIXES: Record<string, string> = {
-  dc: 'http://purl.org/dc/elements/1.1/',
+  dcterms: 'http://purl.org/dc/terms/',
   owl: 'http://www.w3.org/2002/07/owl#',
   rdfs: 'http://www.w3.org/2000/01/rdf-schema#',
   salmodule: 'https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#',
@@ -177,8 +177,8 @@ export function assemble(draft: ModuleDraft): Assembled {
   const ontology: Record<string, unknown> = {
     '@id': '.',
     '@type': 'owl:Ontology',
-    'dc:creator': draft.creator.trim(),
-    'dc:title': draft.title.trim(),
+    'dcterms:creator': draft.creator.trim(),
+    'dcterms:title': draft.title.trim(),
     'owl:versionInfo': draft.version.trim(),
   }
   if (draft.comment.trim()) ontology['rdfs:comment'] = draft.comment.trim()

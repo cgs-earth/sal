@@ -13,9 +13,27 @@ For a step-by-step flow, start with [Getting Started](/sal/guides/getting-starte
 Initializes a SAL project in the current Git repository.
 The repository must not be your home directory and must already have a Git remote.
 
+`sal init` asks one question, a sentence or two describing the project, and records the answer in `.sal/config.jsonld` on the project's own node, which [`sal serve --with-ui`](#sal-serve) shows under the data product's name. The description is required; pass `--description` to give it without being asked. A directory that already has a `.sal/config.jsonld` is already a SAL project, and `sal init` fails rather than write over what it records.
+
+```
+Description of the project: A demo project for sal; a small dataset of stream gauges and the agency that runs them
+```
+
+```json
+{
+  "@id": ".",
+  "@type": "schema:Project",
+  "dcterms:title": "sal-demo",
+  "dcterms:description": "A demo project for sal; a small dataset of stream gauges and the agency that runs them"
+}
+```
+
+The node is the project itself, resolved against the base IRI the git remote gives, and `dcterms:title` is the last segment of that remote, the repository name; [`sal import`](#sal-import) types the same node `owl:Ontology` and records the imports on it, and `sal build` validates and commits its statements like any other source, so the description is a triple of the data product too.
+
 `sal init` creates:
 
 - `.sal/data` in the project for generated data.
+- `.sal/config.jsonld` holding the project node above; `sal import` and `sal build` add to the same file. See [the project config file](/sal/reference/data-layout/#the-project-config-file).
 - `sparql/` in the project root for the project's SPARQL queries, which is where [`sal build`](#constructed-triples) and [`sal construct`](#sal-construct) look for `CONSTRUCT` queries. An existing directory is left as it is.
 - `~/.sal/cache` for user-level cache data.
 - `~/.sal/config.jsonld` for user-level SAL configuration.
@@ -25,16 +43,16 @@ The repository must not be your home directory and must already have a Git remot
 
 ### `sal init --salmodule`
 
-Initializes the repository as a [SAL module](/sal/reference/salmodule-description/) rather than a SAL project: a module is a container that produces data for projects, so none of the project layout (`.sal/data`, `sparql/`, the `.gitignore` entries) is created. It checks the git remote the way `sal init` does, since the remote names the module, and scaffolds the files a module needs in the repository root:
+Initializes the repository as a [SAL module](/sal/reference/salmodule-description/) rather than a SAL project: a module is a container that produces data for projects, so none of the project layout (`.sal/data`, `.sal/config.jsonld`, `sparql/`, the `.gitignore` entries) is created and no description is asked for. It checks the git remote the way `sal init` does, since the remote names the module, and then opens [a form in your browser](#sal-init---salmodule-in-the-browser) that writes `ontology.jsonld`. Where no browser is likely to open, in CI, over SSH, without a terminal, or on Linux without a display, it says so and asks its questions at the prompt instead; `--no-ui` asks at the prompt anyway and `--ui` opens the form anyway. Either way it scaffolds the files a module needs in the repository root:
 
-- `ontology.jsonld`, a skeleton of the document the module's `salmodule ontology` command prints: a `@context` binding the prefixes it uses and a `@graph` holding an `owl:Ontology` node followed by one `owl:Class` that is a subclass of `salmodule:Task`. The ontology node is `"@id": "."`, its `dc:title` is the git repository name, and its `dc:creator` is the configured git `user.name`; `owl:versionInfo` and every other string start blank for you to fill in.
+- `ontology.jsonld`, a skeleton of the document the module's `salmodule ontology` command prints: a `@context` binding the prefixes it uses and a `@graph` holding an `owl:Ontology` node followed by one `owl:Class` that is a subclass of `salmodule:Task`. The ontology node is `"@id": "."`, its `dcterms:title` is the git repository name, and its `dcterms:creator` is the configured git `user.name`; `owl:versionInfo` and every other string start blank for you to fill in.
 - A `Dockerfile` holding only a comment reminding you that the image must stream JSON-LD to standard out per the salmodule specification.
 - A `.dockerignore` holding only a comment saying it excludes files from the module container.
 - `.vscode/salmodule-ontology.schema.json`, the [JSON Schema for a SAL module ontology](/sal/reference/salmodule-json-schema/), and a `json.schemas` entry in `.vscode/settings.json` applying it to `ontology.jsonld`, so that VS Code and any other editor reading that setting flags a missing ontology node, a task class that is not a subclass of a `salmodule:` task class, a `sh:nodeKind` that is not one of SHACL's, or a constraint `sal` refuses in a `salmodule:stdoutShape` while you type. An existing `settings.json` keeps everything it has and gains only the entry; one that `sal` cannot parse as JSON, because it holds comments for instance, is left alone with a warning showing the entry to add by hand. [`sal validate`](#sal-validate---salmodule) checks `ontology.jsonld` against the same schema, so what the editor flags and what `sal` refuses are one set of rules.
 
 A file that already exists is left unchanged, so the flag is safe to re-run. The schema copy is the one exception, since it is `sal`'s rather than the module's: a newer `sal` rewrites it.
 
-So that the ontology starts with a worked example rather than blank fields, `sal init --salmodule` asks three questions about one task the module will offer: a unique ID with no spaces or special characters (it becomes the class's `@id` and the `@type` a project instance uses), a human readable name (`rdfs:label`), and a comment about what the task does (`rdfs:comment`). An ID with a space or punctuation is asked for again. The task class's `salmodule:taskShape` then becomes a `sh:NodeShape` targeting that class with an empty `sh:property` list, ready for the constraints on the task's configuration properties:
+So that the ontology starts with a worked example rather than blank fields, the prompt asks three questions about one task the module will offer: a unique ID with no spaces or special characters (it becomes the class's `@id` and the `@type` a project instance uses), a human readable name (`rdfs:label`), and a comment about what the task does (`rdfs:comment`). An ID with a space or punctuation is asked for again. The task class's `salmodule:taskShape` then becomes a `sh:NodeShape` targeting that class with an empty `sh:property` list, ready for the constraints on the task's configuration properties:
 
 ```
 Unique ID for the task, with no spaces or special characters (e.g. FetchStations): FetchStations
@@ -45,7 +63,7 @@ Comment describing what the task does: Fetches every station in a region and emi
 ```json
 {
   "@context": {
-    "dc": "http://purl.org/dc/elements/1.1/",
+    "dcterms": "http://purl.org/dc/terms/",
     "owl": "http://www.w3.org/2002/07/owl#",
     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
     "salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#",
@@ -55,8 +73,8 @@ Comment describing what the task does: Fetches every station in a region and emi
     {
       "@id": ".",
       "@type": "owl:Ontology",
-      "dc:creator": "Ada Lovelace",
-      "dc:title": "my-module",
+      "dcterms:creator": "Ada Lovelace",
+      "dcterms:title": "my-module",
       "owl:versionInfo": "",
       "rdfs:label": "",
       "rdfs:comment": ""
@@ -77,29 +95,31 @@ Comment describing what the task does: Fetches every station in a region and emi
 }
 ```
 
-Pass `--bare` to skip the questions. The task class is then written with every string blank and `"salmodule:taskShape": {}`, which is also what you get when standard input is not a terminal. The schema flags each of those blanks in the editor until it is filled in.
+Pass `--bare` to open no form and ask no questions. The task class is then written with every string blank and `"salmodule:taskShape": {}`, which is also what you get at the prompt when standard input is not a terminal. The schema flags each of those blanks in the editor until it is filled in.
 
 ```sh
 sal init --salmodule --bare
 ```
 
-### `sal init --salmodule --ui`
+### `sal init --salmodule` in the browser
 
-Pass `--ui` to write `ontology.jsonld` from a form in your browser instead of answering the questions at the prompt. `sal` serves the form on a localhost port it prints, opens it in your browser, and keeps running until you press `Ctrl+C`.
+By default `sal init --salmodule` writes `ontology.jsonld` from a form in your browser rather than from the questions at the prompt. `sal` serves the form on a localhost port it prints, opens it in your browser, and keeps running until you press `Ctrl+C`. It falls back to the prompt where no browser is likely to open (`CI` set, an SSH session, standard output that is not a terminal, or no `DISPLAY` on Linux), saying why; pass `--ui` to open the form regardless, say over SSH with a forwarded port, or `--no-ui` to answer at the prompt on a machine with a browser.
 
 ```sh
-sal init --salmodule --ui
+sal init --salmodule          # the form, or the prompt where no browser would open
+sal init --salmodule --no-ui  # the prompt
+sal init --salmodule --ui     # the form, wherever it runs
 ```
 
 The form is a page of the same web UI `sal serve --with-ui` serves, in the same light and dark themes, and has a `?` beside each part saying what it is for. It asks for:
 
-- the module: `dc:title` and `dc:creator`, filled in from the git repository name and `user.name`, plus `owl:versionInfo` and an optional `rdfs:comment`;
-- the prefixes: the six every module ontology binds (`salmodule`, `owl`, `rdfs`, `dc`, `sh`, and `xsd`) are always there, and you add the ones your shapes refer to, `schema` for `https://schema.org/` say;
+- the module: `dcterms:title` and `dcterms:creator`, filled in from the git repository name and `user.name`, plus `owl:versionInfo` and an optional `rdfs:comment`;
+- the prefixes: the six every module ontology binds (`salmodule`, `owl`, `rdfs`, `dcterms`, `sh`, and `xsd`) are always there, and you add the ones your shapes refer to, `schema` for `https://schema.org/` say;
 - the tasks: each one an `owl:Class` subclassing `salmodule:Task`, with its ID, `rdfs:label`, and `rdfs:comment`, and an editor for each of its SHACL shapes, `salmodule:taskShape`, `salmodule:stdoutShape`, and `salmodule:stdinShape`, written as JSON-LD using the prefixes above. The task shape starts as the node shape targeting the task that the prompts write, and each editor has a button that inserts a worked example to edit from; an editor left empty declares no shape.
 
 The pane beside the form shows the `ontology.jsonld` that would be written, and it is checked as you type with the same rules [`sal validate --salmodule`](#sal-validate---salmodule) applies: the [JSON Schema](/sal/reference/salmodule-json-schema/), that every term of the module's own namespace is declared, that every shape is one `sal` can enforce, and that a shape's JSON parses at all. Each problem is listed and marked on the line it is about, and the **Write** button is enabled only once there are none. Writing creates `ontology.jsonld` with exactly the text shown, along with the `Dockerfile`, `.dockerignore`, and editor schema `sal init --salmodule` scaffolds, leaving any that already exist alone.
 
-The form creates an ontology and does not edit one. Once `ontology.jsonld` exists, the page says the module is initialized and offers no form, and that is also what it shows when the flag is passed in a module that already has one; to start over, delete the file and the page unlocks again. Edit a written ontology in your editor, where the schema `sal` registered checks it, and check it with `sal validate --salmodule`.
+The form creates an ontology and does not edit one. Once `ontology.jsonld` exists, the page says the module is initialized and offers no form, and that is also what it shows when the command is run in a module that already has one; to start over, delete the file and the page unlocks again. Edit a written ontology in your editor, where the schema `sal` registered checks it, and check it with `sal validate --salmodule`.
 
 ## `sal import`
 
@@ -114,15 +134,17 @@ The import is written to the ontology node of `.sal/config.jsonld`, which `sal i
 ```json
 {
   "@context": {
-    "dc": "http://purl.org/dc/elements/1.1/",
+    "dcterms": "http://purl.org/dc/terms/",
     "owl": "http://www.w3.org/2002/07/owl#",
-    "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "schema": "https://schema.org/"
   },
   "@graph": [
     {
       "@id": ".",
-      "@type": "owl:Ontology",
-      "dc:title": "my-project",
+      "@type": ["schema:Project", "owl:Ontology"],
+      "dcterms:title": "my-project",
+      "dcterms:description": "A demo project for sal; a small dataset of stream gauges and the agency that runs them",
       "owl:imports": [{ "@id": "https://www.w3.org/ns/sosa/" }],
       "rdfs:comment": "Represents the ontology for the my-project project overall and all the vocabularies that are directly materialized into the graph, not just referenced."
     }
@@ -131,7 +153,7 @@ The import is written to the ontology node of `.sal/config.jsonld`, which `sal i
 ```
 
 `"@id": "."` is the project itself, which is the same base `sal build` resolves the project's own relative terms against.
-`dc:title` defaults to the Git project name; pass `--title` to set it, on the first import or on any later one.
+`dcterms:title` is the Git project name `sal init` recorded; pass `--title` to replace it, on the first import or on any later one.
 `rdfs:comment` is always generated.
 
 Several ontologies can be imported at once, and importing one that is already listed leaves the file unchanged:
@@ -160,8 +182,8 @@ The module is recorded like any other import:
 ```json
 {
   "@id": ".",
-  "@type": "owl:Ontology",
-  "dc:title": "my-project",
+  "@type": ["schema:Project", "owl:Ontology"],
+  "dcterms:title": "my-project",
   "owl:imports": [{ "@id": "salmodule://github.com/adplincinst/sample-salmodule-1" }]
 }
 ```

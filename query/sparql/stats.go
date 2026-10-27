@@ -18,9 +18,10 @@ import (
 type TableStats struct {
 	TablePath string `json:"tablePath"`
 	// Title and Description name the data product for the UI's landing page,
-	// from the dc:title and rdfs:comment of the project ontology node in
-	// .sal/config.jsonld. Both are empty for a remote table, which has no
-	// project on disk, and for a project that has never run `sal import`.
+	// from the dcterms:title and dcterms:description `sal init` records on
+	// the project node of .sal/config.jsonld. Both are empty for a
+	// remote table, which has no project on disk, and for a project that
+	// recorded neither.
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Triples     int64  `json:"triples"`
@@ -85,7 +86,7 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 		stats.Vocabularies = vocabulariesResult()
 		if ontology := projectOntology(); ontology != nil {
 			stats.Title = ontology.Title
-			stats.Description = ontology.Comment
+			stats.Description = ontology.Description
 		}
 	} else {
 		stats.Vocabularies = Result{Header: importation.VocabularyTableHeader}
@@ -100,9 +101,9 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 	return stats, nil
 }
 
-// projectOntology reads the project's ontology node out of .sal/config.jsonld:
-// its title and comment name the data product, and its owl:imports IRIs are
-// the imported artifacts. They come from disk rather than from the table
+// projectOntology reads the project's own node out of .sal/config.jsonld:
+// its title and description name the data product, and its owl:imports IRIs
+// are the imported artifacts. They come from disk rather than from the table
 // because the table carries the imported statements, not the documents they
 // were fetched from. A directory that is not a SAL project, or a project that
 // has never imported anything, simply has none rather than failing the whole

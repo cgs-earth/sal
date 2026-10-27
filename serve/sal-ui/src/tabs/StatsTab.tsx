@@ -91,6 +91,9 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
                     </button>
                   </div>
                 </div>
+                {/* What the project says it is, from sal init; a project that
+                    gave no description has no line here rather than a blank one. */}
+                {stats.description && <p className="dataset-description">{stats.description}</p>}
               </div>
 
               <dl className="dataset-figures">

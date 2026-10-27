@@ -730,6 +730,17 @@ kbd {
   margin-right: 10px;
 }
 
+/* The description sits under the name line as prose in the text color, a
+   step smaller than the body so the figures below it still lead. */
+.dataset-description {
+  margin: 0;
+  max-width: 64ch;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 /* The figures are one strip: the triple count leads in larger type, and the
    distinct counts, which are facets of it, follow in the text color behind
    hairlines. No figure wears a color of its own, since they are facets of one

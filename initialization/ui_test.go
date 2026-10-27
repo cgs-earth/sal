@@ -21,7 +21,7 @@ const testModuleNamespace = "salmodule://github.com/cgs-earth/example/"
 // one task and every string filled in.
 const validModuleOntology = `{
   "@context": {
-    "dc": "http://purl.org/dc/elements/1.1/",
+    "dcterms": "http://purl.org/dc/terms/",
     "owl": "http://www.w3.org/2002/07/owl#",
     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
     "salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#",
@@ -32,8 +32,8 @@ const validModuleOntology = `{
     {
       "@id": ".",
       "@type": "owl:Ontology",
-      "dc:creator": "Ada Lovelace",
-      "dc:title": "example",
+      "dcterms:creator": "Ada Lovelace",
+      "dcterms:title": "example",
       "owl:versionInfo": "1.0"
     },
     {
@@ -98,6 +98,7 @@ func getStatus(t *testing.T, server *httptest.Server) moduleInitStatus {
 func TestInitUIRequiresSalModule(t *testing.T) {
 	newGitRepo(t)
 	require.ErrorIs(t, (&InitCmd{UI: true}).Run(), ErrUIWithoutSalModule)
+	require.ErrorIs(t, (&InitCmd{NoUI: true}).Run(), ErrUIWithoutSalModule)
 }
 
 func TestModuleInitFormReportsTheModuleAsNotInitializedUntilTheOntologyExists(t *testing.T) {

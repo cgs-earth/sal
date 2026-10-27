@@ -37,8 +37,10 @@ git remote add origin https://github.com/cgs-earth/sal-demo.git
 git config user.email "demo@cgs-earth.org"
 git config user.name "SAL Demo"
 
+# The description is given as a flag since nothing is at the terminal to answer
+# the prompt; init.tape types the same one.
 if [ "$STATE" != "fresh" ]; then
-	sal init
+	sal init --description "A demo project for sal; a small dataset of stream gauges and the agency that runs them"
 fi
 
 if [ "$STATE" = "committed" ] || [ "$STATE" = "built" ]; then

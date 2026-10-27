@@ -9,7 +9,7 @@ export type QueryResult = {
 
 export type TableStats = {
   tablePath: string
-  /** The dc:title and rdfs:comment of the project ontology in .sal/config.jsonld; empty for a remote table or a project that never ran sal import. */
+  /** The dcterms:title and dcterms:description sal init records on the project node of .sal/config.jsonld; empty for a remote table or a project that recorded neither. */
   title: string
   description: string
   triples: number
