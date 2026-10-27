@@ -12,7 +12,7 @@ require (
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/containerd/errdefs v1.0.0
-	github.com/duckdb/duckdb-go/v2 v2.10505.0
+	github.com/duckdb/duckdb-go/v2 v2.20000.0
 	github.com/geoarrow/geoarrow-go v0.0.0-20260728193914-4ce71a7eb2c3
 	github.com/lmittmann/tint v1.1.3
 	github.com/moby/moby/api v1.55.0
@@ -118,12 +118,7 @@ require (
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.7.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
-	github.com/duckdb/duckdb-go-bindings v0.10505.0 // indirect
-	github.com/duckdb/duckdb-go-bindings/lib/darwin-amd64 v0.10505.0 // indirect
-	github.com/duckdb/duckdb-go-bindings/lib/darwin-arm64 v0.10505.0 // indirect
-	github.com/duckdb/duckdb-go-bindings/lib/linux-amd64 v0.10505.0 // indirect
-	github.com/duckdb/duckdb-go-bindings/lib/linux-arm64 v0.10505.0 // indirect
-	github.com/duckdb/duckdb-go-bindings/lib/windows-amd64 v0.10505.0 // indirect
+	github.com/duckdb/duckdb-go-bindings v0.20000.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.10.2 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0 // indirect
@@ -206,6 +201,11 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
+	go.duckdb.org/libduckdb/darwin-amd64 v0.20000.0 // indirect
+	go.duckdb.org/libduckdb/darwin-arm64 v0.20000.0 // indirect
+	go.duckdb.org/libduckdb/linux-amd64 v0.20000.0 // indirect
+	go.duckdb.org/libduckdb/linux-arm64 v0.20000.0 // indirect
+	go.duckdb.org/libduckdb/windows-amd64 v0.20000.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.44.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.69.0 // indirect
