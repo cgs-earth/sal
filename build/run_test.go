@@ -6,14 +6,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/apache/iceberg-go"
 	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/table"
 	"github.com/cgs-earth/sal/build/validate"
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/salmodule"
 	"github.com/stretchr/testify/require"
+	rdflibgo "github.com/tggo/goRDFlib"
 )
 
 // runTestSource is a project source file declaring one task instance of the
@@ -216,6 +219,56 @@ func TestBuildRunsModuleTasksByDefault(t *testing.T) {
 	require.Equal(t, 1, runner.runs)
 	require.True(t, graphHasTriple(graph, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
 	require.True(t, graphHasTriple(graph, "https://github.com/cgs-earth/sal-run-test-project/finder/1", testModuleNamespace+"maxRetries", "5"))
+}
+
+// TestBuildPinsTheVocabulariesModuleOutputUses checks that a vocabulary whose
+// terms reach the table through a module task's output is pinned and carried
+// as provenance like one the sources declare, while a namespace the output
+// uses that cannot be resolved (schema.org is a 404 to this test's fetch) only
+// warns, and the module's own vocabulary is pinned once, by its commit hash.
+func TestBuildPinsTheVocabulariesModuleOutputUses(t *testing.T) {
+	newRunTestProject(t, runTestSource)
+	original := projectVocabularies
+	projectVocabularies = func(refresh bool) (*validate.PinnedVocabularies, error) {
+		pins, err := original(refresh)
+		if err != nil {
+			return nil, err
+		}
+		pins.Fetch = func(_ context.Context, source string) ([]byte, string, validate.PinnedVersion, error) {
+			switch source {
+			case testModuleNamespace:
+				return []byte(testModuleOntology), "application/ld+json", validate.PinnedVersion{}, nil
+			case "https://vocab.test/things":
+				return []byte(pinsTestVocabulary), "text/turtle", validate.PinnedVersion{}, nil
+			}
+			return nil, "", validate.PinnedVersion{}, fmt.Errorf("bad response status code: 404")
+		}
+		return pins, nil
+	}
+	t.Cleanup(func() { projectVocabularies = original })
+	runner := &testContainerRunner{
+		ontology:  testModuleOntology,
+		runOutput: `{"@id":"https://example.test/widgets/1","@type":"https://vocab.test/things#Widget","https://vocab.test/things#label":"One","schema:name":"Bob"}`,
+	}
+	installFakeModuleRunner(t, runner)
+
+	graph, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(filepath.Join(".sal", "config.jsonld"))
+	require.NoError(t, err)
+	require.Contains(t, string(content), `"@id": "https://vocab.test/things#"`)
+	require.NotContains(t, string(content), `"@id": "https://schema.org/"`)
+	require.Equal(t, 1, strings.Count(string(content), `"@id": "`+testModuleNamespace+`"`), "the module is pinned once, under its namespace")
+	// the pin is provenance in the graph too, not only in the lockfile
+	var versionIRIs int
+	subject := rdflibgo.NewURIRefUnsafe("https://vocab.test/things#")
+	predicate := rdflibgo.NewURIRefUnsafe("http://www.w3.org/2002/07/owl#versionIRI")
+	pkg.Triples(graph, subject, &predicate, nil)(func(rdflibgo.Triple) bool {
+		versionIRIs++
+		return true
+	})
+	require.Equal(t, 1, versionIRIs)
 }
 
 // TestBuildWithoutSalModulesCommitsOnlyTheTaskConfiguration checks the flag

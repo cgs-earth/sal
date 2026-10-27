@@ -38,6 +38,7 @@ type UIRunner interface {
 	salsparql.SQLTranslator
 	salsparql.StatsRunner
 	salsparql.BlobRunner
+	salsparql.VocabularyRunner
 }
 
 // defaultBlobListing is how many blobs /api/blobs lists when the request does
@@ -141,6 +142,7 @@ func NewEndpointWithUI(local UIRunner, blobDir string, stacDir string) (http.Han
 	mux.Handle("/api/sparql/translate", translateHandler{translator: runner})
 	mux.Handle("/api/stats", statsHandler{runner: runner})
 	mux.Handle("/api/blobs", blobListHandler{runner: runner})
+	mux.Handle("/api/vocabularies", vocabularyHandler{runner: runner})
 	mux.Handle("/api/salmodule", salmoduleHandler{inspect: salmodule.Inspect})
 	// The tab is /blobs alone; a path beneath it names a blob, and a browser
 	// following a link to a file in a copied directory wants that file rather
@@ -601,6 +603,28 @@ func (h blobListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	limit = min(limit, maxUIRows)
 	listing, err := h.runner.Blobs(r.Context(), limit)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, listing)
+}
+
+// vocabularyHandler answers GET /api/vocabularies with every vocabulary the
+// project pins and the terms its pinned document defines, so that the SPARQL
+// tab can offer the project's prefixes and complete their terms from the
+// versions a build validated against. A remote table lists none.
+type vocabularyHandler struct {
+	runner salsparql.VocabularyRunner
+}
+
+func (h vocabularyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "the vocabulary listing endpoint only supports GET requests", http.StatusMethodNotAllowed)
+		return
+	}
+	listing, err := h.runner.Vocabularies(r.Context())
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return

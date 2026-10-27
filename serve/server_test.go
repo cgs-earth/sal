@@ -62,7 +62,12 @@ type endpointUIRunner struct {
 	geometries salsparql.GeometryQuery
 	blobs      salsparql.BlobListing
 	// blobLimit is the limit Blobs was last asked for.
-	blobLimit int
+	blobLimit    int
+	vocabularies salsparql.VocabularyListing
+}
+
+func (r *endpointUIRunner) Vocabularies(_ context.Context) (salsparql.VocabularyListing, error) {
+	return r.vocabularies, r.err
 }
 
 func (r *endpointUIRunner) Blobs(_ context.Context, limit int) (salsparql.BlobListing, error) {
@@ -601,6 +606,62 @@ func TestEndpointWithUIReportsBlobListingErrorsAsJSON(t *testing.T) {
 	var body map[string]string
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
 	require.Equal(t, "no such table", body["error"])
+}
+
+func TestEndpointWithUIListsPinnedVocabulariesWithTheirTerms(t *testing.T) {
+	runner := &endpointUIRunner{vocabularies: salsparql.VocabularyListing{Vocabularies: []salsparql.Vocabulary{{
+		ID:         "https://schema.org/",
+		Prefix:     "schema",
+		Namespace:  "https://schema.org/",
+		Version:    "urn:sha256:aaaa",
+		Format:     "application/ld+json",
+		Imported:   true,
+		Classes:    []string{"Person"},
+		Properties: []string{"name"},
+		Others:     []string{},
+	}}}}
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/vocabularies")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+	var body salsparql.VocabularyListing
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, runner.vocabularies, body)
+}
+
+func TestEndpointWithUIReportsVocabularyListingErrorsAsJSON(t *testing.T) {
+	runner := &endpointUIRunner{}
+	runner.err = errors.New("config.jsonld: invalid JSON-LD")
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/vocabularies")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, "config.jsonld: invalid JSON-LD", body["error"])
+}
+
+func TestEndpointWithUIOnlyListsVocabulariesOnGET(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/vocabularies", "application/json", strings.NewReader("{}"))
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 }
 
 func TestEndpointWithUIReturnsTableStats(t *testing.T) {

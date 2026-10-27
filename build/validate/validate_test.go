@@ -238,3 +238,37 @@ func TestAVocabularyThatCannotBeCheckedIsReportedOnce(t *testing.T) {
 	require.Len(t, errs, 1)
 	require.Equal(t, path+":4: failed to check vocabulary for gone:Widget: bad response status code: 404 (also affects lines 5, 6, 7, 8)", errs[0].Error())
 }
+
+// A vocabulary a module's output uses is pinned like a declared one when it
+// resolves; one that does not is passed over with a warning rather than
+// failing the build, and the project's own base, xsd, and anything that is
+// not an http or https IRI are never dereferenced at all.
+func TestPinMaterializedVocabulariesPinsWhatResolvesAndSkipsTheRest(t *testing.T) {
+	projectDir := t.TempDir()
+	var fetched []string
+	pins := newTestPins(t, projectDir, testVocabularyDocument, nil)
+	pins.Fetch = func(_ context.Context, source string) ([]byte, string, PinnedVersion, error) {
+		fetched = append(fetched, source)
+		if source == "https://vocab.test/gone" {
+			return nil, "", PinnedVersion{}, fmt.Errorf("bad response status code: 404")
+		}
+		return []byte(testVocabularyDocument), "text/turtle", PinnedVersion{}, nil
+	}
+
+	validator := NewValidator(pins, testBase, nil)
+	pinned := validator.PinMaterializedVocabularies(context.Background(), []string{
+		testBase + "widgets/",
+		xsdNamespaceIRI,
+		"urn:thing:",
+		"https://vocab.test/gone#",
+		testVocabularyNamespace,
+	})
+
+	require.Equal(t, []string{testVocabularyNamespace}, pinned)
+	require.Equal(t, []string{"https://vocab.test/gone", "https://vocab.test/things"}, fetched)
+	require.NoError(t, pins.Save())
+	content, err := os.ReadFile(filepath.Join(projectDir, "config.jsonld"))
+	require.NoError(t, err)
+	require.Contains(t, string(content), testVocabularyNamespace)
+	require.NotContains(t, string(content), "https://vocab.test/gone")
+}

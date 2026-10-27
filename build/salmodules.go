@@ -91,7 +91,8 @@ func findSalModuleTasks(graph *rdflibgo.Graph) ([]salModuleTask, error) {
 
 // MaterializeSalModules runs every SAL module task instance the graph declares
 // and merges the RDF each module produced back into the graph, reporting how
-// many tasks it ran. A relative IRI a task emits resolves against the graph's
+// many tasks it ran and, sorted, the namespaces the tasks' output stated its
+// triples in (see TaskOutputParser.Vocabularies), which the build pins. A relative IRI a task emits resolves against the graph's
 // base, which is the project namespace, so what a module materializes is named
 // as the project's own instance data unless the module wrote absolute IRIs.
 // A file a task names with a file:/// IRI is copied out of the container
@@ -100,10 +101,10 @@ func findSalModuleTasks(graph *rdflibgo.Graph) ([]salModuleTask, error) {
 // blobDir's prov.jsonld, and the graph refers to either as urn:sha256:<digest>
 // in place of the container path. Nothing an earlier run copied is removed;
 // the blob store only grows until the user clears it.
-func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver *salmodule.Resolver, blobDir string) (tasksRun int, err error) {
+func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver *salmodule.Resolver, blobDir string) (tasksRun int, vocabularies []string, err error) {
 	tasks, err := findSalModuleTasks(graph)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	modules := map[string]bool{}
 	for _, task := range tasks {
@@ -114,22 +115,31 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver 
 	ctx, span := telemetry.Start(ctx, "build.materialize_modules", attribute.Int("sal.module.tasks", len(tasks)), attribute.Int("sal.modules", len(modules)))
 	defer func() { telemetry.End(span, err) }()
 
+	used := map[string]bool{}
 	for _, task := range tasks {
-		ran, err := materializeTask(ctx, graph, resolver, blobDir, task)
+		ran, taskVocabularies, err := materializeTask(ctx, graph, resolver, blobDir, task)
 		if err != nil {
-			return tasksRun, err
+			return tasksRun, nil, err
 		}
 		if ran {
 			tasksRun++
 		}
+		for _, namespace := range taskVocabularies {
+			used[namespace] = true
+		}
 	}
-	return tasksRun, nil
+	for namespace := range used {
+		vocabularies = append(vocabularies, namespace)
+	}
+	sort.Strings(vocabularies)
+	return tasksRun, vocabularies, nil
 }
 
 // materializeTask runs one task instance and merges what it produced into
-// graph, reporting whether it ran at all: an instance whose class neither the
-// project nor the module's ontology declares a task is left alone.
-func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmodule.Resolver, blobDir string, task salModuleTask) (_ bool, err error) {
+// graph, reporting whether it ran at all, an instance whose class neither the
+// project nor the module's ontology declares a task is left alone, and the
+// namespaces its output used.
+func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmodule.Resolver, blobDir string, task salModuleTask) (_ bool, _ []string, err error) {
 	ctx, span := telemetry.Start(ctx, "salmodule.task",
 		attribute.String("sal.module", task.ref.Namespace),
 		attribute.String("sal.module.task_class", task.classIRI),
@@ -139,16 +149,16 @@ func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmo
 
 	ontology, err := resolver.Ontology(ctx, task.ref)
 	if err != nil {
-		return false, fmt.Errorf("run: %w", err)
+		return false, nil, fmt.Errorf("run: %w", err)
 	}
 	if !task.declaredTask && !ontology.IsTaskClass(task.classIRI) {
 		slog.Debug("Skipping " + task.subject.String() + "; " + task.classIRI + " is not a SAL module task class")
-		return false, nil
+		return false, nil, nil
 	}
 
 	taskInstance, err := ontology.TaskInstance(graph, task.subject, task.classIRI)
 	if err != nil {
-		return false, fmt.Errorf("run: %w", err)
+		return false, nil, fmt.Errorf("run: %w", err)
 	}
 
 	// the shape a task class declares for its output is enforced line by
@@ -157,7 +167,7 @@ func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmo
 	// contract, but a module that predates the shape is not failed for it
 	validator, err := ontology.StdoutValidator(task.classIRI, graph.Base())
 	if err != nil {
-		return false, fmt.Errorf("run: %w", err)
+		return false, nil, fmt.Errorf("run: %w", err)
 	}
 
 	slog.Info("Running SAL module task " + task.classIRI)
@@ -183,16 +193,16 @@ func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmo
 	var taskErr salmodule.TaskError
 	switch {
 	case errors.As(runErr, &shapeErr):
-		return false, fmt.Errorf("run: %w", shapeErr)
+		return false, nil, fmt.Errorf("run: %w", shapeErr)
 	case errors.As(err, &taskErr):
-		return false, fmt.Errorf("run: %w", taskErr)
+		return false, nil, fmt.Errorf("run: %w", taskErr)
 	case runErr != nil:
-		return false, fmt.Errorf("run: %w", runErr)
+		return false, nil, fmt.Errorf("run: %w", runErr)
 	case err != nil:
-		return false, fmt.Errorf("run: %w", err)
+		return false, nil, fmt.Errorf("run: %w", err)
 	}
 	if err := salmodule.LinkCopiedFiles(graph, parser.FileTriples(), result.Files, blobDir); err != nil {
-		return false, fmt.Errorf("run: %w", err)
+		return false, nil, fmt.Errorf("run: %w", err)
 	}
 
 	materialized := pkg.GraphLen(graph) - before
@@ -201,5 +211,5 @@ func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmo
 	if len(result.Files) > 0 {
 		slog.Info(fmt.Sprintf("Copied %d files from %s into %s", len(result.Files), task.classIRI, blobDir))
 	}
-	return true, nil
+	return true, parser.Vocabularies(), nil
 }

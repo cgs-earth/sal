@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 
 	"github.com/cgs-earth/sal/pkg/telemetry"
+	"github.com/cgs-earth/sal/salmodule"
 	rdflibgo "github.com/tggo/goRDFlib"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -342,6 +344,38 @@ func (v *Validator) PinDeclaredPrefixes(ctx context.Context) error {
 		return errs
 	}
 	return nil
+}
+
+// PinMaterializedVocabularies resolves and pins the vocabularies the output of
+// the project's SAL module tasks stated its triples in, namespaces the way
+// salmodule.TaskOutputParser.Vocabularies reports them, so that a vocabulary
+// whose terms reach the table through a module is listed and pinned like one
+// the project declares a prefix for. It reports the namespaces it pinned.
+// Unlike a declared prefix, a namespace that cannot be resolved is warned
+// about rather than failing the build: a module's output is never validated
+// against its vocabularies, and a module may state triples in a namespace no
+// document is served for. A namespace that is not resolvable at all, the
+// project's own base, xsd, or one that is not an http, https, or salmodule://
+// IRI, is passed over silently.
+func (v *Validator) PinMaterializedVocabularies(ctx context.Context, namespaces []string) []string {
+	var pinned []string
+	for _, namespace := range namespaces {
+		if !v.vocabs.resolvable(namespace) || !isDereferenceable(namespace) {
+			continue
+		}
+		if _, err := v.vocabs.load(ctx, namespace); err != nil {
+			slog.Warn(fmt.Sprintf("Not pinning <%s>, which a SAL module's output uses, because it could not be resolved: %s", namespace, err))
+			continue
+		}
+		pinned = append(pinned, namespace)
+	}
+	return pinned
+}
+
+// isDereferenceable reports whether a namespace names something sal can fetch
+// a vocabulary document from.
+func isDereferenceable(namespace string) bool {
+	return strings.HasPrefix(namespace, "http://") || strings.HasPrefix(namespace, "https://") || salmodule.IsModuleIRI(namespace)
 }
 
 // ValidateRDFFile checks one file's terms without pinning the vocabularies it
