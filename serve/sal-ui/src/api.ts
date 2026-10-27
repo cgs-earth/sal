@@ -73,6 +73,16 @@ export type BlobListing = {
   sql: string
 }
 
+/** One statement a pinned vocabulary document makes about a term, with the predicate and an IRI value written as prefixed names where a prefix is known. */
+export type TermStatement = {
+  predicate: string
+  value: string
+  /** Whether value names a resource rather than being a literal. */
+  iri?: boolean
+  /** The language tag of a literal value, when it has one. */
+  language?: string
+}
+
 /** One vocabulary the project pins, with the terms its pinned document defines, as `/api/vocabularies` lists it. */
 export type Vocabulary = {
   /** The IRI the pin was recorded under, which is how the Stats tab lists the vocabulary. */
@@ -89,6 +99,8 @@ export type Vocabulary = {
   classes: string[]
   properties: string[]
   others: string[]
+  /** What the pinned document says about each term, by local name, for every term it describes: its label, comment, definition, superclasses, domain, range, and the like, in that order. */
+  statements: Record<string, TermStatement[]>
   /** Why the pinned document could not be read, in which case the term lists are empty. */
   error?: string
 }

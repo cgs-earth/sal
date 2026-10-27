@@ -3,6 +3,7 @@ package sparql
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"slices"
 
 	"github.com/cgs-earth/sal/build/validate"
@@ -32,6 +33,11 @@ type Vocabulary struct {
 	Classes    []string `json:"classes"`
 	Properties []string `json:"properties"`
 	Others     []string `json:"others"`
+	// Statements is what the pinned document says about each term, by local
+	// name, for every term it says something about; see
+	// validate.VocabularyTerms. The editor shows them for the term under the
+	// caret.
+	Statements map[string][]validate.TermStatement `json:"statements"`
 	// Error is why the pinned document could not be read, in which case the
 	// term lists are empty; the prefix can still be inserted.
 	Error string `json:"error,omitempty"`
@@ -79,7 +85,7 @@ func (r DuckDBRunner) Vocabularies(_ context.Context) (VocabularyListing, error)
 		imports = ontology.Imports
 	}
 	for _, id := range pins.IDs() {
-		vocabulary := Vocabulary{ID: id, Imported: slices.Contains(imports, id), Classes: []string{}, Properties: []string{}, Others: []string{}}
+		vocabulary := Vocabulary{ID: id, Imported: slices.Contains(imports, id), Classes: []string{}, Properties: []string{}, Others: []string{}, Statements: map[string][]validate.TermStatement{}}
 		terms, err := pins.Terms(id)
 		if err != nil {
 			slog.Warn("listing a pinned vocabulary without its terms", "vocabulary", id, "error", err)
@@ -94,6 +100,7 @@ func (r DuckDBRunner) Vocabularies(_ context.Context) (VocabularyListing, error)
 			vocabulary.Classes = append(vocabulary.Classes, terms.Classes...)
 			vocabulary.Properties = append(vocabulary.Properties, terms.Properties...)
 			vocabulary.Others = append(vocabulary.Others, terms.Others...)
+			maps.Copy(vocabulary.Statements, terms.Statements)
 		}
 		listing.Vocabularies = append(listing.Vocabularies, vocabulary)
 	}
