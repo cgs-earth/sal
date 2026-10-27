@@ -23,7 +23,7 @@ import (
 	"github.com/cgs-earth/sal/serve"
 )
 
-// moduleInitServer answers the module init form `sal init --salmodule --ui`
+// moduleInitServer answers the module init form `sal init --salmodule`
 // opens in the browser. The form assembles ontology.jsonld and asks the server
 // to check it as it is edited and to write it once; the server is also what
 // tells the form whether the module is already initialized, which it reads
@@ -284,7 +284,7 @@ func serveModuleInitUI(dir string) error {
 		return err
 	}
 	if !server.initialized() {
-		slog.Warn("the form was closed before " + salmodule.OntologyFile + " was written; run `sal init --salmodule --ui` again to create it")
+		slog.Warn("the form was closed before " + salmodule.OntologyFile + " was written; run `sal init --salmodule` again to create it")
 	}
 	return nil
 }

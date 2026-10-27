@@ -21,7 +21,7 @@
   "$defs": {
     "context": {
       "type": "object",
-      "description": "The prefixes the document uses. sal injects this @context into every JSON node a task writes, so any key a task emits must resolve through it too. It must bind salmodule and owl; rdfs, sh, xsd, rdf, and skos are checked against their well known IRIs when present.",
+      "description": "The prefixes the document uses. sal injects this @context into every JSON node a task writes, so any key a task emits must resolve through it too. It must bind salmodule and owl; rdfs, sh, xsd, rdf, skos, and dcterms are checked against their well known IRIs when present.",
       "required": [
         "salmodule",
         "owl"
@@ -49,6 +49,10 @@
         },
         "skos": {
           "const": "http://www.w3.org/2004/02/skos/core#"
+        },
+        "dcterms": {
+          "const": "http://purl.org/dc/terms/",
+          "description": "Dublin Core Terms, which sal uses for the ontology node's title, creator, description, and date."
         },
         "@version": {
           "const": 1.1
@@ -418,16 +422,7 @@
         "@type": {
           "$ref": "#/$defs/isOntology"
         },
-        "dc:title": {
-          "$ref": "#/$defs/literal"
-        },
-        "dc:creator": {
-          "$ref": "#/$defs/literal"
-        },
-        "dc:description": {
-          "$ref": "#/$defs/literal"
-        },
-        "dc:date": {
+        "dcterms:date": {
           "$ref": "#/$defs/literal"
         },
         "dcterms:title": {

@@ -96,41 +96,54 @@ Use [`sal validate`](/sal/reference/commands/#sal-validate) to run these checks 
 
 ## The project config file
 
-`.sal/config.jsonld` is a single JSON-LD document with one `@graph` that condenses everything a project records about itself and the vocabularies it resolves against: the project's own ontology (what [`sal import`](/sal/reference/commands/#sal-import) writes) and the pinned vocabulary versions (what `sal build` writes). Both used to be separate files, `.sal/ontology.jsonld` and `.sal/ns-prefix-versions.jsonld`; they are now nodes in the same `@graph`, so a project has a single file describing everything it resolves and materializes against.
+`.sal/config.jsonld` is a single JSON-LD document with one `@graph` that condenses everything a project records about itself and the vocabularies it resolves against: the project's own node (what [`sal init`](/sal/reference/commands/#sal-init) and [`sal import`](/sal/reference/commands/#sal-import) write) and the pinned vocabulary versions (what `sal build` writes). The two used to be separate files, `.sal/ontology.jsonld` and `.sal/ns-prefix-versions.jsonld`; they are now nodes in the same `@graph`, so a project has a single file describing everything it resolves and materializes against.
 
-The first node in the graph, if the project has run `sal import` at least once, is the project's own ontology:
+The first node in the graph is the project itself, `"@id": "."`, resolved against the base IRI the Git remote gives. `sal init` writes it as a `schema:Project` titled after the Git repository, the last segment of the remote URL, and carrying the description it asked for:
 
 ```json
 {
   "@id": ".",
-  "@type": "owl:Ontology",
-  "dc:title": "my-project",
+  "@type": "schema:Project",
+  "dcterms:title": "my-project",
+  "dcterms:description": "A demo project for sal; a small dataset of stream gauges and the agency that runs them"
+}
+```
+
+The first `sal import` types the same node `owl:Ontology` and records the imports on it, keeping the title and description:
+
+```json
+{
+  "@id": ".",
+  "@type": ["schema:Project", "owl:Ontology"],
+  "dcterms:title": "my-project",
+  "dcterms:description": "A demo project for sal; a small dataset of stream gauges and the agency that runs them",
   "owl:imports": [{ "@id": "http://www.w3.org/2002/07/owl#" }],
   "rdfs:comment": "Represents the ontology for the my-project project overall and all the vocabularies that are directly materialized into the graph, not just referenced."
 }
 ```
 
-`dc:title` defaults to the Git project name and `--title` overrides it; `rdfs:comment` is always generated. Ontologies listed with `owl:imports` are merged at the version pinned for them as the project's own statements. Pinning a vocabulary does not import it: a vocabulary the project validates against but does not import has no statements in the triples table, only the provenance node recording which version was pinned.
+`dcterms:description` is what `sal init` asked for or was given with `--description`, and `sal serve --with-ui` shows it under the data product's name. `dcterms:title` is the Git project name and `sal import --title` replaces it; `rdfs:comment` is always generated. Ontologies listed with `owl:imports` are merged at the version pinned for them as the project's own statements. Pinning a vocabulary does not import it: a vocabulary the project validates against but does not import has no statements in the triples table, only the provenance node recording which version was pinned. The node's own statements are validated and committed like a source file, which is why a build pins `schema.org` and `dcterms` for it.
 
 ## Pinned vocabularies
 
 Vocabularies are resolved per project rather than from a shared cache on the machine.
-`sal build` records the exact version of every vocabulary the project resolves against as the rest of `.sal/config.jsonld`'s `@graph`, one node per vocabulary, distinguished from the project ontology node by carrying `owl:versionIRI`:
+`sal build` records the exact version of every vocabulary the project resolves against as the rest of `.sal/config.jsonld`'s `@graph`, one node per vocabulary, distinguished from the project node by carrying `owl:versionIRI`:
 
 ```json
 {
   "@context": {
-    "dc": "http://purl.org/dc/elements/1.1/",
     "owl": "http://www.w3.org/2002/07/owl#",
     "dcterms": "http://purl.org/dc/terms/",
     "xsd": "http://www.w3.org/2001/XMLSchema#",
-    "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "schema": "https://schema.org/"
   },
   "@graph": [
     {
       "@id": ".",
-      "@type": "owl:Ontology",
-      "dc:title": "my-project",
+      "@type": ["schema:Project", "owl:Ontology"],
+      "dcterms:title": "my-project",
+      "dcterms:description": "A demo project for sal; a small dataset of stream gauges and the agency that runs them",
       "rdfs:comment": "Represents the ontology for the my-project project overall and all the vocabularies that are directly materialized into the graph, not just referenced."
     },
     {
@@ -229,7 +242,7 @@ The catalog is `static`: there is no catalog server, and the metadata location i
 Everything about the table is read from the table itself once it is written: the columns, partition spec, format version, and metadata location from its metadata, the snapshot ID from its current snapshot, and the row count and spatial extent from a scan of its geometry column.
 `extent.spatial.bbox` covers every geometry in the table, or the whole world when it holds none, since STAC requires a collection to state one.
 `extent.temporal.interval` runs from the earliest snapshot still in the table to the current one, which is when the data product was built.
-The collection's title is the project ontology's `dc:title` when [`sal import`](/sal/reference/commands/#sal-import) has recorded one, and the git project name otherwise, and its provider is the git project owner.
+The collection's title is the project node's `dcterms:title`, which `sal init` records and [`sal import --title`](/sal/reference/commands/#sal-import) replaces, and the git project name otherwise, and its provider is the git project owner.
 
 The catalog is regenerated whole on every build, since it names the snapshot and metadata file that build produced, and it sits under `.sal/data` rather than beside `.sal/config.jsonld` for the same reason: it is a build artifact, not a source file, and writing it into Git would leave the working tree dirty after every build.
 [`sal clean --wipe`](/sal/reference/commands/#sal-clean) removes it with the rest of the data product.

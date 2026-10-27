@@ -9,6 +9,9 @@ export type QueryResult = {
 
 export type TableStats = {
   tablePath: string
+  /** The dcterms:title and dcterms:description sal init records on the project node of .sal/config.jsonld; empty for a remote table or a project that recorded neither. */
+  title: string
+  description: string
   triples: number
   subjects: number
   predicates: number
@@ -68,6 +71,41 @@ export type BlobListing = {
   truncated: boolean
   /** The DuckDB statement that lists the same blobs, for running by hand in the SQL tab. */
   sql: string
+}
+
+/** One vocabulary the project pins, with the terms its pinned document defines, as `/api/vocabularies` lists it. */
+export type Vocabulary = {
+  /** The IRI the pin was recorded under, which is how the Stats tab lists the vocabulary. */
+  id: string
+  /** The name to declare the namespace under, from the document or by convention. */
+  prefix: string
+  namespace: string
+  /** The owl:versionIRI the vocabulary is pinned at, urn:sha256:… or urn:git-commit-hash:…. */
+  version: string
+  format: string
+  /** Whether the project ontology imports the vocabulary with owl:imports, so its statements are in the table. */
+  imported: boolean
+  /** The local names under the namespace, each sorted: what the document types as a class, as a property, and the rest. */
+  classes: string[]
+  properties: string[]
+  others: string[]
+  /** Why the pinned document could not be read, in which case the term lists are empty. */
+  error?: string
+}
+
+export type VocabularyListing = {
+  vocabularies: Vocabulary[]
+}
+
+/**
+ * Lists every vocabulary the project pins with the terms its pinned document
+ * defines, read from the blob store the versions a build validated against
+ * are kept in. A remote table has no project on disk, so it lists none.
+ */
+export async function fetchVocabularies(signal?: AbortSignal): Promise<VocabularyListing> {
+  const response = await fetch('/api/vocabularies', { signal })
+  if (!response.ok) throw await failure(response)
+  return (await response.json()) as VocabularyListing
 }
 
 /** A longitude/latitude bounding box as [minX, minY, maxX, maxY]. */

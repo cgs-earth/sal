@@ -128,10 +128,10 @@ export function ModuleForm({ status }: { status: InitStatus }) {
             </p>
           </header>
           <div className="field-grid">
-            <Field id="title" label="Title" code="dc:title" help="The module's name, shown to a project browsing modules. Defaults to the git repository name.">
+            <Field id="title" label="Title" code="dcterms:title" help="The module's name, shown to a project browsing modules. Defaults to the git repository name.">
               <input id="title" value={draft.title} onChange={(event) => update({ title: event.target.value })} />
             </Field>
-            <Field id="creator" label="Creator" code="dc:creator" help="Who maintains the module. Defaults to git user.name.">
+            <Field id="creator" label="Creator" code="dcterms:creator" help="Who maintains the module. Defaults to git user.name.">
               <input id="creator" value={draft.creator} onChange={(event) => update({ creator: event.target.value })} />
             </Field>
             <Field

@@ -1,10 +1,28 @@
 package sparql
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+// A warehouse with no table under the namespace, as after sal init with no
+// build, is reported as no data rather than as a catalog failure.
+func TestRunnerReportsAnUnbuiltTableAsNoData(t *testing.T) {
+	warehouse := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(warehouse, "blobs"), 0755))
+	tbl := TriplesTable{Warehouse: warehouse, Namespace: "sal", Path: filepath.Join(warehouse, "sal", "triples")}
+
+	_, err := tbl.Runner(context.Background(), 0)
+
+	var missing NoTriplesTableError
+	require.ErrorAs(t, err, &missing)
+	require.Equal(t, tbl.Path, missing.Path)
+	require.EqualError(t, err, "no data found at "+tbl.Path+": add data to the project and run `sal build` first")
+}
 
 func TestFormatTableAlignsColumnsUnderTheirHeader(t *testing.T) {
 	output := FormatTable(

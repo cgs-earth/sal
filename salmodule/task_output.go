@@ -73,6 +73,10 @@ type TaskOutputParser struct {
 	// fileTriples are the triples naming a file:/// IRI as subject or object,
 	// which LinkCopiedFiles rewrites once the copies have landed
 	fileTriples []rdflibgo.Triple
+	// vocabularies are the namespaces of every predicate, class, and
+	// datatype the output has used so far, which the build pins; see
+	// Vocabularies
+	vocabularies map[string]bool
 }
 
 // NewTaskOutputParser returns the parser that adds what a task of this module
@@ -82,7 +86,7 @@ func (o *ModuleOntology) NewTaskOutputParser(graph *rdflibgo.Graph, base string)
 	if len(o.Context) > 0 {
 		head = append(append([]byte(`{"@context":`), o.Context...), `,"@graph":[`...)
 	}
-	parser := &TaskOutputParser{ontology: o, graph: graph, base: base, head: head, errorNodes: map[string]rdflibgo.Subject{}}
+	parser := &TaskOutputParser{ontology: o, graph: graph, base: base, head: head, errorNodes: map[string]rdflibgo.Subject{}, vocabularies: map[string]bool{}}
 	parser.pending.Write(head)
 	return parser
 }
@@ -148,6 +152,43 @@ func (p *TaskOutputParser) Finish() error {
 // its subject or object, for LinkCopiedFiles to rewrite.
 func (p *TaskOutputParser) FileTriples() []rdflibgo.Triple { return p.fileTriples }
 
+// Vocabularies returns, sorted, the namespace of every term the output has
+// used so far as a predicate, as the class of a typed node, or as a literal's
+// datatype: what the output's triples are stated in, which the build pins so
+// that the vocabularies the table ends up holding terms of are the ones the
+// project lists. Only the output counts: a prefix the module's own @context
+// binds without the output using it, sh for the shapes of its ontology say,
+// is not among them, and neither is a namespace that only names subjects or
+// objects, since those are instances rather than vocabulary.
+func (p *TaskOutputParser) Vocabularies() []string {
+	namespaces := make([]string, 0, len(p.vocabularies))
+	for namespace := range p.vocabularies {
+		namespaces = append(namespaces, namespace)
+	}
+	sort.Strings(namespaces)
+	return namespaces
+}
+
+// VocabularyNamespace is the namespace a term IRI belongs to: everything up
+// to and including its last "#", else its last "/". An IRI with neither, such
+// as a urn:, belongs to no namespace and reports "".
+func VocabularyNamespace(iri string) string {
+	if at := strings.LastIndex(iri, "#"); at >= 0 {
+		return iri[:at+1]
+	}
+	if at := strings.LastIndex(iri, "/"); at >= 0 {
+		return iri[:at+1]
+	}
+	return ""
+}
+
+// noteVocabulary records the namespace of a term the output used, if it has one.
+func (p *TaskOutputParser) noteVocabulary(iri string) {
+	if namespace := VocabularyNamespace(iri); namespace != "" {
+		p.vocabularies[namespace] = true
+	}
+}
+
 // flush parses the pending batch as one JSON-LD document and adds its triples
 // to the graph. The JSON-LD processor labels the blank nodes of every
 // document from _:b0, so each batch's blank nodes are given fresh labels on
@@ -183,10 +224,17 @@ func (p *TaskOutputParser) flush() error {
 	pkg.Triples(batch, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		subject := relabel(triple.Subject).(rdflibgo.Subject)
 		object := relabel(triple.Object)
+		p.noteVocabulary(triple.Predicate.Value())
 		if triple.Predicate.Equal(rdflibgo.RDF.Type) {
-			if class, ok := object.(rdflibgo.URIRef); ok && class.Value() == Namespace+"Error" {
-				p.errorNodes[subject.String()] = subject
+			if class, ok := object.(rdflibgo.URIRef); ok {
+				p.noteVocabulary(class.Value())
+				if class.Value() == Namespace+"Error" {
+					p.errorNodes[subject.String()] = subject
+				}
 			}
+		}
+		if literal, ok := object.(rdflibgo.Literal); ok {
+			p.noteVocabulary(literal.Datatype().Value())
 		}
 		if isFileIRI(subject) || isFileIRI(object) {
 			p.fileTriples = append(p.fileTriples, rdflibgo.Triple{Subject: subject, Predicate: triple.Predicate, Object: object})

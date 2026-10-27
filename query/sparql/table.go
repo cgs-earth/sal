@@ -2,14 +2,26 @@ package sparql
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
 	"path"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/apache/iceberg-go/catalog"
 	"github.com/cgs-earth/sal/pkg"
 )
+
+// NoTriplesTableError reports a project whose triples table has not been
+// built: there is nothing at Path for a query to read. Commands that have
+// their own advice, such as serve, replace the message and keep the path.
+type NoTriplesTableError struct {
+	Path string
+}
+
+func (e NoTriplesTableError) Error() string {
+	return "no data found at " + e.Path + ": add data to the project and run `sal build` first"
+}
 
 // TriplesTable is the built triples table of the SAL project that the current
 // working directory belongs to.
@@ -23,20 +35,13 @@ type TriplesTable struct {
 }
 
 // LocateTriplesTable resolves the triples table of the SAL project in the
-// current working directory. An unbuilt project is reported as an actionable
-// error rather than left for DuckDB to fail on a missing path.
+// current working directory. Whether the table has been built is only known
+// once Runner opens it, which reports an unbuilt one as a NoTriplesTableError
+// rather than leaving the catalog to fail on a missing metadata directory.
 func LocateTriplesTable() (TriplesTable, error) {
 	warehouse, err := pkg.SalDataDir()
 	if err != nil {
 		return TriplesTable{}, err
-	}
-
-	entries, err := os.ReadDir(warehouse)
-	if err != nil {
-		return TriplesTable{}, fmt.Errorf("failed to read SAL data directory: %w", err)
-	}
-	if len(entries) == 0 {
-		return TriplesTable{}, fmt.Errorf("no data has been built yet; run `sal build` to build a data product first")
 	}
 
 	namespace, err := pkg.GitProjectName()
@@ -62,7 +67,9 @@ func (t TriplesTable) Runner(ctx context.Context, limit int) (DuckDBRunner, erro
 		}
 		return DuckDBRunner{TablePath: t.Path, Limit: limit}, nil
 	}
-	if err := VerifyObjectColumns(ctx, t.Warehouse, t.Namespace); err != nil {
+	if err := VerifyObjectColumns(ctx, t.Warehouse, t.Namespace); errors.Is(err, catalog.ErrNoSuchTable) {
+		return DuckDBRunner{}, NoTriplesTableError{Path: t.Path}
+	} else if err != nil {
 		return DuckDBRunner{}, err
 	}
 	return DuckDBRunner{TablePath: t.Path, Limit: limit, Imports: t.Imports}, nil

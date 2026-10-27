@@ -36,7 +36,11 @@ func LocateImportedTables() []ImportedTable {
 		slog.Debug("not registering imported data products", "error", err)
 		return nil
 	}
-	return importedTables(importsDir, projectImports())
+	var imports []string
+	if ontology := projectOntology(); ontology != nil {
+		imports = ontology.Imports
+	}
+	return importedTables(importsDir, imports)
 }
 
 // importedTables resolves each oci:// import to the Iceberg tables pulled for it.

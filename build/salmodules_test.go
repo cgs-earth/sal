@@ -188,12 +188,29 @@ func TestMaterializeSalModulesMergesTaskOutput(t *testing.T) {
 		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
 	}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
 	require.Equal(t, 1, runner.runs)
 	require.True(t, graphHasTriple(graph, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
+}
+
+// TestMaterializeSalModulesReportsTheVocabulariesTheOutputUses checks that
+// materialization hands the build the namespaces the tasks' output stated its
+// triples in, merged across tasks, so the build can pin them.
+func TestMaterializeSalModulesReportsTheVocabulariesTheOutputUses(t *testing.T) {
+	graph := parseTestProject(t, testProject)
+	runner := &testContainerRunner{
+		ontology:  testModuleOntology,
+		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","http://purl.org/dc/terms/title":"Bob"}`,
+	}
+
+	_, vocabularies, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+
+	require.NoError(t, err)
+	// a plain literal's datatype is xsd:string, so xsd is among them like any other datatype's namespace
+	require.Equal(t, []string{"http://purl.org/dc/terms/", "http://www.w3.org/1999/02/22-rdf-syntax-ns#", "http://www.w3.org/2001/XMLSchema#", "https://schema.org/"}, vocabularies)
 }
 
 // TestMaterializeSalModulesNamesRelativeOutputUnderTheProject checks that a
@@ -206,7 +223,7 @@ func TestMaterializeSalModulesNamesRelativeOutputUnderTheProject(t *testing.T) {
 		runOutput: `{"@id":"person/bob","@type":"schema:Person","schema:name":"Bob"}`,
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.True(t, graphHasTriple(graph, "https://example.test/project/person/bob", "https://schema.org/name", "Bob"))
@@ -219,7 +236,7 @@ func TestMaterializeSalModulesNamesRelativeOutputUnderTheProject(t *testing.T) {
 func TestMaterializeSalModulesPassesTheInstanceConfiguredInRDF(t *testing.T) {
 	runner := &testContainerRunner{ontology: testModuleOntology}
 
-	_, err := MaterializeSalModules(context.Background(), parseTestProject(t, testProject), testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), parseTestProject(t, testProject), testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Len(t, runner.runEnv, 1)
@@ -242,7 +259,7 @@ func TestMaterializeSalModulesSkipsClassesThatAreNotTasks(t *testing.T) {
 	`)
 	runner := &testContainerRunner{ontology: testModuleOntology}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Equal(t, 0, tasksRun)
@@ -256,7 +273,7 @@ func TestMaterializeSalModulesFailsWhenTheModuleReportsAnError(t *testing.T) {
 		runOutput: `{"@type":"salmodule:Error","rdfs:comment":"reference feature server is unreachable"}`,
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reference feature server is unreachable")
@@ -271,7 +288,7 @@ func TestMaterializeSalModulesPrefersTheModuleErrorOverTheContainerExitStatus(t 
 		runErr:    fmt.Errorf("container exited with status 1"),
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reference feature server is unreachable")
@@ -284,7 +301,7 @@ func TestMaterializeSalModulesReportsContainerFailuresWithoutModuleErrors(t *tes
 		runErr:   fmt.Errorf("container exited with status 137"),
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "container exited with status 137")
@@ -303,7 +320,7 @@ func TestMaterializeSalModulesCopiesTheFilesATaskNames(t *testing.T) {
 		containerFiles: map[string]string{"/tmp/test.txt": "hello\n"},
 	}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -329,7 +346,7 @@ func TestMaterializeSalModulesFailsWhenANamedFileIsMissingFromTheContainer(t *te
 		runOutput: `{"@id":"https://example.test/dataset","schema:hasPart":{"@id":"file:///tmp/missing.txt"}}`,
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no such file /tmp/missing.txt")
@@ -366,7 +383,7 @@ func TestMaterializeSalModulesCopiesADirectoryATaskNames(t *testing.T) {
 		},
 	}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -411,7 +428,7 @@ func TestMaterializeSalModulesLeavesDirectoriesEarlierRunsCopied(t *testing.T) {
 		containerFiles: map[string]string{"/out/catalog/catalog.json": `{"links":[]}`},
 	}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -464,7 +481,7 @@ func TestMaterializeSalModulesWarnsWhenTheTaskClassHasNoStdoutShape(t *testing.T
 		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
 	}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -479,7 +496,7 @@ func TestMaterializeSalModulesIsQuietWhenTheTaskClassHasAStdoutShape(t *testing.
 		runOutput: `{"@id":"person/alice","@type":"schema:Person","schema:name":"Alice"}` + "\n",
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.NotContains(t, logs.String(), "stdoutShape")
@@ -509,7 +526,7 @@ func TestMaterializeSalModulesFailsWhenOutputViolatesTheStdoutShape(t *testing.T
 			`{"@id":"person/bob","@type":"schema:Person"}` + "\n",
 	}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	var shapeErr salmodule.StdoutShapeError
 	require.ErrorAs(t, err, &shapeErr)
@@ -526,7 +543,7 @@ func TestMaterializeSalModulesMergesOutputThatConformsToTheStdoutShape(t *testin
 		runOutput: `{"@id":"person/alice","@type":"schema:Person","schema:name":"Alice"}` + "\n",
 	}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -546,7 +563,7 @@ func TestMaterializeSalModulesSpanCountsTheTasksAndModules(t *testing.T) {
 		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 	require.NoError(t, err)
 
 	var names []string

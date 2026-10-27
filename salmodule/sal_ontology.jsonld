@@ -2,7 +2,7 @@
     "@context": {
         "salmodule": "https://w3id.org/sal/salmodule#",
         "owl": "http://www.w3.org/2002/07/owl#",
-        "dc": "http://purl.org/dc/elements/1.1/",
+        "dcterms": "http://purl.org/dc/terms/",
         "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
         "sh": "http://www.w3.org/ns/shacl#",
         "xsd": "http://www.w3.org/2001/XMLSchema#",
@@ -12,8 +12,8 @@
         {
             "@id": ".",
             "@type": "owl:Ontology",
-            "dc:title": "SAL Builtin Ontology",
-            "dc:description": "An ontology describing the SAL built-in salmodule Tasks and other vocabulary.",
+            "dcterms:title": "SAL Builtin Ontology",
+            "dcterms:description": "An ontology describing the SAL built-in salmodule Tasks and other vocabulary.",
             "owl:versionInfo": "0.0.1"
         },
         {

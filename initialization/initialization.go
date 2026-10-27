@@ -12,10 +12,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	_ "embed"
 
+	"github.com/cgs-earth/sal/importation"
 	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/salmodule"
 	"github.com/cgs-earth/sal/specs"
@@ -25,17 +27,22 @@ import (
 var salConfigTemplate string
 
 type InitCmd struct {
-	SalModule bool `arg:"--salmodule" help:"also scaffold the files a SAL module needs: ontology.jsonld, Dockerfile, and .dockerignore"`
-	Bare      bool `arg:"--bare" help:"with --salmodule, skip the prompts that fill in a sample task and leave the task class blank"`
-	UI        bool `arg:"--ui" help:"with --salmodule, open a form in the browser that checks and writes ontology.jsonld instead of asking at the prompt"`
+	Description string `arg:"--description" help:"a sentence or two describing the project, recorded in .sal/config.jsonld; asked for when not given"`
+	SalModule   bool   `arg:"--salmodule" help:"also scaffold the files a SAL module needs: ontology.jsonld, Dockerfile, and .dockerignore"`
+	Bare        bool   `arg:"--bare" help:"with --salmodule, answer no questions and leave the task class blank"`
+	UI          bool   `arg:"--ui" help:"with --salmodule, open the browser form that writes ontology.jsonld even where sal would not on its own (CI, an SSH session, no terminal or display)"`
+	NoUI        bool   `arg:"--no-ui" help:"with --salmodule, answer the questions at the prompt instead of opening the browser form"`
 }
 
-// ErrUIWithoutSalModule is returned when --ui is passed without --salmodule,
-// since the form only writes a module's ontology.
-var ErrUIWithoutSalModule = errors.New("--ui only applies with --salmodule; it opens the form that writes a SAL module's ontology.jsonld")
+// ErrUIWithoutSalModule is returned when --ui or --no-ui is passed without
+// --salmodule, since the form only writes a module's ontology.
+var ErrUIWithoutSalModule = errors.New("--ui and --no-ui only apply with --salmodule; the form writes a SAL module's ontology.jsonld")
 
-// stdin is where the sample task prompts read their answers from; tests
-// replace it.
+// ErrDescriptionRequired is returned when neither --description nor the
+// prompt gave a description, since a project is not initialized without one.
+var ErrDescriptionRequired = errors.New("a description of the project is required; answer the prompt or pass --description")
+
+// stdin is where the prompts read their answers from; tests replace it.
 var stdin io.Reader = os.Stdin
 
 // taskIDPattern is what a task ID typed at the prompt must match: a name
@@ -51,7 +58,7 @@ type taskDetails struct {
 }
 
 func (cmd *InitCmd) Run() error {
-	if cmd.UI && !cmd.SalModule {
+	if (cmd.UI || cmd.NoUI) && !cmd.SalModule {
 		return ErrUIWithoutSalModule
 	}
 
@@ -108,18 +115,52 @@ func (cmd *InitCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	salDataDir := filepath.Join(cwd, ".sal", "data")
 
-	err = os.MkdirAll(salDataDir, 0755)
-	if err != nil {
-		return err
-	}
-
-	// sparql/ holds the project's SPARQL queries; it is source, so it sits in
-	// the project root rather than under the gitignored .sal/data
-	err = os.MkdirAll(filepath.Join(cwd, "sparql"), 0755)
-	if err != nil {
-		return err
+	// A SAL module is a container that produces data for projects, not a
+	// project itself, so the project layout is only made without --salmodule:
+	// .sal/data for what sal builds, sparql/ for the project's SPARQL queries
+	// (source, so it sits in the project root rather than under the gitignored
+	// .sal/data), the .gitignore entries for what sal generates, and the
+	// project's own node in .sal/config.jsonld carrying its description. A
+	// project that already has the file is initialized, and init refuses to
+	// write over what it records; the description is asked for before anything
+	// is written so that giving up at the prompt leaves nothing behind.
+	if !cmd.SalModule {
+		configPath := filepath.Join(cwd, ".sal", "config.jsonld")
+		if _, err := os.Stat(configPath); err == nil {
+			return fmt.Errorf("%s already exists; this directory is already a SAL project", configPath)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		description := cmd.Description
+		if description == "" {
+			if description, err = promptDescription(stdin); err != nil {
+				return err
+			}
+		}
+		if err := os.MkdirAll(filepath.Join(cwd, ".sal", "data"), 0755); err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Join(cwd, "sparql"), 0755); err != nil {
+			return err
+		}
+		if err := ignoreGeneratedDirectories(cwd); err != nil {
+			return err
+		}
+		base, err := pkg.DefaultSalBase()
+		if err != nil {
+			return err
+		}
+		title, err := pkg.GitProjectName()
+		if err != nil {
+			return err
+		}
+		// the project's own node, "@id": "." typed schema:Project and titled
+		// after the repository, which build validates and commits like a source
+		// and sal import adds its imports to
+		if err := importation.WriteOntology(configPath, &importation.Ontology{IRI: base, Base: base, IsProject: true, Title: title, Description: description}); err != nil {
+			return err
+		}
 	}
 
 	home, err = os.UserHomeDir()
@@ -138,34 +179,9 @@ func (cmd *InitCmd) Run() error {
 		return err
 	}
 
-	// .sal/data and .sal/constructed hold what sal generates, so both are
-	// gitignored; an entry the .gitignore already has is left as it is
-	gitignorePath := filepath.Join(cwd, ".gitignore")
-	content, err := os.ReadFile(gitignorePath)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	ignored := string(content)
-	for _, entry := range []string{".sal/data", ".sal/constructed"} {
-		if strings.Contains(ignored, entry) {
-			continue
-		}
-		if ignored != "" && !strings.HasSuffix(ignored, "\n") {
-			ignored += "\n"
-		}
-		ignored += entry + "\n"
-	}
-	if ignored != string(content) {
-		if err := os.WriteFile(gitignorePath, []byte(ignored), 0644); err != nil {
-			return err
-		}
-	}
-
-	// the form writes ontology.jsonld and the files next to it in place of the
-	// prompts, once the project itself is initialized, so a module whose
-	// ontology is still being filled in is already a SAL project
-	if cmd.SalModule && cmd.UI {
-		slog.Info("SAL project initialized at " + cwd)
+	// the form writes ontology.jsonld and the files next to it in place of
+	// the prompts
+	if cmd.SalModule && cmd.opensForm() {
 		return serveModuleInitUI(cwd)
 	}
 
@@ -186,10 +202,112 @@ func (cmd *InitCmd) Run() error {
 		if err := writeEditorSchema(cwd); err != nil {
 			return err
 		}
+		slog.Info("SAL module initialized at " + cwd)
+		return nil
 	}
 
 	slog.Info("SAL project initialized at " + cwd)
 	return nil
+}
+
+// ignoreGeneratedDirectories adds .sal/data and .sal/constructed, which hold
+// what sal generates, to the project's .gitignore, leaving an entry the file
+// already has as it is.
+func ignoreGeneratedDirectories(dir string) error {
+	gitignorePath := filepath.Join(dir, ".gitignore")
+	content, err := os.ReadFile(gitignorePath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	ignored := string(content)
+	for _, entry := range []string{".sal/data", ".sal/constructed"} {
+		if strings.Contains(ignored, entry) {
+			continue
+		}
+		if ignored != "" && !strings.HasSuffix(ignored, "\n") {
+			ignored += "\n"
+		}
+		ignored += entry + "\n"
+	}
+	if ignored == string(content) {
+		return nil
+	}
+	return os.WriteFile(gitignorePath, []byte(ignored), 0644)
+}
+
+// opensForm decides whether `sal init --salmodule` writes ontology.jsonld
+// from the browser form, which is the default, or from the prompts. --ui and
+// --no-ui decide outright; --bare asks nothing, so it takes the prompts; and
+// otherwise the form is skipped, saying why, where no browser is likely to
+// open.
+func (cmd *InitCmd) opensForm() bool {
+	switch {
+	case cmd.UI:
+		return true
+	case cmd.NoUI || cmd.Bare:
+		return false
+	}
+	if reason := headlessReason(); reason != "" {
+		slog.Info("not opening the browser form since " + reason + "; asking at the prompt instead (pass --ui to open it anyway)")
+		return false
+	}
+	return true
+}
+
+// headlessReason reports why no browser is likely to open for this session,
+// or "" when one is: a CI environment, an SSH session, standard output that
+// is not a terminal, or a Linux or BSD session with no display. Tests replace
+// it.
+var headlessReason = func() string {
+	if os.Getenv("CI") != "" {
+		return "CI is set"
+	}
+	if os.Getenv("SSH_CONNECTION") != "" || os.Getenv("SSH_TTY") != "" {
+		return "this is an SSH session"
+	}
+	if info, err := os.Stdout.Stat(); err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return "standard output is not a terminal"
+	}
+	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
+		return "there is no display"
+	}
+	return ""
+}
+
+// askLine prints a question and reads the answer, trimmed, from reader. The
+// bool is false once the input has run out, as happens when stdin is not a
+// terminal, so that a prompt can fall back to a default rather than wait.
+func askLine(reader *bufio.Reader, question string) (string, bool, error) {
+	fmt.Print(question + ": ")
+	line, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", false, err
+	}
+	line = strings.TrimSpace(line)
+	if line == "" && errors.Is(err, io.EOF) {
+		fmt.Println()
+		return "", false, nil
+	}
+	return line, true, nil
+}
+
+// promptDescription asks for the project's description, which is required:
+// an empty answer is asked again, and running out of input, as happens when
+// stdin is not a terminal, is ErrDescriptionRequired.
+func promptDescription(in io.Reader) (string, error) {
+	reader := bufio.NewReader(in)
+	for {
+		description, ok, err := askLine(reader, "Description of the project")
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "", ErrDescriptionRequired
+		}
+		if description != "" {
+			return description, nil
+		}
+	}
 }
 
 // promptTaskDetails asks the user for a sample task to seed ontology.jsonld
@@ -204,23 +322,9 @@ func promptTaskDetails(in io.Reader) (taskDetails, error) {
 	fmt.Println()
 
 	reader := bufio.NewReader(in)
-	ask := func(question string) (string, bool, error) {
-		fmt.Print(question + ": ")
-		line, err := reader.ReadString('\n')
-		if err != nil && !errors.Is(err, io.EOF) {
-			return "", false, err
-		}
-		line = strings.TrimSpace(line)
-		if line == "" && errors.Is(err, io.EOF) {
-			fmt.Println()
-			return "", false, nil
-		}
-		return line, true, nil
-	}
-
 	var task taskDetails
 	for task.ID == "" {
-		id, ok, err := ask("Unique ID for the task, with no spaces or special characters (e.g. FetchStations)")
+		id, ok, err := askLine(reader, "Unique ID for the task, with no spaces or special characters (e.g. FetchStations)")
 		if err != nil {
 			return taskDetails{}, err
 		}
@@ -235,7 +339,7 @@ func promptTaskDetails(in io.Reader) (taskDetails, error) {
 		task.ID = id
 	}
 
-	label, ok, err := ask("Human readable name for the task (e.g. Fetch weather stations)")
+	label, ok, err := askLine(reader, "Human readable name for the task (e.g. Fetch weather stations)")
 	if err != nil {
 		return taskDetails{}, err
 	}
@@ -244,7 +348,7 @@ func promptTaskDetails(in io.Reader) (taskDetails, error) {
 		return task, nil
 	}
 
-	comment, _, err := ask("Comment describing what the task does")
+	comment, _, err := askLine(reader, "Comment describing what the task does")
 	if err != nil {
 		return taskDetails{}, err
 	}
@@ -255,7 +359,8 @@ func promptTaskDetails(in io.Reader) (taskDetails, error) {
 // salModuleOntology renders the ontology.jsonld skeleton a new SAL module
 // starts from: a @context binding every prefix the document uses and a @graph
 // holding the owl:Ontology node, named "." like a project ontology, titled
-// after the git repository and credited to the configured git user, followed
+// (dcterms:title) after the git repository and credited (dcterms:creator) to
+// the configured git user, followed
 // by one owl:Class that is a salmodule:Task. The task class carries whatever
 // promptTaskDetails collected, and when it collected an ID the class's
 // salmodule:taskShape becomes a SHACL node shape targeting it; otherwise every
@@ -270,7 +375,7 @@ func salModuleOntology(task taskDetails) (string, error) {
 		return "", err
 	}
 	if creator == "" {
-		slog.Warn("git user.name is not set; leaving dc:creator blank in ontology.jsonld")
+		slog.Warn("git user.name is not set; leaving dcterms:creator blank in ontology.jsonld")
 	}
 	type iri struct {
 		ID string `json:"@id"`
@@ -278,8 +383,8 @@ func salModuleOntology(task taskDetails) (string, error) {
 	type ontologyNode struct {
 		ID      string `json:"@id"`
 		Type    string `json:"@type"`
-		Creator string `json:"dc:creator"`
-		Title   string `json:"dc:title"`
+		Creator string `json:"dcterms:creator"`
+		Title   string `json:"dcterms:title"`
 		Version string `json:"owl:versionInfo"`
 		Label   string `json:"rdfs:label"`
 		Comment string `json:"rdfs:comment"`
@@ -298,7 +403,7 @@ func salModuleOntology(task taskDetails) (string, error) {
 		TaskShape  any    `json:"salmodule:taskShape"`
 	}
 	context := map[string]string{
-		"dc":        "http://purl.org/dc/elements/1.1/",
+		"dcterms":   "http://purl.org/dc/terms/",
 		"owl":       "http://www.w3.org/2002/07/owl#",
 		"rdfs":      "http://www.w3.org/2000/01/rdf-schema#",
 		"salmodule": salmodule.Namespace,

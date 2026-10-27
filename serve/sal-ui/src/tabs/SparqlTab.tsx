@@ -3,15 +3,20 @@ import { createPortal } from 'react-dom'
 import Yasgui from '@zazuko/yasgui'
 import '@zazuko/yasgui/build/yasgui.min.css'
 import '../yasgui-theme.css'
-import { translateSparql, type QueryResult } from '../api'
+import { fetchVocabularies, translateSparql, type QueryResult, type Vocabulary } from '../api'
 import { ShareLinkButton } from '../components/ShareLinkButton'
 import { SampleQueryPicker } from '../components/SampleQueryPicker'
+import { PrefixPicker, type Prefixes } from '../components/PrefixPicker'
 import { registerGraphPlugin } from './sparql/GraphPlugin'
+import { getVocabularies, registerSalCompleters, setVocabularies } from './sparql/completers'
 import { setQueryRunner, setQueryTextGetter } from './sparql/sparqlBridge'
 import { SqlPreview, type Translation } from './sparql/SqlPreview'
 import { publishResult } from '../results'
 
 registerGraphPlugin(Yasgui)
+// Before the first Yasgui is built, since it decides which completers a new
+// editor enables.
+registerSalCompleters(Yasgui)
 
 /** Where the SQL pane's on/off choice is remembered between visits. */
 const SHOW_SQL_KEY = 'sal-ui.sparql.showSql'
@@ -273,6 +278,36 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
   const translateTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const translateAbort = useRef<AbortController | null>(null)
 
+  // The vocabularies the project pins feed both the Prefixes dialog and the
+  // editor's completers, which read them from the module-level store. They
+  // are read once per visit to the tab; the server parses each pinned
+  // document once and answers the rest from memory.
+  const [vocabularies, setVocabularyList] = useState<Vocabulary[] | null>(null)
+  const [vocabularyError, setVocabularyError] = useState<string | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchVocabularies(controller.signal).then(
+      (listing) => {
+        setVocabularies(listing.vocabularies)
+        setVocabularyList(getVocabularies())
+      },
+      (caught: unknown) => {
+        if (controller.signal.aborted) return
+        setVocabularyError(caught instanceof Error ? caught.message : String(caught))
+        setVocabularyList([])
+      },
+    )
+    return () => controller.abort()
+  }, [])
+
+  const declaredPrefixes = useCallback((): Prefixes => yasgui.current?.getTab()?.getYasqe()?.getPrefixesFromQuery() ?? {}, [])
+  const insertPrefixes = (prefixes: Prefixes) => {
+    const yasqe = yasgui.current?.getTab()?.getYasqe()
+    if (!yasqe) return
+    yasqe.addPrefixes(prefixes)
+    scheduleTranslation()
+  }
+
   // Translates whatever the active Yasgui tab holds, debounced so that typing
   // does not send a request per keystroke and an older request never lands
   // after a newer one.
@@ -435,6 +470,13 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
               samples={samples.map((sample) => ({ name: sample.name, text: sample.query }))}
               onPick={(sample) => loadSample({ name: sample.name, query: sample.text })}
             />
+            <PrefixPicker
+              compact
+              vocabularies={vocabularies}
+              error={vocabularyError}
+              declared={declaredPrefixes}
+              onInsert={insertPrefixes}
+            />
             <label className="toggle sql-toggle" title="Show the DuckDB SQL the query translates to">
               <input type="checkbox" checked={showSql} onChange={(event) => toggleShowSql(event.target.checked)} />
               Show SQL
@@ -457,6 +499,13 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
               <li>
                 Queries run against the local <code>/sparql</code> endpoint, which translates SPARQL to DuckDB SQL rather
                 than evaluating it in a triplestore. <strong>Show SQL</strong> opens that translation beside the editor.
+              </li>
+              <li>
+                <strong>Prefixes</strong> lists the vocabularies the project pins, the ones the Stats tab shows, and adds
+                the <code>PREFIX</code> line of any of them to the query. Once a prefix is declared, typing it and a colon
+                (<code>schema:na</code>) suggests the terms its pinned document defines, so what is offered is what the
+                build validated against; <kbd>Ctrl</kbd>+<kbd>Space</kbd> asks for the list by hand. A prefix typed
+                without a declaration is declared for you when it names one of those vocabularies.
               </li>
               <li>
                 A <code>SERVICE</code> naming <code>/v&#123;snapshot&#125;/sparql</code> reads the table at an earlier

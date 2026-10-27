@@ -20,6 +20,17 @@
  * `<html data-theme>` chooses between them. index.html sets it before the first
  * paint from what theme.ts remembered, or the system preference.
  */
+/* Sora is the display face behind District Pro: self-hosted from public/fonts so
+   the embedded UI needs no network, latin only, variable weight. The SIL Open
+   Font License it is shipped under sits beside it. */
+@font-face {
+  font-family: 'Sora';
+  src: url('/fonts/sora-latin-wght-normal.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --cgs-continental-green: #46ab9d;
   --cgs-fluvial-blue: #2c84b9;
@@ -35,7 +46,7 @@
 
   /* District Pro for display text and Aptos for body copy, when the machine has
      them; the fallbacks are the clean sans-serifs the guidelines allow. */
-  --font-display: 'District Pro', 'Aptos', 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-display: 'District Pro', 'Sora', 'Aptos', 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-sans: 'Aptos', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', 'Menlo', 'Consolas', monospace;
 
@@ -145,51 +156,57 @@
   color-scheme: dark;
 
   /* A darker page under lighter panels, and brighter secondary text, so the
-     structure reads at a glance rather than as one dim surface. */
-  --bg: #0f1417;
-  --bg-sunken: #0b0f12;
-  --bg-panel: #1a2228;
-  --bg-raised: #27333b;
-  --bg-hover: #34434d;
-  --bg-input: #0b0f12;
+     structure reads at a glance rather than as one dim surface. The neutrals
+     sit a step above the docs site's, which read as too dim in an app that is
+     looked at for longer than a page. */
+  --bg: #141c22;
+  --bg-sunken: #0f161b;
+  --bg-panel: #1f2931;
+  --bg-raised: #2c3842;
+  --bg-hover: #394754;
+  --bg-input: #111920;
 
-  --line: #2b373f;
-  --line-strong: #46555f;
-  --line-emphasis: #627480;
-  --line-highlight: rgb(255 255 255 / 5%);
+  --line: #334049;
+  --line-strong: #51626d;
+  --line-emphasis: #71858f;
+  --line-highlight: rgb(255 255 255 / 7%);
 
+  /* Secondary text runs brighter than a dark theme usually has it, since the
+     lifted surfaces leave the dimmer grays too close to the panels. */
   --text: var(--cgs-cream);
-  --text-secondary: #d8e6ee;
-  --text-muted: #aabfca;
-  --text-faint: #93a6b1;
-  --text-disabled: #6e808b;
+  --text-secondary: #e6eff4;
+  --text-muted: #c6d6de;
+  --text-faint: #abbcc6;
+  --text-disabled: #80929d;
 
-  --accent: var(--cgs-continental-green);
-  --accent-hover: #6ccfc0;
+  /* The turquoise runs lighter than Continental Green on the dark page, where
+     the brand shade itself sits too close to the slate it is on. */
+  --accent: #5cc7b8;
+  --accent-hover: #7ddccf;
   --accent-text: #0b0f12;
-  --accent-ink: #62c7b8;
-  --link: #9ad0ee;
-  --code: #9ad0ee;
-  --success: #62c7b8;
+  --accent-ink: #80dccd;
+  --link: #a6d8f3;
+  --code: #a6d8f3;
+  --success: #80dccd;
   --warn: var(--cgs-prairie-yellow);
   --warn-ink: var(--cgs-prairie-yellow);
   --danger: #f59a93;
   --selection: color-mix(in srgb, var(--cgs-fluvial-blue) 50%, transparent);
-  --shadow: 0 12px 32px rgb(0 0 0 / 55%);
+  --shadow: 0 12px 32px rgb(0 0 0 / 45%);
 
-  --ambient-blue: rgb(44 132 185 / 30%);
-  --ambient-green: rgb(70 171 157 / 24%);
-  --ambient-yellow: rgb(249 198 9 / 9%);
+  --ambient-blue: rgb(44 132 185 / 42%);
+  --ambient-green: rgb(70 171 157 / 34%);
+  --ambient-yellow: rgb(249 198 9 / 14%);
 
-  --glass-panel: rgb(26 34 40 / 62%);
-  --glass-modal: rgb(26 34 40 / 94%);
-  --glass-panel-header: rgb(255 255 255 / 4%);
-  --glass-panel-border: rgb(255 255 255 / 12%);
+  --glass-panel: rgb(31 41 49 / 68%);
+  --glass-modal: rgb(31 41 49 / 94%);
+  --glass-panel-header: rgb(255 255 255 / 6%);
+  --glass-panel-border: rgb(255 255 255 / 16%);
   --glass-bg: color-mix(in srgb, var(--bg-raised) 72%, transparent);
   --glass-bg-hover: color-mix(in srgb, var(--bg-hover) 78%, transparent);
   --glass-outline: color-mix(in srgb, var(--line-strong) 85%, transparent);
-  --glass-highlight: rgb(255 255 255 / 7%);
-  --glass-shadow: 0 2px 10px rgb(0 0 0 / 35%);
+  --glass-highlight: rgb(255 255 255 / 9%);
+  --glass-shadow: 0 2px 10px rgb(0 0 0 / 30%);
 
   /* The same hue families as the light editor, lifted toward Cream so they
      stand off the near-black editor surface. */
@@ -204,7 +221,7 @@
   --syntax-punctuation: #aabfca;
 
   --chart-green: var(--cgs-continental-green);
-  --chart-green-ink: #62c7b8;
+  --chart-green-ink: #80dccd;
   --chart-blue: var(--cgs-fluvial-blue);
   --chart-blue-ink: #6fb6e0;
   --chart-sky: var(--cgs-rayleigh-blue);

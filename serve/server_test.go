@@ -22,6 +22,7 @@ import (
 	salsparql "github.com/cgs-earth/sal/query/sparql"
 	"github.com/cgs-earth/sal/salmodule"
 	"github.com/stretchr/testify/require"
+	"os/exec"
 )
 
 type endpointRunner struct {
@@ -62,7 +63,12 @@ type endpointUIRunner struct {
 	geometries salsparql.GeometryQuery
 	blobs      salsparql.BlobListing
 	// blobLimit is the limit Blobs was last asked for.
-	blobLimit int
+	blobLimit    int
+	vocabularies salsparql.VocabularyListing
+}
+
+func (r *endpointUIRunner) Vocabularies(_ context.Context) (salsparql.VocabularyListing, error) {
+	return r.vocabularies, r.err
 }
 
 func (r *endpointUIRunner) Blobs(_ context.Context, limit int) (salsparql.BlobListing, error) {
@@ -161,6 +167,24 @@ func TestEndpointWithUIServesTheAppAtRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(body), `<div id="root">`)
 	require.Contains(t, string(body), "/assets/")
+}
+
+func TestEndpointWithUIServesTheDisplayFontAsAFont(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/fonts/sora-latin-wght-normal.woff2")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "font/woff2", resp.Header.Get("Content-Type"))
+	require.Empty(t, resp.Header.Get("Content-Encoding"), "woff2 is already compressed")
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, "wOF2", string(body[:4]))
 }
 
 func TestEndpointWithUIFallsBackToIndexForUnknownPaths(t *testing.T) {
@@ -585,13 +609,71 @@ func TestEndpointWithUIReportsBlobListingErrorsAsJSON(t *testing.T) {
 	require.Equal(t, "no such table", body["error"])
 }
 
+func TestEndpointWithUIListsPinnedVocabulariesWithTheirTerms(t *testing.T) {
+	runner := &endpointUIRunner{vocabularies: salsparql.VocabularyListing{Vocabularies: []salsparql.Vocabulary{{
+		ID:         "https://schema.org/",
+		Prefix:     "schema",
+		Namespace:  "https://schema.org/",
+		Version:    "urn:sha256:aaaa",
+		Format:     "application/ld+json",
+		Imported:   true,
+		Classes:    []string{"Person"},
+		Properties: []string{"name"},
+		Others:     []string{},
+	}}}}
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/vocabularies")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+	var body salsparql.VocabularyListing
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, runner.vocabularies, body)
+}
+
+func TestEndpointWithUIReportsVocabularyListingErrorsAsJSON(t *testing.T) {
+	runner := &endpointUIRunner{}
+	runner.err = errors.New("config.jsonld: invalid JSON-LD")
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/vocabularies")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, "config.jsonld: invalid JSON-LD", body["error"])
+}
+
+func TestEndpointWithUIOnlyListsVocabulariesOnGET(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/vocabularies", "application/json", strings.NewReader("{}"))
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+}
+
 func TestEndpointWithUIReturnsTableStats(t *testing.T) {
 	runner := &endpointUIRunner{stats: salsparql.TableStats{
-		TablePath:  "/tmp/warehouse/sal/triples",
-		Triples:    12,
-		Subjects:   3,
-		Predicates: 4,
-		Objects:    9,
+		TablePath:   "/tmp/warehouse/sal/triples",
+		Title:       "Demo data product",
+		Description: "Represents the ontology for the demo project overall.",
+		Triples:     12,
+		Subjects:    3,
+		Predicates:  4,
+		Objects:     9,
 		Snapshots: salsparql.Result{
 			Header: []string{"snapshot_id"},
 			Rows:   [][]string{{"123"}},
@@ -616,6 +698,8 @@ func TestEndpointWithUIReturnsTableStats(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	var body salsparql.TableStats
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, "Demo data product", body.Title)
+	require.Equal(t, "Represents the ontology for the demo project overall.", body.Description)
 	require.Equal(t, int64(12), body.Triples)
 	require.Equal(t, int64(9), body.Objects)
 	require.Equal(t, "/tmp/warehouse/sal/triples", body.TablePath)
@@ -1442,4 +1526,27 @@ func TestBlobEndpointAllowsCrossOriginReads(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 	require.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
 	require.Contains(t, resp.Header.Get("Access-Control-Allow-Methods"), "GET")
+}
+
+// A project initialized but never built has nothing to serve, which the
+// command says in its own words rather than as a catalog failure.
+func TestServeReportsAnUnbuiltProjectAsNoData(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"remote", "add", "origin", "https://github.com/cgs-earth/example.git"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(out))
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".sal", "data", "blobs"), 0755))
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(dir)
+
+	err := (&ServeCmd{WithUI: true}).Run()
+
+	// the project directory is reported with symlinks resolved, which on macOS
+	// puts the temp dir under /private
+	dir, resolveErr := filepath.EvalSymlinks(dir)
+	require.NoError(t, resolveErr)
+	require.EqualError(t, err, "no data found at "+filepath.Join(dir, ".sal", "data", "example", "triples")+": add data to the project before serving it")
 }

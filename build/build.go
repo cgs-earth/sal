@@ -398,18 +398,6 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 		return nil, err
 	}
 
-	// the pins are written only once the build is known to be committable, so
-	// that a rejected build does not leave the worktree dirty with a lockfile
-	// change the next build would then refuse to run against
-	if err := pins.Save(); err != nil {
-		return nil, fmt.Errorf("build: record pinned vocabularies: %w", err)
-	}
-
-	// every vocabulary the project pins becomes provenance in the graph itself,
-	// so which exact version a build validated against is queryable alongside
-	// the data rather than only recorded in .sal/config.jsonld
-	pins.AppendProvenance(finalGraph)
-
 	// a build runs every module task the project declares and commits what
 	// the tasks produced in the same snapshot as the sources, so that a build
 	// is the one operation that produces a snapshot; --without-sal-modules
@@ -422,14 +410,33 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 		if err != nil {
 			return nil, err
 		}
-		tasksRun, err := MaterializeSalModules(ctx, finalGraph, resolver, blobDir)
+		tasksRun, vocabularies, err := MaterializeSalModules(ctx, finalGraph, resolver, blobDir)
 		if err != nil {
 			return nil, err
 		}
 		if tasksRun == 0 && cfg.fromRunCmd {
 			return nil, ErrNoModuleTasks
 		}
+		// the vocabularies the tasks' output is stated in are pinned like the
+		// ones the sources declare, since their terms reach the table all the
+		// same; what a module's own ontology binds without using is not
+		if pinned := validator.PinMaterializedVocabularies(ctx, vocabularies); len(pinned) > 0 {
+			slog.Info(fmt.Sprintf("Pinned %d vocabularies used by SAL module output: %s", len(pinned), strings.Join(pinned, ", ")))
+		}
 	}
+
+	// the pins are written only once the build is known to be committable and
+	// every task has run, so that a rejected or failed build does not leave the
+	// worktree dirty with a lockfile change the next build would then refuse
+	// to run against
+	if err := pins.Save(); err != nil {
+		return nil, fmt.Errorf("build: record pinned vocabularies: %w", err)
+	}
+
+	// every vocabulary the project pins becomes provenance in the graph itself,
+	// so which exact version a build validated against is queryable alongside
+	// the data rather than only recorded in .sal/config.jsonld
+	pins.AppendProvenance(finalGraph)
 
 	// every file and directory a module task has ever handed over is described
 	// in the blob store's prov.jsonld; carrying its record into the graph the

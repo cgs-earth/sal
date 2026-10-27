@@ -128,7 +128,7 @@ func (s *SalModuleSuite) newSalProject(source string) string {
 	s.git(project, "-c", "user.email=sal@example.test", "-c", "user.name=SAL", "commit", "-m", "project source")
 
 	s.Require().NoError(os.Chdir(project))
-	s.Require().NoError((&initialization.InitCmd{}).Run())
+	s.Require().NoError((&initialization.InitCmd{Description: "The integration test project"}).Run())
 	s.git(project, "add", "-A")
 	s.git(project, "-c", "user.email=sal@example.test", "-c", "user.name=SAL", "commit", "-m", "sal init")
 	return project

@@ -54,7 +54,7 @@ type StacProject struct {
 	Owner string
 	// Remote is the https URL of the git repository the data was built from.
 	Remote string
-	// Title is the project ontology's dc:title when the project has one, and
+	// Title is the project node's dcterms:title when the project has one, and
 	// the project name otherwise.
 	Title string
 }

@@ -82,11 +82,18 @@ export function TablePath({ tablePath, remoteTablePath, onSwitched }: TablePathP
 
   return (
     <div className="header-table">
+      {/* The input is named and left open to autocomplete so the browser keeps
+          the tables entered before in its form history and offers them again;
+          it records an entry when the form is submitted, which still happens
+          with the default prevented. */}
       <form className="header-table-form" onSubmit={(event) => void submit(event)}>
         <input
           ref={input}
+          id="remote-table-path"
+          name="remoteTablePath"
           className="module-input"
           type="text"
+          autoComplete="on"
           value={draft}
           spellCheck={false}
           disabled={busy}
@@ -95,11 +102,28 @@ export function TablePath({ tablePath, remoteTablePath, onSwitched }: TablePathP
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
         />
-        <button type="submit" className="button small primary" disabled={busy}>
-          {busy ? 'Opening…' : 'Query'}
+        <button
+          type="submit"
+          className={`icon-button header-table-confirm${busy ? ' loading' : ''}`}
+          aria-label={busy ? 'Opening the table' : 'Query this table'}
+          title={busy ? 'Opening the table…' : 'Query this table (Enter)'}
+          disabled={busy}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M5 12.5l4.5 4.5L19 7.5" />
+          </svg>
         </button>
-        <button type="button" className="button small" onClick={close} disabled={busy}>
-          Cancel
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Cancel"
+          title="Cancel (Escape)"
+          onClick={close}
+          disabled={busy}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+            <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
+          </svg>
         </button>
       </form>
       {error ? (

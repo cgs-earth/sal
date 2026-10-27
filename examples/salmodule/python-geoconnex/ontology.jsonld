@@ -7,15 +7,15 @@
         "sh": "http://www.w3.org/ns/shacl#",
         "sf": "http://www.opengis.net/ont/sf#",
         "xsd": "http://www.w3.org/2001/XMLSchema#",
-        "dc": "http://purl.org/dc/terms/",
+        "dcterms": "http://purl.org/dc/terms/",
         "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
     },
     "@graph": [
         {
             "@id": ".",
             "@type": "owl:Ontology",
-            "dc:creator": "Andrew Padilla",
-            "dc:title": "Sample SAL Module",
+            "dcterms:creator": "Andrew Padilla",
+            "dcterms:title": "Sample SAL Module",
             "owl:versionInfo": "1.0"
         },
         {
