@@ -28,7 +28,7 @@
       ],
       "properties": {
         "salmodule": {
-          "const": "https://w3id.org/sal/salmodule#",
+          "const": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#",
           "description": "The SAL Module ontology, which defines the task classes and shape annotations a module uses."
         },
         "owl": {

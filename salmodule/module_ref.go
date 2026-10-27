@@ -12,7 +12,7 @@ import (
 // salmodule:runCommand, and salmodule:taskInstanceEnvVar ontology properties
 // declared in specs/salmodule.ttl.
 const (
-	// Namespace https://w3id.org/sal/salmodule#
+	// Namespace is the IRI of the SAL Module ontology itself.
 	Namespace = "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
 	// ProtocolScheme is the URI scheme used to reference a SAL module from RDF.
 	ProtocolScheme = "salmodule"
