@@ -48,7 +48,7 @@ Comment describing what the task does: Fetches every station in a region and emi
     "dc": "http://purl.org/dc/elements/1.1/",
     "owl": "http://www.w3.org/2002/07/owl#",
     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
-    "salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#",
+    "salmodule": "https://w3id.org/sal/salmodule#",
     "sh": "http://www.w3.org/ns/shacl#"
   },
   "@graph": [
@@ -457,8 +457,8 @@ A project that imported a data product with `sal import oci://...` gets a view p
 `triples`, plus an `imports` view stacking them all.
 
 Info modes:
-
-- `head`: show the first rows from `triples`.
+https://w3id.org/sal/salmodule#
+https://w3id.org/sal/salmodule#
 - `properties`: show Iceberg table properties.
 - `snapshots`: show Iceberg snapshots and SAL Git tags.
 - `column-stats`: show Iceberg column statistics.
@@ -476,8 +476,8 @@ See [SPARQL Query Engine](/sal/reference/sparql-engine/) for how the translation
 
 Looks up the RDF resources inside a built data product.
 Where `sal query` is about the Iceberg table that stores the triples, `sal get` is about the RDF the table describes.
-`sal get vocabularies` is the exception: it reads the pinned vocabulary and project ontology nodes in `.sal/config.jsonld` rather than the built data product.
-
+https://w3id.org/sal/salmodule#pinned vocabulary and project ontology nodes in `.sal/config.jsonld` rather than the built data product.
+https://w3id.org/sal/salmodule#
 By default, `classes`, `datatypes`, `instances`, `properties`, and `shapes` list only the resources the project itself defines: the subjects named under the project base, which comes from the Git remote the same way `sal build` resolves the project's own relative terms.
 An imported ontology or a module task contributes resources under its own namespace, and those are left out until `--all` is given:
 
@@ -533,9 +533,9 @@ Lists the resources the project instantiates, with the class each one is typed w
 
 ```sh
 sal get instances
-```
-
-```
+https://w3id.org/sal/salmodule#
+https://w3id.org/sal/salmodule#
+https://w3id.org/sal/salmodule#
 instance                                              class
 https://github.com/cgs-earth/sal-demo/Andrew          https://schema.org/Person
 https://github.com/cgs-earth/sal-demo/MyRandPeople    salmodule://github.com/cgs-earth/sample-salmodule/RandomPeople

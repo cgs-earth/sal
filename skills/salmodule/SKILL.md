@@ -65,7 +65,7 @@ Print one JSON-LD document to stdout and exit 0. Requirements:
 
 ```json
 {
-  "@context": {
+  "@context": {https://w3id.org/sal/salmodule#
     "schema": "https://schema.org/",
     "owl": "http://www.w3.org/2002/07/owl#",
     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
