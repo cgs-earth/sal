@@ -179,3 +179,38 @@ func TestGraphFromTaskOutputAcceptsEmptyOutput(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, pkg.GraphLen(graph))
 }
+
+// TestTaskOutputParserReportsTheVocabulariesTheOutputUses checks what the
+// build pins for a module's output: the namespaces of its predicates, the
+// classes it types nodes with, and its literals' datatypes, and nothing from
+// the subjects and objects it names or from a prefix the module's @context
+// binds without the output using it.
+func TestTaskOutputParserReportsTheVocabulariesTheOutputUses(t *testing.T) {
+	graph := rdflibgo.NewGraph(rdflibgo.WithBase(testProjectBase))
+	parser := testTaskOntology(t).NewTaskOutputParser(graph, testProjectBase)
+	lines := []string{
+		`{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
+		`{"@id":"https://example.test/person/bob","http://www.opengis.net/ont/geosparql#hasGeometry":{"@id":"https://geoconnex.us/ref/states/01"}}`,
+		`{"@id":"https://example.test/person/bob","schema:birthDate":{"@value":"1990-01-01","@type":"http://www.w3.org/2001/XMLSchema#date"}}`,
+		`{"@id":"urn:thing:1","http://purl.org/dc/terms/title":"Titled"}`,
+	}
+	for i, line := range lines {
+		require.NoError(t, parser.Line([]byte(line), i+1))
+	}
+	require.NoError(t, parser.Finish())
+
+	require.Equal(t, []string{
+		"http://purl.org/dc/terms/",
+		"http://www.opengis.net/ont/geosparql#",
+		"http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+		"http://www.w3.org/2001/XMLSchema#",
+		"https://schema.org/",
+	}, parser.Vocabularies())
+}
+
+func TestVocabularyNamespaceSplitsAtTheLastHashOrSlash(t *testing.T) {
+	require.Equal(t, "https://schema.org/", VocabularyNamespace("https://schema.org/name"))
+	require.Equal(t, "http://www.opengis.net/ont/geosparql#", VocabularyNamespace("http://www.opengis.net/ont/geosparql#asWKT"))
+	require.Equal(t, "https://www.opengis.net/def/schema/hy_features/hyf/", VocabularyNamespace("https://www.opengis.net/def/schema/hy_features/hyf/HY_HydroFeature"))
+	require.Equal(t, "", VocabularyNamespace("urn:isbn:123"))
+}

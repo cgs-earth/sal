@@ -91,7 +91,6 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
                     </button>
                   </div>
                 </div>
-                {stats.description && <p className="dataset-description">{stats.description}</p>}
               </div>
 
               <dl className="dataset-figures">

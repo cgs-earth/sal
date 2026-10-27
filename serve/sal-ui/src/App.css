@@ -730,14 +730,6 @@ kbd {
   margin-right: 10px;
 }
 
-.dataset-description {
-  max-width: 72ch;
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 14px;
-  line-height: 1.5;
-}
-
 /* The figures are one strip: the triple count leads in larger type, and the
    distinct counts, which are facets of it, follow in the text color behind
    hairlines. No figure wears a color of its own, since they are facets of one
@@ -1526,6 +1518,91 @@ kbd {
   flex: none;
   padding: 10px 16px;
   border-top: var(--border);
+}
+
+/* ---------- modals: the prefix picker ---------- */
+
+.modal-banner {
+  margin: 12px 16px 0;
+}
+
+/* Each row is the prefix, the namespace it binds, and at the right how many
+   terms it holds and whether the query already declares it. */
+.prefix-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.prefix-item.selected {
+  background: var(--bg-raised);
+  border-left-color: var(--accent);
+}
+
+.prefix-item.declared {
+  cursor: default;
+}
+
+.prefix-name {
+  color: var(--accent-ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.prefix-namespace {
+  min-width: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prefix-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.prefix-badge {
+  padding: 1px 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.prefix-unavailable {
+  color: var(--danger);
+}
+
+.prefix-declared {
+  color: var(--success);
+  font-weight: 700;
+}
+
+.modal-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: var(--border);
+}
+
+.modal-actions .button {
+  flex: none;
+  white-space: nowrap;
 }
 
 /* ---------- sparql ---------- */

@@ -351,9 +351,38 @@
   font-family: var(--font-mono);
 }
 
-.yasgui .CodeMirror-hint-active {
+/* Each row carries its own black, which the list's color does not reach. */
+.yasgui .CodeMirror-hint {
+  color: var(--text);
+}
+
+.yasgui .CodeMirror-hint-active,
+.yasgui li.CodeMirror-hint-active {
   background: var(--accent);
   color: var(--accent-text);
+}
+
+/* A term suggestion carries its kind, class or property, at the right of the
+   row; the row is laid out for it only when one is there, so the prefix
+   completer's rows are untouched. */
+.yasgui .CodeMirror-hint:has(.sal-hint-kind) {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.yasgui .sal-hint-kind {
+  color: var(--text-faint);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.yasgui .CodeMirror-hint-active .sal-hint-kind {
+  color: var(--accent-text);
+  opacity: 0.8;
 }
 
 /* ---------- yasqe buttons ---------- */

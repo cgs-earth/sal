@@ -124,6 +124,10 @@ func (s *tableSwitch) Blobs(ctx context.Context, limit int) (salsparql.BlobListi
 	return s.current().Blobs(ctx, limit)
 }
 
+func (s *tableSwitch) Vocabularies(ctx context.Context) (salsparql.VocabularyListing, error) {
+	return s.current().Vocabularies(ctx)
+}
+
 // tableLocation is what /api/table reports: the remote table the UI's queries
 // read, empty when they read the project's own table.
 type tableLocation struct {
