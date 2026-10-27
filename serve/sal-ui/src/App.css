@@ -666,18 +666,31 @@ kbd {
 
 /* ---------- stats ---------- */
 
-/* The landing card: the data product's name and path, its figures, and its
-   STAC links, as one sheet rather than a row of tiles. */
+/* The landing card: the data product's name and path and its figures on the
+   left, the STAC links and the extent map on the right, as one sheet rather
+   than a row of tiles. The right column takes the height the left one needs
+   and the map stretches to it, so the map never makes the card taller. */
 .dataset-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 18px 32px;
   padding: 20px 24px;
-  gap: 18px;
 }
 
-.dataset-heading {
+.dataset-main {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+/* The STAC links and refresh sit at the end of the name line, so the right
+   column is the map alone. */
+.dataset-meta-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px 24px;
 }
 
 .dataset-identity {
@@ -737,6 +750,75 @@ kbd {
   margin: 0;
   padding: 14px 0 2px;
   border-top: 1px solid var(--line-strong);
+}
+
+/* The map is a framed window with the Map tab's control styling and the same
+   caption style as a figure's label. It fills the column's height, down to a
+   floor that keeps it usable when there is no description beside it. */
+.dataset-extent {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+}
+
+/* Qualified by the figure: the map shares .map-canvas with the Map tab for the
+   control styling, and that class's flex: 1 would otherwise size it by content. */
+.dataset-extent .extent-map {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  min-height: 84px;
+  border-radius: var(--radius-sm);
+  border: var(--border-strong);
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+.extent-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+/* The caption names the figure on the left and gives the box's corners and
+   their frame on the right, in the code face since they are coordinates. */
+.dataset-extent figcaption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.extent-bbox {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.extent-bbox code {
+  color: var(--code);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.extent-crs {
+  color: var(--text-faint);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 /* The dividers take the strong line rather than the panel's glass edge, which
@@ -817,8 +899,17 @@ kbd {
 }
 
 @media (max-width: 640px) {
-  .dataset-heading {
+  .dataset-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dataset-meta-row {
     flex-direction: column;
+  }
+
+  .dataset-extent .extent-map {
+    flex: none;
+    height: 150px;
   }
 
   .figure {
@@ -1254,9 +1345,12 @@ kbd {
   filter: var(--map-ctrl-icon-filter);
 }
 
-.map-canvas .maplibregl-ctrl-attrib,
+/* The attribution's compact rule in MapLibre's own stylesheet paints it white
+   on black and outranks a two-class selector, so these carry the extra class. */
+.map-canvas .maplibregl-ctrl.maplibregl-ctrl-attrib,
+.map-canvas .maplibregl-ctrl-attrib.maplibregl-compact,
 .map-canvas .maplibregl-ctrl-scale {
-  background: color-mix(in srgb, var(--bg-sunken) 80%, transparent);
+  background: color-mix(in srgb, var(--bg-sunken) 85%, transparent);
   color: var(--text-muted);
   border-color: var(--line-emphasis);
   font-size: 11px;
@@ -1264,6 +1358,14 @@ kbd {
 
 .map-canvas .maplibregl-ctrl-attrib a {
   color: var(--link);
+}
+
+/* The (i) is a black glyph on a translucent white disc; on the dark theme the
+   glyph is inverted the way the zoom icons are and the disc is dropped. */
+.map-canvas .maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-button,
+.map-canvas .maplibregl-ctrl-attrib.maplibregl-compact-show .maplibregl-ctrl-attrib-button {
+  background-color: transparent;
+  filter: var(--map-ctrl-icon-filter);
 }
 
 .map-popup .maplibregl-popup-content {
