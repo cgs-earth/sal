@@ -93,11 +93,11 @@ func TestFindQueriesNamesTheFileThatDoesNotParse(t *testing.T) {
 }
 
 func TestFindQueriesRefusesAConstructSalCannotTranslate(t *testing.T) {
-	dir := newProject(t, map[string]string{"optional.rq": `CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o OPTIONAL { ?o ?q ?r } }`})
+	dir := newProject(t, map[string]string{"graph.rq": `CONSTRUCT { ?s ?p ?o } WHERE { GRAPH <http://example.org/g> { ?s ?p ?o } }`})
 
 	_, err := FindQueries(dir)
 
-	require.ErrorContains(t, err, "optional.rq")
+	require.ErrorContains(t, err, "graph.rq")
 }
 
 func TestFindQueriesRefusesTwoQueriesWithOneOutputName(t *testing.T) {

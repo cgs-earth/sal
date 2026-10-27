@@ -22,7 +22,7 @@ var ExportSQL = `SELECT
 	CAST(object_float AS VARCHAR) AS object_float,
 	CAST(object_integer AS VARCHAR) AS object_integer,
 	CAST(object_byte AS VARCHAR) AS object_byte,
-	` + timeTextExpr("triples") + ` AS object_time,
+	` + timeTextExpr("triples.object_time") + ` AS object_time,
 	ST_AsText(object_geometry) AS object_wkt,
 	object_string,
 	object_type,

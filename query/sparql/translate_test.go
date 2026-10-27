@@ -188,28 +188,38 @@ WHERE {
 	require.Contains(t, query, "("+objectNumeric("t0")+" >= 21 AND "+objectNumeric("t0")+" < 65)")
 }
 
-func TestToSQLRejectsAskQueries(t *testing.T) {
-	_, err := ToSQL(`
+func TestToSQLTranslatesAskToAnExistsProjection(t *testing.T) {
+	query, err := ToSQL(`
 PREFIX schema: <https://schema.org/>
 
 ASK {
   ?s schema:name "bob" .
 }`)
 
-	require.ErrorContains(t, err, "only read-only SPARQL SELECT and CONSTRUCT queries are supported")
+	require.NoError(t, err)
+	require.Equal(t, `SELECT EXISTS (SELECT 1
+  FROM triples AS t0
+  WHERE t0.predicate = 'https://schema.org/name'
+    AND t0.object_string = 'bob') AS "ask"`, query)
 }
 
-func TestToSQLRejectsOptionalPatterns(t *testing.T) {
-	_, err := ToSQL(`
+func TestToSQLTranslatesOptionalToALeftJoin(t *testing.T) {
+	query, err := ToSQL(`
 PREFIX schema: <https://schema.org/>
 
-SELECT ?s
+SELECT ?s ?age
 WHERE {
   ?s schema:name "bob" .
   OPTIONAL { ?s schema:age ?age . }
 }`)
 
-	require.ErrorContains(t, err, "only basic SPARQL triple patterns and FILTER expressions are supported")
+	require.NoError(t, err)
+	require.Equal(t, `SELECT t0.subject AS "s", `+objectProjection("o0_0")+` AS "age"
+FROM triples AS t0
+LEFT JOIN triples AS o0_0 ON o0_0.predicate = 'https://schema.org/age'
+  AND t0.subject = o0_0.subject
+WHERE t0.predicate = 'https://schema.org/name'
+  AND t0.object_string = 'bob'`, query)
 }
 
 func TestToSQLRejectsUnboundProjection(t *testing.T) {
@@ -403,10 +413,10 @@ WHERE {
 SELECT ?s
 WHERE {
   ?s ?p ?o .
-  FILTER(REGEX(?o, "bob"))
+  FILTER(<http://example.org/myfunction>(?o))
 }`)
 
-	require.ErrorContains(t, err, `SPARQL function "regex" is not supported yet`)
+	require.ErrorContains(t, err, `SPARQL function "http://example.org/myfunction" is not supported yet`)
 }
 
 func TestToSQLRejectsNonWKTGeometryLiterals(t *testing.T) {
@@ -534,22 +544,28 @@ WHERE {
 	require.ErrorContains(t, err, "the first argument of LANGMATCHES must be LANG(?variable)")
 }
 
-func TestToSQLStillRejectsAggregatesAndOtherProjectionExpressions(t *testing.T) {
-	_, err := ToSQL(`
+func TestToSQLProjectsAggregatesAndVariableExpressions(t *testing.T) {
+	query, err := ToSQL(`
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 
 SELECT (COUNT(?s) AS ?n)
 WHERE {
   ?s rdfs:label ?label .
 }`)
-	require.ErrorContains(t, err, `SPARQL function "count" is not supported yet`)
 
-	_, err = ToSQL(`
+	require.NoError(t, err)
+	require.Equal(t, `SELECT count(t0.subject) AS "n"
+FROM triples AS t0
+WHERE t0.predicate = 'http://www.w3.org/2000/01/rdf-schema#label'`, query)
+
+	query, err = ToSQL(`
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 
 SELECT (?s AS ?resource)
 WHERE {
   ?s rdfs:label ?label .
 }`)
-	require.ErrorContains(t, err, "SPARQL projection expressions other than a function call")
+
+	require.NoError(t, err)
+	require.Contains(t, query, `SELECT t0.subject AS "resource"`)
 }
