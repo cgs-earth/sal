@@ -121,7 +121,7 @@ func NewEndpoint(runner salsparql.SnapshotRunner, blobDir string, stacDir string
 // table on object storage instead; the blob store and the STAC catalog are the
 // project's whichever table is queried.
 func NewEndpointWithUI(local UIRunner, blobDir string, stacDir string) (http.Handler, error) {
-	ui, err := uiHandler()
+	ui, err := uiHandler("index.html")
 	if err != nil {
 		return nil, err
 	}

@@ -9,6 +9,9 @@ export type QueryResult = {
 
 export type TableStats = {
   tablePath: string
+  /** The dc:title and rdfs:comment of the project ontology in .sal/config.jsonld; empty for a remote table or a project that never ran sal import. */
+  title: string
+  description: string
   triples: number
   subjects: number
   predicates: number
@@ -95,7 +98,7 @@ export type GeometryQuery = {
 }
 
 /** Reads the `{"error": "..."}` body the Go handlers send, falling back to the status text. */
-async function failure(response: Response): Promise<Error> {
+export async function failure(response: Response): Promise<Error> {
   const body = await response.text()
   try {
     const parsed = JSON.parse(body) as { error?: string }

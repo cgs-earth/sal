@@ -24,8 +24,18 @@ type ValidateCmd struct {
 	PrefixMaps                      []string `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
 	NoCache                         bool     `arg:"--no-cache" help:"resolve vocab prefixes from their remote sources instead of the versions pinned in .sal/config.jsonld"`
 	AllowPrefixesWithoutSlashOrHash bool     `arg:"--allow-prefixes-without-slash-or-hash" help:"include a prefix whose namespace does not end in / or # without asking"`
+	SalModule                       bool     `arg:"--salmodule" help:"also check that the project is a valid SAL module: that ontology.jsonld and a Dockerfile exist and that the ontology has the structure the SAL Module specification requires, without building or running anything; implied when both files are in the project root"`
 }
 
+// placeholderModuleNamespace stands in for a module's salmodule:// namespace
+// when the repository has no git remote to derive it from. The module checks
+// only need a base for the ontology's relative terms, so any will do.
+const placeholderModuleNamespace = "salmodule://github.com/OWNER/REPO/"
+
+// Run validates the RDF sources the way a build does, without committing
+// anything, and then, with --salmodule or in a project whose root holds an
+// ontology.jsonld and a Dockerfile, checks the project as a SAL module. Both
+// sets of problems are reported together, each with its file and line.
 func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
 	buildCfg := &BuildCmd{
 		Paths:                           cfg.Paths,
@@ -35,7 +45,62 @@ func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
 		skipCommit:                      true,
 		skipProjectChecks:               true,
 	}
-	return buildCfg.Run()
+	moduleDir := cfg.moduleDir()
+	checkModule := cfg.SalModule || salmodule.IsModuleRoot(moduleDir)
+
+	graph, err := buildCfg.Run()
+	if !checkModule {
+		return graph, err
+	}
+	var errs validate.MultiError
+	if nested, ok := err.(validate.MultiError); ok {
+		errs = append(errs, nested...)
+	} else if err != nil {
+		errs = append(errs, err)
+	}
+
+	slog.Info("Checking the SAL module in " + moduleDir + " against the SAL Module specification")
+	if problems := salmodule.CheckModule(moduleDir, localModuleNamespace()); len(problems) > 0 {
+		errs = append(errs, problems...)
+	} else {
+		slog.Info("SAL module is valid: " + filepath.Join(moduleDir, salmodule.OntologyFile) + " follows the SAL Module specification and " + filepath.Join(moduleDir, salmodule.DockerfileName) + " exists")
+	}
+	if len(errs) > 0 {
+		return nil, errs
+	}
+	return graph, nil
+}
+
+// localModuleNamespace is the salmodule:// namespace of the module in the
+// current git repository, derived from its remote the way a project
+// referencing it would write it. A repository with no usable remote is checked
+// under a placeholder, since the checks only need a base for the ontology's
+// relative terms.
+func localModuleNamespace() string {
+	remote, err := pkg.DefaultGitRemote()
+	if err == nil {
+		namespace, err := salmodule.ModuleNamespaceForRemote(remote)
+		if err == nil {
+			return namespace
+		}
+	}
+	slog.Warn("Cannot derive the module's salmodule:// namespace from a git remote; checking the module under the placeholder "+placeholderModuleNamespace, "error", err)
+	return placeholderModuleNamespace
+}
+
+// moduleDir is the directory the SAL module checks look in: the one directory
+// named on the command line when exactly one is, otherwise the root of the
+// SAL project, or the current directory outside one.
+func (cfg *ValidateCmd) moduleDir() string {
+	if len(cfg.Paths) == 1 {
+		if info, err := os.Stat(cfg.Paths[0]); err == nil && info.IsDir() {
+			return cfg.Paths[0]
+		}
+	}
+	if projectDir, err := findSALProjectDir(os.UserHomeDir); err == nil {
+		return projectDir
+	}
+	return "."
 }
 
 type BuildCmd struct {

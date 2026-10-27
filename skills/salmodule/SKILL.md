@@ -57,6 +57,11 @@ Print one JSON-LD document to stdout and exit 0. Requirements:
   (the copy `sal init --salmodule` puts in `.vscode/`) encodes all of the above; validating a draft
   ontology against it catches a bare-string `rdfs:subClassOf`, a missing ontology node, or an
   unprefixed key in a shape before the module is ever built.
+- `sal validate`, run in the module repository, checks all of the above without building the image:
+  with `--salmodule`, or on its own when `ontology.jsonld` and a `Dockerfile` are both in the root, it
+  checks the ontology against the schema, that every relative term it uses is declared in `@graph`,
+  and that every shape is well-formed, reporting each problem as `ontology.jsonld:LINE: ...` next to
+  the usual undefined-term errors. Run it before `sal build` in a project that references the module.
 
 ```json
 {

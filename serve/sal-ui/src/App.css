@@ -1,8 +1,12 @@
+/* The app is the one scroll region: the header and the tab bar scroll away with
+   the tab body rather than staying at the top of the screen, and the footer
+   after it is part of the same scroll. */
 .app {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  overflow-y: auto;
 }
 
 /* ---------- header ---------- */
@@ -113,20 +117,38 @@ a.brand-mark:hover {
   white-space: nowrap;
 }
 
+/* The local/remote badge is a tinted pill in the display face with a status
+   dot, set apart from the path it labels rather than sharing its code face:
+   accent for the project's own table, the warning tint for one on object
+   storage. */
 .header-path .table-kind {
+  --kind-ink: var(--accent-ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   flex: none;
-  padding: 1px 7px;
+  padding: 2px 9px 2px 7px;
   border-radius: 999px;
-  border: var(--border-strong);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+  border: 1px solid color-mix(in srgb, var(--kind-ink) 35%, transparent);
+  background: color-mix(in srgb, var(--kind-ink) 12%, transparent);
+  color: var(--kind-ink);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: capitalize;
+}
+
+.header-path .table-kind::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--kind-ink);
 }
 
 .header-path .table-kind.remote {
-  color: var(--warn-ink);
-  border-color: var(--warn-ink);
+  --kind-ink: var(--warn-ink);
 }
 
 .header-table-form {
@@ -144,6 +166,49 @@ a.brand-mark:hover {
 
 .header-table-form .module-input:disabled {
   opacity: 0.6;
+}
+
+/* The confirm and cancel controls are icons, a check and a cross, so the form
+   stays the width of its input; the check wears the accent as the primary
+   action, and pulses while the server is opening the table. */
+.header-table-form .icon-button {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+
+.header-table-form .icon-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.header-table-form .icon-button:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+/* Qualified by the form so these outrank the generic .icon-button rule
+   declared further down. */
+.header-table-form .header-table-confirm {
+  color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent) 88%, transparent);
+  border-color: var(--accent);
+}
+
+.header-table-form .header-table-confirm:hover:not(:disabled) {
+  color: var(--accent-text);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.header-table-form .header-table-confirm.loading {
+  animation: header-table-pulse 900ms ease-in-out infinite;
+}
+
+@keyframes header-table-pulse {
+  50% {
+    opacity: 0.45;
+  }
 }
 
 .header-table-hint {
@@ -220,9 +285,9 @@ a.brand-mark:hover {
 
 /* ---------- footer ---------- */
 
-/* The last child of the scrolling content: every tab body is at least the
-   content's height, so the footer sits below the fold and is seen only by
-   scrolling to the end. */
+/* The last child of the content: every tab body is at least the content's
+   height, so the footer sits below the fold and is seen only by scrolling to
+   the end. */
 .app-footer {
   display: flex;
   flex: none;
@@ -264,14 +329,14 @@ a.brand-mark:hover {
 
 /* ---------- content ---------- */
 
-/* The content is the one scroll region: the tab bodies scroll it rather than
-   themselves, so the footer after them is part of the same scroll. */
+/* The content takes the viewport left under the header and the tab bar, so a
+   tab that fills it exactly (the map) fits the screen, and a taller tab body
+   overflows it and scrolls the app, header and all. */
 .content {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  overflow-y: auto;
 }
 
 .tab-body {
@@ -334,11 +399,10 @@ a.brand-mark:hover {
 
 /* A panel is a sheet of frosted glass over the page's brand washes: a
    translucent fill, the washes blurred through it, a bright hairline where
-   light catches its edge, and a soft shadow lifting it off the page. The stat
-   cards are the same sheet in another size; the modal is the same sheet made
-   nearly opaque, since it sits over text that would otherwise read through. */
+   light catches its edge, and a soft shadow lifting it off the page. The modal
+   is the same sheet made nearly opaque, since it sits over text that would
+   otherwise read through. */
 .panel,
-.stat-card,
 .modal {
   background: var(--glass-panel);
   border: 1px solid var(--glass-panel-border);
@@ -412,10 +476,6 @@ a.brand-mark:hover {
   align-items: center;
   gap: 12px;
   flex: none;
-}
-
-.tab-body.stats > .toolbar h2 {
-  font-size: 18px;
 }
 
 .toolbar-actions {
@@ -606,23 +666,231 @@ kbd {
 
 /* ---------- stats ---------- */
 
-.table-path {
+/* The landing card: the data product's name and path and its figures on the
+   left, the STAC links and the extent map on the right, as one sheet rather
+   than a row of tiles. The right column takes the height the left one needs
+   and the map stretches to it, so the map never makes the card taller. */
+.dataset-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 18px 32px;
+  padding: 20px 24px;
+}
+
+.dataset-main {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  flex-direction: column;
+  gap: 18px;
   min-width: 0;
 }
 
-.table-path .label {
+/* The STAC links and refresh sit at the end of the name line, so the right
+   column is the map alone. */
+.dataset-meta-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 24px;
+}
+
+.dataset-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The name and the path share one line, each behind a small label, the way the
+   header writes the table path: the labels in the faint caps, the values in
+   the code face so they read as identifiers rather than prose. */
+.dataset-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  min-width: 0;
+  margin: 0;
+}
+
+.dataset-meta .label {
   color: var(--text-faint);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
 
-.table-links {
+.dataset-meta code {
+  color: var(--code);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.dataset-name {
+  font-weight: 700;
+  margin-right: 10px;
+}
+
+.dataset-description {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* The figures are one strip: the triple count leads in larger type, and the
+   distinct counts, which are facets of it, follow in the text color behind
+   hairlines. No figure wears a color of its own, since they are facets of one
+   table rather than categories. */
+.dataset-figures {
   display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 0;
+  margin: 0;
+  padding: 14px 0 2px;
+  border-top: 1px solid var(--line-strong);
+}
+
+/* The map is a framed window with the Map tab's control styling and the same
+   caption style as a figure's label. It fills the column's height, down to a
+   floor that keeps it usable when there is no description beside it. */
+.dataset-extent {
+  display: flex;
+  flex-direction: column;
   gap: 6px;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+}
+
+/* Qualified by the figure: the map shares .map-canvas with the Map tab for the
+   control styling, and that class's flex: 1 would otherwise size it by content. */
+.dataset-extent .extent-map {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  min-height: 84px;
+  border-radius: var(--radius-sm);
+  border: var(--border-strong);
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+.extent-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+/* The caption names the figure on the left and gives the box's corners and
+   their frame on the right, in the code face since they are coordinates. */
+.dataset-extent figcaption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.extent-bbox {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.extent-bbox code {
+  color: var(--code);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.extent-crs {
+  color: var(--text-faint);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* The dividers take the strong line rather than the panel's glass edge, which
+   is near white on the light theme and vanishes against the sheet. */
+.figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 28px;
+  border-left: 1px solid var(--line-strong);
+}
+
+.figure:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+/* The figures are set in the display face rather than the code face: they are
+   headline numbers, not identifiers, and tabular figures keep them aligned. */
+.figure dd {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The triple count takes the accent, Fluvial Blue on the light theme and
+   Continental Green on the dark, as the one colored figure. */
+.figure.headline dd {
+  font-size: 36px;
+  color: var(--accent);
+}
+
+.figure dt {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.dataset-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The refresh control is an icon the height of the links beside it, and its
+   arrow turns while the table is being reread. */
+.refresh-button {
+  width: 28px;
+  height: 28px;
+}
+
+.refresh-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.refresh-button:disabled {
+  cursor: progress;
+}
+
+.refresh-button.loading svg {
+  animation: refresh-spin 900ms linear infinite;
+}
+
+@keyframes refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .button.small {
@@ -630,63 +898,36 @@ kbd {
   font-size: 12px;
 }
 
-.table-path code {
-  color: var(--code);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+@media (max-width: 640px) {
+  .dataset-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
 
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 12px;
-}
+  .dataset-meta-row {
+    flex-direction: column;
+  }
 
-.stat-card {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 14px 16px;
-  border-radius: var(--radius);
-  border-left: 3px solid var(--stripe);
-}
+  .dataset-extent .extent-map {
+    flex: none;
+    height: 150px;
+  }
 
-/* Each card takes a brand color: the pure color for its stripe, and the same
-   color as the figure, deepened where the light theme needs the contrast. */
-.stat-card[data-accent='green'] {
-  --stripe: var(--chart-green);
-  --figure: var(--chart-green-ink);
-}
-.stat-card[data-accent='blue'] {
-  --stripe: var(--chart-blue);
-  --figure: var(--chart-blue-ink);
-}
-.stat-card[data-accent='sky'] {
-  --stripe: var(--chart-sky);
-  --figure: var(--chart-sky-ink);
-}
-.stat-card[data-accent='yellow'] {
-  --stripe: var(--chart-yellow);
-  --figure: var(--chart-yellow-ink);
-}
-.stat-card[data-accent='gray'] {
-  --stripe: var(--chart-gray);
-  --figure: var(--chart-gray-ink);
-}
+  .figure {
+    padding: 0 16px;
+  }
 
-.stat-value {
-  font-family: var(--font-mono);
-  font-size: 26px;
-  font-weight: 700;
-  line-height: 1.2;
-  color: var(--figure);
-}
+  .figure.headline {
+    flex-basis: 100%;
+  }
 
-.stat-label {
-  color: var(--text-muted);
-  font-size: 12px;
+  .figure.headline + .figure {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .dataset-actions {
+    flex-wrap: wrap;
+  }
 }
 
 .tab-body.stats .panel {
@@ -1104,9 +1345,12 @@ kbd {
   filter: var(--map-ctrl-icon-filter);
 }
 
-.map-canvas .maplibregl-ctrl-attrib,
+/* The attribution's compact rule in MapLibre's own stylesheet paints it white
+   on black and outranks a two-class selector, so these carry the extra class. */
+.map-canvas .maplibregl-ctrl.maplibregl-ctrl-attrib,
+.map-canvas .maplibregl-ctrl-attrib.maplibregl-compact,
 .map-canvas .maplibregl-ctrl-scale {
-  background: color-mix(in srgb, var(--bg-sunken) 80%, transparent);
+  background: color-mix(in srgb, var(--bg-sunken) 85%, transparent);
   color: var(--text-muted);
   border-color: var(--line-emphasis);
   font-size: 11px;
@@ -1114,6 +1358,14 @@ kbd {
 
 .map-canvas .maplibregl-ctrl-attrib a {
   color: var(--link);
+}
+
+/* The (i) is a black glyph on a translucent white disc; on the dark theme the
+   glyph is inverted the way the zoom icons are and the disc is dropped. */
+.map-canvas .maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-button,
+.map-canvas .maplibregl-ctrl-attrib.maplibregl-compact-show .maplibregl-ctrl-attrib-button {
+  background-color: transparent;
+  filter: var(--map-ctrl-icon-filter);
 }
 
 .map-popup .maplibregl-popup-content {

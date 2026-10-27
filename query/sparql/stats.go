@@ -16,7 +16,13 @@ import (
 
 // TableStats summarizes an Iceberg triples table for the `sal serve --with-ui` stats view.
 type TableStats struct {
-	TablePath   string `json:"tablePath"`
+	TablePath string `json:"tablePath"`
+	// Title and Description name the data product for the UI's landing page,
+	// from the dc:title and rdfs:comment of the project ontology node in
+	// .sal/config.jsonld. Both are empty for a remote table, which has no
+	// project on disk, and for a project that has never run `sal import`.
+	Title       string `json:"title"`
+	Description string `json:"description"`
 	Triples     int64  `json:"triples"`
 	Subjects    int64  `json:"subjects"`
 	Predicates  int64  `json:"predicates"`
@@ -77,6 +83,10 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 	// which says nothing about a table on object storage
 	if !isRemoteTablePath(r.TablePath) {
 		stats.Vocabularies = vocabulariesResult()
+		if ontology := projectOntology(); ontology != nil {
+			stats.Title = ontology.Title
+			stats.Description = ontology.Comment
+		}
 	} else {
 		stats.Vocabularies = Result{Header: importation.VocabularyTableHeader}
 	}
@@ -90,21 +100,22 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 	return stats, nil
 }
 
-// projectImports reads the owl:imports IRIs out of the project's ontology
-// node in .sal/config.jsonld. They come from disk rather than from the table
+// projectOntology reads the project's ontology node out of .sal/config.jsonld:
+// its title and comment name the data product, and its owl:imports IRIs are
+// the imported artifacts. They come from disk rather than from the table
 // because the table carries the imported statements, not the documents they
 // were fetched from. A directory that is not a SAL project, or a project that
-// has imported nothing, simply reports none rather than failing the whole
+// has never imported anything, simply has none rather than failing the whole
 // stats view.
-func projectImports() []string {
+func projectOntology() *importation.Ontology {
 	path, err := pkg.SalConfigPath()
 	if err != nil {
-		slog.Debug("not reporting project imports", "error", err)
+		slog.Debug("not reporting the project ontology", "error", err)
 		return nil
 	}
 	base, err := pkg.DefaultSalBase()
 	if err != nil {
-		slog.Debug("not reporting project imports", "error", err)
+		slog.Debug("not reporting the project ontology", "error", err)
 		return nil
 	}
 	ontology, err := importation.ReadOntology(path, base)
@@ -112,10 +123,7 @@ func projectImports() []string {
 		slog.Warn("ignoring unreadable project ontology", "path", path, "error", err)
 		return nil
 	}
-	if ontology == nil {
-		return nil
-	}
-	return ontology.Imports
+	return ontology
 }
 
 // vocabulariesResult builds the same vocabulary listing `sal get vocabularies`

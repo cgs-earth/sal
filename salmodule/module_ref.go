@@ -2,6 +2,7 @@ package salmodule
 
 import (
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 )
@@ -124,6 +125,28 @@ func ParseModuleIRI(iri string) (ModuleRef, error) {
 		CloneURL:        fmt.Sprintf("https://%s/%s/%s.git", host, owner, repo),
 		ImageRepository: imageRepository(host, owner, repo),
 	}, nil
+}
+
+// ModuleNamespaceForRemote returns the salmodule:// namespace of the module
+// whose git repository is at remote, an https clone URL such as
+// https://github.com/owner/repo.git: the namespace a project referencing the
+// module would declare, and so the one its own ontology resolves against.
+func ModuleNamespaceForRemote(remote string) (string, error) {
+	parsed, err := url.Parse(remote)
+	if err != nil || parsed.Host == "" {
+		return "", fmt.Errorf("git remote %q is not a URL naming a host", remote)
+	}
+	path := strings.TrimSuffix(strings.Trim(parsed.Path, "/"), ".git")
+	// ParseModuleIRI would otherwise read a host followed by one segment as
+	// OWNER/REPO on the default host
+	if !strings.Contains(path, "/") {
+		return "", fmt.Errorf("git remote %q does not name an OWNER/REPO path", remote)
+	}
+	ref, err := ParseModuleIRI(ProtocolScheme + "://" + parsed.Host + "/" + path)
+	if err != nil {
+		return "", err
+	}
+	return ref.Namespace, nil
 }
 
 // imageRepository builds a docker repository name that is unique per module and
