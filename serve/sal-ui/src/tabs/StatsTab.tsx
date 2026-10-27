@@ -25,47 +25,74 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
 
   return (
     <div className="tab-body stats">
-      <div className="toolbar">
-        <h2>Table statistics</h2>
-        <div className="toolbar-actions">
-          <button type="button" className="button" onClick={onReload} disabled={loading}>
-            {loading ? 'Refreshing…' : 'Refresh'}
-          </button>
-        </div>
-      </div>
-
       {error && <p className="error-banner">{error}</p>}
       {!stats && loading && <p className="empty">Reading Iceberg metadata…</p>}
 
       {stats && (
         <>
-          <p className="table-path" title={stats.tablePath}>
-            <span className="label">Table</span>
-            <code>{stats.tablePath}</code>
-          </p>
-          <p className="table-path">
-            <span className="label">STAC</span>
-            <span className="table-links">
-              <StacLink href={STAC_COLLECTION_PATH} available={stacAvailable} title="The STAC Collection sal build wrote for this table">
-                JSON
-              </StacLink>
-              <StacLink
-                href={stacViewerURL(window.location.origin)}
-                available={stacAvailable}
-                title="Open the catalog in the Portolan STAC Browser"
-              >
-                Viewer
-              </StacLink>
-            </span>
-          </p>
+          {/* The landing card: what the data product is, how big it is, and the
+              STAC catalog describing it. The Iceberg detail follows below it;
+              the tab bar is what leads to the queries. */}
+          <section className="panel dataset-card" aria-labelledby="dataset-title">
+            <div className="dataset-heading">
+              <div className="dataset-identity">
+                <p className="dataset-meta" id="dataset-title">
+                  <span className="label">Name</span>
+                  <code className="dataset-name">{stats.title || tableName(stats.tablePath)}</code>
+                  <span className="label">Path</span>
+                  <code className="dataset-path" title={stats.tablePath}>
+                    {stats.tablePath}
+                  </code>
+                </p>
+                {stats.description && <p className="dataset-description">{stats.description}</p>}
+              </div>
+              <div className="dataset-actions">
+                <StacLink href={STAC_COLLECTION_PATH} available={stacAvailable} title="The STAC Collection sal build wrote for this table">
+                  STAC JSON
+                </StacLink>
+                <StacLink
+                  href={stacViewerURL(window.location.origin)}
+                  available={stacAvailable}
+                  title="Open the catalog in the Portolan STAC Browser"
+                >
+                  STAC viewer
+                </StacLink>
+                <button
+                  type="button"
+                  className={`icon-button refresh-button${loading ? ' loading' : ''}`}
+                  aria-label={loading ? 'Refreshing' : 'Refresh'}
+                  title="Reread the table's counts and metadata"
+                  onClick={onReload}
+                  disabled={loading}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M20 12a8 8 0 1 1-2.6-5.9" />
+                    <path d="M20 4v5h-5" />
+                  </svg>
+                </button>
+              </div>
+            </div>
 
-          <div className="stat-grid">
-            <StatCard label="Triples" value={formatCount(stats.triples)} accent="green" />
-            <StatCard label="Distinct subjects" value={formatCount(stats.subjects)} accent="blue" />
-            <StatCard label="Distinct predicates" value={formatCount(stats.predicates)} accent="sky" />
-            <StatCard label="Distinct objects" value={formatCount(stats.objects)} accent="yellow" />
-            <StatCard label="Snapshots" value={formatCount(stats.snapshots.rows?.length ?? 0)} accent="gray" />
-          </div>
+            <dl className="dataset-figures">
+              <div className="figure headline">
+                <dd>{formatCount(stats.triples)}</dd>
+                <dt>Triples</dt>
+              </div>
+              <div className="figure">
+                <dd>{formatCount(stats.subjects)}</dd>
+                <dt>Distinct subjects</dt>
+              </div>
+              <div className="figure">
+                <dd>{formatCount(stats.predicates)}</dd>
+                <dt>Distinct predicates</dt>
+              </div>
+              <div className="figure">
+                <dd>{formatCount(stats.objects)}</dd>
+                <dt>Distinct objects</dt>
+              </div>
+            </dl>
+
+          </section>
 
           <Section title="Snapshots" caption="Every commit written to the Iceberg table, newest first.">
             <ResultTable header={stats.snapshots.header} rows={stats.snapshots.rows} empty="No snapshots yet" />
@@ -73,7 +100,7 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
 
           <Section
             title="Vocabularies"
-            caption="Every vocabulary sal build/validate has pinned, unioned with what sal import has recorded — the same listing sal get vocabularies prints."
+            caption="Every RDF vocabulary that is imported or pinned in the project"
           >
             <ResultTable
               header={stats.vocabularies.header}
@@ -95,13 +122,10 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
   )
 }
 
-function StatCard({ label, value, accent }: { label: string; value: string; accent: string }) {
-  return (
-    <div className="stat-card" data-accent={accent}>
-      <span className="stat-value">{value}</span>
-      <span className="stat-label">{label}</span>
-    </div>
-  )
+/** The last path segment of the table, which names a project whose ontology has no title. */
+function tableName(tablePath: string) {
+  const segments = tablePath.replace(/\/+$/, '').split('/')
+  return segments[segments.length - 1] || tablePath
 }
 
 function Section({ title, caption, children }: { title: string; caption: string; children: React.ReactNode }) {

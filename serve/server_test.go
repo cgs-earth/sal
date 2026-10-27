@@ -163,6 +163,24 @@ func TestEndpointWithUIServesTheAppAtRoot(t *testing.T) {
 	require.Contains(t, string(body), "/assets/")
 }
 
+func TestEndpointWithUIServesTheDisplayFontAsAFont(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/fonts/sora-latin-wght-normal.woff2")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "font/woff2", resp.Header.Get("Content-Type"))
+	require.Empty(t, resp.Header.Get("Content-Encoding"), "woff2 is already compressed")
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, "wOF2", string(body[:4]))
+}
+
 func TestEndpointWithUIFallsBackToIndexForUnknownPaths(t *testing.T) {
 	server := newUIServer(t, &endpointUIRunner{})
 	defer server.Close()
@@ -587,11 +605,13 @@ func TestEndpointWithUIReportsBlobListingErrorsAsJSON(t *testing.T) {
 
 func TestEndpointWithUIReturnsTableStats(t *testing.T) {
 	runner := &endpointUIRunner{stats: salsparql.TableStats{
-		TablePath:  "/tmp/warehouse/sal/triples",
-		Triples:    12,
-		Subjects:   3,
-		Predicates: 4,
-		Objects:    9,
+		TablePath:   "/tmp/warehouse/sal/triples",
+		Title:       "Demo data product",
+		Description: "Represents the ontology for the demo project overall.",
+		Triples:     12,
+		Subjects:    3,
+		Predicates:  4,
+		Objects:     9,
 		Snapshots: salsparql.Result{
 			Header: []string{"snapshot_id"},
 			Rows:   [][]string{{"123"}},
@@ -616,6 +636,8 @@ func TestEndpointWithUIReturnsTableStats(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	var body salsparql.TableStats
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, "Demo data product", body.Title)
+	require.Equal(t, "Represents the ontology for the demo project overall.", body.Description)
 	require.Equal(t, int64(12), body.Triples)
 	require.Equal(t, int64(9), body.Objects)
 	require.Equal(t, "/tmp/warehouse/sal/triples", body.TablePath)
