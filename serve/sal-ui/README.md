@@ -30,13 +30,21 @@ server falls back to. The form's sources are under `src/init/`; it talks to the 
 
 ## Development
 
-Run the Go server in one terminal and Vite in another. Vite proxies `/api`, `/sparql`, and
-`/geometries` to port 8080, so the UI talks to real data with hot reloading:
+One target runs the Go server and Vite together. Vite proxies `/api`, `/sparql`, `/geometries`,
+`/blobs`, and `/stac` to port 8080, so the UI talks to real data with hot reloading:
 
 ```sh
-sal serve --with-ui   # terminal 1
-make ui_dev           # terminal 2, then open the URL Vite prints
+make dev              # then open http://localhost:5173
 ```
+
+Open Vite's port, not 8080: the Go server on 8080 serves the committed `dist` embedded in
+the binary, so an edit under `src` only shows on 5173 until `make ui` rebuilds `dist`.
+
+That runs both halves with hot reload: Vite serves the UI from `src` with hot module
+replacement, and [air](https://github.com/air-verse/air), fetched on demand with `go run`,
+rebuilds sal into `.tmp/` and restarts `sal serve --with-ui` on every Go change. The server
+reads the SAL project in the current directory; `SAL_DEV_PROJECT=path make dev` points it
+at another project's table.
 
 For the module init form, run `sal init --salmodule --ui` in a module repository instead,
 point the proxy at the address it prints, and open `/salmodule-init.html` on Vite's port:

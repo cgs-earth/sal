@@ -1,0 +1,35 @@
+# Hot reload for `make dev`: air rebuilds sal on every Go change and restarts
+# `sal serve --with-ui`, while Vite's dev server reloads the React UI on its
+# own. Run with `go run github.com/air-verse/air@latest`, so nothing is added
+# to go.mod. The build lands in .tmp/, which is gitignored.
+root = "."
+tmp_dir = ".tmp"
+
+[build]
+cmd = "go build -o ./.tmp/sal ."
+# The server reads the SAL project in the working directory, so SAL_DEV_PROJECT
+# points it at another project's table; by default it serves this repository's.
+full_bin = "root=$PWD; cd \"${SAL_DEV_PROJECT:-.}\" && exec \"$root/.tmp/sal\" serve --with-ui"
+include_ext = ["go"]
+exclude_dir = [".tmp", ".sal", ".git", "docs", "examples", "integration_tests", "serve/sal-ui", "testdata", "sal-sbx-dev-kit"]
+exclude_regex = ["_test\\.go$"]
+# Linking DuckDB takes a few seconds, so changes made while a build runs are
+# folded into the next one rather than each starting a build of their own.
+delay = 500
+# The server stops cleanly on an interrupt, flushing telemetry; give it that
+# before it is killed.
+send_interrupt = true
+kill_delay = "2s"
+stop_on_error = false
+log = "build-errors.log"
+
+[log]
+time = true
+
+[color]
+main = "cyan"
+build = "yellow"
+runner = "green"
+
+[misc]
+clean_on_exit = true

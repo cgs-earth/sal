@@ -20,6 +20,17 @@
  * `<html data-theme>` chooses between them. index.html sets it before the first
  * paint from what theme.ts remembered, or the system preference.
  */
+/* Sora is the display face behind District Pro: self-hosted from public/fonts so
+   the embedded UI needs no network, latin only, variable weight. The SIL Open
+   Font License it is shipped under sits beside it. */
+@font-face {
+  font-family: 'Sora';
+  src: url('/fonts/sora-latin-wght-normal.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --cgs-continental-green: #46ab9d;
   --cgs-fluvial-blue: #2c84b9;
@@ -35,7 +46,7 @@
 
   /* District Pro for display text and Aptos for body copy, when the machine has
      them; the fallbacks are the clean sans-serifs the guidelines allow. */
-  --font-display: 'District Pro', 'Aptos', 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-display: 'District Pro', 'Sora', 'Aptos', 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-sans: 'Aptos', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', 'Menlo', 'Consolas', monospace;
 

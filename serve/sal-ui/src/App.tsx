@@ -122,7 +122,7 @@ export function App() {
             <MapTab />
           </Suspense>
         )}
-        {/* Inside the scrolling content rather than under it, so the footer is
+        {/* Inside the content rather than under it, so the footer is
             only reached by scrolling past the end of a tab and never takes a
             strip of the viewport from the editors and the map. */}
         <footer className="app-footer">

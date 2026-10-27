@@ -20,6 +20,15 @@ import (
 //go:embed all:sal-ui/dist
 var uiAssets embed.FS
 
+// Go's built-in MIME table has no entry for the self-hosted display font under
+// dist/fonts, and the system table is not guaranteed one either, so it is
+// registered here rather than left to be served as an octet stream.
+func init() {
+	if err := mime.AddExtensionType(".woff2", "font/woff2"); err != nil {
+		slog.Warn("failed to register the woff2 MIME type", "error", err)
+	}
+}
+
 // ModuleInitUIPage is the page of the embedded app that `sal init --salmodule
 // --ui` serves: the form that writes a module's ontology.jsonld. It is a second
 // entry of the Vite build next to index.html, so it shares the app's theme,

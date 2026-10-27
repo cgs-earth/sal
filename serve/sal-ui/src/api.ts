@@ -9,6 +9,9 @@ export type QueryResult = {
 
 export type TableStats = {
   tablePath: string
+  /** The dc:title and rdfs:comment of the project ontology in .sal/config.jsonld; empty for a remote table or a project that never ran sal import. */
+  title: string
+  description: string
   triples: number
   subjects: number
   predicates: number
