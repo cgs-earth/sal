@@ -6,7 +6,8 @@ import { fetchExtent, fetchGeometries, type BBox, type GeoJSONFeature } from '..
 import { boundsOf, boxPolygon, featuresFromResult, type MapFeature } from '../geo'
 import { useResults, type ResultSource } from '../results'
 import { pathForTab, visit } from '../routing'
-import { mapPalette, useTheme, type MapPalette, type Theme } from '../theme'
+import { addExtentLayers, BASEMAP } from '../basemap'
+import { mapPalette, useTheme, type MapPalette } from '../theme'
 
 /**
  * What the map draws: the last result of one of the editors, or a bounding box
@@ -34,12 +35,6 @@ const FIT_PADDING = 48
 
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] }
 
-/** A dark and a light basemap, so the map follows the page theme. */
-const BASEMAP: Record<Theme, string> = {
-  dark: 'https://tiles.openfreemap.org/styles/fiord',
-  light: 'https://tiles.openfreemap.org/styles/positron',
-}
-
 /** The layers a click on a feature is looked up in, topmost first. */
 const FEATURE_LAYERS = ['features-point', 'features-line', 'features-fill']
 
@@ -50,21 +45,9 @@ const FEATURE_LAYERS = ['features-point', 'features-line', 'features-fill']
  * in the other palette.
  */
 function addLayers(map: maplibregl.Map, { feature, extent, point, pointStroke, box }: MapPalette) {
-  map.addSource('extent', { type: 'geojson', data: EMPTY })
+  addExtentLayers(map, extent)
   map.addSource('bbox', { type: 'geojson', data: EMPTY })
   map.addSource('features', { type: 'geojson', data: EMPTY })
-  map.addLayer({
-    id: 'extent-fill',
-    type: 'fill',
-    source: 'extent',
-    paint: { 'fill-color': extent, 'fill-opacity': 0.08 },
-  })
-  map.addLayer({
-    id: 'extent-line',
-    type: 'line',
-    source: 'extent',
-    paint: { 'line-color': extent, 'line-width': 1.5, 'line-dasharray': [4, 3] },
-  })
   map.addLayer({
     id: 'features-fill',
     type: 'fill',
