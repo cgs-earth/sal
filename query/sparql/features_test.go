@@ -11,16 +11,18 @@ import (
 // sampleTriples is a DuckDB with a triples table in the shape build writes,
 // holding a few people, so that the SQL the translator writes for the
 // constructs beyond basic patterns can be run rather than only compared as
-// text. The spatial extension is loaded for the geometry column and the
-// ST_AsText every projected object goes through.
+// text. The spatial extension would have to be downloaded, which a unit test
+// must not do, so object_geometry holds WKT text and two macros stand in for
+// the ST_AsText every projected object goes through and the ST_GeomFromText
+// a geometry literal becomes; the SQL under test is the same either way.
 func sampleTriples(t *testing.T) *sql.DB {
 	t.Helper()
 	db := localDB(t)
 	ctx := context.Background()
-	_, err := db.ExecContext(ctx, "LOAD spatial")
+	_, err := db.ExecContext(ctx, "CREATE MACRO ST_AsText(g) AS g; CREATE MACRO ST_GeomFromText(wkt) AS wkt;")
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, `CREATE TABLE triples AS SELECT * FROM (VALUES
-	 ('http://a', 'https://schema.org/name', NULL::VARCHAR, NULL::DOUBLE, NULL::BIGINT, NULL::INTEGER, NULL::TIMESTAMP, NULL::GEOMETRY, 'alice', 'http://www.w3.org/2001/XMLSchema#string', NULL::VARCHAR, 'h1'),
+	 ('http://a', 'https://schema.org/name', NULL::VARCHAR, NULL::DOUBLE, NULL::BIGINT, NULL::INTEGER, NULL::TIMESTAMP, NULL::VARCHAR, 'alice', 'http://www.w3.org/2001/XMLSchema#string', NULL::VARCHAR, 'h1'),
 	 ('http://a', 'https://schema.org/age', NULL, NULL, 30, NULL, NULL, NULL, NULL, 'http://www.w3.org/2001/XMLSchema#integer', NULL, 'h2'),
 	 ('http://b', 'https://schema.org/name', NULL, NULL, NULL, NULL, NULL, NULL, 'bob', 'http://www.w3.org/2001/XMLSchema#string', NULL, 'h3'),
 	 ('http://b', 'https://schema.org/age', NULL, NULL, 9, NULL, NULL, NULL, NULL, 'http://www.w3.org/2001/XMLSchema#integer', NULL, 'h4'),
@@ -28,7 +30,7 @@ func sampleTriples(t *testing.T) *sql.DB {
 	 ('http://a', 'https://schema.org/knows', 'http://c', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'h6'),
 	 ('http://c', 'http://www.w3.org/2000/01/rdf-schema#label', NULL, NULL, NULL, NULL, NULL, NULL, 'carol', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString', 'en', 'h7'),
 	 ('http://c', 'https://schema.org/birthDate', NULL, NULL, NULL, NULL, TIMESTAMP '1990-06-15 00:00:00', NULL, NULL, 'http://www.w3.org/2001/XMLSchema#dateTime', NULL, 'h8'),
-	 ('http://c', 'https://schema.org/geo', NULL, NULL, NULL, NULL, NULL, ST_GeomFromText('POINT(1 2)'), NULL, 'http://www.opengis.net/ont/geosparql#wktLiteral', NULL, 'h9')
+	 ('http://c', 'https://schema.org/geo', NULL, NULL, NULL, NULL, NULL, 'POINT (1 2)', NULL, 'http://www.opengis.net/ont/geosparql#wktLiteral', NULL, 'h9')
 	) t(subject, predicate, object_iri, object_float, object_integer, object_byte, object_time, object_geometry, object_string, object_type, object_language, triple_hash)`)
 	require.NoError(t, err)
 	return db
