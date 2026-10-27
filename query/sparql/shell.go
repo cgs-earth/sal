@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"encoding/hex"
 	"fmt"
+	rdflibsparql "github.com/tggo/goRDFlib/sparql"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -103,6 +104,14 @@ func (r DuckDBRunner) Run(ctx context.Context, query string) (_ Result, err erro
 		return Result{}, err
 	}
 	return r.RunSQL(ctx, sql)
+}
+
+// IsAsk reports whether a query is an ASK, whose result is the one boolean the
+// column named ask holds rather than a table of bindings. A query that does
+// not parse is not one.
+func IsAsk(query string) bool {
+	parsed, err := rdflibsparql.Parse(rewriteService(query))
+	return err == nil && parsed.Type == "ASK"
 }
 
 // Translate is the SQL Run executes for a SPARQL query: the translation with

@@ -57,16 +57,18 @@ type Sample = { name: string; query: string }
 
 /*
  * Starter queries. The `/sparql` endpoint translates SPARQL to DuckDB SQL and
- * only understands basic triple patterns, property paths, FILTER comparisons,
- * the LANG and DATATYPE accessors, DISTINCT, LIMIT, MINUS and FILTER [NOT]
- * EXISTS, and a SERVICE naming one of this server's own snapshot endpoints, so
- * every sample stays inside that subset. The snapshot samples need a snapshot
- * ID only the server knows, so they are built by snapshotSamples from the
- * Stats listing rather than listed here. The inherited classes and label
- * samples walk whatever class and property hierarchies the table holds, the
- * project's own statements and the ontologies it imports with owl:imports;
- * neither names a term of any particular vocabulary, so they work over
- * whatever the dataset holds.
+ * understands triple patterns, property paths, OPTIONAL, UNION, BIND, VALUES,
+ * subqueries, FILTER expressions and the SPARQL builtins, aggregates with
+ * GROUP BY and HAVING, ORDER BY, LIMIT and OFFSET, MINUS and FILTER [NOT]
+ * EXISTS, ASK, and a SERVICE naming one of this server's own snapshot
+ * endpoints, so every sample stays inside that subset. The snapshot samples
+ * need a snapshot ID only the server knows, so they are built by
+ * snapshotSamples from the Stats listing rather than listed here. The
+ * samples name no term of any particular vocabulary beyond rdf, rdfs, and
+ * the ones sal itself writes, so they work over whatever the dataset holds;
+ * the inherited classes and label samples walk whatever class and property
+ * hierarchies the table holds, the project's own statements and the
+ * ontologies it imports with owl:imports.
  */
 const SAMPLES: Sample[] = [
   {
@@ -181,6 +183,146 @@ WHERE {
   FILTER(?type != rdfs:Class)
 }
 LIMIT 50`,
+  },
+  {
+    name: 'Instances per type',
+    query: `${PREFIXES}
+# How many subjects each type has, largest first: an aggregate with
+# GROUP BY, HAVING, and ORDER BY.
+SELECT ?type (COUNT(?subject) AS ?instances)
+WHERE {
+  ?subject rdf:type ?type .
+}
+GROUP BY ?type
+HAVING (COUNT(?subject) > 1)
+ORDER BY DESC(?instances)
+LIMIT 25`,
+  },
+  {
+    name: 'Predicate usage',
+    query: `# Every predicate with how often it is used and how many distinct
+# subjects use it.
+SELECT ?predicate (COUNT(*) AS ?uses) (COUNT(DISTINCT ?subject) AS ?subjects)
+WHERE {
+  ?subject ?predicate ?object .
+}
+GROUP BY ?predicate
+ORDER BY DESC(?uses) ?predicate`,
+  },
+  {
+    name: 'Labels where available',
+    query: `${PREFIXES}
+# Every typed subject, with its label when it has one and its IRI
+# otherwise: OPTIONAL leaves ?label unbound, and COALESCE fills it in.
+SELECT ?subject ?type (COALESCE(?label, STR(?subject)) AS ?name)
+WHERE {
+  ?subject rdf:type ?type .
+  OPTIONAL { ?subject rdfs:label ?label }
+}
+ORDER BY ?type ?name
+LIMIT 50`,
+  },
+  {
+    name: 'Unlabelled subjects',
+    query: `${PREFIXES}
+# Typed subjects that carry no rdfs:label, found by an OPTIONAL that
+# matched nothing. FILTER NOT EXISTS asks the same question.
+SELECT ?subject ?type
+WHERE {
+  ?subject rdf:type ?type .
+  OPTIONAL { ?subject rdfs:label ?label }
+  FILTER(!BOUND(?label))
+}
+LIMIT 50`,
+  },
+  {
+    name: 'Labels or comments',
+    query: `${PREFIXES}
+# One column of text from either property, with the property it came
+# from: each arm of the UNION binds ?text and ?source its own way.
+SELECT ?subject ?text ?source
+WHERE {
+  { ?subject rdfs:label ?text . BIND("label" AS ?source) }
+  UNION
+  { ?subject rdfs:comment ?text . BIND("comment" AS ?source) }
+}
+ORDER BY ?subject ?source
+LIMIT 50`,
+  },
+  {
+    name: 'Describe a few subjects',
+    query: `# Everything said about a handful of subjects named inline. Replace
+# the IRIs with ones from the All triples sample.
+SELECT ?subject ?predicate ?object
+WHERE {
+  VALUES ?subject { <https://example.org/a> <https://example.org/b> }
+  ?subject ?predicate ?object .
+}
+ORDER BY ?subject ?predicate`,
+  },
+  {
+    name: 'Search labels',
+    query: `${PREFIXES}
+# Case-insensitive search through labels with REGEX, projecting the
+# label's length and an upper-cased copy through BIND.
+SELECT ?subject ?label ?length ?shout
+WHERE {
+  ?subject rdfs:label ?label .
+  FILTER(REGEX(?label, "a", "i"))
+  BIND(STRLEN(?label) AS ?length)
+  BIND(UCASE(?label) AS ?shout)
+}
+ORDER BY DESC(?length)
+LIMIT 50`,
+  },
+  {
+    name: 'Numeric objects',
+    query: `# Every numeric value in the table, largest first, with a little
+# arithmetic: isNumeric reads the typed object columns.
+SELECT ?subject ?predicate ?value (?value * 2 AS ?doubled)
+WHERE {
+  ?subject ?predicate ?value .
+  FILTER(isNumeric(?value))
+}
+ORDER BY DESC(?value)
+LIMIT 50`,
+  },
+  {
+    name: 'Most described subjects',
+    query: `${PREFIXES}
+# The subjects with the most statements, joined to their labels through
+# a subquery that counts per subject.
+SELECT ?subject ?statements ?label
+WHERE {
+  {
+    SELECT ?subject (COUNT(*) AS ?statements)
+    WHERE { ?subject ?predicate ?object . }
+    GROUP BY ?subject
+  }
+  OPTIONAL { ?subject rdfs:label ?label }
+}
+ORDER BY DESC(?statements)
+LIMIT 25`,
+  },
+  {
+    name: 'Second page of labels',
+    query: `${PREFIXES}
+# Page through an ordered result with LIMIT and OFFSET.
+SELECT ?subject ?label
+WHERE {
+  ?subject rdfs:label ?label .
+}
+ORDER BY ?label
+LIMIT 25
+OFFSET 25`,
+  },
+  {
+    name: 'Any labels?',
+    query: `${PREFIXES}
+# An ASK answers true or false rather than rows.
+ASK {
+  ?subject rdfs:label ?label .
+}`,
   },
   {
     name: 'Geometries',
@@ -595,6 +737,13 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
               <li>
                 A <code>SERVICE</code> naming <code>/v&#123;snapshot&#125;/sparql</code> reads the table at an earlier
                 snapshot, and <code>MINUS</code> subtracts one from the other, so one query can diff two.
+              </li>
+              <li>
+                <code>OPTIONAL</code>, <code>UNION</code>, <code>BIND</code>, <code>VALUES</code>, subqueries,
+                aggregates with <code>GROUP BY</code> and <code>HAVING</code>, <code>ORDER BY</code> with{' '}
+                <code>OFFSET</code>, the string, numeric, and date builtins, and <code>ASK</code> all translate; the{' '}
+                <em>Instances per type</em>, <em>Labels where available</em>, and <em>Labels or comments</em> samples
+                show the shape. <code>GRAPH</code> does not, since the table holds a single graph.
               </li>
               <li>
                 A property path such as <code>rdfs:subClassOf*</code> walks whatever hierarchy the table holds: the

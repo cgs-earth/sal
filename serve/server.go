@@ -731,7 +731,11 @@ func (h sparqlHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", sparqlResultsJSON)
-	if err := json.NewEncoder(w).Encode(sparqlJSONResult(result)); err != nil {
+	var response any = sparqlJSONResult(result)
+	if salsparql.IsAsk(query) {
+		response = sparqlJSONAsk(result)
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		slog.Error("failed to write SPARQL JSON result", "error", err)
 	}
 }
@@ -915,6 +919,22 @@ type sparqlJSONResults struct {
 type sparqlJSONResponse struct {
 	Head    sparqlJSONHead    `json:"head"`
 	Results sparqlJSONResults `json:"results"`
+}
+
+// sparqlJSONAskResponse is the SPARQL JSON result of an ASK: a boolean in
+// place of the bindings.
+type sparqlJSONAskResponse struct {
+	Head    struct{} `json:"head"`
+	Boolean bool     `json:"boolean"`
+}
+
+// sparqlJSONAsk reads the one boolean the translated ASK projects.
+func sparqlJSONAsk(result salsparql.Result) sparqlJSONAskResponse {
+	response := sparqlJSONAskResponse{}
+	if len(result.Rows) == 1 && len(result.Rows[0]) == 1 {
+		response.Boolean = result.Rows[0][0] == "true"
+	}
+	return response
 }
 
 func sparqlJSONResult(result salsparql.Result) sparqlJSONResponse {

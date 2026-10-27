@@ -4,7 +4,7 @@ description: How SAL answers SPARQL queries by translating them to DuckDB SQL ov
 ---
 
 SAL answers SPARQL by **translating it to SQL**, not by loading the graph into a triplestore.
-A `SELECT` query is parsed, rewritten into a DuckDB statement over the `triples` view of the built Iceberg table, and executed there.
+A query is parsed, rewritten into a DuckDB statement over the `triples` view of the built Iceberg table, and executed there.
 
 This keeps queries running directly against the data product on disk or in object storage, with no separate database to load or keep in sync.
 The cost is that only the subset of SPARQL that has a direct relational translation is supported; everything else is reported as an error rather than silently answered wrong.
@@ -103,20 +103,25 @@ In a `FILTER`, the same rule applies to whichever side the variable is compared 
 | --- | --- | --- |
 | `SELECT` | Yes | |
 | `CONSTRUCT` | Yes | Projects the triples the template builds; see [CONSTRUCT](#construct). |
-| `SELECT *` | Yes | Projects every variable bound by a triple pattern. |
+| `ASK` | Yes | Projects one boolean column, `ask`; the HTTP endpoint answers it as a SPARQL JSON `boolean`. |
+| `DESCRIBE` | No | Not parsed. |
+| `SELECT *` | Yes | Projects every variable the group binds, in the order they are first named. |
 | `DISTINCT` | Yes | Becomes `SELECT DISTINCT`. |
 | `PREFIX` | Yes | Prefixed names are expanded before translation; an undeclared prefix is an error. |
-| `WHERE` | Yes | Must contain at least one triple pattern. |
-| `FILTER` | Partly | Comparisons and boolean combinations only — see [Filters](#filters). |
-| `LIMIT` | Yes | Becomes `LIMIT`. |
-| `ASK`, `DESCRIBE` | No | `only read-only SPARQL SELECT and CONSTRUCT queries are supported`. |
-| `(LANG(?o) AS ?lang)`, `(DATATYPE(?o) AS ?type)` | Yes | The only projection expressions; see [Language tags and datatypes](#language-tags-and-datatypes). |
-| `OFFSET`, `ORDER BY`, `GROUP BY`, `HAVING` | No | `SPARQL solution modifiers are not supported yet`. |
-| Aggregates and other projection expressions, e.g. `(COUNT(?s) AS ?n)` | No | `SPARQL function "count" is not supported yet`. Count in SQL instead: `SELECT count(*) FROM triples`. |
+| `WHERE` | Yes | Must contain at least one triple pattern, `VALUES`, `UNION`, or subquery. |
+| `FILTER` | Yes | Comparisons, boolean combinations, arithmetic, and the functions listed under [Expressions and functions](#expressions-and-functions). |
+| `(expr AS ?name)` | Yes | Any expression, aggregates included; a geometry-valued one is rendered as WKT. |
+| `OPTIONAL { ... }` | Yes | Becomes a `LEFT JOIN`; see [Group patterns](#group-patterns). |
+| `UNION` | Yes | Becomes a derived table of the arms combined with `UNION ALL`. |
+| `BIND(expr AS ?x)` | Yes | The expression is inlined wherever `?x` is read. |
+| `VALUES` | Yes | Becomes a `VALUES` derived table joined on the variables it names; `UNDEF` is `NULL` and matches anything. |
+| `{ SELECT ... }` (subquery) | Yes | Becomes a derived table joined on the variables it projects. |
+| `GROUP BY`, `HAVING`, aggregates | Yes | `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `GROUP_CONCAT`, `SAMPLE`; see [Solution modifiers and aggregates](#solution-modifiers-and-aggregates). |
+| `ORDER BY`, `LIMIT`, `OFFSET` | Yes | An object variable orders numbers as numbers and dates as dates. |
 | `SERVICE <endpoint> { ... }` | Partly | Only this server's own `/sparql` and `/v{snapshot}/sparql` endpoints; see [Diffing snapshots with SERVICE and MINUS](#diffing-snapshots-with-service-and-minus). |
 | `MINUS { ... }` | Yes | Becomes a correlated `NOT EXISTS` subquery; see [MINUS and EXISTS](#minus-and-exists). |
 | `FILTER EXISTS { ... }`, `FILTER NOT EXISTS { ... }` | Yes | Become a correlated `EXISTS` / `NOT EXISTS` subquery, usable inside `&&`, `\|\|`, and `!`. |
-| `OPTIONAL`, `UNION`, `GRAPH`, `BIND`, `VALUES`, subqueries | No | `only basic SPARQL triple patterns and FILTER expressions are supported yet`. |
+| `GRAPH` | No | `a GRAPH clause is not supported; the table holds a single graph`. |
 | Property paths, e.g. `rdf:type/rdfs:subClassOf*` | Partly | Sequences, inverses, alternatives, negated sets, and repetition of a single step; see [Property paths](#property-paths). |
 | `REDUCED` | Ignored | Accepted, but results are not deduplicated. Use `DISTINCT` if you need that. |
 
@@ -138,7 +143,7 @@ WHERE     { ?a schema:knows ?b }
 | Variables, IRIs, and literals | Yes | An object variable keeps its datatype and language tag. A bare number is typed by its form: `1` is an `xsd:integer`, `1.5` an `xsd:decimal`, `1e5` an `xsd:double`. |
 | Blank nodes, `_:b` and `[ ... ]` | Yes | A different node for every solution, named from the values the solution binds so that the same data always constructs the same node. |
 | `CONSTRUCT WHERE { ... }` | Yes | The pattern is the template; it may hold only plain triple patterns. |
-| `LIMIT` | Yes | Bounds the solutions, not the triples built from them. |
+| `LIMIT`, `OFFSET` | Yes | Bound the solutions, not the triples built from them. `ORDER BY` is ignored, since a graph has no order. |
 | A variable the `WHERE` clause does not bind | No | `CONSTRUCT template variable ?x is not bound by a supported triple pattern`. |
 
 A triple a solution makes invalid, one with a literal as its subject or anything but an IRI as its predicate, is left out rather than failing the query, as SPARQL specifies.
@@ -164,19 +169,9 @@ A datatype is used only to decide which object column to compare against, never 
 
 ### Filters
 
-`FILTER` supports comparisons between a variable and a constant, or between two constants, combined with `&&` and `||`:
-
-| Operator | Supported | Notes |
-| --- | --- | --- |
-| `=`, `!=`, `<`, `>`, `<=`, `>=` | Yes | |
-| `&&`, `\|\|`, `!` | Yes | |
-| `LANG`, `DATATYPE`, `LANGMATCHES` | Yes | Over an object variable; see [Language tags and datatypes](#language-tags-and-datatypes). |
-| GeoSPARQL `geof:` functions | Partly | The Simple Features relations, `geof:distance`, and the geometry constructors; see [GeoSPARQL](#geosparql). |
-| Arithmetic, `IN`, `EXISTS` | No | |
-| Functions such as `REGEX`, `STR`, `BOUND` | No | |
-
+A `FILTER` is any boolean expression over the variables in scope; see [Expressions and functions](#expressions-and-functions) for what an expression may hold.
 Several `FILTER`s in one group are all applied, as if joined by `&&`.
-A `FILTER` over a variable no triple pattern binds is an error rather than a query that matches nothing.
+A `FILTER` over a variable nothing binds is an error rather than a query that matches nothing.
 
 ```sparql
 PREFIX schema: <https://schema.org/>
@@ -194,6 +189,169 @@ FROM triples AS t0
 WHERE t0.predicate = 'https://schema.org/age'
   AND (COALESCE(t0.object_float, CAST(t0.object_integer AS DOUBLE), CAST(t0.object_byte AS DOUBLE)) >= 21
    AND COALESCE(t0.object_float, CAST(t0.object_integer AS DOUBLE), CAST(t0.object_byte AS DOUBLE)) < 65)
+```
+
+## Group patterns
+
+A group graph pattern is flattened into one `FROM` clause: one aliased scan per triple pattern, one derived table per `VALUES`, `UNION`, and subquery, and one `LEFT JOIN` per `OPTIONAL`.
+The parser nests each construct over the pattern written before it, so the translation remembers which variables each one applied to where SPARQL's scoping depends on it.
+
+### OPTIONAL
+
+An `OPTIONAL` group becomes a `LEFT JOIN`.
+The group is translated like a group of its own (`o0_0`, `o0_1`, ..., a second group gets `o1_`), and everything it would put in a `WHERE` clause, its constants, joins, and `FILTER`s, goes in the `ON` clause instead, together with an equality for every variable it shares with the pattern before it.
+The join therefore extends a solution with the whole group or leaves every variable of it `NULL`, which is what SPARQL's `LeftJoin` does; a group of several patterns is joined as a parenthesized `CROSS JOIN`.
+A `FILTER` inside the group may name the variables of the pattern before it, as SPARQL allows.
+
+```sparql
+PREFIX schema: <https://schema.org/>
+
+SELECT ?s ?age
+WHERE {
+  ?s schema:name ?name .
+  OPTIONAL { ?s schema:age ?age }
+}
+```
+
+```sql
+SELECT t0.subject AS "s", COALESCE(...) AS "age"
+FROM triples AS t0
+LEFT JOIN triples AS o0_0 ON o0_0.predicate = 'https://schema.org/age'
+  AND t0.subject = o0_0.subject
+WHERE t0.predicate = 'https://schema.org/name'
+```
+
+A variable the `OPTIONAL` binds is nullable from then on: `BOUND(?age)` tests it, `COALESCE(?age, 0)` fills it, `COUNT(?age)` counts only the solutions that bound it, and `ORDER BY ?age` puts the unbound solutions last, where DuckDB orders `NULL`.
+A variable the group shares with a pattern written *after* it is joined through the `WHERE` clause as `NULL` or equal, since SPARQL joins that pattern to the solutions the `OPTIONAL` has already extended.
+
+### UNION
+
+`{ A } UNION { B }` becomes a derived table (`u0`, with the arms' scans as `u0_0_0`, `u0_1_0`, ...) holding the arms combined with `UNION ALL`, joined to the rest of the group on the variables they share.
+Every variable any arm binds is a column of every arm, `NULL` in an arm that does not bind it, and such a variable is nullable like one an `OPTIONAL` binds.
+A variable every arm binds in object position keeps its typed columns, so `LANG`, `DATATYPE`, and a numeric comparison still work on it; one every arm binds as a subject or predicate stays one; anything else is the text the term renders to.
+
+```sparql
+PREFIX schema: <https://schema.org/>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?s ?label
+WHERE {
+  { ?s schema:name ?label } UNION { ?s rdfs:label ?label }
+}
+```
+
+### BIND and VALUES
+
+`BIND(expr AS ?x)` translates the expression once and inlines it wherever `?x` is read, in a `FILTER`, a projection, or a later `BIND`.
+A `BIND` written before a triple pattern that also binds `?x` constrains the pattern, so `BIND(<http://example.org/a> AS ?s) ?s ?p ?o` matches one subject.
+A `BIND` may read a variable an `OPTIONAL` bound, which is how `BIND(COALESCE(?label, STR(?s)) AS ?name)` falls back.
+
+`VALUES` becomes a `VALUES` derived table (`v0`) with a column per variable, joined on the variables the group also binds.
+A term is written as the text a bound variable renders to, and a column holding only IRIs joins an object through `object_iri`.
+`UNDEF` is `NULL`, and a variable with an `UNDEF` in its column is nullable, so that row is compatible with every solution, as SPARQL specifies.
+
+### Subqueries
+
+`{ SELECT ... }` inside a group is translated like a query of its own and joined as a derived table (`q0`) on the variables it projects.
+Its variables are text from then on, so a subquery that computes an aggregate per subject is the way to join the count to the rest of the query:
+
+```sparql
+PREFIX schema: <https://schema.org/>
+
+SELECT ?name ?known
+WHERE {
+  ?s schema:name ?name .
+  {
+    SELECT ?s (COUNT(?o) AS ?known)
+    WHERE { ?s schema:knows ?o }
+    GROUP BY ?s
+  }
+}
+```
+
+## Solution modifiers and aggregates
+
+`GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, and `OFFSET` become the SQL clauses of the same name.
+
+| Clause | Notes |
+| --- | --- |
+| `GROUP BY ?x` | Groups by the expression `?x` reads; a grouped object variable is projected by the same expression, without its geometry. `GROUP BY (expr AS ?x)` binds `?x` to the expression. |
+| `HAVING (expr)` | Any boolean expression over aggregates, grouped variables, or the names of projected expressions. |
+| `ORDER BY ?x`, `DESC(?x)` | An object variable is ordered by its numeric columns, then its timestamps, then the text it renders to, so `9` sorts before `10` and dates sort as dates, numbers first, then dates, then everything else. Any other expression orders by its value. Unbound values order last. |
+| `LIMIT n`, `OFFSET n` | As written; the shell and the endpoint add their own `LIMIT` only to a query that states none. |
+
+| Aggregate | Becomes | Notes |
+| --- | --- | --- |
+| `COUNT(*)`, `COUNT(?x)`, `COUNT(DISTINCT ?x)` | `count(*)`, `count(...)`, `count(DISTINCT ...)` | `COUNT(?x)` counts the solutions that bind `?x`. |
+| `SUM(?x)`, `AVG(?x)` | `sum(...)`, `avg(...)` | Over the numeric columns, so the result is a `DOUBLE` and renders as one, `39.0` for a sum of integers. |
+| `MIN(?x)`, `MAX(?x)` | `min(...)`, `max(...)` | An object variable is taken over its numeric columns first, falling back to the text it renders to, so `MAX` of ages is `30.0` and `MIN` of names is the first alphabetically. |
+| `GROUP_CONCAT(?x; SEPARATOR=", ")` | `string_agg(..., ', ')` | The separator defaults to a space. |
+| `SAMPLE(?x)` | `any_value(...)` | |
+
+```sparql
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+SELECT ?type (COUNT(?s) AS ?n)
+WHERE {
+  ?s rdf:type ?type .
+}
+GROUP BY ?type
+HAVING (COUNT(?s) > 1)
+ORDER BY DESC(?n)
+LIMIT 10
+```
+
+```sql
+SELECT COALESCE(...) AS "type", count(t0.subject) AS "n"
+FROM triples AS t0
+WHERE t0.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'
+GROUP BY COALESCE(...)
+HAVING count(t0.subject) > 1
+ORDER BY count(t0.subject) DESC
+LIMIT 10
+```
+
+## Expressions and functions
+
+An expression may appear in a `FILTER`, a `BIND`, a projection, `GROUP BY`, `HAVING`, or `ORDER BY`.
+Each one is translated to the DuckDB operator or function of the same meaning, and its kind, a number, a string, an IRI, a boolean, a dateTime, or a geometry, decides which typed column an object variable it is compared against reads: `FILTER(?age > 21)` reads the numeric columns, `FILTER(?name = "bob")` reads `object_string`, `FILTER(?o = <iri>)` reads `object_iri`, and two variables compare as the text each renders to.
+A string function over an object variable reads `object_string`, so it yields `NULL` for an IRI or a number as SPARQL specifies; `STR` is the one function that reads any term.
+
+| Expression | Becomes |
+| --- | --- |
+| `=`, `!=`, `<`, `>`, `<=`, `>=`, `&&`, `\|\|`, `!` | The same operators, `AND`, `OR`, `NOT`. |
+| `+`, `-`, `*`, `/`, unary `-` | Arithmetic over the numeric columns; text is `TRY_CAST` to `DOUBLE`. |
+| `?x IN (a, b)`, `NOT IN` | Expanded to `=` and `!=` combined with `\|\|` and `&&` by the parser. |
+| `STR`, `LANG`, `DATATYPE`, `IRI`/`URI` | The rendered term, `object_language`, `object_type`; see [Language tags and datatypes](#language-tags-and-datatypes). |
+| `BOUND`, `COALESCE`, `IF` | `IS NOT NULL`, `COALESCE`, `CASE WHEN`. |
+| `isIRI`/`isURI`, `isBlank`, `isLiteral`, `isNumeric` | Tests on the typed columns: an IRI fills `object_iri`, a literal carries an `object_type`, a blank node has neither. |
+| `sameTerm` | `=`. |
+| `STRLEN`, `UCASE`, `LCASE`, `SUBSTR`, `CONCAT`, `STRSTARTS`, `STRENDS`, `CONTAINS`, `STRBEFORE`, `STRAFTER` | `length`, `upper`, `lower`, `substr`, `concat`, `starts_with`, `ends_with`, `contains`, and `substr` around `instr`. |
+| `REGEX(?x, pattern, flags)`, `REPLACE` | `regexp_matches` and `regexp_replace`, which take RE2 syntax. The flags `i`, `m`, `q`, and `s` are honored; `x` is an error. A replacement names a group as `$1`. |
+| `ABS`, `ROUND`, `CEIL`, `FLOOR`, `RAND` | The same functions, `random()`. |
+| `NOW`, `YEAR`, `MONTH`, `DAY`, `HOURS`, `MINUTES`, `SECONDS` | `now()`, `year`, `month`, `day`, `hour`, `minute`, `second` over `object_time`. `SECONDS` is whole seconds. |
+| `MD5`, `SHA1`, `SHA256` | The same functions. |
+| `xsd:integer(?x)`, `xsd:decimal`, `xsd:double`, `xsd:float`, `xsd:string`, `xsd:boolean`, `xsd:dateTime` | `TRY_CAST`, so a value that cannot be converted is unbound rather than an error. |
+| GeoSPARQL `geof:` functions | The Simple Features relations, `geof:distance`, and the geometry constructors; see [GeoSPARQL](#geosparql). |
+| `EXISTS { ... }`, `NOT EXISTS { ... }` | A correlated subquery; see [MINUS and EXISTS](#minus-and-exists). |
+
+Anything else, `STRDT`, `STRLANG`, `ENCODE_FOR_URI`, `TZ`, `TIMEZONE`, `UUID`, `STRUUID`, `BNODE`, and a function named by any other IRI, is reported as `SPARQL function "..." is not supported yet`.
+
+```sparql
+PREFIX schema: <https://schema.org/>
+
+SELECT ?s (UCASE(?name) AS ?shout)
+WHERE {
+  ?s schema:name ?name .
+  FILTER(REGEX(?name, "^a", "i") && STRLEN(?name) > 3)
+}
+```
+
+```sql
+SELECT t0.subject AS "s", upper(t0.object_string) AS "shout"
+FROM triples AS t0
+WHERE t0.predicate = 'https://schema.org/name'
+  AND (regexp_matches(t0.object_string, '^a', 'i') AND length(t0.object_string) > 3)
 ```
 
 ## MINUS and EXISTS
@@ -234,6 +392,7 @@ The two follow SPARQL's own scoping rules, which differ:
 
 A variable bound only inside a `MINUS` or `EXISTS` group is not bound outside it: `SELECT *` does not project it, and naming it in an outer `FILTER` or `SELECT` is an error.
 A group with no triple pattern is an error as well.
+Either group may hold an `OPTIONAL`, a `UNION`, a `BIND`, or a `VALUES` of its own.
 Correlating an object variable renders it with `ST_AsText`, which loads the spatial extension the first time, the same way projecting an object does; the `triple_hash` case does not.
 
 ## Property paths
@@ -377,7 +536,7 @@ A projected object variable shows only the lexical form of a literal: `"My test 
 | `LANGMATCHES(LANG(?o), "en")` | `(object_language = 'en' OR starts_with(object_language, 'en-'))` | RFC 4647 basic filtering, so `"en"` also matches `en-us`. The range is compared lower case, since tags are stored lower case. |
 | `LANGMATCHES(LANG(?o), "*")` | `object_language IS NOT NULL` | Any tagged literal. |
 
-`LANG` and `DATATYPE` can be projected with `AS` or compared in a `FILTER`; `LANGMATCHES` is a boolean and stands on its own in a `FILTER`. Only a `LANG` call is accepted as its first argument.
+`LANG` and `DATATYPE` can be projected with `AS`, bound with `BIND`, or compared in a `FILTER`; `LANGMATCHES` is a boolean and stands on its own in a `FILTER`. Only a `LANG` call is accepted as its first argument. A variable a `UNION` binds in object position in every arm keeps its tag and datatype; one a `BIND`, `VALUES`, or subquery bound is text and has neither.
 
 ```sparql
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
@@ -458,7 +617,7 @@ How a function may be used follows from what it returns:
 
 - A **boolean** function stands on its own in the `FILTER`, and can be negated with `!` or combined with `&&` and `||` like any other condition.
 - A **number**, which is only `geof:distance`, must be compared against a number with `<`, `<=`, `>`, `>=`, `=`, or `!=`.
-- A **geometry** function cannot be projected or compared, since projection expressions are not supported; it is only useful nested as the argument of a boolean or numeric one, such as `geof:sfContains(geof:envelope(?g), ...)`.
+- A **geometry** function can be projected, `(geof:envelope(?g) AS ?box)`, which renders it as WKT, or nested as the argument of a boolean or numeric one, such as `geof:sfContains(geof:envelope(?g), ...)`; it cannot be compared with `=`.
 
 Each geometry argument of a function is one of:
 
@@ -582,7 +741,7 @@ A projected object variable is rendered with `ST_AsText`, so a geometry comes ba
 
 - **One coordinate system.** CRS IRIs are dropped, not honored. All geometries are taken to share the CRS84 longitude/latitude frame the table declares, and `geof:distance` in degrees is a planar distance in that frame.
 - **Metres between points only.** `uom:metre` is answered with `ST_Distance_Sphere`, which DuckDB defines for points; between lines or polygons it is an error. Use degrees, or a bounding box, for those.
-- **No geometry output.** Because projection expressions are not supported, a query cannot `SELECT (geof:envelope(?g) AS ?box)`; geometry-valued functions only appear nested in a `FILTER`.
+- **Geometry output is WKT.** A projected geometry function, `SELECT (geof:envelope(?g) AS ?box)`, is rendered with `ST_AsText`; a geometry cannot be bound with `BIND` and compared as a geometry afterwards.
 - **No spatial index.** A relation against a literal evaluates the `ST_` function on every geometry row. That is quick for the sizes a data product usually holds, but it is a scan, not an R-tree lookup.
 - **First use loads the extension.** DuckDB's spatial extension is loaded on the first query that needs it, which adds a moment to that query and nothing to the ones after it in the same process.
 
@@ -676,5 +835,5 @@ Because results come back from SQL as text, a binding's `type` is inferred from 
 
 Two ways around it, depending on what you need:
 
-- **Query the table as SQL.** [`sal query`](/sal/reference/commands/#sal-query) opens the same `triples` view in a DuckDB shell, and `sal serve --with-ui` exposes `POST /api/sql`. Aggregation, ordering, window functions, the full set of `ST_` geometry functions, and joins against imported data products are all available there. A project that imported a data product with `sal import oci://...` gets a view per imported table plus an `imports` view stacking them, none of which SPARQL can reach — SPARQL only ever queries the project's own `triples` view.
+- **Query the table as SQL.** [`sal query`](/sal/reference/commands/#sal-query) opens the same `triples` view in a DuckDB shell, and `sal serve --with-ui` exposes `POST /api/sql`. Window functions, the full set of `ST_` geometry functions, and joins against imported data products are all available there. A project that imported a data product with `sal import oci://...` gets a view per imported table plus an `imports` view stacking them, none of which SPARQL can reach — SPARQL only ever queries the project's own `triples` view.
 - **Take the graph elsewhere.** [`sal export`](/sal/reference/commands/#sal-export) writes the data product as N-Triples, which any full SPARQL engine can load.

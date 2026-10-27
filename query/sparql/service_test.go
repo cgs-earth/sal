@@ -90,7 +90,7 @@ SELECT ?s WHERE { SERVICE ex:sparql { ?s ?p ?o } }`)
 func TestTranslateStillRejectsAGRAPHClause(t *testing.T) {
 	_, err := ToSQL(`SELECT ?s WHERE { GRAPH <http://localhost:8080/v1/sparql> { ?s ?p ?o } }`)
 
-	require.ErrorContains(t, err, "only basic SPARQL triple patterns and FILTER expressions are supported yet")
+	require.ErrorContains(t, err, "a GRAPH clause is not supported; the table holds a single graph")
 }
 
 func TestRewriteServiceLeavesATermCalledServiceAlone(t *testing.T) {

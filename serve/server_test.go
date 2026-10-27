@@ -429,7 +429,7 @@ func TestEndpointWithUIReportsSPARQLTranslationErrorsAsJSON(t *testing.T) {
 	defer server.Close()
 
 	resp, err := http.Post(server.URL+"/api/sparql/translate", "application/json",
-		strings.NewReader(`{"query":"ASK { ?s ?p ?o }"}`))
+		strings.NewReader(`{"query":"SELECT ?s WHERE { GRAPH <http://example.org/g> { ?s ?p ?o } }"}`))
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, resp.Body.Close())
@@ -438,7 +438,7 @@ func TestEndpointWithUIReportsSPARQLTranslationErrorsAsJSON(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	var body map[string]string
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
-	require.Contains(t, body["error"], "SELECT")
+	require.Contains(t, body["error"], "GRAPH")
 }
 
 func TestEndpointWithUIRejectsEmptySPARQLTranslation(t *testing.T) {
@@ -816,6 +816,21 @@ func TestSparqlJSONResultReportsWKTBindingsAsGeometryLiterals(t *testing.T) {
 		Datatype: "http://www.opengis.net/ont/geosparql#wktLiteral",
 	}, binding["wkt"])
 	require.Equal(t, sparqlJSONBinding{Type: "literal", Value: "Point of interest"}, binding["name"])
+}
+
+func TestEndpointAnswersAnAskWithABoolean(t *testing.T) {
+	runner := &endpointRunner{result: salsparql.Result{Header: []string{"ask"}, Rows: [][]string{{"true"}}}}
+	server := httptest.NewServer(NewEndpoint(runner, "", ""))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/sparql?query=" + url.QueryEscape("ASK { ?s ?p ?o }"))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"head":{},"boolean":true}`, string(body))
 }
 
 func TestEndpointAcceptsFormPOSTQuery(t *testing.T) {
