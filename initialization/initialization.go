@@ -108,18 +108,22 @@ func (cmd *InitCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	salDataDir := filepath.Join(cwd, ".sal", "data")
 
-	err = os.MkdirAll(salDataDir, 0755)
-	if err != nil {
-		return err
-	}
-
-	// sparql/ holds the project's SPARQL queries; it is source, so it sits in
-	// the project root rather than under the gitignored .sal/data
-	err = os.MkdirAll(filepath.Join(cwd, "sparql"), 0755)
-	if err != nil {
-		return err
+	// A SAL module is a container that produces data for projects, not a
+	// project itself, so the project layout is only made without --salmodule:
+	// .sal/data for what sal builds, sparql/ for the project's SPARQL queries
+	// (source, so it sits in the project root rather than under the gitignored
+	// .sal/data), and the .gitignore entries for what sal generates.
+	if !cmd.SalModule {
+		if err := os.MkdirAll(filepath.Join(cwd, ".sal", "data"), 0755); err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Join(cwd, "sparql"), 0755); err != nil {
+			return err
+		}
+		if err := ignoreGeneratedDirectories(cwd); err != nil {
+			return err
+		}
 	}
 
 	home, err = os.UserHomeDir()
@@ -138,34 +142,9 @@ func (cmd *InitCmd) Run() error {
 		return err
 	}
 
-	// .sal/data and .sal/constructed hold what sal generates, so both are
-	// gitignored; an entry the .gitignore already has is left as it is
-	gitignorePath := filepath.Join(cwd, ".gitignore")
-	content, err := os.ReadFile(gitignorePath)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	ignored := string(content)
-	for _, entry := range []string{".sal/data", ".sal/constructed"} {
-		if strings.Contains(ignored, entry) {
-			continue
-		}
-		if ignored != "" && !strings.HasSuffix(ignored, "\n") {
-			ignored += "\n"
-		}
-		ignored += entry + "\n"
-	}
-	if ignored != string(content) {
-		if err := os.WriteFile(gitignorePath, []byte(ignored), 0644); err != nil {
-			return err
-		}
-	}
-
-	// the form writes ontology.jsonld and the files next to it in place of the
-	// prompts, once the project itself is initialized, so a module whose
-	// ontology is still being filled in is already a SAL project
+	// the form writes ontology.jsonld and the files next to it in place of
+	// the prompts
 	if cmd.SalModule && cmd.UI {
-		slog.Info("SAL project initialized at " + cwd)
 		return serveModuleInitUI(cwd)
 	}
 
@@ -186,10 +165,37 @@ func (cmd *InitCmd) Run() error {
 		if err := writeEditorSchema(cwd); err != nil {
 			return err
 		}
+		slog.Info("SAL module initialized at " + cwd)
+		return nil
 	}
 
 	slog.Info("SAL project initialized at " + cwd)
 	return nil
+}
+
+// ignoreGeneratedDirectories adds .sal/data and .sal/constructed, which hold
+// what sal generates, to the project's .gitignore, leaving an entry the file
+// already has as it is.
+func ignoreGeneratedDirectories(dir string) error {
+	gitignorePath := filepath.Join(dir, ".gitignore")
+	content, err := os.ReadFile(gitignorePath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	ignored := string(content)
+	for _, entry := range []string{".sal/data", ".sal/constructed"} {
+		if strings.Contains(ignored, entry) {
+			continue
+		}
+		if ignored != "" && !strings.HasSuffix(ignored, "\n") {
+			ignored += "\n"
+		}
+		ignored += entry + "\n"
+	}
+	if ignored == string(content) {
+		return nil
+	}
+	return os.WriteFile(gitignorePath, []byte(ignored), 0644)
 }
 
 // promptTaskDetails asks the user for a sample task to seed ontology.jsonld

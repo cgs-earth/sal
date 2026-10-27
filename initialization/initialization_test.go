@@ -188,11 +188,18 @@ func TestInitLeavesExistingSparqlDirectoryAlone(t *testing.T) {
 	require.Equal(t, "SELECT * WHERE { ?s ?p ?o }\n", string(content))
 }
 
-func TestInitSalModuleBareScaffoldsModuleFiles(t *testing.T) {
+func TestInitSalModuleMakesNoProjectLayout(t *testing.T) {
 	dir := newGitRepo(t)
 	require.NoError(t, (&InitCmd{SalModule: true, Bare: true}).Run())
 
-	require.DirExists(t, filepath.Join(dir, ".sal", "data"))
+	require.NoDirExists(t, filepath.Join(dir, ".sal"))
+	require.NoDirExists(t, filepath.Join(dir, "sparql"))
+	require.NoFileExists(t, filepath.Join(dir, ".gitignore"))
+}
+
+func TestInitSalModuleBareScaffoldsModuleFiles(t *testing.T) {
+	dir := newGitRepo(t)
+	require.NoError(t, (&InitCmd{SalModule: true, Bare: true}).Run())
 
 	dockerfile, err := os.ReadFile(filepath.Join(dir, "Dockerfile"))
 	require.NoError(t, err)
