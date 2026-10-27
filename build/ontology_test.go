@@ -57,12 +57,12 @@ func TestImportOntologiesDoesNothingWithoutAProjectOntology(t *testing.T) {
 func TestImportOntologiesMergesEveryImport(t *testing.T) {
 	path := writeProjectOntology(t, `{
   "@context": {
-    "dc": "http://purl.org/dc/elements/1.1/",
+    "dcterms": "http://purl.org/dc/terms/",
     "owl": "http://www.w3.org/2002/07/owl#"
   },
   "@id": ".",
   "@type": "owl:Ontology",
-  "dc:title": "My Ontology",
+  "dcterms:title": "My Ontology",
   "owl:imports": [
     { "@id": "https://example.com/onto1" },
     { "@id": "https://example.com/onto2" }
@@ -100,9 +100,9 @@ func TestProjectOntologyContentReturnsTheOntologyNode(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(project, ".sal"), 0755))
 	config := filepath.Join(project, ".sal", "config.jsonld")
 	require.NoError(t, os.WriteFile(config, []byte(`{
-  "@context": { "dc": "http://purl.org/dc/elements/1.1/", "owl": "http://www.w3.org/2002/07/owl#" },
+  "@context": { "dcterms": "http://purl.org/dc/terms/", "owl": "http://www.w3.org/2002/07/owl#" },
   "@graph": [
-    { "@id": ".", "@type": "owl:Ontology", "dc:title": "My Ontology" }
+    { "@id": ".", "@type": "owl:Ontology", "dcterms:title": "My Ontology" }
   ]
 }`), 0644))
 	t.Chdir(project)
@@ -113,7 +113,32 @@ func TestProjectOntologyContentReturnsTheOntologyNode(t *testing.T) {
 	require.NotNil(t, content)
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(content, &doc))
-	require.Equal(t, "My Ontology", doc["dc:title"])
+	require.Equal(t, "My Ontology", doc["dcterms:title"])
+}
+
+// The node sal init writes is validated like a source file too, declaring
+// only the prefixes it uses, so a build pins schema.org and dcterms for it.
+func TestProjectOntologyContentRendersTheProjectNodeInitWrites(t *testing.T) {
+	project := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(project, ".sal"), 0755))
+	config := filepath.Join(project, ".sal", "config.jsonld")
+	require.NoError(t, os.WriteFile(config, []byte(`{
+  "@context": { "dcterms": "http://purl.org/dc/terms/", "schema": "https://schema.org/" },
+  "@graph": [
+    { "@id": ".", "@type": "schema:Project", "dcterms:description": "A test project" }
+  ]
+}`), 0644))
+	t.Chdir(project)
+
+	content, err := projectOntologyContent(ontologyTestBase)
+
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+  "@context": { "dcterms": "http://purl.org/dc/terms/", "schema": "https://schema.org/" },
+  "@id": ".",
+  "@type": "schema:Project",
+  "dcterms:description": "A test project"
+}`, string(content))
 }
 
 func TestProjectOntologyContentReturnsNilWithoutAnOntologyNode(t *testing.T) {

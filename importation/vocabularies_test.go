@@ -105,10 +105,10 @@ func TestProjectVocabularyRowsUnionsPinnedNodesAndTheOntologyImports(t *testing.
 		"@context": pkg.SalConfigContext,
 		"@graph": []map[string]any{
 			{
-				"@id":         ".",
-				"@type":       "owl:Ontology",
-				"dc:title":    "My Ontology",
-				"owl:imports": []map[string]string{{"@id": "https://schema.org/"}},
+				"@id":           ".",
+				"@type":         "owl:Ontology",
+				"dcterms:title": "My Ontology",
+				"owl:imports":   []map[string]string{{"@id": "https://schema.org/"}},
 			},
 			{
 				"@id":            "https://schema.org/",

@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -28,6 +29,10 @@ func (cmd *ServeCmd) Run() error {
 		return err
 	}
 	runner, err := table.Runner(ctx, 0)
+	var missing salsparql.NoTriplesTableError
+	if errors.As(err, &missing) {
+		return fmt.Errorf("no data found at %s: add data to the project before serving it", missing.Path)
+	}
 	if err != nil {
 		return err
 	}

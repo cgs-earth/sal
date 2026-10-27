@@ -188,9 +188,9 @@ func TestStacProjectInfoTakesTheTitleFromTheProjectOntology(t *testing.T) {
 	git("remote", "add", "origin", "https://github.com/cgs-earth/sal-stac-test-project.git")
 	require.NoError(t, os.MkdirAll(filepath.Join(project, ".sal", "data"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(project, ".sal", "config.jsonld"), []byte(`{
-  "@context": { "dc": "http://purl.org/dc/elements/1.1/", "owl": "http://www.w3.org/2002/07/owl#" },
+  "@context": { "dcterms": "http://purl.org/dc/terms/", "owl": "http://www.w3.org/2002/07/owl#" },
   "@graph": [
-    { "@id": ".", "@type": "owl:Ontology", "dc:title": "Test Project Ontology" }
+    { "@id": ".", "@type": "owl:Ontology", "dcterms:title": "Test Project Ontology" }
   ]
 }`), 0644))
 	t.Chdir(project)

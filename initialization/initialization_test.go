@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/salmodule"
 	"github.com/cgs-earth/sal/specs"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -32,11 +33,47 @@ func newGitRepo(t *testing.T) string {
 	run("config", "user.name", "Ada Lovelace")
 	t.Setenv("HOME", t.TempDir())
 	t.Chdir(dir)
+	// the prompts read nothing rather than the terminal unless a test answers
+	// them, and a module is initialized at the prompt rather than in a browser
+	answerPrompts(t)
+	previous := headlessReason
+	headlessReason = func() string { return "this is a test" }
+	t.Cleanup(func() { headlessReason = previous })
 	return dir
 }
 
-// answerPrompts feeds the sample task prompts the given lines instead of
-// the terminal for the rest of the test.
+func TestInitSalModuleOpensTheFormByDefault(t *testing.T) {
+	previous := headlessReason
+	headlessReason = func() string { return "" }
+	t.Cleanup(func() { headlessReason = previous })
+
+	require.True(t, (&InitCmd{SalModule: true}).opensForm())
+	require.False(t, (&InitCmd{SalModule: true, NoUI: true}).opensForm())
+	require.False(t, (&InitCmd{SalModule: true, Bare: true}).opensForm())
+}
+
+func TestInitSalModuleAsksAtThePromptWhereNoBrowserWouldOpen(t *testing.T) {
+	previous := headlessReason
+	headlessReason = func() string { return "CI is set" }
+	t.Cleanup(func() { headlessReason = previous })
+
+	require.False(t, (&InitCmd{SalModule: true}).opensForm())
+	require.True(t, (&InitCmd{SalModule: true, UI: true}).opensForm())
+}
+
+func TestHeadlessReasonNamesCI(t *testing.T) {
+	t.Setenv("CI", "true")
+	require.Equal(t, "CI is set", headlessReason())
+}
+
+func TestHeadlessReasonNamesAnSSHSession(t *testing.T) {
+	t.Setenv("CI", "")
+	t.Setenv("SSH_CONNECTION", "10.0.0.2 52000 10.0.0.1 22")
+	require.Equal(t, "this is an SSH session", headlessReason())
+}
+
+// answerPrompts feeds the prompts the given lines instead of the terminal for
+// the rest of the test; with none, every prompt reads one blank answer.
 func answerPrompts(t *testing.T, lines ...string) {
 	t.Helper()
 	previous := stdin
@@ -57,9 +94,103 @@ func readOntology(t *testing.T, dir string) (map[string]any, []map[string]any) {
 	return doc.Context, doc.Graph
 }
 
+// initProject runs init as a project with the description every project needs.
+func initProject() error {
+	return (&InitCmd{Description: "A test project"}).Run()
+}
+
+// readProjectConfig parses the .sal/config.jsonld init wrote into dir.
+func readProjectConfig(t *testing.T, dir string) pkg.ConfigDocument {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(dir, ".sal", "config.jsonld"))
+	require.NoError(t, err)
+	var doc pkg.ConfigDocument
+	require.NoError(t, json.Unmarshal(raw, &doc))
+	return doc
+}
+
+func TestInitRecordsTheDescriptionGivenAsAFlag(t *testing.T) {
+	dir := newGitRepo(t)
+	require.NoError(t, (&InitCmd{Description: "A test project showing off sal features on a small dataset"}).Run())
+
+	doc := readProjectConfig(t, dir)
+	require.Equal(t, pkg.SalConfigContext, doc.Context)
+	require.Len(t, doc.Graph, 1)
+	require.JSONEq(t, `{
+  "@id": ".",
+  "@type": "schema:Project",
+  "dcterms:title": "example",
+  "dcterms:description": "A test project showing off sal features on a small dataset"
+}`, string(doc.Graph[0]))
+}
+
+func TestInitAsksForTheDescriptionWhenNotGiven(t *testing.T) {
+	dir := newGitRepo(t)
+	answerPrompts(t, "  Answered at the prompt  ")
+	require.NoError(t, (&InitCmd{}).Run())
+
+	doc := readProjectConfig(t, dir)
+	require.JSONEq(t, `{"@id": ".", "@type": "schema:Project", "dcterms:title": "example", "dcterms:description": "Answered at the prompt"}`, string(doc.Graph[0]))
+}
+
+// An empty answer is asked again rather than taken, since the description is
+// required.
+func TestInitAsksAgainUntilADescriptionIsGiven(t *testing.T) {
+	dir := newGitRepo(t)
+	answerPrompts(t, "", "   ", "Third time")
+	require.NoError(t, (&InitCmd{}).Run())
+
+	doc := readProjectConfig(t, dir)
+	require.JSONEq(t, `{"@id": ".", "@type": "schema:Project", "dcterms:title": "example", "dcterms:description": "Third time"}`, string(doc.Graph[0]))
+}
+
+func TestInitWithoutADescriptionFailsAndWritesNothing(t *testing.T) {
+	dir := newGitRepo(t)
+	previous := stdin
+	stdin = strings.NewReader("")
+	t.Cleanup(func() { stdin = previous })
+
+	require.ErrorIs(t, (&InitCmd{}).Run(), ErrDescriptionRequired)
+	require.NoDirExists(t, filepath.Join(dir, ".sal"))
+	require.NoFileExists(t, filepath.Join(dir, ".gitignore"))
+}
+
+// A project that has a .sal/config.jsonld is initialized, and init refuses to
+// write over what it records, with or without a description given.
+func TestInitFailsWhenTheProjectIsAlreadyInitialized(t *testing.T) {
+	dir := newGitRepo(t)
+	require.NoError(t, (&InitCmd{Description: "Original description"}).Run())
+
+	err := (&InitCmd{Description: "New description"}).Run()
+
+	require.ErrorContains(t, err, filepath.Join(dir, ".sal", "config.jsonld")+" already exists; this directory is already a SAL project")
+	doc := readProjectConfig(t, dir)
+	require.JSONEq(t, `{"@id": ".", "@type": "schema:Project", "dcterms:title": "example", "dcterms:description": "Original description"}`, string(doc.Graph[0]))
+}
+
+// A module is not a project, so it is neither asked for a description nor
+// given a .sal/config.jsonld to record one in.
+func TestInitSalModuleWritesNoProjectConfig(t *testing.T) {
+	dir := newGitRepo(t)
+	answerPrompts(t, "FetchStations", "Fetch weather stations", "Fetches every station in a region")
+	require.NoError(t, (&InitCmd{SalModule: true}).Run())
+
+	require.NoFileExists(t, filepath.Join(dir, ".sal", "config.jsonld"))
+	require.Equal(t, "FetchStations", readOntologyTaskID(t, dir))
+}
+
+// readOntologyTaskID is the @id of the task class in the ontology.jsonld init
+// wrote into dir, which says which prompt answer the task consumed.
+func readOntologyTaskID(t *testing.T, dir string) string {
+	t.Helper()
+	_, graph := readOntology(t, dir)
+	id, _ := graph[1]["@id"].(string)
+	return id
+}
+
 func TestInitWithoutSalModuleWritesNoModuleFiles(t *testing.T) {
 	dir := newGitRepo(t)
-	require.NoError(t, (&InitCmd{}).Run())
+	require.NoError(t, initProject())
 
 	require.DirExists(t, filepath.Join(dir, ".sal", "data"))
 	require.NoFileExists(t, filepath.Join(dir, "ontology.jsonld"))
@@ -149,7 +280,7 @@ func TestInitSalModuleLeavesUnparseableEditorSettingsAlone(t *testing.T) {
 
 func TestInitGitignoresGeneratedDirectories(t *testing.T) {
 	dir := newGitRepo(t)
-	require.NoError(t, (&InitCmd{}).Run())
+	require.NoError(t, initProject())
 
 	gitignore, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
 	require.NoError(t, err)
@@ -160,8 +291,7 @@ func TestInitAddsOnlyTheMissingGitignoreEntries(t *testing.T) {
 	dir := newGitRepo(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules\n.sal/data"), 0644))
 
-	require.NoError(t, (&InitCmd{}).Run())
-	require.NoError(t, (&InitCmd{}).Run())
+	require.NoError(t, initProject())
 
 	gitignore, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
 	require.NoError(t, err)
@@ -170,7 +300,7 @@ func TestInitAddsOnlyTheMissingGitignoreEntries(t *testing.T) {
 
 func TestInitCreatesSparqlDirectory(t *testing.T) {
 	dir := newGitRepo(t)
-	require.NoError(t, (&InitCmd{}).Run())
+	require.NoError(t, initProject())
 
 	require.DirExists(t, filepath.Join(dir, "sparql"))
 }
@@ -181,7 +311,7 @@ func TestInitLeavesExistingSparqlDirectoryAlone(t *testing.T) {
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "sparql"), 0755))
 	require.NoError(t, os.WriteFile(query, []byte("SELECT * WHERE { ?s ?p ?o }\n"), 0644))
 
-	require.NoError(t, (&InitCmd{}).Run())
+	require.NoError(t, initProject())
 
 	content, err := os.ReadFile(query)
 	require.NoError(t, err)
@@ -211,7 +341,7 @@ func TestInitSalModuleBareScaffoldsModuleFiles(t *testing.T) {
 
 	context, graph := readOntology(t, dir)
 	require.Equal(t, map[string]any{
-		"dc":        "http://purl.org/dc/elements/1.1/",
+		"dcterms":   "http://purl.org/dc/terms/",
 		"owl":       "http://www.w3.org/2002/07/owl#",
 		"rdfs":      "http://www.w3.org/2000/01/rdf-schema#",
 		"salmodule": salmodule.Namespace,
@@ -221,8 +351,8 @@ func TestInitSalModuleBareScaffoldsModuleFiles(t *testing.T) {
 	ontology := graph[0]
 	require.Equal(t, "owl:Ontology", ontology["@type"])
 	require.Equal(t, ".", ontology["@id"])
-	require.Equal(t, "Ada Lovelace", ontology["dc:creator"])
-	require.Equal(t, "example", ontology["dc:title"])
+	require.Equal(t, "Ada Lovelace", ontology["dcterms:creator"])
+	require.Equal(t, "example", ontology["dcterms:title"])
 	require.Equal(t, "", ontology["owl:versionInfo"])
 	require.Equal(t, "", ontology["rdfs:label"])
 
@@ -289,8 +419,8 @@ func TestInitSalModuleWithoutGitUserLeavesCreatorBlank(t *testing.T) {
 	require.NoError(t, (&InitCmd{SalModule: true, Bare: true}).Run())
 
 	_, graph := readOntology(t, dir)
-	require.Equal(t, "", graph[0]["dc:creator"])
-	require.Equal(t, "example", graph[0]["dc:title"])
+	require.Equal(t, "", graph[0]["dcterms:creator"])
+	require.Equal(t, "example", graph[0]["dcterms:title"])
 }
 
 func TestInitSalModuleLeavesExistingFilesAlone(t *testing.T) {

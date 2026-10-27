@@ -9,7 +9,7 @@ import './init.css'
 const STATUS_POLL_MS = 2000
 
 /**
- * The page `sal init --salmodule --ui` opens: the form that writes a module's
+ * The page `sal init --salmodule` opens: the form that writes a module's
  * ontology.jsonld while it does not exist, and a notice that the module is
  * initialized once it does. The server reads the disk on every status
  * request, so deleting the file unlocks the form again, and writing it from

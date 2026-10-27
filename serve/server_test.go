@@ -22,6 +22,7 @@ import (
 	salsparql "github.com/cgs-earth/sal/query/sparql"
 	"github.com/cgs-earth/sal/salmodule"
 	"github.com/stretchr/testify/require"
+	"os/exec"
 )
 
 type endpointRunner struct {
@@ -1525,4 +1526,27 @@ func TestBlobEndpointAllowsCrossOriginReads(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 	require.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
 	require.Contains(t, resp.Header.Get("Access-Control-Allow-Methods"), "GET")
+}
+
+// A project initialized but never built has nothing to serve, which the
+// command says in its own words rather than as a catalog failure.
+func TestServeReportsAnUnbuiltProjectAsNoData(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"remote", "add", "origin", "https://github.com/cgs-earth/example.git"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(out))
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".sal", "data", "blobs"), 0755))
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(dir)
+
+	err := (&ServeCmd{WithUI: true}).Run()
+
+	// the project directory is reported with symlinks resolved, which on macOS
+	// puts the temp dir under /private
+	dir, resolveErr := filepath.EvalSymlinks(dir)
+	require.NoError(t, resolveErr)
+	require.EqualError(t, err, "no data found at "+filepath.Join(dir, ".sal", "data", "example", "triples")+": add data to the project before serving it")
 }
