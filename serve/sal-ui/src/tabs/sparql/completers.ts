@@ -1,5 +1,5 @@
 import type Yasgui from '@zazuko/yasgui'
-import type { Vocabulary } from '../../api'
+import type { TermStatement, Vocabulary } from '../../api'
 
 /*
  * Autocompletion from the project's own vocabularies. YASQE ships completers
@@ -136,13 +136,33 @@ function rankTerms(terms: Term[], typed: string, at: 'predicate' | 'class' | 'ot
     .map((entry) => entry.term)
 }
 
-/** The kind of the term a hint inserts, for the tag beside it; null when it is not one of ours. */
-function hintKind(yasqe: Yasqe, text: string): TermKind | null {
+/** What the project's vocabularies know about one prefixed name written in a query. */
+export type TermInfo = {
+  /** The name as written, `schema:name`. */
+  name: string
+  /** The full IRI the query's prefix declaration expands the name to. */
+  iri: string
+  kind: TermKind
+  /** What the pinned document says about the term, in reading order; empty when it only names it. */
+  statements: TermStatement[]
+}
+
+/**
+ * Looks a prefixed name up in the vocabulary the query binds its prefix to:
+ * null when the text is not a prefixed name, its prefix is undeclared or not
+ * one of the project's vocabularies, or the pinned document does not define
+ * the term.
+ */
+export function lookupTerm(yasqe: Yasqe, text: string): TermInfo | null {
   const colon = text.indexOf(':')
   if (colon < 0) return null
   const namespace = yasqe.getPrefixesFromQuery()[text.slice(0, colon)]
   if (!namespace) return null
-  return byNamespace.get(namespace)?.kinds.get(text.slice(colon + 1)) ?? null
+  const index = byNamespace.get(namespace)
+  const local = text.slice(colon + 1)
+  const kind = index?.kinds.get(local)
+  if (!index || !kind) return null
+  return { name: text, iri: namespace + local, kind, statements: index.vocabulary.statements[local] ?? [] }
 }
 
 /**
@@ -152,7 +172,7 @@ function hintKind(yasqe: Yasqe, text: string): TermKind | null {
  */
 function renderHint(this: Yasqe, element: HTMLElement, _list: unknown, hint: Hint) {
   element.append(hint.displayText ?? hint.text)
-  const kind = hintKind(this, hint.text)
+  const kind = lookupTerm(this, hint.text)?.kind
   if (kind && kind !== 'other') {
     const tag = document.createElement('span')
     tag.className = 'sal-hint-kind'

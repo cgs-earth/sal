@@ -65,7 +65,11 @@ build_demo_data() {
 	git config user.email "demo@cgs-earth.org"
 	git config user.name "SAL Demo"
 
-	/app/sal init
+	# init asks for a description when none is given, and nothing answers a
+	# prompt here: Cloud Build runs this image with no terminal to build the
+	# demo project, and so does a Cloud Run instance starting from an empty
+	# disk. It is recorded on the project node and shown on the UI's landing card.
+	/app/sal init --description "Sample RDF served by the SAL demo image: places, organizations, and a SAL module task pulling in STAC catalogs"
 	# An import the demo can show off: it puts an owl:imports in .sal/config.jsonld
 	# for the stats view, and build merges the schema.org vocabulary into the
 	# table. The sample data types its resources with schema.org classes, so

@@ -385,6 +385,111 @@
   opacity: 0.8;
 }
 
+/* ---------- definitions pane ---------- */
+
+/*
+ * The Definitions pane (TermDefinitions.tsx) is docked down the right of the
+ * editor, inside the Yasqe root and the full height of the editor above its
+ * resize handle, and the editor is narrowed by the pane's width so the two
+ * never overlap; the run and share buttons move with the editor, since Yasqe
+ * keeps them inside it. SparqlTab.tsx puts the class on the root while the
+ * pane is shown.
+ */
+.yasgui .yasqe.sal-with-definitions {
+  --sal-definitions-width: clamp(220px, 34%, 380px);
+  position: relative;
+}
+
+.yasgui .yasqe.sal-with-definitions > .CodeMirror {
+  margin-right: var(--sal-definitions-width);
+}
+
+.sal-term-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 10px;
+  box-sizing: border-box;
+  width: var(--sal-definitions-width);
+  padding: 10px 12px;
+  border-left: var(--border-strong);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow: auto;
+}
+
+.sal-term-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.sal-term-panel-head code,
+.sal-term-panel-statements code,
+.sal-term-panel-empty code {
+  color: var(--code);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.sal-term-panel-head code {
+  font-size: 13px;
+}
+
+.sal-term-panel-iri {
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.sal-term-panel-statements {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 3px;
+  margin: 8px 0 0;
+}
+
+.sal-term-panel-statements dt {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 19px;
+}
+
+.sal-term-panel-statements dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A second value of the same predicate sits under the first, in its column. */
+.sal-term-panel-statements dd + dd {
+  grid-column: 2;
+}
+
+.sal-term-panel-lang {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.sal-term-panel-empty {
+  margin: 0;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.sal-term-panel-head ~ .sal-term-panel-empty,
+.sal-term-panel-iri ~ .sal-term-panel-empty {
+  margin-top: 8px;
+}
+
 /* ---------- yasqe buttons ---------- */
 
 .yasgui .yasqe_buttons svg,

@@ -56,6 +56,8 @@ func TestTermsClassifiesWhatThePinnedDocumentDefinesUnderItsNamespace(t *testing
 	require.Equal(t, []string{"Colour", "Gadget", "Widget"}, terms.Classes)
 	require.Equal(t, []string{"name", "partOf"}, terms.Properties)
 	require.Equal(t, []string{"Blue"}, terms.Others, "an instance is a term too, outside both kinds")
+	require.Equal(t, []TermStatement{{Predicate: "rdfs:label", Value: "Widget"}}, terms.Statements["Widget"])
+	require.NotContains(t, terms.Statements, "Gadget", "a term the document only types has no statements worth showing")
 }
 
 func TestTermsLeavesOutWhatAnotherNamespaceDefines(t *testing.T) {
@@ -115,4 +117,67 @@ func TestTermsNeverFetchesAMissingDocument(t *testing.T) {
 	_, err = reloaded.Terms(testVocabularyNamespace)
 	require.Error(t, err)
 	require.Equal(t, 1, fetches)
+}
+
+func TestTermsReadsWhatTheDocumentSaysAboutATerm(t *testing.T) {
+	document := `@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix schema: <https://schema.org/> .
+@prefix things: <https://vocab.test/things#> .
+@prefix ex: <https://example.org/elsewhere/> .
+
+things:Widget a owl:Class ;
+    rdfs:subClassOf schema:Thing, ex:Part ;
+    rdfs:comment "  A thing with parts.  " ;
+    rdfs:label "Widget" ;
+    rdfs:isDefinedBy things: ;
+    skos:example "a gear" .
+things:partOf a owl:ObjectProperty ;
+    rdfs:domain things:Widget ;
+    rdfs:range <https://vocab.test/other#Whole> ;
+    owl:deprecated true .
+things:Blue a things:Colour ;
+    rdfs:label "Blue" .
+things:Mystery a owl:Class .
+<https://vocab.test/other#Elsewhere> a owl:Class ;
+    rdfs:comment "Not this vocabulary's" .
+`
+	terms := pinnedTerms(t, testVocabularyNamespace, document, "text/turtle")
+	require.Equal(t, []TermStatement{
+		{Predicate: "rdfs:label", Value: "Widget"},
+		{Predicate: "rdfs:comment", Value: "A thing with parts."},
+		{Predicate: "skos:example", Value: "a gear"},
+		{Predicate: "rdfs:subClassOf", Value: "ex:Part", IRI: true},
+		{Predicate: "rdfs:subClassOf", Value: "schema:Thing", IRI: true},
+	}, terms.Statements["Widget"], "descriptive statements in a fixed order, IRIs shortened with the document's and the conventional prefixes, rdf:type and isDefinedBy left out")
+	require.Equal(t, []TermStatement{
+		{Predicate: "rdfs:domain", Value: "things:Widget", IRI: true},
+		{Predicate: "rdfs:range", Value: "https://vocab.test/other#Whole", IRI: true},
+		{Predicate: "owl:deprecated", Value: "true"},
+	}, terms.Statements["partOf"], "an IRI under a namespace nothing binds is written in full")
+	require.Equal(t, []TermStatement{{Predicate: "rdfs:label", Value: "Blue"}}, terms.Statements["Blue"], "an instance has statements like any term")
+	require.NotContains(t, terms.Statements, "Mystery", "a term the document says nothing about has no entry")
+	require.NotContains(t, terms.Statements, "Elsewhere")
+}
+
+func TestTermsOrdersAndBoundsTheValuesOfOneStatement(t *testing.T) {
+	document := `@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix things: <https://vocab.test/things#> .
+
+things:Widget a owl:Class ;
+    rdfs:comment "Ein Ding"@de, "A thing"@en-GB, "Une chose"@fr, "A thing, untagged" .
+things:Gadget a owl:Class ;
+    rdfs:subClassOf things:C1, things:C2, things:C3, things:C4, things:C5, things:C6, things:C7 .
+`
+	terms := pinnedTerms(t, testVocabularyNamespace, document, "text/turtle")
+	require.Equal(t, []TermStatement{
+		{Predicate: "rdfs:comment", Value: "A thing", Language: "en-gb"},
+		{Predicate: "rdfs:comment", Value: "A thing, untagged"},
+		{Predicate: "rdfs:comment", Value: "Ein Ding", Language: "de"},
+		{Predicate: "rdfs:comment", Value: "Une chose", Language: "fr"},
+	}, terms.Statements["Widget"], "English and untagged literals first, then the rest, each set sorted")
+	require.Len(t, terms.Statements["Gadget"], statementValuesLimit)
+	require.Equal(t, TermStatement{Predicate: "rdfs:subClassOf", Value: "things:C1", IRI: true}, terms.Statements["Gadget"][0])
 }

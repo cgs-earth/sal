@@ -2,7 +2,9 @@ package validate
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -43,6 +45,24 @@ type VocabularyTerms struct {
 	Classes    []string
 	Properties []string
 	Others     []string
+	// Statements is what the document says about each term, by local name:
+	// the statements with the term as subject and one of descriptivePredicates
+	// as predicate, in that order, which the SPARQL editor shows for the term
+	// under the caret. A term the document only names has none.
+	Statements map[string][]TermStatement
+}
+
+// TermStatement is one statement a vocabulary document makes about a term,
+// rendered for reading: Predicate and an IRI Value are written as prefixed
+// names when a prefix is known for the namespace (the vocabulary's own, one
+// the document binds, or a conventional one) and as the full IRI otherwise.
+type TermStatement struct {
+	Predicate string `json:"predicate"`
+	Value     string `json:"value"`
+	// IRI reports that Value names a resource rather than being a literal.
+	IRI bool `json:"iri,omitempty"`
+	// Language is the language tag of a literal Value, when it has one.
+	Language string `json:"language,omitempty"`
 }
 
 const rdfTypeIRI = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
@@ -59,6 +79,58 @@ var propertyTypeIRIs = map[string]bool{
 	"http://www.w3.org/2002/07/owl#DatatypeProperty":      true,
 	"http://www.w3.org/2002/07/owl#AnnotationProperty":    true,
 	"http://www.w3.org/2002/07/owl#FunctionalProperty":    true,
+}
+
+// descriptivePredicates are the properties that say what a term is, in the
+// order they are worth reading: what it is called and what it means first,
+// then where it sits in the vocabulary and what it relates, then whether it
+// is still in use. Anything else the document states about a term, its
+// rdf:type above all, is left to the term lists.
+var descriptivePredicates = []string{
+	"http://www.w3.org/2000/01/rdf-schema#label",
+	"http://www.w3.org/2004/02/skos/core#prefLabel",
+	"http://www.w3.org/2000/01/rdf-schema#comment",
+	"http://www.w3.org/2004/02/skos/core#definition",
+	"https://schema.org/description",
+	"http://schema.org/description",
+	"http://purl.org/dc/terms/description",
+	"http://purl.org/dc/elements/1.1/description",
+	"http://www.w3.org/2004/02/skos/core#scopeNote",
+	"http://www.w3.org/2004/02/skos/core#note",
+	"http://www.w3.org/2004/02/skos/core#example",
+	"http://www.w3.org/2000/01/rdf-schema#subClassOf",
+	"http://www.w3.org/2000/01/rdf-schema#subPropertyOf",
+	"http://www.w3.org/2000/01/rdf-schema#domain",
+	"http://www.w3.org/2000/01/rdf-schema#range",
+	"https://schema.org/domainIncludes",
+	"http://schema.org/domainIncludes",
+	"https://schema.org/rangeIncludes",
+	"http://schema.org/rangeIncludes",
+	"http://www.w3.org/2002/07/owl#deprecated",
+	"https://schema.org/supersededBy",
+	"http://schema.org/supersededBy",
+	"http://www.w3.org/2000/01/rdf-schema#seeAlso",
+}
+
+// statementValuesLimit bounds how many values of one predicate a term's
+// statements carry, since a class with a hundred domainIncludes is not
+// something to read in an editor popup.
+const statementValuesLimit = 5
+
+// renderIRI writes iri as a prefixed name when prefixes binds its namespace,
+// and as the IRI itself otherwise.
+func renderIRI(iri string, prefixes map[string]string) string {
+	cut := strings.LastIndexAny(iri, "/#")
+	if cut < 0 {
+		return iri
+	}
+	if prefix, ok := prefixes[iri[:cut+1]]; ok {
+		name := iri[cut+1:]
+		if name != "" && !strings.ContainsAny(name, "/#") {
+			return prefix + ":" + name
+		}
+	}
+	return iri
 }
 
 // conventionalPrefixes are the prefixes vocabularies are declared under by
@@ -166,7 +238,8 @@ func termsOf(graph *rdflibgo.Graph, id string, base string) VocabularyTerms {
 	})
 
 	namespace := vocabularyNamespace(id, base, iris)
-	terms := VocabularyTerms{ID: id, Namespace: namespace, Prefix: vocabularyPrefix(graph, namespace)}
+	terms := VocabularyTerms{ID: id, Namespace: namespace, Prefix: vocabularyPrefix(graph, namespace), Statements: map[string][]TermStatement{}}
+	prefixes := statementPrefixes(graph, namespace, terms.Prefix)
 	for iri := range iris {
 		name, ok := strings.CutPrefix(iri, namespace)
 		if !ok || name == "" || strings.ContainsAny(name, "/#") {
@@ -180,11 +253,72 @@ func termsOf(graph *rdflibgo.Graph, id string, base string) VocabularyTerms {
 		default:
 			terms.Others = append(terms.Others, name)
 		}
+		if statements := termStatements(graph, iri, prefixes); len(statements) > 0 {
+			terms.Statements[name] = statements
+		}
 	}
 	sort.Strings(terms.Classes)
 	sort.Strings(terms.Properties)
 	sort.Strings(terms.Others)
 	return terms
+}
+
+// statementPrefixes is what IRIs in a term's statements are shortened with:
+// the conventional prefixes, then whatever the document binds itself, then
+// the vocabulary's own prefix for its namespace, each overriding the last.
+func statementPrefixes(graph *rdflibgo.Graph, namespace string, prefix string) map[string]string {
+	prefixes := maps.Clone(conventionalPrefixes)
+	pkg.Namespaces(graph)(func(prefix string, iri rdflibgo.URIRef) bool {
+		if prefix != "" && !strings.ContainsAny(prefix, ":/#") {
+			prefixes[iri.Value()] = prefix
+		}
+		return true
+	})
+	prefixes[namespace] = prefix
+	return prefixes
+}
+
+// termStatements is what graph says about the term iri with the descriptive
+// predicates, in descriptivePredicates order and at most statementValuesLimit
+// values per predicate. Values are sorted so the result does not depend on
+// the order of the document, with an English or untagged literal ahead of
+// one in another language, which is what the limit then keeps.
+func termStatements(graph *rdflibgo.Graph, iri string, prefixes map[string]string) []TermStatement {
+	var statements []TermStatement
+	for _, predicate := range descriptivePredicates {
+		var values []TermStatement
+		predicateIRI := rdflibgo.NewURIRefUnsafe(predicate)
+		pkg.Triples(graph, rdflibgo.NewURIRefUnsafe(iri), &predicateIRI, nil)(func(triple rdflibgo.Triple) bool {
+			switch object := triple.Object.(type) {
+			case rdflibgo.URIRef:
+				values = append(values, TermStatement{Predicate: renderIRI(predicate, prefixes), Value: renderIRI(object.Value(), prefixes), IRI: true})
+			case rdflibgo.Literal:
+				if text := strings.TrimSpace(object.Lexical()); text != "" {
+					values = append(values, TermStatement{Predicate: renderIRI(predicate, prefixes), Value: text, Language: object.Language()})
+				}
+			}
+			return true
+		})
+		slices.SortFunc(values, func(a, b TermStatement) int {
+			if preferred := preferredLanguageOf(a) != preferredLanguageOf(b); preferred {
+				if preferredLanguageOf(a) {
+					return -1
+				}
+				return 1
+			}
+			return strings.Compare(a.Value, b.Value)
+		})
+		statements = append(statements, values[:min(len(values), statementValuesLimit)]...)
+	}
+	return statements
+}
+
+// preferredLanguageOf reports whether a statement's value is an IRI or a
+// literal an English speaking reader can be expected to read: untagged or
+// tagged English.
+func preferredLanguageOf(statement TermStatement) bool {
+	language := strings.ToLower(statement.Language)
+	return language == "" || language == "en" || strings.HasPrefix(language, "en-")
 }
 
 // vocabularyNamespace is the IRI the terms of the vocabulary pinned under id
