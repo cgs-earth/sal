@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cgs-earth/sal/edit"
 	"github.com/cgs-earth/sal/pkg"
+	"github.com/cgs-earth/sal/rewrite"
 	"gocloud.dev/blob"
 	_ "gocloud.dev/blob/azureblob"
 	_ "gocloud.dev/blob/fileblob"
@@ -272,7 +272,7 @@ func rewriteStagedIcebergRoots(stagedDataDir string, bucketURL string) error {
 		if len(tables) > 1 || !deployDestinationIsExplicitTableRoot(bucketURL) {
 			newRoot = joinRemote(baseRoot, filepath.ToSlash(rel))
 		}
-		changes, err := edit.RewriteIcebergTableRoot(tablePath, newRoot)
+		changes, err := rewrite.RewriteIcebergTableRoot(tablePath, newRoot)
 		if err != nil {
 			return err
 		}
@@ -436,7 +436,7 @@ func versionStagedIcebergMetadata(tablePath string, tableRoot string) (int, erro
 		if err := os.Rename(oldLocalPath, newLocalPath); err != nil {
 			return 0, fmt.Errorf("rename Iceberg metadata file %s: %w", oldLocalPath, err)
 		}
-		changes, err := edit.RewriteIcebergMetadataPath(tablePath, oldRemotePath, newRemotePath)
+		changes, err := rewrite.RewriteIcebergMetadataPath(tablePath, oldRemotePath, newRemotePath)
 		if err != nil {
 			return 0, err
 		}

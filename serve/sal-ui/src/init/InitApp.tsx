@@ -1,22 +1,23 @@
 import { useEffect, useState } from 'react'
 import { ThemeToggle } from '../components/ThemeToggle'
-import { fetchInitStatus, type InitStatus } from './api'
+import { fetchStatus, type ModuleStatus } from './api'
 import { ModuleForm } from './ModuleForm'
 import '../App.css'
 import './init.css'
 
-/** How often the module root is checked for ontology.jsonld appearing or disappearing. */
+/** How often the module root is checked for ontology.jsonld appearing, disappearing, or changing. */
 const STATUS_POLL_MS = 2000
 
 /**
- * The page `sal init --salmodule` opens: the form that writes a module's
- * ontology.jsonld while it does not exist, and a notice that the module is
- * initialized once it does. The server reads the disk on every status
- * request, so deleting the file unlocks the form again, and writing it from
- * the form locks it.
+ * The page `sal init --salmodule` and `sal edit` open: the form that writes a
+ * module's ontology.jsonld, starting from the one the module has. The server
+ * reads the disk on every status request, so a file written or deleted by
+ * hand is seen here; the form itself is kept while the file exists, so that
+ * an edit in progress survives the poll, and starts over when the file is
+ * created or removed outside it.
  */
 export function InitApp() {
-  const [status, setStatus] = useState<InitStatus | null>(null)
+  const [status, setStatus] = useState<ModuleStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showHelp, setShowHelp] = useState(false)
 
@@ -24,7 +25,7 @@ export function InitApp() {
     const controller = new AbortController()
     const load = async () => {
       try {
-        setStatus(await fetchInitStatus(controller.signal))
+        setStatus(await fetchStatus(controller.signal))
         setError(null)
       } catch (caught) {
         if (controller.signal.aborted) return
@@ -46,7 +47,7 @@ export function InitApp() {
           <a className="brand-mark" href="https://cgs-earth.github.io/sal/" target="_blank" rel="noreferrer" title="SAL documentation">
             SAL
           </a>
-          <span className="brand-sub">module init</span>
+          <span className="brand-sub">{status?.mode === 'edit' ? 'module edit' : 'module init'}</span>
         </div>
         <div className="header-actions">
           <button
@@ -67,18 +68,18 @@ export function InitApp() {
           <ul>
             <li>
               A SAL module is a git repository with a <code>Dockerfile</code> and an <code>ontology.jsonld</code>{' '}
-              declaring the tasks a project can run. This page writes the <code>ontology.jsonld</code>, with the
-              Dockerfile and editor schema <code>sal init --salmodule</code> scaffolds beside it.
+              declaring the tasks a project can run. This page writes and edits the <code>ontology.jsonld</code>; the
+              first write also scaffolds the Dockerfile and editor schema <code>sal init --salmodule</code> creates.
             </li>
             <li>
-              Fill in the module, bind the prefixes your shapes use, and describe each task. The preview on the right is
-              exactly what will be written, checked as you type with the same rules{' '}
-              <code>sal validate --salmodule</code> applies.
+              Describe the module, bind the prefixes your shapes use, and describe each task: what configures it, and
+              the shape of what it prints. The preview on the right is exactly what will be written, checked as you type
+              with the same rules <code>sal validate --salmodule</code> applies.
             </li>
             <li>
-              Write is enabled once the document has no problems. The file is written once: to start over, delete{' '}
-              <code>ontology.jsonld</code> and this page unlocks again. Stop the page with <kbd>Ctrl</kbd>+<kbd>C</kbd> in
-              the terminal.
+              Write is enabled once the document has no problems and differs from the file. A file edited by hand while
+              this page is open is not written over; reload the page to pick it up. Stop the page with <kbd>Ctrl</kbd>+
+              <kbd>C</kbd> in the terminal, and run <code>sal edit</code> in the module to open it again.
             </li>
             <li>
               See the{' '}
@@ -94,39 +95,12 @@ export function InitApp() {
       <main className="content">
         {error && <p className="error-banner">{error}</p>}
         {!error && !status && <p className="empty">Asking sal about the module…</p>}
-        {!error && status && status.initialized && <Initialized status={status} />}
-        {!error && status && !status.initialized && (
-          // keyed on the path so that a module unlocked by deleting its
-          // ontology starts from a fresh form rather than the one written
-          <ModuleForm key={status.ontologyPath} status={status} />
+        {!error && status && (
+          // keyed on whether the file exists, so that one created or deleted
+          // outside the form starts it over, while edits to it do not
+          <ModuleForm key={`${status.ontologyPath}:${status.initialized}`} status={status} />
         )}
       </main>
-    </div>
-  )
-}
-
-function Initialized({ status }: { status: InitStatus }) {
-  return (
-    <div className="tab-body init">
-      <section className="panel init-done">
-        <header className="panel-header">
-          <h3>Module initialized</h3>
-          <span className="badge">{status.namespace}</span>
-        </header>
-        <div className="init-done-body">
-          <p>
-            <code>{status.ontologyPath}</code> exists, so this page will not write another ontology. The form edits
-            nothing yet: to change the ontology, edit the file in your editor, where the schema sal registered in{' '}
-            <code>.vscode/settings.json</code> checks it as you type, and run <code>sal validate --salmodule</code>.
-          </p>
-          <p>To start over, delete the file and this page unlocks again.</p>
-          <p className="hint">
-            Next: write the <code>Dockerfile</code> so the container answers <code>salmodule ontology</code> with this
-            document and <code>salmodule run</code> with newline delimited JSON, then press <kbd>Ctrl</kbd>+<kbd>C</kbd>{' '}
-            in the terminal to stop this page.
-          </p>
-        </div>
-      </section>
     </div>
   )
 }

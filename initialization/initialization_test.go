@@ -10,11 +10,15 @@ import (
 	"testing"
 
 	"github.com/cgs-earth/sal/pkg"
+	"github.com/cgs-earth/sal/pkg/skillstest"
 	"github.com/cgs-earth/sal/salmodule"
 	"github.com/cgs-earth/sal/specs"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/stretchr/testify/require"
 )
+
+// skillsRepositoryDefault is where the skills come from outside tests.
+var skillsRepositoryDefault = pkg.SkillsRepository
 
 // newGitRepo creates a git repository with an https remote in a temp directory,
 // changes into it, and points HOME at a second temp directory so that init's
@@ -33,19 +37,24 @@ func newGitRepo(t *testing.T) string {
 	run("config", "user.name", "Ada Lovelace")
 	t.Setenv("HOME", t.TempDir())
 	t.Chdir(dir)
+	// the skills come from a local repository, never from GitHub; a test
+	// about them makes its own with the skills it needs
+	if pkg.SkillsRepository == skillsRepositoryDefault {
+		skillstest.NewRepository(t, "sal", "salmodule")
+	}
 	// the prompts read nothing rather than the terminal unless a test answers
 	// them, and a module is initialized at the prompt rather than in a browser
 	answerPrompts(t)
-	previous := headlessReason
-	headlessReason = func() string { return "this is a test" }
-	t.Cleanup(func() { headlessReason = previous })
+	previous := pkg.HeadlessReason
+	pkg.HeadlessReason = func() string { return "this is a test" }
+	t.Cleanup(func() { pkg.HeadlessReason = previous })
 	return dir
 }
 
 func TestInitSalModuleOpensTheFormByDefault(t *testing.T) {
-	previous := headlessReason
-	headlessReason = func() string { return "" }
-	t.Cleanup(func() { headlessReason = previous })
+	previous := pkg.HeadlessReason
+	pkg.HeadlessReason = func() string { return "" }
+	t.Cleanup(func() { pkg.HeadlessReason = previous })
 
 	require.True(t, (&InitCmd{SalModule: true}).opensForm())
 	require.False(t, (&InitCmd{SalModule: true, NoUI: true}).opensForm())
@@ -53,23 +62,12 @@ func TestInitSalModuleOpensTheFormByDefault(t *testing.T) {
 }
 
 func TestInitSalModuleAsksAtThePromptWhereNoBrowserWouldOpen(t *testing.T) {
-	previous := headlessReason
-	headlessReason = func() string { return "CI is set" }
-	t.Cleanup(func() { headlessReason = previous })
+	previous := pkg.HeadlessReason
+	pkg.HeadlessReason = func() string { return "CI is set" }
+	t.Cleanup(func() { pkg.HeadlessReason = previous })
 
 	require.False(t, (&InitCmd{SalModule: true}).opensForm())
 	require.True(t, (&InitCmd{SalModule: true, UI: true}).opensForm())
-}
-
-func TestHeadlessReasonNamesCI(t *testing.T) {
-	t.Setenv("CI", "true")
-	require.Equal(t, "CI is set", headlessReason())
-}
-
-func TestHeadlessReasonNamesAnSSHSession(t *testing.T) {
-	t.Setenv("CI", "")
-	t.Setenv("SSH_CONNECTION", "10.0.0.2 52000 10.0.0.1 22")
-	require.Equal(t, "this is an SSH session", headlessReason())
 }
 
 // answerPrompts feeds the prompts the given lines instead of the terminal for
@@ -353,7 +351,7 @@ func TestInitSalModuleBareScaffoldsModuleFiles(t *testing.T) {
 	require.Equal(t, ".", ontology["@id"])
 	require.Equal(t, "Ada Lovelace", ontology["dcterms:creator"])
 	require.Equal(t, "example", ontology["dcterms:title"])
-	require.Equal(t, "", ontology["owl:versionInfo"])
+	require.Equal(t, "0.1", ontology["owl:versionInfo"])
 	require.Equal(t, "", ontology["rdfs:label"])
 
 	task := graph[1]
@@ -470,4 +468,124 @@ func TestInitSalModuleBareSkeletonIsFlaggedBySchemaUntilFilledIn(t *testing.T) {
 
 	require.ErrorContains(t, err, "/@graph/1/@id")
 	require.ErrorContains(t, err, "/@graph/1/salmodule:taskShape")
+}
+
+func TestInitWritesTheProjectMakefile(t *testing.T) {
+	dir := newGitRepo(t)
+	require.NoError(t, initProject())
+
+	makefile, err := os.ReadFile(filepath.Join(dir, "Makefile"))
+	require.NoError(t, err)
+	require.Equal(t, projectMakefile, string(makefile))
+	require.Contains(t, projectMakefile, "\nvalidate: ## ")
+	require.Contains(t, projectMakefile, "\n\tsal build $(SOURCES)\n")
+	require.Contains(t, projectMakefile, "\napply: $(TF_DIR)/.terraform ## ")
+	require.Contains(t, projectMakefile, "\n\tterraform -chdir=$(TF_DIR) destroy\n")
+	require.NoFileExists(t, filepath.Join(dir, "terraform", "main.tf"), "the Terraform configuration is written only with --with-iac")
+}
+
+func TestInitLeavesAnExistingMakefileAlone(t *testing.T) {
+	dir := newGitRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Makefile"), []byte("all:\n\techo mine\n"), 0644))
+
+	require.NoError(t, initProject())
+
+	makefile, err := os.ReadFile(filepath.Join(dir, "Makefile"))
+	require.NoError(t, err)
+	require.Equal(t, "all:\n\techo mine\n", string(makefile))
+}
+
+func TestInitWithIaCWritesTheTerraformConfiguration(t *testing.T) {
+	dir := newGitRepo(t)
+	require.NoError(t, (&InitCmd{Description: "A test project", WithIaC: true}).Run())
+
+	variables, err := os.ReadFile(filepath.Join(dir, "terraform", "variables.tf"))
+	require.NoError(t, err)
+	require.Contains(t, string(variables), `default     = "example"`, "the service is named after the repository")
+	require.FileExists(t, filepath.Join(dir, "terraform", "main.tf"))
+	require.FileExists(t, filepath.Join(dir, "terraform", "terraform.tfvars"))
+}
+
+func TestInitWithIaCLeavesAnExistingConfigurationAlone(t *testing.T) {
+	dir := newGitRepo(t)
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "terraform"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "terraform", "main.tf"), []byte("# mine\n"), 0644))
+
+	require.NoError(t, (&InitCmd{Description: "A test project", WithIaC: true}).Run())
+
+	main, err := os.ReadFile(filepath.Join(dir, "terraform", "main.tf"))
+	require.NoError(t, err)
+	require.Equal(t, "# mine\n", string(main))
+}
+
+func TestInitWithIaCRefusesASalModule(t *testing.T) {
+	newGitRepo(t)
+	require.ErrorIs(t, (&InitCmd{SalModule: true, WithIaC: true}).Run(), ErrIaCWithSalModule)
+	require.ErrorIs(t, (&InitCmd{Skills: true, NoSkills: true}).Run(), ErrSkillsFlags)
+}
+
+// skillInstalled reports whether the named skill is in both agent
+// directories under dir.
+func skillInstalled(t *testing.T, dir string, skill string) bool {
+	t.Helper()
+	installed := pkg.InstalledSkills(dir, skill)
+	require.Contains(t, []int{0, 2}, len(installed), "a skill is installed in every agent directory or none")
+	return len(installed) == 2
+}
+
+func TestInitInstallsTheProjectSkill(t *testing.T) {
+	skillstest.NewRepository(t, "sal", "salmodule")
+	dir := newGitRepo(t)
+	require.NoError(t, initProject())
+
+	require.True(t, skillInstalled(t, dir, "sal"))
+	require.False(t, skillInstalled(t, dir, "salmodule"))
+}
+
+func TestInitInstallsTheModuleSkillForASalModule(t *testing.T) {
+	skillstest.NewRepository(t, "sal", "salmodule")
+	dir := newGitRepo(t)
+	require.NoError(t, (&InitCmd{SalModule: true, Bare: true}).Run())
+
+	require.True(t, skillInstalled(t, dir, "salmodule"))
+	require.False(t, skillInstalled(t, dir, "sal"))
+}
+
+func TestInitWithNoSkillsInstallsNone(t *testing.T) {
+	skillstest.NewRepository(t, "sal")
+	dir := newGitRepo(t)
+
+	require.NoError(t, (&InitCmd{Description: "A test project", NoSkills: true}).Run())
+
+	require.False(t, skillInstalled(t, dir, "sal"))
+	require.NoDirExists(t, filepath.Join(dir, ".claude"))
+}
+
+// A download that fails does not fail the init, which has created the
+// project by then.
+func TestInitWarnsWhenTheSkillCannotBeDownloaded(t *testing.T) {
+	previous := pkg.SkillsRepository
+	pkg.SkillsRepository = "file://" + filepath.Join(t.TempDir(), "missing")
+	t.Cleanup(func() { pkg.SkillsRepository = previous })
+	dir := newGitRepo(t)
+
+	require.NoError(t, initProject())
+
+	require.FileExists(t, filepath.Join(dir, ".sal", "config.jsonld"))
+	require.False(t, skillInstalled(t, dir, "sal"))
+	// asked for nothing but the skills, the failure is the error
+	require.ErrorContains(t, (&InitCmd{Skills: true}).Run(), "download the agent skills")
+}
+
+// An initialized project cannot be initialized again, but its skills can
+// still be installed.
+func TestInitInstallsSkillsIntoAnInitializedProject(t *testing.T) {
+	skillstest.NewRepository(t, "sal")
+	dir := newGitRepo(t)
+	require.NoError(t, (&InitCmd{Description: "A test project", NoSkills: true}).Run())
+	require.False(t, skillInstalled(t, dir, "sal"))
+
+	require.NoError(t, (&InitCmd{Skills: true}).Run())
+
+	require.True(t, skillInstalled(t, dir, "sal"))
 }

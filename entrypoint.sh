@@ -70,7 +70,9 @@ build_demo_data() {
 	# demo project, and so does a Cloud Run instance starting from an empty
 	# disk. It is recorded on the project node and shown on the UI's landing card.
 	# An import the demo can show off: it puts an owl:imports in .sal/config.jsonld
-	/app/sal init --description "Sample RDF for demo purposes. Contains geospatial data and a SAL module task which copies in external files."
+	# --no-skills: the agent skills would be cloned from GitHub on every
+	# start, and nothing in the image reads them
+	/app/sal init --no-skills --description "Sample RDF for demo purposes. Contains geospatial data and a SAL module task which copies in external files."
 	# for the stats view, and build merges the schema.org vocabulary into the
 	# table. The sample data types its resources with schema.org classes, so
 	# importing it is what lets a SPARQL property path such as

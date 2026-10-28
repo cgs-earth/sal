@@ -12,9 +12,14 @@ After [`sal init`](/sal/reference/commands/#sal-init), a project has:
 
 ```text
 .sal/
+  config.jsonld
   data/
+Makefile
 sparql/
+terraform/        with --with-iac, or after sal terraform
 ```
+
+`Makefile` documents the commands a project runs, each target one `sal` command, plus the `terraform` targets that deploy it; see [`sal init`](/sal/reference/commands/#sal-init). `.claude/skills/` and `.agents/skills/` hold the [agent skill](/sal/guides/agent-skills/) when `sal init` was told to install it.
 
 `sparql/` is for the project's SPARQL queries. It is source rather than generated data, so it sits in the project root and is not gitignored.
 Every `CONSTRUCT` query in it, a file ending in `.rq` or `.sparql`, is run by [`sal build`](/sal/reference/commands/#constructed-triples), which commits the triples it constructs with the rest of the build.

@@ -11,9 +11,15 @@ metadata:
 # SAL modules
 
 A SAL module is a git repository with a `Dockerfile` in its root; `sal init --salmodule` scaffolds one,
-asking for one sample task to seed `ontology.jsonld` with (`--bare` skips the questions), writing a
-`Dockerfile` and `.dockerignore` holding only a comment, and registering a JSON Schema for
-`ontology.jsonld` in `.vscode/` so an editor checks the ontology's structure as it is written. The image it builds is a CLI with
+opening a browser form that writes `ontology.jsonld` (or asking for one sample task at the prompt where
+no browser opens; `--bare` skips the questions), writing a `Dockerfile` and `.dockerignore` holding only
+a comment, and registering a JSON Schema for `ontology.jsonld` in `.vscode/` so an editor checks the
+ontology's structure as it is written. `sal edit`, run in the module, opens the same form on an
+existing `ontology.jsonld`: the module, its prefixes, and each task's configuration properties and
+output shape as rows, with the JSON-LD preview checked as it is edited, and below it a prompt for a
+coding agent (`sal edit --prompt` prints it) that lists the tasks, shapes, and a sample task instance
+to implement the module from. `sal init --salmodule --skills` installs this skill into
+`.claude/skills/salmodule` and `.agents/skills/salmodule`. The image it builds is a CLI with
 two subcommands. `sal` clones the repository, builds the image, and runs those subcommands; nothing
 else about the language, framework, or base image matters.
 
