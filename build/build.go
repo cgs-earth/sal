@@ -27,11 +27,6 @@ type ValidateCmd struct {
 	SalModule                       bool     `arg:"--salmodule" help:"also check that the project is a valid SAL module: that ontology.jsonld and a Dockerfile exist and that the ontology has the structure the SAL Module specification requires, without building or running anything; implied when both files are in the project root"`
 }
 
-// placeholderModuleNamespace stands in for a module's salmodule:// namespace
-// when the repository has no git remote to derive it from. The module checks
-// only need a base for the ontology's relative terms, so any will do.
-const placeholderModuleNamespace = "salmodule://github.com/OWNER/REPO/"
-
 // Run validates the RDF sources the way a build does, without committing
 // anything, and then, with --salmodule or in a project whose root holds an
 // ontology.jsonld and a Dockerfile, checks the project as a SAL module. Both
@@ -60,7 +55,7 @@ func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
 	}
 
 	slog.Info("Checking the SAL module in " + moduleDir + " against the SAL Module specification")
-	if problems := salmodule.CheckModule(moduleDir, localModuleNamespace()); len(problems) > 0 {
+	if problems := salmodule.CheckModule(moduleDir, salmodule.LocalNamespace()); len(problems) > 0 {
 		errs = append(errs, problems...)
 	} else {
 		slog.Info("SAL module is valid: " + filepath.Join(moduleDir, salmodule.OntologyFile) + " follows the SAL Module specification and " + filepath.Join(moduleDir, salmodule.DockerfileName) + " exists")
@@ -69,23 +64,6 @@ func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
 		return nil, errs
 	}
 	return graph, nil
-}
-
-// localModuleNamespace is the salmodule:// namespace of the module in the
-// current git repository, derived from its remote the way a project
-// referencing it would write it. A repository with no usable remote is checked
-// under a placeholder, since the checks only need a base for the ontology's
-// relative terms.
-func localModuleNamespace() string {
-	remote, err := pkg.DefaultGitRemote()
-	if err == nil {
-		namespace, err := salmodule.ModuleNamespaceForRemote(remote)
-		if err == nil {
-			return namespace
-		}
-	}
-	slog.Warn("Cannot derive the module's salmodule:// namespace from a git remote; checking the module under the placeholder "+placeholderModuleNamespace, "error", err)
-	return placeholderModuleNamespace
 }
 
 // moduleDir is the directory the SAL module checks look in: the one directory

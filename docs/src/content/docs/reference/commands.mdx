@@ -38,14 +38,23 @@ The node is the project itself, resolved against the base IRI the git remote giv
 - `~/.sal/cache` for user-level cache data.
 - `~/.sal/config.jsonld` for user-level SAL configuration.
 - `.gitignore` entries for `.sal/data` and `.sal/constructed`.
+- A `Makefile` documenting the commands a project runs: `make validate`, `make build`, `make query`, `make serve`, and so on, each one `sal` command, plus `make apply`, `make destroy`, and `make upload` for the deployment [`sal terraform`](#sal-terraform) writes. It is documentation that happens to run rather than a build system, and an existing `Makefile` is left alone.
 
 ![sal init running in a repository that already has a remote](/sal/demos/sal-init.gif)
+
+### Agent skills
+
+`sal init` also installs the [agent skill](/sal/guides/agent-skills/) that teaches Claude Code, Codex, and other coding agents how to work with the repository: the `sal` skill for a project, the `salmodule` skill for a module. The skill is downloaded from the sal repository with git and copied into both `.claude/skills/<name>` (where Claude Code reads it) and `.agents/skills/<name>` (where agents following the Agent Skills convention read it); the copies are identical, and both belong in git so the whole team's agents see them. `--no-skills` skips it. A download that fails, offline say, is a warning rather than a failed init; `sal init --skills` in an initialized project installs the skill and nothing else, which is also how to update it.
+
+### `sal init --with-iac`
+
+`--with-iac` also writes the Terraform configuration [`sal terraform`](#sal-terraform) generates into `terraform/`, so a project starts with the deployment the `Makefile`'s `make apply` runs. A `terraform/` that already holds a configuration is left alone.
 
 ### `sal init --salmodule`
 
 Initializes the repository as a [SAL module](/sal/reference/salmodule-description/) rather than a SAL project: a module is a container that produces data for projects, so none of the project layout (`.sal/data`, `.sal/config.jsonld`, `sparql/`, the `.gitignore` entries) is created and no description is asked for. It checks the git remote the way `sal init` does, since the remote names the module, and then opens [a form in your browser](#sal-init---salmodule-in-the-browser) that writes `ontology.jsonld`. Where no browser is likely to open, in CI, over SSH, without a terminal, or on Linux without a display, it says so and asks its questions at the prompt instead; `--no-ui` asks at the prompt anyway and `--ui` opens the form anyway. Either way it scaffolds the files a module needs in the repository root:
 
-- `ontology.jsonld`, a skeleton of the document the module's `salmodule ontology` command prints: a `@context` binding the prefixes it uses and a `@graph` holding an `owl:Ontology` node followed by one `owl:Class` that is a subclass of `salmodule:Task`. The ontology node is `"@id": "."`, its `dcterms:title` is the git repository name, and its `dcterms:creator` is the configured git `user.name`; `owl:versionInfo` and every other string start blank for you to fill in.
+- `ontology.jsonld`, a skeleton of the document the module's `salmodule ontology` command prints: a `@context` binding the prefixes it uses and a `@graph` holding an `owl:Ontology` node followed by one `owl:Class` that is a subclass of `salmodule:Task`. The ontology node is `"@id": "."`, its `dcterms:title` is the git repository name, its `dcterms:creator` is the configured git `user.name`, and its `owl:versionInfo` starts at `0.1`; every other string starts blank for you to fill in.
 - A `Dockerfile` holding only a comment reminding you that the image must stream JSON-LD to standard out per the salmodule specification.
 - A `.dockerignore` holding only a comment saying it excludes files from the module container.
 - `.vscode/salmodule-ontology.schema.json`, the [JSON Schema for a SAL module ontology](/sal/reference/salmodule-json-schema/), and a `json.schemas` entry in `.vscode/settings.json` applying it to `ontology.jsonld`, so that VS Code and any other editor reading that setting flags a missing ontology node, a task class that is not a subclass of a `salmodule:` task class, a `sh:nodeKind` that is not one of SHACL's, or a constraint `sal` refuses in a `salmodule:stdoutShape` while you type. An existing `settings.json` keeps everything it has and gains only the entry; one that `sal` cannot parse as JSON, because it holds comments for instance, is left alone with a warning showing the entry to add by hand. [`sal validate`](#sal-validate---salmodule) checks `ontology.jsonld` against the same schema, so what the editor flags and what `sal` refuses are one set of rules.
@@ -75,7 +84,7 @@ Comment describing what the task does: Fetches every station in a region and emi
       "@type": "owl:Ontology",
       "dcterms:creator": "Ada Lovelace",
       "dcterms:title": "my-module",
-      "owl:versionInfo": "",
+      "owl:versionInfo": "0.1",
       "rdfs:label": "",
       "rdfs:comment": ""
     },
@@ -113,13 +122,40 @@ sal init --salmodule --ui     # the form, wherever it runs
 
 The form is a page of the same web UI `sal serve --with-ui` serves, in the same light and dark themes, and has a `?` beside each part saying what it is for. It asks for:
 
-- the module: `dcterms:title` and `dcterms:creator`, filled in from the git repository name and `user.name`, plus `owl:versionInfo` and an optional `rdfs:comment`;
+- the module: `dcterms:title` and `dcterms:creator`, filled in from the git repository name and `user.name`, `owl:versionInfo`, which starts at `0.1`, and an `rdfs:comment` describing the module; the title, version, and description are required before the document can be written;
 - the prefixes: the six every module ontology binds (`salmodule`, `owl`, `rdfs`, `dcterms`, `sh`, and `xsd`) are always there, and you add the ones your shapes refer to, `schema` for `https://schema.org/` say;
 - the tasks: each one an `owl:Class` subclassing `salmodule:Task`, with its ID, `rdfs:label`, and `rdfs:comment`, and an editor for each of its SHACL shapes, `salmodule:taskShape`, `salmodule:stdoutShape`, and `salmodule:stdinShape`, written as JSON-LD using the prefixes above. The task shape starts as the node shape targeting the task that the prompts write, and each editor has a button that inserts a worked example to edit from; an editor left empty declares no shape.
 
 The pane beside the form shows the `ontology.jsonld` that would be written, and it is checked as you type with the same rules [`sal validate --salmodule`](#sal-validate---salmodule) applies: the [JSON Schema](/sal/reference/salmodule-json-schema/), that every term of the module's own namespace is declared, that every shape is one `sal` can enforce, and that a shape's JSON parses at all. Each problem is listed and marked on the line it is about, and the **Write** button is enabled only once there are none. Writing creates `ontology.jsonld` with exactly the text shown, along with the `Dockerfile`, `.dockerignore`, and editor schema `sal init --salmodule` scaffolds, leaving any that already exist alone.
 
-The form creates an ontology and does not edit one. Once `ontology.jsonld` exists, the page says the module is initialized and offers no form, and that is also what it shows when the command is run in a module that already has one; to start over, delete the file and the page unlocks again. Edit a written ontology in your editor, where the schema `sal` registered checks it, and check it with `sal validate --salmodule`.
+The same form edits an ontology that exists: run in a module that already has an `ontology.jsonld`, it loads the file into the form, and **Save** writes the file back, which is what [`sal edit`](#sal-edit) opens. Below the preview, once the document is written, is a prompt for a coding agent; see `sal edit`.
+
+## `sal edit`
+
+Opens the browser form [`sal init --salmodule`](#sal-init---salmodule-in-the-browser) creates `ontology.jsonld` with, loaded with the module's `ontology.jsonld`, so a module's ontology can be changed without knowing how the document is put together. Run it in the module's root:
+
+```sh
+sal edit
+```
+
+The form shows the module (title, creator, version, and description), the prefixes the shapes use, and each task with its label and comment and three shapes, which the form shows as rows rather than SHACL:
+
+- **Configuration** (`salmodule:taskShape`): one row per property a project configures an instance with. The row's name becomes a term of the module, declared with its type and range where it is constrained, and its value kind (text, integer, decimal, true or false, date, date and time, URL, IRI, or anything), **required**, and **single** boxes become the datatype and cardinality constraints `sal` validates an instance against before running the task.
+- **Output** (`salmodule:stdoutShape`): the class the task's nodes carry as `@type` and one row per property every node must have, which `sal` checks each line of the task's output against.
+- **Input** (`salmodule:stdinShape`): the same for the nodes a consuming task reads.
+
+A shape holding a constraint the rows cannot show (`sh:pattern`, `sh:in`, a nested shape) is edited as JSON instead, every shape has an **Edit as JSON** button for the rest of SHACL, and an undeclared shape can be declared straight as JSON to paste a shape into; **Edit as form** turns JSON back into rows when it holds only what the rows can show. The examples the editor inserts use Dublin Core Terms, which every module ontology binds. Nothing the file holds is lost by editing it in the form: a context entry that is not a prefix, a key on a node the form has no field for, and any node that is neither the ontology node nor a task class are written back as they were, and the preview shows exactly what will be written. The document is checked as it is edited with the rules [`sal validate --salmodule`](#sal-validate---salmodule) applies, and **Save** is enabled once there is no problem and the text differs from the file. A file edited by hand while the page is open is not written over; the page says to reload.
+
+While the button is greyed out, a folded list under it says what to fix or fill in: the problems the form found, the ones `sal` found with their lines, or that the file already holds the document.
+
+`sal edit --prompt` prints a **prompt for a coding agent**, written by `sal` from the ontology: the module's namespace and prefixes, every task with its configuration properties, output shape, and a sample of the task instance the container is handed, the contract the run command keeps (newline delimited JSON, error nodes, `file:///` hand-over), and the commands that check the result. Paste it into Claude Code, Codex, or any other agent, which then writes the Dockerfile and the code from it; `sal edit --agents` writes it as `AGENTS.md` in the module root instead, headed by a marker that lets `sal` write it again, and never touches one written by hand. The prompt tells the agent to read the installed [`salmodule` skill](/sal/guides/agent-skills/) first when `.claude/skills/salmodule` or `.agents/skills/salmodule` exists, and how to install it otherwise. Neither opens the form.
+
+```sh
+sal edit --prompt | pbcopy
+sal edit --agents
+```
+
+The form is served on a localhost port `sal` prints and keeps running until `Ctrl+C`; `--port` fixes the port, for forwarding it over SSH, and `--ui` opens the browser even where `sal` would not on its own.
 
 ## `sal import`
 
@@ -819,6 +855,16 @@ Enabling the UI also exposes the JSON endpoints it reads:
 
 `/api/sql` runs arbitrary DuckDB statements against your machine, `/api/table` points every query at a bucket a caller names, and `/api/salmodule` builds and runs container images from repositories a caller names, so only enable `--with-ui` on a network you trust.
 
+### Serving an uploaded copy
+
+`--data` serves a copy of a project's `.sal/data` instead of the project the current directory belongs to, so no project, git repository, or DuckDB catalog is needed where the copy sits, such as a container with a bucket mounted into it:
+
+```sh
+sal serve --data /mnt/sal
+```
+
+The directory holds one Iceberg table, found by its `metadata` directory under the project's name, plus the `blobs` and `stac` directories beside it, which is the layout `sal upload` writes to a bucket root. The table is read through DuckDB's `iceberg_scan` with `allow_moved_paths`, so the paths its metadata records, the bucket's, need no rewriting. This is what the Cloud Run service [`sal terraform`](#sal-terraform) deploys runs.
+
 ## `sal push`
 
 Publishes `.sal/data` as an OCI artifact:
@@ -858,16 +904,31 @@ sal upload --bucket gs://my-bucket/sal/triples
 SAL stages a temporary copy, rewrites staged Iceberg metadata to point at the target location, then uploads data and metadata in reader-friendly order.
 See [Publishing Data](/sal/guides/publishing-data/#upload-to-object-storage).
 
-## `sal edit`
+## `sal rewrite`
 
 Rewrites local Iceberg metadata so a copied table can be read from a new table root:
 
 ```sh
-sal edit --new-table-root gs://my-bucket/sal/triples
+sal rewrite --new-table-root gs://my-bucket/sal/triples
 ```
 
 This command changes metadata references only.
 It does not rewrite Parquet data files.
+It was `sal edit` before that name went to the module ontology form.
+
+## `sal terraform`
+
+Writes a Terraform configuration into `terraform/` that serves the built data product from Google Cloud: a Cloud Storage bucket holding the copy of `.sal/data` that [`sal upload`](#sal-upload) writes, and a Cloud Run service running `sal serve` over it. See [Publishing Data](/sal/guides/publishing-data/#deploy-a-query-endpoint-on-google-cloud).
+
+```sh
+sal terraform --project my-gcp-project
+make apply                                 # terraform init && terraform apply
+make upload                                # sal upload --bucket gs://<the bucket>/
+```
+
+The bucket is mounted into the container with Cloud Storage FUSE, so `sal serve --data` reads the Iceberg table as local files, the service account's read access to the bucket is the only credential, and the bucket and the service sit in one region. The defaults are small on purpose, one CPU, 2 GiB, no instance kept warm, at most two, so an idle deployment costs nothing beyond the bucket, and every one is a variable in `variables.tf`. The service is public by default and serves the SPARQL endpoint, the STAC catalog, and the blob store, but not the browser UI, whose SQL endpoint runs arbitrary DuckDB statements; `with_ui = true` turns it on. `--region` picks the region, `--image` the `sal` image, and `--dir` the directory; `--project` records the Google Cloud project ID in `terraform.tfvars`, which must be filled in before `make apply` otherwise. Files the directory already holds are left alone unless `--force` is given. [`sal init --with-iac`](#sal-init---with-iac) writes the same configuration when a project is created.
+
+`sal terraform` only writes files; nothing is created until `terraform apply` runs.
 
 ## `sal clean`
 

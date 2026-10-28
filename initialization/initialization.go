@@ -2,7 +2,6 @@ package initialization
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,15 +11,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 
 	_ "embed"
 
+	"github.com/cgs-earth/sal/edit"
 	"github.com/cgs-earth/sal/importation"
 	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/salmodule"
-	"github.com/cgs-earth/sal/specs"
+	"github.com/cgs-earth/sal/terraform"
 )
 
 //go:embed sal_config_example.jsonld
@@ -32,7 +31,17 @@ type InitCmd struct {
 	Bare        bool   `arg:"--bare" help:"with --salmodule, answer no questions and leave the task class blank"`
 	UI          bool   `arg:"--ui" help:"with --salmodule, open the browser form that writes ontology.jsonld even where sal would not on its own (CI, an SSH session, no terminal or display)"`
 	NoUI        bool   `arg:"--no-ui" help:"with --salmodule, answer the questions at the prompt instead of opening the browser form"`
+	WithIaC     bool   `arg:"--with-iac" help:"also write the Terraform configuration sal terraform generates, deploying the data product on Google Cloud, into terraform/"`
+	Skills      bool   `arg:"--skills" help:"in a project that is already initialized, only install (or update) the SAL agent skills in .claude/skills and .agents/skills; a new project or module gets them anyway"`
+	NoSkills    bool   `arg:"--no-skills" help:"do not install the SAL agent skills"`
 }
+
+// ErrIaCWithSalModule is returned when --with-iac is passed with --salmodule,
+// since the configuration deploys a data product and a module has none.
+var ErrIaCWithSalModule = errors.New("--with-iac only applies to a project; a SAL module has no data product to deploy")
+
+// ErrSkillsFlags is returned when --skills and --no-skills are both passed.
+var ErrSkillsFlags = errors.New("--skills and --no-skills cannot both be given")
 
 // ErrUIWithoutSalModule is returned when --ui or --no-ui is passed without
 // --salmodule, since the form only writes a module's ontology.
@@ -44,6 +53,23 @@ var ErrDescriptionRequired = errors.New("a description of the project is require
 
 // stdin is where the prompts read their answers from; tests replace it.
 var stdin io.Reader = os.Stdin
+
+// promptReader buffers stdin for every prompt of an invocation. One reader
+// is shared, rather than one per prompt, since a buffered reader may take
+// more than the line it was asked for from the source and a second reader
+// over the same source would then miss it.
+var (
+	promptReader *bufio.Reader
+	promptSource io.Reader
+)
+
+func prompts() *bufio.Reader {
+	if promptReader == nil || promptSource != stdin {
+		promptSource = stdin
+		promptReader = bufio.NewReader(stdin)
+	}
+	return promptReader
+}
 
 // taskIDPattern is what a task ID typed at the prompt must match: a name
 // usable as a relative IRI and a JSON-LD @type, with no spaces or punctuation.
@@ -60,6 +86,12 @@ type taskDetails struct {
 func (cmd *InitCmd) Run() error {
 	if (cmd.UI || cmd.NoUI) && !cmd.SalModule {
 		return ErrUIWithoutSalModule
+	}
+	if cmd.WithIaC && cmd.SalModule {
+		return ErrIaCWithSalModule
+	}
+	if cmd.Skills && cmd.NoSkills {
+		return ErrSkillsFlags
 	}
 
 	// if cwd is home return an error
@@ -128,13 +160,18 @@ func (cmd *InitCmd) Run() error {
 	if !cmd.SalModule {
 		configPath := filepath.Join(cwd, ".sal", "config.jsonld")
 		if _, err := os.Stat(configPath); err == nil {
+			// the one thing init adds to an initialized project is the
+			// skills, since nothing else about it can be re-run
+			if cmd.Skills {
+				return pkg.InstallSkills(cwd, pkg.SalSkill)
+			}
 			return fmt.Errorf("%s already exists; this directory is already a SAL project", configPath)
 		} else if !os.IsNotExist(err) {
 			return err
 		}
 		description := cmd.Description
 		if description == "" {
-			if description, err = promptDescription(stdin); err != nil {
+			if description, err = promptDescription(); err != nil {
 				return err
 			}
 		}
@@ -161,6 +198,14 @@ func (cmd *InitCmd) Run() error {
 		if err := importation.WriteOntology(configPath, &importation.Ontology{IRI: base, Base: base, IsProject: true, Title: title, Description: description}); err != nil {
 			return err
 		}
+		if err := writeMakefile(cwd); err != nil {
+			return err
+		}
+		if cmd.WithIaC {
+			if err := writeTerraform(cwd, title); err != nil {
+				return err
+			}
+		}
 	}
 
 	home, err = os.UserHomeDir()
@@ -179,16 +224,33 @@ func (cmd *InitCmd) Run() error {
 		return err
 	}
 
+	// the skill is installed before the form, which runs until the user
+	// stops it
+	skill := pkg.SalSkill
+	if cmd.SalModule {
+		skill = pkg.SalModuleSkill
+	}
+	if err := cmd.installSkills(cwd, skill); err != nil {
+		return err
+	}
+
 	// the form writes ontology.jsonld and the files next to it in place of
-	// the prompts
+	// the prompts, and edits an ontology.jsonld the module already has
 	if cmd.SalModule && cmd.opensForm() {
-		return serveModuleInitUI(cwd)
+		form, err := edit.NewForm(cwd, "init")
+		if err != nil {
+			return err
+		}
+		form.Written = func() {
+			slog.Info("SAL module initialized at " + cwd + "; press Ctrl+C to stop the form")
+		}
+		return form.Serve(0, cmd.UI)
 	}
 
 	if cmd.SalModule {
 		var task taskDetails
 		if !cmd.Bare {
-			if task, err = promptTaskDetails(stdin); err != nil {
+			if task, err = promptTaskDetails(); err != nil {
 				return err
 			}
 		}
@@ -196,10 +258,10 @@ func (cmd *InitCmd) Run() error {
 		if err != nil {
 			return err
 		}
-		if err := writeSalModuleFiles(cwd, ontology); err != nil {
+		if err := salmodule.WriteModuleFiles(cwd, ontology, false); err != nil {
 			return err
 		}
-		if err := writeEditorSchema(cwd); err != nil {
+		if err := salmodule.WriteEditorSchema(cwd); err != nil {
 			return err
 		}
 		slog.Info("SAL module initialized at " + cwd)
@@ -207,6 +269,42 @@ func (cmd *InitCmd) Run() error {
 	}
 
 	slog.Info("SAL project initialized at " + cwd)
+	return nil
+}
+
+// installSkills installs the named agent skill into the project or module,
+// which every init does unless --no-skills says not to, since the skill is
+// what makes a coding agent useful in the repository. A download that fails
+// only warns, since the project is initialized by then and `sal init
+// --skills` installs the skill later; with --skills, which asked for nothing
+// else, it is the error.
+func (cmd *InitCmd) installSkills(dir string, skill string) error {
+	if cmd.NoSkills {
+		return nil
+	}
+	err := pkg.InstallSkills(dir, skill)
+	if err != nil && !cmd.Skills {
+		slog.Warn("could not install the "+skill+" agent skill; run `sal init --skills` to try again, or pass --no-skills", "error", err)
+		return nil
+	}
+	return err
+}
+
+// writeTerraform writes the Terraform configuration `sal terraform` would
+// for a project named name into the project, leaving a configuration the
+// directory already holds alone with a warning rather than failing an init.
+func writeTerraform(dir string, name string) error {
+	written, err := terraform.Generate(filepath.Join(dir, terraform.DefaultDir), terraform.Options{Name: name})
+	if errors.Is(err, terraform.ErrExists) {
+		slog.Warn("leaving the Terraform configuration the project already has alone; `sal terraform --force` replaces it", "error", err)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, path := range written {
+		slog.Info("wrote " + path)
+	}
 	return nil
 }
 
@@ -247,31 +345,11 @@ func (cmd *InitCmd) opensForm() bool {
 	case cmd.NoUI || cmd.Bare:
 		return false
 	}
-	if reason := headlessReason(); reason != "" {
+	if reason := pkg.HeadlessReason(); reason != "" {
 		slog.Info("not opening the browser form since " + reason + "; asking at the prompt instead (pass --ui to open it anyway)")
 		return false
 	}
 	return true
-}
-
-// headlessReason reports why no browser is likely to open for this session,
-// or "" when one is: a CI environment, an SSH session, standard output that
-// is not a terminal, or a Linux or BSD session with no display. Tests replace
-// it.
-var headlessReason = func() string {
-	if os.Getenv("CI") != "" {
-		return "CI is set"
-	}
-	if os.Getenv("SSH_CONNECTION") != "" || os.Getenv("SSH_TTY") != "" {
-		return "this is an SSH session"
-	}
-	if info, err := os.Stdout.Stat(); err != nil || info.Mode()&os.ModeCharDevice == 0 {
-		return "standard output is not a terminal"
-	}
-	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
-		return "there is no display"
-	}
-	return ""
 }
 
 // askLine prints a question and reads the answer, trimmed, from reader. The
@@ -294,8 +372,8 @@ func askLine(reader *bufio.Reader, question string) (string, bool, error) {
 // promptDescription asks for the project's description, which is required:
 // an empty answer is asked again, and running out of input, as happens when
 // stdin is not a terminal, is ErrDescriptionRequired.
-func promptDescription(in io.Reader) (string, error) {
-	reader := bufio.NewReader(in)
+func promptDescription() (string, error) {
+	reader := prompts()
 	for {
 		description, ok, err := askLine(reader, "Description of the project")
 		if err != nil {
@@ -315,13 +393,13 @@ func promptDescription(in io.Reader) (string, error) {
 // ID is asked again until it has no spaces or special characters. Running out
 // of input, as happens when stdin is not a terminal, leaves the task blank,
 // the same as --bare.
-func promptTaskDetails(in io.Reader) (taskDetails, error) {
+func promptTaskDetails() (taskDetails, error) {
 	fmt.Println("A SAL module declares the tasks a project can run as classes in ontology.jsonld.")
 	fmt.Println("sal will ask a few questions about one task so that the ontology starts with a")
 	fmt.Println("worked example to extend rather than blank fields. Pass --bare to skip this.")
 	fmt.Println()
 
-	reader := bufio.NewReader(in)
+	reader := prompts()
 	var task taskDetails
 	for task.ID == "" {
 		id, ok, err := askLine(reader, "Unique ID for the task, with no spaces or special characters (e.g. FetchStations)")
@@ -355,6 +433,10 @@ func promptTaskDetails(in io.Reader) (taskDetails, error) {
 	task.Comment = comment
 	return task, nil
 }
+
+// initialModuleVersion is the owl:versionInfo a new module starts at, the
+// same the browser form starts from.
+const initialModuleVersion = "0.1"
 
 // salModuleOntology renders the ontology.jsonld skeleton a new SAL module
 // starts from: a @context binding every prefix the document uses and a @graph
@@ -419,7 +501,7 @@ func salModuleOntology(task taskDetails) (string, error) {
 	}{
 		Context: context,
 		Graph: []any{
-			ontologyNode{ID: ".", Type: "owl:Ontology", Creator: creator, Title: title, Version: ""},
+			ontologyNode{ID: ".", Type: "owl:Ontology", Creator: creator, Title: title, Version: initialModuleVersion},
 			taskNode{
 				ID:         task.ID,
 				Type:       "owl:Class",
@@ -435,88 +517,4 @@ func salModuleOntology(task taskDetails) (string, error) {
 		return "", err
 	}
 	return string(out) + "\n", nil
-}
-
-// writeSalModuleFiles scaffolds the files a SAL module repository needs on top
-// of a SAL project: the ontology.jsonld skeleton plus a Dockerfile and
-// .dockerignore holding only a comment saying what belongs in each. A file that already exists is left alone so that re-running
-// init never clobbers a module's own work.
-func writeSalModuleFiles(dir string, ontology string) error {
-	files := []struct{ name, content string }{
-		{"ontology.jsonld", ontology},
-		{"Dockerfile", "# When invoked this Dockerfile should stream JSON-LD to standard out in accordance with the salmodule specification.\n"},
-		{".dockerignore", "# Ignore any files that should not be packaged into the salmodule container ran by the SAL cli.\n"},
-	}
-	for _, file := range files {
-		path := filepath.Join(dir, file.name)
-		if _, err := os.Stat(path); err == nil {
-			slog.Warn(file.name + " already exists; leaving it unchanged")
-			continue
-		} else if !os.IsNotExist(err) {
-			return err
-		}
-		if err := os.WriteFile(path, []byte(file.content), 0644); err != nil {
-			return err
-		}
-		slog.Info("created " + file.name)
-	}
-	return nil
-}
-
-// editorSchemaURL is where .vscode/settings.json points VS Code for the
-// schema, relative to the workspace root the settings file sits under.
-const editorSchemaURL = "./.vscode/" + specs.SalModuleOntologySchemaFile
-
-// writeEditorSchema copies the SAL module ontology JSON Schema into .vscode
-// and registers it in .vscode/settings.json for ontology.jsonld, so that an
-// editor checks the ontology against the SAL Module specification as it is
-// written. The schema copy is sal's, not the module's, so a stale copy is
-// rewritten; the settings file is the module's, so an existing one gains
-// only the json.schemas entry, and one sal cannot parse (settings.json may
-// hold comments) is left alone with a warning saying what to add by hand.
-func writeEditorSchema(dir string) error {
-	vscodeDir := filepath.Join(dir, ".vscode")
-	if err := os.MkdirAll(vscodeDir, 0755); err != nil {
-		return err
-	}
-	schemaPath := filepath.Join(vscodeDir, specs.SalModuleOntologySchemaFile)
-	if existing, err := os.ReadFile(schemaPath); err != nil && !os.IsNotExist(err) {
-		return err
-	} else if !bytes.Equal(existing, specs.SalModuleOntologySchema) {
-		if err := os.WriteFile(schemaPath, specs.SalModuleOntologySchema, 0644); err != nil {
-			return err
-		}
-		slog.Info("created .vscode/" + specs.SalModuleOntologySchemaFile)
-	}
-
-	entry := map[string]any{
-		"fileMatch": []any{"/ontology.jsonld"},
-		"url":       editorSchemaURL,
-	}
-	settingsPath := filepath.Join(vscodeDir, "settings.json")
-	settings := map[string]any{}
-	content, err := os.ReadFile(settingsPath)
-	switch {
-	case err != nil && !os.IsNotExist(err):
-		return err
-	case err == nil:
-		if strings.Contains(string(content), editorSchemaURL) {
-			return nil
-		}
-		if err := json.Unmarshal(content, &settings); err != nil {
-			slog.Warn(".vscode/settings.json could not be parsed as JSON; add the schema to it yourself", "json.schemas", entry)
-			return nil
-		}
-	}
-	schemas, _ := settings["json.schemas"].([]any)
-	settings["json.schemas"] = append(schemas, entry)
-	out, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(settingsPath, append(out, '\n'), 0644); err != nil {
-		return err
-	}
-	slog.Info("registered the schema for ontology.jsonld in .vscode/settings.json")
-	return nil
 }

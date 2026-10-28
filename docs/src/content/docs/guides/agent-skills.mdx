@@ -14,6 +14,19 @@ installed knows the SAL workflow and the SAL Module contract without being told.
   ontology document must declare, how the task instance arrives, the newline delimited JSON output
   contract, error nodes, handing over files with `file:///` IRIs, and how to test the image locally.
 
+## Install with `sal init`
+
+`sal init` installs the skill that fits what it is initializing, the `sal` skill for a project and the `salmodule` skill for a module, into both `.claude/skills/<name>` and `.agents/skills/<name>` so Claude Code and the agents following the Agent Skills convention find it; commit both. `--no-skills` skips it, and `sal init --skills` in a project that is already initialized installs or updates the skill and does nothing else:
+
+```sh
+sal init                          # a project, with the sal skill
+sal init --no-skills              # without it
+sal init --skills                 # an initialized project: install or update the skill only
+sal init --salmodule --skills     # the same in a module
+```
+
+The copy is downloaded from this repository's default branch with git, so it describes the current release. [`sal edit`](/sal/reference/commands/#sal-edit)'s prompt for a coding agent points at the installed `salmodule` skill.
+
 ## Install as a Claude Code plugin
 
 The repository publishes a plugin marketplace, so inside Claude Code:

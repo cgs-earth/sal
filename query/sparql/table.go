@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/apache/iceberg-go/catalog"
 	"github.com/cgs-earth/sal/pkg"
+	"github.com/cgs-earth/sal/rewrite"
 )
 
 // NoTriplesTableError reports a project whose triples table has not been
@@ -55,6 +57,29 @@ func LocateTriplesTable() (TriplesTable, error) {
 		Path:      joinRemote(warehouse, namespace, "triples"),
 		Imports:   LocateImportedTables(),
 	}, nil
+}
+
+// LocateDataDirTable resolves the triples table inside a copy of a project's
+// .sal/data directory that is not the project's own, such as a bucket `sal
+// upload` wrote mounted into a container: the one directory under it, or
+// the directory itself, that holds an Iceberg metadata directory. The table
+// is named by its path alone, like a table on object storage, so Runner
+// verifies it through DuckDB rather than through a catalog over the
+// warehouse, and iceberg_scan's allow_moved_paths reads it wherever the
+// metadata says it was written.
+func LocateDataDirTable(dataDir string) (TriplesTable, error) {
+	dataDir, err := filepath.Abs(dataDir)
+	if err != nil {
+		return TriplesTable{}, err
+	}
+	tables, err := rewrite.IcebergTablePaths(dataDir)
+	if err != nil {
+		return TriplesTable{}, err
+	}
+	if len(tables) > 1 {
+		return TriplesTable{}, fmt.Errorf("%s holds %d Iceberg tables, %s; a data directory serves one", dataDir, len(tables), strings.Join(tables, ", "))
+	}
+	return TriplesTable{Path: tables[0]}, nil
 }
 
 // Runner opens a DuckDB runner over the table, after checking that the table

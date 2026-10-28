@@ -13,11 +13,11 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       // Two pages share one build: the app `sal serve --with-ui` serves, and
-      // the module init form `sal init --salmodule --ui` serves. serve/ui.go
+      // the module ontology form `sal init --salmodule` and `sal edit` serve. serve/ui.go
       // picks the page; the chunks they share are built once.
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
-        init: fileURLToPath(new URL('./salmodule-init.html', import.meta.url)),
+        init: fileURLToPath(new URL('./salmodule.html', import.meta.url)),
       },
     },
   },
