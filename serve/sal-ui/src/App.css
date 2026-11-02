@@ -1514,6 +1514,19 @@ kbd {
   filter: var(--map-ctrl-icon-filter);
 }
 
+/* MapLibre's own fullscreen glyph is four corner brackets, the same shape as
+   the zoom-to-extent overlay button's; a window with an arrow out of, and
+   back into, its corner is what tells the two apart. */
+.map-canvas .maplibregl-ctrl button.maplibregl-ctrl-fullscreen .maplibregl-ctrl-icon {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23333' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='5' width='17' height='14' rx='2'/%3E%3Cpath d='M12.5 8.5H16V12M16 8.5l-5 5'/%3E%3C/svg%3E");
+  background-size: 20px 20px;
+}
+
+.map-canvas .maplibregl-ctrl button.maplibregl-ctrl-shrink .maplibregl-ctrl-icon {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23333' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='5' width='17' height='14' rx='2'/%3E%3Cpath d='M15 10.5h-3.5V7M11.5 10.5l5-5'/%3E%3C/svg%3E");
+  background-size: 20px 20px;
+}
+
 /* The attribution's compact rule in MapLibre's own stylesheet paints it white
    on black and outranks a two-class selector, so these carry the extra class. */
 .map-canvas .maplibregl-ctrl.maplibregl-ctrl-attrib,
@@ -1817,10 +1830,24 @@ kbd {
   cursor: not-allowed;
 }
 
+/* The list on the left with the selected feature's map beside it, and the properties under both. */
 .feature-results {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 42%);
   gap: 16px;
+  align-items: start;
+}
+
+.feature-results > .feature-detail {
+  grid-column: 1 / -1;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-emphasis);
+}
+
+@media (max-width: 900px) {
+  .feature-results {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .feature-list,
@@ -1846,10 +1873,10 @@ kbd {
   margin-left: 8px;
 }
 
-/* The selected feature's name sits centered over its property tables. */
+/* The selected feature's name heads its property tables, set off from the list above by a rule. */
 .feature-detail-header {
-  justify-content: center;
-  text-align: center;
+  justify-content: flex-start;
+  text-align: left;
 }
 
 .feature-detail-id {
@@ -1885,8 +1912,13 @@ kbd {
   white-space: nowrap;
 }
 
-.feature-copy .button + .button {
-  margin-left: 6px;
+.feature-copy .icon-button {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.feature-copy .icon-button + .icon-button {
+  margin-left: 4px;
 }
 
 .feature-pager {
@@ -1978,10 +2010,11 @@ kbd {
   background: var(--cgs-continental-green);
 }
 
-/* A fixed height rather than the viewport's share, since it sits among the tables. */
+/* As tall as the list beside it, and never shorter than a useful map. */
 .feature-map {
   flex: none;
-  height: 420px;
+  align-self: stretch;
+  min-height: 420px;
   border: var(--border-strong);
   border-radius: var(--radius-sm);
   overflow: hidden;

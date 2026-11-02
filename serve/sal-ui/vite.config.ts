@@ -39,10 +39,15 @@ export default defineConfig({
       '/stac': 'http://localhost:8080',
       // The OGC API Features endpoint. A browser navigating to /ogc wants the
       // feature view of this app, the same as the Go server decides it, so
-      // only a client's request is proxied.
+      // only a client's request is proxied, or a navigation that asks for
+      // JSON outright with f=json (or geojson), which the server answers.
       '/ogc': {
         target: 'http://localhost:8080',
-        bypass: (req) => (req.headers['sec-fetch-mode'] === 'navigate' ? '/index.html' : undefined),
+        bypass: (req) => {
+          if (req.headers['sec-fetch-mode'] !== 'navigate') return undefined
+          const format = new URL(req.url ?? '/', 'http://localhost').searchParams.get('f')
+          return format === 'json' || format === 'geojson' ? undefined : '/index.html'
+        },
       },
     },
   },
