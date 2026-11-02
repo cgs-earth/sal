@@ -800,7 +800,7 @@ kbd {
   border-top: 1px solid var(--line-strong);
 }
 
-/* The map is a framed window with the Map tab's control styling and the same
+/* The map is a framed window with the Geospatial tab's control styling and the same
    caption style as a figure's label. It fills the column's height, down to a
    floor that keeps it usable when there is no description beside it. */
 .dataset-extent {
@@ -812,7 +812,7 @@ kbd {
   margin: 0;
 }
 
-/* Qualified by the figure: the map shares .map-canvas with the Map tab for the
+/* Qualified by the figure: the map shares .map-canvas with the Geospatial tab for the
    control styling, and that class's flex: 1 would otherwise size it by content. */
 .dataset-extent .extent-map {
   position: relative;
@@ -1314,12 +1314,28 @@ kbd {
   align-self: flex-start;
 }
 
+/* The box controls while the map draws a result instead: present but grayed. */
+.map-control-group-locked > :not(.hint) {
+  opacity: 0.45;
+}
+
+.map-control-group-locked .toggle,
+.map-control-group-locked .module-input {
+  cursor: not-allowed;
+}
+
 .map-control-group .hint code {
   color: var(--code);
 }
 
 .map-chips {
   padding: 0;
+}
+
+.map-source {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12.5px;
 }
 
 .chip.active {
@@ -1419,10 +1435,6 @@ kbd {
   color: var(--code);
 }
 
-.map-link {
-  align-self: flex-start;
-}
-
 .map-controls .error-banner {
   margin: 0;
 }
@@ -1432,6 +1444,59 @@ kbd {
   flex: 1;
   min-width: 0;
   background: var(--bg);
+}
+
+/* The map with the buttons the UI lays over it, opposite MapLibre's own. */
+.map-stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.map-overlay {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Sized and framed like a MapLibre control button, so the two sets read as one. */
+.map-overlay-button {
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  padding: 0;
+  border: var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.map-overlay-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.map-overlay-button:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.map-overlay-button.active {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.map-overlay-button:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
 }
 
 /* MapLibre's own chrome is styled for a light page; recolor it to the theme. */
@@ -1521,6 +1586,441 @@ kbd {
 
 .map-popup-table a {
   color: var(--link);
+}
+
+/* The map button on a result that holds geometry, beside Copy CSV and in the Yasr header. */
+.map-link-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* The builder's listing of the requests Run would make. */
+.feature-queries td:first-child {
+  white-space: nowrap;
+}
+
+.feature-queries .icon-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ---------- the Geospatial tab's views ---------- */
+
+/* The strip in the panel header switching between the map and feature views. */
+.subtabs {
+  display: inline-flex;
+  align-self: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--glass-outline);
+  border-radius: 999px;
+  background: var(--glass-bg);
+}
+
+.subtab {
+  padding: 4px 12px;
+  white-space: nowrap;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.subtab:hover {
+  color: var(--text);
+}
+
+.subtab.active {
+  color: var(--accent-text);
+  background: var(--accent);
+}
+
+/* The feature view scrolls as one page inside the panel: the builder, then
+   the results once there are any. */
+.feature-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.feature-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.feature-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  align-items: flex-start;
+}
+
+.feature-field {
+  display: flex;
+  flex: 1 1 220px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.feature-field > span,
+.feature-field > label {
+  color: var(--text-faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.feature-field-wide {
+  flex: 2 1 360px;
+}
+
+.feature-field-narrow {
+  flex: 0 1 120px;
+}
+
+.feature-field .module-input {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12.5px;
+}
+
+.feature-toggles {
+  gap: 6px;
+}
+
+.feature-chips {
+  padding: 0;
+}
+
+.feature-chips .chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feature-actions {
+  align-items: center;
+}
+
+.feature-actions .error-banner {
+  flex: 1;
+  margin: 0;
+}
+
+/* The term box: the input with its completion list under it. */
+.term-input {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.term-input-row {
+  display: flex;
+  gap: 6px;
+}
+
+.term-input-box {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.term-suggestions {
+  position: absolute;
+  z-index: 5;
+  inset: calc(100% + 4px) 0 auto 0;
+  margin: 0;
+  padding: 4px 0;
+  max-height: 280px;
+  overflow-y: auto;
+  list-style: none;
+  background: var(--bg-raised);
+  border: var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+
+.term-suggestions li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.term-suggestions li.selected {
+  background: var(--accent);
+}
+
+.term-suggestions li code {
+  color: var(--code);
+  font-size: 12px;
+}
+
+.term-suggestions li.selected code,
+.term-suggestions li.selected .term-suggestion-note {
+  color: var(--accent-text);
+}
+
+.term-suggestion-note {
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.term-problem {
+  color: var(--danger);
+}
+
+/* The query builder's sections: a frame with its title on the edge. */
+.feature-section {
+  margin: 0;
+  padding: 10px 14px 14px;
+  border: var(--border-strong);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.feature-section legend {
+  padding: 0 6px;
+  color: var(--accent-ink);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* The builder/results strip sits inside the view, under the panel header. */
+.feature-panes {
+  align-self: flex-start;
+}
+
+.subtab:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.feature-results {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.feature-list,
+.feature-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feature-list-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+}
+
+.feature-list-header .toggle,
+.feature-list-header .map-link-button {
+  margin-left: auto;
+}
+
+.feature-list-header .toggle + .map-link-button {
+  margin-left: 8px;
+}
+
+/* The selected feature's name sits centered over its property tables. */
+.feature-detail-header {
+  justify-content: center;
+  text-align: center;
+}
+
+.feature-detail-id {
+  color: var(--code);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.feature-table tbody tr.selected td {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+}
+
+.feature-status-changed {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.feature-status-only-primary {
+  color: var(--cgs-fluvial-blue);
+}
+
+.feature-status-only-compare {
+  color: var(--cgs-continental-green);
+}
+
+.feature-status-unchanged {
+  color: var(--text-faint);
+}
+
+.feature-copy {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.feature-copy .button + .button {
+  margin-left: 6px;
+}
+
+.feature-pager {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* One property table, or two side by side when diffing. */
+.feature-detail-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.feature-detail-grid.side-by-side {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.feature-props h4 {
+  margin: 0 0 6px;
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.feature-props-table th {
+  position: static;
+  width: 34%;
+  text-align: left;
+  font-weight: 600;
+  color: var(--accent-ink);
+  background: transparent;
+  vertical-align: top;
+}
+
+.feature-props-table tr.changed th,
+.feature-props-table tr.changed td {
+  background: color-mix(in srgb, var(--cgs-prairie-yellow) 22%, transparent);
+  color: var(--text);
+}
+
+.feature-request {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.feature-request-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.feature-request-row code {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--code);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.feature-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.feature-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  border-radius: 3px;
+}
+
+.feature-swatch-primary {
+  background: var(--cgs-fluvial-blue);
+}
+
+.feature-swatch-compare {
+  background: var(--cgs-continental-green);
+}
+
+/* A fixed height rather than the viewport's share, since it sits among the tables. */
+.feature-map {
+  flex: none;
+  height: 420px;
+  border: var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.feature-table {
+  width: 100%;
+  font-size: 12px;
+}
+
+.feature-table tbody tr {
+  cursor: pointer;
+}
+
+.feature-table td {
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.feature-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feature-diff-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  align-items: center;
+}
+
+.feature-diff-primary {
+  color: var(--cgs-fluvial-blue);
+}
+
+.feature-diff-compare {
+  color: var(--cgs-continental-green);
 }
 
 /* ---------- modals: the example query picker ---------- */

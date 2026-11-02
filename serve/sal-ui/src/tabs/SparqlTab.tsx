@@ -13,7 +13,8 @@ import { setQueryRunner, setQueryTextGetter } from './sparql/sparqlBridge'
 import { termAtCaret, watchCaretTerm } from './sparql/caretTerm'
 import { TermDefinitions } from './sparql/TermDefinitions'
 import { SqlPreview, type Translation } from './sparql/SqlPreview'
-import { publishResult } from '../results'
+import { publishResult, useResults } from '../results'
+import { MapLinkButton } from '../components/MapLinkButton'
 
 registerGraphPlugin(Yasgui)
 // Before the first Yasgui is built, since it decides which completers a new
@@ -422,6 +423,8 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
   // screen. Portaling straight into the header instead would leave React
   // unmounting children out of a node Yasgui had already torn down.
   const [shareHost] = useState(() => document.createElement('div'))
+  // The last SPARQL result as published for the map, which decides whether the map button shows.
+  const published = useResults()
   // The Definitions pane sits inside the editor of whichever Yasgui tab is on
   // screen, so like the share button it is a node of this component's own
   // that is moved into the active editor rather than portaled straight in.
@@ -621,7 +624,7 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
     instance.on('tabAdd', followActiveTab)
     instance.on('tabChange', scheduleTranslation)
 
-    // The Map tab draws whatever geometry the last result held. Yasgui emits
+    // The Geospatial tab draws whatever geometry the last result held. Yasgui emits
     // queryResponse before Yasr has stored the result, so it is read a
     // microtask later.
     instance.on('queryResponse', (_, tab) => {
@@ -766,11 +769,20 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
             pushes it to the right of the Table/Graph/Response plugin buttons. */}
         {createPortal(<TermDefinitions term={caretTerm} />, definitionsHost)}
         {createPortal(
-          <ShareLinkButton
-            tab="SPARQL"
-            className="yasr-share"
-            query={() => yasgui.current?.getTab()?.getQuery() ?? ''}
-          />,
+          <>
+            <ShareLinkButton
+              tab="SPARQL"
+              className="yasr-share"
+              query={() => yasgui.current?.getTab()?.getQuery() ?? ''}
+            />
+            {/* Offered beside the plugin buttons once the result holds geometry to draw. */}
+            <MapLinkButton
+              source="SPARQL"
+              header={published.SPARQL?.header ?? null}
+              rows={published.SPARQL?.rows ?? null}
+              className="yasr-share"
+            />
+          </>,
           shareHost,
         )}
       </section>

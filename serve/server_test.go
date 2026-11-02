@@ -35,6 +35,14 @@ type endpointRunner struct {
 	// snapshot is the snapshot AtSnapshot was last asked for, zero when a query
 	// went to the current table.
 	snapshot int64
+	// features is what Features answers, and featureQuery what it was last
+	// asked; extent is what FeaturesExtent answers, extentSnapshot the
+	// snapshot it was asked for.
+	features       salsparql.FeaturePage
+	featureQuery   salsparql.FeatureQuery
+	extent         salsparql.Feature
+	extentSnapshot int64
+	project        salsparql.ProjectInfo
 }
 
 func (r *endpointRunner) Run(_ context.Context, query string) (salsparql.Result, error) {
@@ -51,11 +59,32 @@ func (r *endpointRunner) AtSnapshot(snapshotID int64) salsparql.Runner {
 	return r
 }
 
+// Features reports NoSnapshotError for a snapshot HasSnapshot would not
+// report, as the real runner does, so the 404 path is exercised.
+func (r *endpointRunner) Features(_ context.Context, query salsparql.FeatureQuery) (salsparql.FeaturePage, error) {
+	r.featureQuery = query
+	if query.SnapshotID != 0 && !slices.Contains(r.snapshots, query.SnapshotID) {
+		return salsparql.FeaturePage{}, salsparql.NoSnapshotError{SnapshotID: query.SnapshotID}
+	}
+	return r.features, r.err
+}
+
+func (r *endpointRunner) FeaturesExtent(_ context.Context, snapshotID int64) (salsparql.Feature, error) {
+	r.extentSnapshot = snapshotID
+	if snapshotID != 0 && !slices.Contains(r.snapshots, snapshotID) {
+		return salsparql.Feature{}, salsparql.NoSnapshotError{SnapshotID: snapshotID}
+	}
+	return r.extent, r.err
+}
+
+func (r *endpointRunner) Project() salsparql.ProjectInfo {
+	return r.project
+}
+
 // endpointUIRunner is a UIRunner whose four query surfaces are all canned responses.
 type endpointUIRunner struct {
 	endpointRunner
 	collection salsparql.FeatureCollection
-	extent     salsparql.Feature
 	stats      salsparql.TableStats
 	sqlResult  salsparql.Result
 	sqlErr     error
@@ -705,12 +734,12 @@ func TestEndpointWithUIRejectsMalformedBoundingBox(t *testing.T) {
 }
 
 func TestEndpointWithUIReturnsTheGeometryExtent(t *testing.T) {
-	runner := &endpointUIRunner{extent: salsparql.Feature{
+	runner := &endpointUIRunner{endpointRunner: endpointRunner{extent: salsparql.Feature{
 		Type:       "Feature",
 		BBox:       []float64{-90, 40, -89, 41},
 		Geometry:   json.RawMessage(`{"type":"Polygon","coordinates":[[[-90,40],[-89,40],[-89,41],[-90,41],[-90,40]]]}`),
 		Properties: map[string]string{"geometries": "6"},
-	}}
+	}}}
 	server := newUIServer(t, runner)
 	defer server.Close()
 

@@ -84,10 +84,8 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 	// which says nothing about a table on object storage
 	if !isRemoteTablePath(r.TablePath) {
 		stats.Vocabularies = vocabulariesResult()
-		if ontology := projectOntology(); ontology != nil {
-			stats.Title = ontology.Title
-			stats.Description = ontology.Description
-		}
+		project := r.Project()
+		stats.Title, stats.Description = project.Title, project.Description
 	} else {
 		stats.Vocabularies = Result{Header: importation.VocabularyTableHeader}
 	}

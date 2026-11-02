@@ -11,7 +11,7 @@ type StatsTabProps = {
 }
 
 // MapLibre is the largest thing the UI loads, so the card's small map comes in
-// its own chunk, shared with the Map tab, rather than in the page's.
+// its own chunk, shared with the Geospatial tab, rather than in the page's.
 const ExtentMap = lazy(() =>
   import('../components/ExtentMap').then((module) => ({
     default: module.ExtentMap,

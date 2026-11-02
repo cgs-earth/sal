@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 
-export type ResultSource = 'SQL' | 'SPARQL'
+/** Where a published result came from: an editor, or the feature view's last run. */
+export type ResultSource = 'SQL' | 'SPARQL' | 'Features'
 
 /** The last result an editor produced, in the header/rows shape both editors can give. */
 export type PublishedResult = {
@@ -13,18 +14,19 @@ export type PublishedResult = {
 export type PublishedResults = {
   SQL: PublishedResult | null
   SPARQL: PublishedResult | null
+  Features: PublishedResult | null
   /** Whichever editor ran most recently, or null before either has. */
   latest: ResultSource | null
 }
 
 /*
- * The SQL and SPARQL tabs publish their latest result here so that the Map tab,
+ * The SQL and SPARQL tabs, and the feature view, publish their latest result here so that the map view,
  * which is mounted only while it is shown, can draw whatever geometry the last
  * query returned. A module-level store rather than state lifted into App: only
  * the map reads it, and a tab should keep its last result through the
  * unmount/remount of switching tabs.
  */
-let results: PublishedResults = { SQL: null, SPARQL: null, latest: null }
+let results: PublishedResults = { SQL: null, SPARQL: null, Features: null, latest: null }
 const listeners = new Set<() => void>()
 
 export function publishResult(result: PublishedResult) {
