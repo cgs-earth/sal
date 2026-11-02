@@ -7,7 +7,7 @@ export const BASEMAP: Record<Theme, string> = {
   light: 'https://tiles.openfreemap.org/styles/positron',
 }
 
-/** The source name the dataset extent is drawn from, shared by the Map tab and the Stats card. */
+/** The source name the dataset extent is drawn from, shared by the Geospatial tab and the Stats card. */
 export const EXTENT_SOURCE = 'extent'
 
 /**

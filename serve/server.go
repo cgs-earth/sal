@@ -30,9 +30,16 @@ const sparqlResultsJSON = "application/sparql-results+json"
 // maxUIRows bounds how many rows of a SQL result are sent to the browser.
 const maxUIRows = 1000
 
+// EndpointRunner is the query surface the bare endpoint needs: SPARQL at any
+// snapshot and the features the OGC API serves.
+type EndpointRunner interface {
+	salsparql.SnapshotRunner
+	salsparql.FeatureRunner
+}
+
 // UIRunner is the query surface the bundled web UI needs from the DuckDB backend.
 type UIRunner interface {
-	salsparql.SnapshotRunner
+	EndpointRunner
 	salsparql.GeometryRunner
 	salsparql.SQLRunner
 	salsparql.SQLTranslator
@@ -70,9 +77,9 @@ func Serve(ctx context.Context, addr string, runner salsparql.DuckDBRunner, blob
 		}
 	}()
 	if withUI {
-		pkg.Infof("Serving the SAL UI at http://localhost%s/, SPARQL endpoint at http://localhost%s/sparql, and STAC catalog at http://localhost%s/stac/catalog.json\n", addr, addr, addr)
+		pkg.Infof("Serving the SAL UI at http://localhost%s/, SPARQL endpoint at http://localhost%s/sparql, OGC API Features at http://localhost%s/ogc, and STAC catalog at http://localhost%s/stac/catalog.json\n", addr, addr, addr, addr)
 	} else {
-		pkg.Infof("Serving SPARQL endpoint at http://localhost%s/sparql and STAC catalog at http://localhost%s/stac/catalog.json\n", addr, addr)
+		pkg.Infof("Serving SPARQL endpoint at http://localhost%s/sparql, OGC API Features at http://localhost%s/ogc, and STAC catalog at http://localhost%s/stac/catalog.json\n", addr, addr, addr)
 	}
 	err := server.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
@@ -99,14 +106,15 @@ func instrument(handler http.Handler) http.Handler {
 
 // NewEndpoint returns an HTTP handler for the SPARQL Protocol query operation,
 // at /sparql for the current snapshot and at /v{snapshot}/sparql for an earlier
-// one, plus the /blobs endpoint serving the vocabulary and imported ontology
-// documents pinned under blobDir and the /stac endpoint serving the STAC
-// catalog build wrote under stacDir.
-func NewEndpoint(runner salsparql.SnapshotRunner, blobDir string, stacDir string) http.Handler {
+// one, plus the OGC API Features endpoint at /ogc, the /blobs endpoint serving
+// the vocabulary and imported ontology documents pinned under blobDir, and the
+// /stac endpoint serving the STAC catalog build wrote under stacDir.
+func NewEndpoint(runner EndpointRunner, blobDir string, stacDir string) http.Handler {
 	mux := http.NewServeMux()
 	handler := sparqlHandler{runner: runner}
 	mux.Handle("/", snapshotSparqlHandler{runner: runner, fallback: handler})
 	mux.Handle("/sparql", handler)
+	featuresAPI{runner: runner}.register(mux)
 	mux.Handle("/blobs/", blobHandler{dir: blobDir})
 	stac := stacHandler{dir: stacDir}
 	mux.Handle("/stac", stac)
@@ -151,6 +159,9 @@ func NewEndpointWithUI(local UIRunner, blobDir string, stacDir string) (http.Han
 	// Registered so that ServeMux answers the tab's own URL rather than redirecting
 	// it to /blobs/, which is the endpoint's prefix and not a tab.
 	mux.Handle("/blobs", browserRoute{api: blobs, ui: ui})
+	// /ogc is the OGC API tab for a browser and the landing page for a client;
+	// the routes beneath it are the API whatever asked for them.
+	featuresAPI{runner: runner, ui: ui}.register(mux)
 	// The catalog has no UI tab, so it is the API whatever asked for it.
 	stac := stacHandler{dir: stacDir}
 	mux.Handle("/stac", stac)

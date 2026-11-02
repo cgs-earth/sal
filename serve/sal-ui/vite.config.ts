@@ -37,6 +37,13 @@ export default defineConfig({
       '/geometries': 'http://localhost:8080',
       '/blobs': 'http://localhost:8080',
       '/stac': 'http://localhost:8080',
+      // The OGC API Features endpoint. A browser navigating to /ogc wants the
+      // feature view of this app, the same as the Go server decides it, so
+      // only a client's request is proxied.
+      '/ogc': {
+        target: 'http://localhost:8080',
+        bypass: (req) => (req.headers['sec-fetch-mode'] === 'navigate' ? '/index.html' : undefined),
+      },
     },
   },
 })

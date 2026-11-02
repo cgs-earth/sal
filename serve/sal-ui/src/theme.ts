@@ -66,19 +66,35 @@ export function graphPalette(theme: Theme): GraphPalette {
       }
 }
 
-/** The literal colors the Map tab's layers are painted with under a theme. */
+/** The literal colors the Geospatial tab's layers are painted with under a theme. */
 export interface MapPalette {
   feature: string
   point: string
   pointStroke: string
   box: string
   extent: string
+  /** The features of the other snapshot when the OGC API tab compares two. */
+  compare: string
 }
 
 export function mapPalette(theme: Theme): MapPalette {
   return theme === 'dark'
-    ? { feature: cgs.rayleighBlue, point: cgs.prairieYellow, pointStroke: '#11161a', box: cgs.continentalGreen, extent: cgs.cumulusGray }
-    : { feature: cgs.fluvialBlue, point: cgs.prairieYellow, pointStroke: cgs.pavementGray, box: cgs.continentalGreen, extent: cgs.slateGray }
+    ? {
+        feature: cgs.rayleighBlue,
+        point: cgs.prairieYellow,
+        pointStroke: '#11161a',
+        box: cgs.continentalGreen,
+        extent: cgs.cumulusGray,
+        compare: cgs.continentalGreen,
+      }
+    : {
+        feature: cgs.fluvialBlue,
+        point: cgs.prairieYellow,
+        pointStroke: cgs.pavementGray,
+        box: cgs.continentalGreen,
+        extent: cgs.slateGray,
+        compare: cgs.continentalGreen,
+      }
 }
 
 /** Where the chosen theme is remembered between visits. */

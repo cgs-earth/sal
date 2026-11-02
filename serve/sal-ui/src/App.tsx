@@ -12,11 +12,11 @@ import './App.css'
 // YASGUI and its CodeMirror 5 bundle dominate the build, so keep them out of the
 // initial chunk and load them the first time the SPARQL tab is opened.
 const SparqlTab = lazy(() => import('./tabs/SparqlTab').then((module) => ({ default: module.SparqlTab })))
-// MapLibre is nearly as large, and only the Map tab needs it.
-const MapTab = lazy(() => import('./tabs/MapTab').then((module) => ({ default: module.MapTab })))
+// MapLibre is nearly as large, and only the Geospatial tab needs it.
+const GeospatialTab = lazy(() => import('./tabs/GeospatialTab').then((module) => ({ default: module.GeospatialTab })))
 
 export function App() {
-  const { tab: active, sharedQuery, blobHash, navigate } = useRoute()
+  const { tab: active, sharedQuery, blobHash, mapView, ogcRequest, mapSource, arrival, navigate } = useRoute()
   const [stats, setStats] = useState<TableStats | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -114,9 +114,9 @@ export function App() {
           </Suspense>
         )}
         {active === 'Blobs' && <BlobsTab hash={blobHash} />}
-        {active === 'Map' && (
+        {active === 'Geospatial' && (
           <Suspense fallback={<LoadingState message="Loading the map…" delay={200} />}>
-            <MapTab />
+            <GeospatialTab view={mapView} request={ogcRequest} source={mapSource} arrival={arrival} snapshots={stats?.snapshots ?? null} />
           </Suspense>
         )}
         {/* Inside the content rather than under it, so the footer is

@@ -137,12 +137,17 @@ export type GeometryQuery = {
   bbox?: BBox
 }
 
-/** Reads the `{"error": "..."}` body the Go handlers send, falling back to the status text. */
+/**
+ * Reads the `{"error": "..."}` body the Go handlers send, or the
+ * `{"code", "description"}` one the OGC API routes send, falling back to
+ * the status text.
+ */
 export async function failure(response: Response): Promise<Error> {
   const body = await response.text()
   try {
-    const parsed = JSON.parse(body) as { error?: string }
+    const parsed = JSON.parse(body) as { error?: string; description?: string }
     if (parsed.error) return new Error(parsed.error)
+    if (parsed.description) return new Error(parsed.description)
   } catch {
     // Not a JSON body; fall through to the raw text.
   }
@@ -289,4 +294,133 @@ export function stacViewerURL(origin: string): string {
 export async function hasStacCatalog(signal?: AbortSignal): Promise<boolean> {
   const response = await fetch(STAC_COLLECTION_PATH, { method: 'HEAD', signal })
   return response.ok
+}
+
+/* ---------- OGC API Features ---------- */
+
+/** Where `sal serve` answers OGC API Features: the landing page, with the collection and its items beneath it. */
+export const OGC_PATH = '/ogc'
+
+/** The one collection the endpoint serves. */
+export const OGC_COLLECTION = 'triples'
+
+export type OgcLink = {
+  href: string
+  rel: string
+  type?: string
+  title?: string
+}
+
+/** The landing page: the data product's name and the links into the API. */
+export type OgcLanding = {
+  title: string
+  description: string
+  links: OgcLink[]
+}
+
+export type OgcCollection = {
+  id: string
+  title: string
+  description: string
+  itemType: string
+  crs: string[]
+  /** Absent when the table holds no geometries. */
+  extent?: { spatial: { bbox: BBox[]; crs: string } }
+  links: OgcLink[]
+}
+
+/**
+ * One feature: an RDF subject with a geometry, under its IRI, carrying the
+ * predicates the request named as properties keyed by their IRI, null where
+ * the subject lacks one, an array where it has several values.
+ */
+export type OgcFeature = {
+  type: 'Feature'
+  id: string
+  geometry: Geometry | null
+  properties: Record<string, unknown>
+  links?: OgcLink[]
+}
+
+export type OgcFeatureCollection = {
+  type: 'FeatureCollection'
+  timeStamp: string
+  numberReturned: number
+  features: OgcFeature[]
+  links: OgcLink[]
+}
+
+/** The parameters the items and item routes take; everything optional reads the current table. */
+export type OgcQuery = {
+  /** The Iceberg snapshot to read the table at, '' for the current one. */
+  snapshot?: string
+  /** The predicate IRIs each feature carries as properties. */
+  properties?: string[]
+  /** Only the features typed with this class IRI (items only). */
+  type?: string
+  limit?: number
+  offset?: number
+  bbox?: BBox
+}
+
+/** The relative URL of a page of features. */
+export function ogcItemsURL(query: OgcQuery): string {
+  const params = ogcParams(query)
+  if (query.type) params.set('type', query.type)
+  if (query.limit !== undefined) params.set('limit', String(query.limit))
+  if (query.offset) params.set('offset', String(query.offset))
+  if (query.bbox) params.set('bbox', query.bbox.join(','))
+  return withParams(`${OGC_PATH}/collections/${OGC_COLLECTION}/items`, params)
+}
+
+/** The relative URL of one feature, its IRI escaped into a single path segment. */
+export function ogcItemURL(id: string, query: OgcQuery): string {
+  return withParams(`${OGC_PATH}/collections/${OGC_COLLECTION}/items/${encodeURIComponent(id)}`, ogcParams(query))
+}
+
+function ogcParams(query: OgcQuery): URLSearchParams {
+  const params = new URLSearchParams()
+  if (query.snapshot) params.set('snapshot', query.snapshot)
+  if (query.properties && query.properties.length > 0) params.set('properties', query.properties.join(','))
+  return params
+}
+
+function withParams(path: string, params: URLSearchParams): string {
+  const encoded = params.toString()
+  return encoded ? `${path}?${encoded}` : path
+}
+
+async function fetchOgc<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(path, { headers: { Accept: 'application/geo+json, application/json' }, signal })
+  if (!response.ok) throw await failure(response)
+  return (await response.json()) as T
+}
+
+export function fetchOgcLanding(signal?: AbortSignal): Promise<OgcLanding> {
+  return fetchOgc<OgcLanding>(OGC_PATH, signal)
+}
+
+/** The conformance classes the endpoint declares. */
+export async function fetchOgcConformance(signal?: AbortSignal): Promise<string[]> {
+  const declaration = await fetchOgc<{ conformsTo: string[] }>(`${OGC_PATH}/conformance`, signal)
+  return declaration.conformsTo
+}
+
+/** The collection, with its extent at the snapshot or at the current table. */
+export function fetchOgcCollection(snapshot: string, signal?: AbortSignal): Promise<OgcCollection> {
+  const params = new URLSearchParams()
+  if (snapshot) params.set('snapshot', snapshot)
+  return fetchOgc<OgcCollection>(withParams(`${OGC_PATH}/collections/${OGC_COLLECTION}`, params), signal)
+}
+
+export function fetchOgcItems(query: OgcQuery, signal?: AbortSignal): Promise<OgcFeatureCollection> {
+  return fetchOgc<OgcFeatureCollection>(ogcItemsURL(query), signal)
+}
+
+/** One feature by its subject IRI, or null when the table has no such feature at that snapshot. */
+export async function fetchOgcItem(id: string, query: OgcQuery, signal?: AbortSignal): Promise<OgcFeature | null> {
+  const response = await fetch(ogcItemURL(id, query), { headers: { Accept: 'application/geo+json' }, signal })
+  if (response.status === 404) return null
+  if (!response.ok) throw await failure(response)
+  return (await response.json()) as OgcFeature
 }
