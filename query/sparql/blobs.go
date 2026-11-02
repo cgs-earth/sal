@@ -13,26 +13,34 @@ import (
 // name is what GET /blobs/{hash} serves. The iri column is the subject's
 // rdfs:label, the IRI the blob was known by before it was pinned: a
 // vocabulary's namespace, or the file:/// IRI a task named a copied file or
-// directory with, and the subject itself when it has no label. A subject pinned at several versions
-// over the table's history lists once per version, since each is a blob.
+// directory with, and the subject itself when it has no label. The modified
+// column is the subject's dcterms:modified, which build records on a pinned
+// vocabulary and LinkCopiedFiles on a copy, rendered as text the way a query
+// projects it, and empty for a subject that has none. A subject pinned at
+// several versions over the table's history lists once per version, since
+// each is a blob.
 const blobsSQL = `SELECT
 	COALESCE(MIN(%[1]s), version.subject) AS iri,
-	version.object_iri AS hash
+	version.object_iri AS hash,
+	MAX(%[2]s) AS modified
 FROM triples AS version
 LEFT JOIN triples AS label
 	ON label.subject = version.subject
 	AND label.predicate = 'http://www.w3.org/2000/01/rdf-schema#label'
+LEFT JOIN triples AS modified
+	ON modified.subject = version.subject
+	AND modified.predicate = 'http://purl.org/dc/terms/modified'
 WHERE version.predicate = 'http://www.w3.org/2002/07/owl#versionIRI'
 	AND (version.object_iri LIKE 'urn:sha256:%%' OR version.object_iri LIKE 'urn:git-commit-hash:%%')
 GROUP BY version.subject, version.object_iri
 ORDER BY iri, hash
-LIMIT %[2]d`
+LIMIT %[3]d`
 
 // BlobsSQL is the DuckDB statement listing the first limit blobs the table
 // refers to, the one Blobs runs and the one the UI offers to run by hand when
 // the table refers to more than the listing shows.
 func BlobsSQL(limit int) string {
-	return fmt.Sprintf(blobsSQL, bindingExpr("label", "object"), limit)
+	return fmt.Sprintf(blobsSQL, bindingExpr("label", "object"), bindingExpr("modified", "object"), limit)
 }
 
 // Blob is one blob the table refers to, as the Blobs tab lists it.
@@ -44,6 +52,9 @@ type Blob struct {
 	// Hash is the owl:versionIRI naming the blob, urn:sha256:<digest> or
 	// urn:git-commit-hash:<commit>, which /blobs/{hash} resolves.
 	Hash string `json:"hash"`
+	// Modified is the subject's dcterms:modified as text, when it has one:
+	// when the vocabulary was pinned, or the mtime of a copied file.
+	Modified string `json:"modified,omitempty"`
 }
 
 // BlobListing is the first limit blobs the table refers to.
@@ -75,10 +86,10 @@ func (r DuckDBRunner) Blobs(ctx context.Context, limit int) (BlobListing, error)
 			listing.Truncated = true
 			break
 		}
-		if len(row) < 2 {
-			return BlobListing{}, fmt.Errorf("blob listing returned %d columns rather than iri and hash", len(row))
+		if len(row) < 3 {
+			return BlobListing{}, fmt.Errorf("blob listing returned %d columns rather than iri, hash, and modified", len(row))
 		}
-		listing.Blobs = append(listing.Blobs, Blob{IRI: strings.TrimSpace(row[0]), Hash: strings.TrimSpace(row[1])})
+		listing.Blobs = append(listing.Blobs, Blob{IRI: strings.TrimSpace(row[0]), Hash: strings.TrimSpace(row[1]), Modified: strings.TrimSpace(row[2])})
 	}
 	return listing, nil
 }

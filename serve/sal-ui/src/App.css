@@ -351,10 +351,10 @@ a.brand-mark:hover {
   gap: 18px;
 }
 
-/* The map and the module ontology fill the content's height exactly and scroll
+/* The map and a blob's view fill the content's height exactly and scroll
    inside their panels, so these two are fixed to it rather than grown past it. */
 .tab-body.map,
-.tab-body.module {
+.tab-body.blob-view {
   display: grid;
   gap: 18px;
   height: 100%;
@@ -386,12 +386,8 @@ a.brand-mark:hover {
   flex: none;
 }
 
-/* the module form is only as tall as its controls, so the ontology gets the rest */
-.tab-body.module {
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
-.tab-body.map {
+.tab-body.map,
+.tab-body.blob-view {
   grid-template-rows: minmax(0, 1fr);
 }
 
@@ -1054,8 +1050,10 @@ kbd {
   color: var(--text-disabled);
 }
 
-/* ---------- modules ---------- */
+/* ---------- forms and code blocks ---------- */
 
+/* The one-line form the header's table input, the map's bounding box, and the
+   Blobs tab's hash lookup share. */
 .module-form {
   display: flex;
   gap: 10px;
@@ -1152,70 +1150,44 @@ kbd {
 
 /* ---------- blobs ---------- */
 
-.blob-toggle {
-  padding: 10px 16px 0;
-}
-
-.blob-toggle code {
-  color: var(--code);
-}
-
-/* The listing is a native disclosure: a details element cannot be laid out as a
-   flex column the way a panel is, so it is a block with the panel's frame and
-   its summary wears the panel header. */
-.blob-list {
-  display: block;
-}
-
-.blob-list-summary {
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-}
-
-.blob-list-summary::-webkit-details-marker {
-  display: none;
-}
-
-.blob-list-summary h3::before {
-  display: inline-block;
-  width: 1em;
-  color: var(--text-faint);
-  content: '▸';
-  transition: transform 120ms ease;
-}
-
-.blob-list[open] > .blob-list-summary h3::before {
-  transform: rotate(90deg);
-}
-
-.blob-list-summary:hover h3 {
-  color: var(--link);
-}
-
-.blob-list-summary:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
 .blob-list-hint {
-  padding-top: 12px;
+  padding-top: 0;
 }
 
 .blob-list-hint a {
   color: var(--link);
 }
 
+/* The listing scrolls inside its panel past this, so the lookup form below it
+   stays in reach when the table refers to a hundred blobs. */
 .blob-list-scroll {
-  max-height: 420px;
+  max-height: min(560px, 60vh);
 }
 
-/* the digest is the heading, so it keeps its case and wraps rather than overflowing */
-.blob-view-header > div {
+/* The listing's links are the row's text, so they wrap like a cell rather than
+   running the table wide. */
+.blob-list-scroll .iri {
+  overflow-wrap: anywhere;
+}
+
+/* A blob's view is headed by the back arrow, then the IRI or digest, which is
+   the heading and so keeps its case and wraps rather than overflowing, and the
+   download button at the far end. */
+.blob-view-header {
+  justify-content: flex-start;
+}
+
+.blob-view-title {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+}
+
+/* The actions keep to one row at the far end; it is the heading that wraps. */
+.blob-view-header .panel-header-actions {
+  flex: none;
 }
 
 .blob-view-header h3 {
@@ -1223,9 +1195,89 @@ kbd {
   letter-spacing: normal;
 }
 
+.blob-view-header h3 code,
+.blob-view-header p code {
+  overflow-wrap: anywhere;
+}
+
 .blob-view-header h3 code {
   font-size: 12.5px;
-  overflow-wrap: anywhere;
+}
+
+/* The back arrow and the copy and download buttons are icon buttons at the
+   height of the header's line. */
+.blob-back,
+.blob-action {
+  flex: none;
+  width: 30px;
+  height: 30px;
+}
+
+.blob-action svg {
+  width: 16px;
+  height: 16px;
+}
+
+.blob-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.blob-action:disabled:hover {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--text-muted);
+}
+
+/* The filter sits in the listing's header at the width of a hash. */
+.blob-filter {
+  flex: none;
+  width: 260px;
+  max-width: 100%;
+}
+
+/* A column heading is a button that sorts by it, worded like the heading and
+   marked with the direction it is sorted in. */
+.blob-sortable {
+  padding: 0;
+}
+
+.blob-sort {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.blob-sort:hover {
+  color: var(--link);
+}
+
+.blob-sort:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.blob-sort-mark {
+  display: inline-block;
+  width: 1em;
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+/* The modified column is a timestamp, never a link, so it keeps to one line. */
+.blob-modified {
+  white-space: nowrap;
+  color: var(--text-muted);
 }
 
 /* ---------- map ---------- */
