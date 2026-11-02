@@ -70,6 +70,36 @@ export function ogcRequestForLocation(pathname: string, params: URLSearchParams)
   }
 }
 
+/** The session storage key that remembers a JSON redirect, so a proxy that keeps answering with the app cannot loop it. */
+const JSON_REDIRECT_KEY = 'sal-ui.ogc-json-redirect'
+
+/**
+ * Sends the browser back to the server for an OGC API Features URL that asks
+ * for JSON with f=json or f=geojson, and reports whether it did. The server
+ * answers that JSON to any client, so the app is only ever opened on such a
+ * URL by a proxy in front of it that hands every navigation to the app; the
+ * reload goes through once, and a second arrival on the same URL renders the
+ * app rather than reloading forever.
+ */
+export function redirectToJSON(location: Location): boolean {
+  const normalized = location.pathname.replace(/\/+$/, '')
+  if (normalized !== OGC_ROOT && !normalized.startsWith(OGC_ROOT + '/')) return false
+  const format = new URLSearchParams(location.search).get('f')
+  if (format !== 'json' && format !== 'geojson') return false
+  let already = false
+  try {
+    already = sessionStorage.getItem(JSON_REDIRECT_KEY) === location.href
+    if (already) sessionStorage.removeItem(JSON_REDIRECT_KEY)
+    else sessionStorage.setItem(JSON_REDIRECT_KEY, location.href)
+  } catch {
+    // Without session storage the loop guard is gone, so the app is shown instead.
+    return false
+  }
+  if (already) return false
+  location.replace(location.href)
+  return true
+}
+
 /** The parameter a shared query is carried in. */
 const QUERY_PARAM = 'q'
 /** The parameter the Blobs tab reads the digest to open from. */

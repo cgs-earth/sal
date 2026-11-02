@@ -52,6 +52,7 @@ Every route has an HTML representation when the server runs with `--with-ui`: th
 A browser navigating to the landing page, the collection, a page of items, or one item gets the app, and an items or item URL is run as the feature view's query on arrival, so an item link pasted into a browser shows that feature with its properties and on a map; a client asking for JSON gets the document.
 The server tells the two apart the way it does for `/sparql`: a navigation, or a request accepting HTML, is a browser.
 The `f` parameter overrides that: `f=json` (or `geojson`) answers JSON whatever the client, and `f=html` answers the app whatever the client, or `406` without `--with-ui`.
+So `f=json` on the end of an items or item URL in the address bar shows the document in the browser rather than the app; the app itself sends such a URL back to the server should a proxy in front of it hand every navigation to the app.
 Each document links its HTML reading with `rel="alternate"` and `type="text/html"`, as OGC API suggests.
 
 ## Parameters of `items`

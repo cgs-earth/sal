@@ -89,7 +89,7 @@ const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] }
 const CURRENT = 'current'
 
 /** How many features the results list shows at a time. */
-const PAGE = 5
+const PAGE = 10
 
 /** The layers a click on a feature is looked up in, topmost first. */
 const FEATURE_LAYERS = ['features-point', 'compare-point', 'features-line', 'compare-line', 'features-fill', 'compare-fill']
@@ -369,7 +369,9 @@ export function FeatureView({ subtabs, snapshots, request }: FeatureViewProps) {
   const pages = Math.max(1, Math.ceil(listed.length / PAGE))
   const current = Math.min(page, pages - 1)
   const shown = listed.slice(current * PAGE, current * PAGE + PAGE)
-  const selectedRow = rows.find((row) => row.id === selected) ?? null
+  // The first listed feature stands in for a selection that names none of
+  // them, so the map and the properties are never empty while there is a feature.
+  const selectedRow = rows.find((row) => row.id === selected) ?? listed[0] ?? null
 
   // The run as a table the map view can draw: every feature listed, with its
   // GeoJSON and the properties asked for, so the map button hands it over the
@@ -393,7 +395,7 @@ export function FeatureView({ subtabs, snapshots, request }: FeatureViewProps) {
   // The map colors are explained only when there are two geometries to tell apart.
   const geometryDiffers = !!run?.diff && !!selectedRow?.differing.has('geometry')
 
-  // The map is drawn for the selected feature alone, under its properties.
+  // The map is drawn for the selected feature alone, beside the list.
   const { map: mapRef, styleVersion, showPopup } = useMapLibre(container, {
     addLayers,
     featureLayers: FEATURE_LAYERS,
@@ -809,7 +811,7 @@ export function FeatureView({ subtabs, snapshots, request }: FeatureViewProps) {
                           <th className="row-number" scope="col">
                             #
                           </th>
-                          <th scope="col">feature</th>
+                          <th scope="col">IRI</th>
                           {run.compared && (
                             <th scope="col">between the snapshots</th>
                           )}
@@ -821,12 +823,10 @@ export function FeatureView({ subtabs, snapshots, request }: FeatureViewProps) {
                           <tr
                             key={row.id}
                             className={
-                              row.id === selected ? "selected" : undefined
+                              row.id === selectedRow?.id ? "selected" : undefined
                             }
-                            aria-selected={row.id === selected}
-                            onClick={() =>
-                              setSelected(row.id === selected ? "" : row.id)
-                            }
+                            aria-selected={row.id === selectedRow?.id}
+                            onClick={() => setSelected(row.id)}
                             title="Show this feature's properties"
                           >
                             <td className="row-number">
@@ -847,13 +847,9 @@ export function FeatureView({ subtabs, snapshots, request }: FeatureViewProps) {
                               className="feature-copy"
                               onClick={(event) => event.stopPropagation()}
                             >
-                              <button
-                                type="button"
-                                className={
-                                  copied === `${row.id} url`
-                                    ? "button small copied"
-                                    : "button small"
-                                }
+                              <CopyIcon
+                                copied={copied === `${row.id} url`}
+                                label="Copy URL"
                                 title={featureURL(row)}
                                 onClick={() =>
                                   void copy(
@@ -861,29 +857,18 @@ export function FeatureView({ subtabs, snapshots, request }: FeatureViewProps) {
                                     `${window.location.origin}${featureURL(row)}`,
                                   )
                                 }
-                              >
-                                {copied === `${row.id} url`
-                                  ? "Copied"
-                                  : "Copy URL"}
-                              </button>
-                              <button
-                                type="button"
-                                className={
-                                  copied === `${row.id} geojson`
-                                    ? "button small copied"
-                                    : "button small"
-                                }
+                              />
+                              <CopyIcon
+                                copied={copied === `${row.id} geojson`}
+                                label="Copy GeoJSON"
+                                icon="geojson"
                                 onClick={() =>
                                   void copy(
                                     `${row.id} geojson`,
                                     featureGeoJSON(row),
                                   )
                                 }
-                              >
-                                {copied === `${row.id} geojson`
-                                  ? "Copied"
-                                  : "Copy GeoJSON"}
-                              </button>
+                              />
                             </td>
                           </tr>
                         ))}
@@ -918,6 +903,8 @@ export function FeatureView({ subtabs, snapshots, request }: FeatureViewProps) {
                   </>
                 )}
               </div>
+              {/* The map sits beside the list, drawing the selected feature. */}
+              {selectedRow && <div className="map-canvas feature-map" ref={container} />}
 
               {selectedRow ? (
                 <div className="feature-detail">
@@ -979,15 +966,8 @@ export function FeatureView({ subtabs, snapshots, request }: FeatureViewProps) {
                       </div>
                     </>
                   )}
-                  <div className="map-canvas feature-map" ref={container} />
                 </div>
-              ) : (
-                listed.length > 0 && (
-                  <p className="hint">
-                    Select a feature to see its properties.
-                  </p>
-                )
-              )}
+              ) : null}
             </section>
           )
         )}
@@ -996,14 +976,36 @@ export function FeatureView({ subtabs, snapshots, request }: FeatureViewProps) {
   );
 }
 
-/** An icon button that copies something to the clipboard, a clipboard that turns into a check mark once it has. */
-function CopyIcon({ copied, onClick }: { copied: boolean; onClick: () => void }) {
-  const label = copied ? 'Copied' : 'Copy the URL to the clipboard'
+type CopyIconProps = {
+  copied: boolean
+  /** What the button copies, as its accessible name and tooltip until it has copied. */
+  label?: string
+  /** A tooltip in place of the label, such as the URL being copied. */
+  title?: string
+  /** The glyph: a clipboard, or braces for a GeoJSON document. */
+  icon?: 'clipboard' | 'geojson'
+  onClick: () => void
+}
+
+/** An icon button that copies something to the clipboard, its glyph turning into a check mark once it has. */
+function CopyIcon({ copied, label = 'Copy the URL to the clipboard', title, icon = 'clipboard', onClick }: CopyIconProps) {
+  const name = copied ? 'Copied' : label
   return (
-    <button type="button" className={copied ? 'icon-button copied' : 'icon-button'} title={label} aria-label={label} onClick={onClick}>
+    <button
+      type="button"
+      className={copied ? 'icon-button copied' : 'icon-button'}
+      title={copied ? name : (title ?? name)}
+      aria-label={name}
+      onClick={onClick}
+    >
       {copied ? (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M5 12.5l4.5 4.5L19 7.5" />
+        </svg>
+      ) : icon === 'geojson' ? (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M8 4c-2 0-3 1-3 3v3c0 1-1 2-2 2 1 0 2 1 2 2v3c0 2 1 3 3 3" />
+          <path d="M16 4c2 0 3 1 3 3v3c0 1 1 2 2 2-1 0-2 1-2 2v3c0 2-1 3-3 3" />
         </svg>
       ) : (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
