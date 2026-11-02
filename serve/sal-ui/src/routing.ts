@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-export const TABS = ['Stats', 'SPARQL', 'SQL', 'Map', 'Blobs', 'Modules'] as const
+export const TABS = ['Stats', 'SPARQL', 'SQL', 'Map', 'Blobs'] as const
 export type TabName = (typeof TABS)[number]
 
 /**
@@ -15,15 +15,12 @@ const TAB_PATHS: Record<TabName, string> = {
   SQL: '/sql',
   Map: '/map',
   Blobs: '/blobs',
-  Modules: '/modules',
 }
 
 /** The parameter a shared query is carried in. */
 const QUERY_PARAM = 'q'
-/** The parameter the Blobs tab reads the digest to look up from. */
+/** The parameter the Blobs tab reads the digest to open from. */
 const BLOB_PARAM = 'hash'
-/** The parameter that asks the Blobs tab to show a blob in the page instead of downloading it. */
-const RENDER_PARAM = 'render'
 
 export function pathForTab(tab: TabName): string {
   return TAB_PATHS[tab]
@@ -45,17 +42,14 @@ export function shareLink(tab: TabName, query: string): string {
 }
 
 /**
- * The Blobs tab URL for a digest. `render=true` shows the blob in the page,
- * which is the right default for a link to an ontology document since those
- * are meant to be read; it is left off otherwise, since most blobs are not,
- * and the tab defaults to downloading.
+ * The Blobs tab URL for a digest, which opens the tab on that blob's own view
+ * rather than on the listing; without a digest it is the listing itself.
  */
-export function blobLink(hash: string, render: boolean): string {
+export function blobLink(hash: string): string {
+  if (!hash) return pathForTab('Blobs')
   const params = new URLSearchParams()
-  if (hash) params.set(BLOB_PARAM, hash)
-  if (render) params.set(RENDER_PARAM, 'true')
-  const search = params.toString()
-  return search ? `${pathForTab('Blobs')}?${search}` : pathForTab('Blobs')
+  params.set(BLOB_PARAM, hash)
+  return `${pathForTab('Blobs')}?${params}`
 }
 
 /**
@@ -71,10 +65,8 @@ export type Route = {
   tab: TabName
   /** The query a share link seeded this tab with, or null for a plain visit. */
   sharedQuery: string | null
-  /** The digest the Blobs tab was opened on, or null for a plain visit. */
+  /** The digest the Blobs tab was opened on, or null for the listing. */
   blobHash: string | null
-  /** Whether the Blobs tab was asked to render the blob in the page rather than download it. */
-  renderBlob: boolean
 }
 
 function readLocation(): Route {
@@ -83,7 +75,6 @@ function readLocation(): Route {
     tab: tabForPath(window.location.pathname),
     sharedQuery: params.get(QUERY_PARAM),
     blobHash: params.get(BLOB_PARAM),
-    renderBlob: params.get(RENDER_PARAM) === 'true',
   }
 }
 
@@ -108,7 +99,7 @@ export function useRoute(): Route & { navigate: (tab: TabName) => void } {
     if (window.location.pathname !== path || window.location.search) {
       window.history.pushState(null, '', path)
     }
-    setRoute({ tab, sharedQuery: null, blobHash: null, renderBlob: false })
+    setRoute({ tab, sharedQuery: null, blobHash: null })
   }, [])
 
   return { ...route, navigate }

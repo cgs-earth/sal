@@ -306,8 +306,9 @@ the Iceberg table metadata as a JSON list under the `sal.salmodules` property:
 ```
 
 The list is rewritten on every build and run, so dropping a module from your RDF drops it from the table too.
-`sal query --info properties` prints it, and the **Modules** tab of `sal serve --with-ui` offers each entry as
-a chip and as an autocompletion so a module the table was built from can be inspected without typing its URI.
+`sal query --info properties` prints it, and `GET /api/stats` of `sal serve --with-ui` returns it as `modules`, so
+which modules a table was built from can be read without a build; `sal salmodule inspect` is how one of them is
+inspected from the command line.
 
 ## Requirements
 

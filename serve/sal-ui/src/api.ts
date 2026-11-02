@@ -19,8 +19,6 @@ export type TableStats = {
   snapshots: QueryResult
   properties: QueryResult
   columnStats: QueryResult
-  /** The `salmodule://` URIs of the modules the build that wrote this table downloaded. */
-  modules: string[] | null
   /** The same listing `sal get vocabularies` prints: header ["vocabulary", "version", "format", "imported"]. */
   vocabularies: QueryResult
   /** The imported data products, each queryable as a view of its own. */
@@ -41,13 +39,6 @@ export type NamedQuery = {
   sql: string
 }
 
-export type ModuleOntology = {
-  /** The salmodule:// namespace the module's own terms resolve against. */
-  module: string
-  /** The JSON-LD document the module printed in response to its ontology command. */
-  ontology: unknown
-}
-
 export type BlobResult = {
   /** The name the blob was resolved by, with any urn:sha256: or urn:git-commit-hash: prefix stripped. */
   digest: string
@@ -63,6 +54,8 @@ export type PinnedBlob = {
   iri: string
   /** The owl:versionIRI naming the blob, urn:sha256:… or urn:git-commit-hash:…, which /blobs/{hash} resolves. */
   hash: string
+  /** The subject's dcterms:modified as text, when it has one: when a vocabulary was pinned, or the mtime of a copied file. */
+  modified?: string
 }
 
 export type BlobListing = {
@@ -222,16 +215,6 @@ export async function translateSparql(query: string, signal?: AbortSignal): Prom
   })
   if (!response.ok) throw await failure(response)
   return ((await response.json()) as { sql: string }).sql
-}
-
-/**
- * Clones, builds, and runs a SAL module so that it publishes its ontology. The
- * first inspection of a module can take minutes, since its image has to be built.
- */
-export async function inspectModule(module: string, signal?: AbortSignal): Promise<ModuleOntology> {
-  const response = await fetch(`/api/salmodule?module=${encodeURIComponent(module)}`, { signal })
-  if (!response.ok) throw await failure(response)
-  return (await response.json()) as ModuleOntology
 }
 
 /**
