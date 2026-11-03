@@ -128,7 +128,7 @@ func (s *SalModuleSuite) newSalProject(source string) string {
 	s.git(project, "-c", "user.email=sal@example.test", "-c", "user.name=SAL", "commit", "-m", "project source")
 
 	s.Require().NoError(os.Chdir(project))
-	s.Require().NoError((&initialization.InitCmd{}).Run())
+	s.Require().NoError((&initialization.InitCmd{Description: "The integration test project", NoSkills: true}).Run())
 	s.git(project, "add", "-A")
 	s.git(project, "-c", "user.email=sal@example.test", "-c", "user.name=SAL", "commit", "-m", "sal init")
 	return project
@@ -308,7 +308,7 @@ func (s *SalModuleSuite) TestRunStopsATaskWhoseOutputViolatesItsStdoutShape() {
 	started := time.Now()
 	_, err := (&build.RunCmd{Paths: []string{"module.ttl"}}).Run()
 
-	var shapeErr salmodule.StdoutShapeError
+	var shapeErr salmodule.StreamShapeError
 	s.Require().ErrorAs(err, &shapeErr)
 	s.Equal(2, shapeErr.Line)
 	s.Contains(err.Error(), "A place must have a schema:name")

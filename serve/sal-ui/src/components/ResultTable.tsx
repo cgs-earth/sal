@@ -63,10 +63,10 @@ function Cell({ value }: { value: string }) {
   }
   // A urn:sha256: or urn:git-commit-hash: IRI is how a pinned document is
   // named, both in the ontology listing's version column and in the
-  // owl:versionIRI provenance a build commits, so it opens the blob itself,
-  // rendered rather than downloaded since a pinned document is meant to be read.
+  // owl:versionIRI provenance a build commits, so it opens the blob itself in
+  // the Blobs tab's view of it.
   if (/^urn:(sha256|git-commit-hash):/i.test(value)) {
-    const href = blobLink(value, true)
+    const href = blobLink(value)
     return (
       <a
         href={href}

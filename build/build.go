@@ -27,11 +27,6 @@ type ValidateCmd struct {
 	SalModule                       bool     `arg:"--salmodule" help:"also check that the project is a valid SAL module: that ontology.jsonld and a Dockerfile exist and that the ontology has the structure the SAL Module specification requires, without building or running anything; implied when both files are in the project root"`
 }
 
-// placeholderModuleNamespace stands in for a module's salmodule:// namespace
-// when the repository has no git remote to derive it from. The module checks
-// only need a base for the ontology's relative terms, so any will do.
-const placeholderModuleNamespace = "salmodule://github.com/OWNER/REPO/"
-
 // Run validates the RDF sources the way a build does, without committing
 // anything, and then, with --salmodule or in a project whose root holds an
 // ontology.jsonld and a Dockerfile, checks the project as a SAL module. Both
@@ -60,7 +55,7 @@ func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
 	}
 
 	slog.Info("Checking the SAL module in " + moduleDir + " against the SAL Module specification")
-	if problems := salmodule.CheckModule(moduleDir, localModuleNamespace()); len(problems) > 0 {
+	if problems := salmodule.CheckModule(moduleDir, salmodule.LocalNamespace()); len(problems) > 0 {
 		errs = append(errs, problems...)
 	} else {
 		slog.Info("SAL module is valid: " + filepath.Join(moduleDir, salmodule.OntologyFile) + " follows the SAL Module specification and " + filepath.Join(moduleDir, salmodule.DockerfileName) + " exists")
@@ -69,23 +64,6 @@ func (cfg *ValidateCmd) Run() (*rdflibgo.Graph, error) {
 		return nil, errs
 	}
 	return graph, nil
-}
-
-// localModuleNamespace is the salmodule:// namespace of the module in the
-// current git repository, derived from its remote the way a project
-// referencing it would write it. A repository with no usable remote is checked
-// under a placeholder, since the checks only need a base for the ontology's
-// relative terms.
-func localModuleNamespace() string {
-	remote, err := pkg.DefaultGitRemote()
-	if err == nil {
-		namespace, err := salmodule.ModuleNamespaceForRemote(remote)
-		if err == nil {
-			return namespace
-		}
-	}
-	slog.Warn("Cannot derive the module's salmodule:// namespace from a git remote; checking the module under the placeholder "+placeholderModuleNamespace, "error", err)
-	return placeholderModuleNamespace
 }
 
 // moduleDir is the directory the SAL module checks look in: the one directory
@@ -398,18 +376,6 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 		return nil, err
 	}
 
-	// the pins are written only once the build is known to be committable, so
-	// that a rejected build does not leave the worktree dirty with a lockfile
-	// change the next build would then refuse to run against
-	if err := pins.Save(); err != nil {
-		return nil, fmt.Errorf("build: record pinned vocabularies: %w", err)
-	}
-
-	// every vocabulary the project pins becomes provenance in the graph itself,
-	// so which exact version a build validated against is queryable alongside
-	// the data rather than only recorded in .sal/config.jsonld
-	pins.AppendProvenance(finalGraph)
-
 	// a build runs every module task the project declares and commits what
 	// the tasks produced in the same snapshot as the sources, so that a build
 	// is the one operation that produces a snapshot; --without-sal-modules
@@ -422,14 +388,33 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 		if err != nil {
 			return nil, err
 		}
-		tasksRun, err := MaterializeSalModules(ctx, finalGraph, resolver, blobDir)
+		tasksRun, vocabularies, err := MaterializeSalModules(ctx, finalGraph, resolver, blobDir)
 		if err != nil {
 			return nil, err
 		}
 		if tasksRun == 0 && cfg.fromRunCmd {
 			return nil, ErrNoModuleTasks
 		}
+		// the vocabularies the tasks' output is stated in are pinned like the
+		// ones the sources declare, since their terms reach the table all the
+		// same; what a module's own ontology binds without using is not
+		if pinned := validator.PinMaterializedVocabularies(ctx, vocabularies); len(pinned) > 0 {
+			slog.Info(fmt.Sprintf("Pinned %d vocabularies used by SAL module output: %s", len(pinned), strings.Join(pinned, ", ")))
+		}
 	}
+
+	// the pins are written only once the build is known to be committable and
+	// every task has run, so that a rejected or failed build does not leave the
+	// worktree dirty with a lockfile change the next build would then refuse
+	// to run against
+	if err := pins.Save(); err != nil {
+		return nil, fmt.Errorf("build: record pinned vocabularies: %w", err)
+	}
+
+	// every vocabulary the project pins becomes provenance in the graph itself,
+	// so which exact version a build validated against is queryable alongside
+	// the data rather than only recorded in .sal/config.jsonld
+	pins.AppendProvenance(finalGraph)
 
 	// every file and directory a module task has ever handed over is described
 	// in the blob store's prov.jsonld; carrying its record into the graph the

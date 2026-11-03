@@ -26,7 +26,8 @@ Run `sal init` from the root of a Git repository that already has a remote:
 sal init
 ```
 
-This creates the local SAL data directory and adds `.sal/data` to `.gitignore`.
+It asks for a sentence or two describing the project, which `--description` can give instead, and records it in `.sal/config.jsonld`; a directory that already has that file is already a project and `sal init` fails.
+It also creates the local SAL data directory and adds `.sal/data` to `.gitignore`.
 Generated data is not meant to be committed to source control.
 
 Read more about the generated files in [Data Layout](/sal/reference/data-layout/).

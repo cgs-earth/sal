@@ -47,8 +47,10 @@ func ConstructPrefixes(query string) (prefixes map[string]string, isConstruct bo
 // SELECTs are combined with UNION, since a CONSTRUCT builds a graph and a graph
 // holds a triple once. A triple the solution makes invalid, a literal as its
 // subject or anything but an IRI as its predicate, is left out, as SPARQL
-// specifies. LIMIT bounds the solutions, not the triples built from them.
-func constructSQL(parsed *rdflibsparql.ParsedQuery, parts groupParts, from []string, where []string, bindings map[string]sqlBinding) (string, error) {
+// specifies. LIMIT and OFFSET bound the solutions, not the triples built from
+// them.
+func constructSQL(parsed *rdflibsparql.ParsedQuery, parts groupParts, group groupSQL, limits string) (string, error) {
+	bindings := group.bindings
 	template := parsed.Construct
 	// CONSTRUCT WHERE { ... } is its own template
 	if len(template) == 0 {
@@ -80,22 +82,21 @@ func constructSQL(parsed *rdflibsparql.ParsedQuery, parts groupParts, from []str
 				return "", fmt.Errorf("CONSTRUCT template variable ?%s is not bound by a supported triple pattern", name)
 			}
 			projected[name] = true
-			if binding.column != "object" {
+			if !binding.typedObject() {
 				columns = append(columns, binding.expr()+" AS "+quoteIdent(name))
 				keyed = append(keyed, binding.expr())
 				continue
 			}
-			alias := binding.alias
 			exprs := []string{
-				alias + ".object_iri",
-				"CAST(" + alias + ".object_float AS VARCHAR)",
-				"CAST(" + alias + ".object_integer AS VARCHAR)",
-				"CAST(" + alias + ".object_byte AS VARCHAR)",
-				timeTextExpr(alias),
-				"ST_AsText(" + alias + ".object_geometry)",
-				alias + ".object_string",
-				alias + ".object_type",
-				alias + ".object_language",
+				binding.col("object_iri"),
+				"CAST(" + binding.col("object_float") + " AS VARCHAR)",
+				"CAST(" + binding.col("object_integer") + " AS VARCHAR)",
+				"CAST(" + binding.col("object_byte") + " AS VARCHAR)",
+				timeTextExpr(binding.col("object_time")),
+				"ST_AsText(" + binding.col("object_geometry") + ")",
+				binding.col("object_string"),
+				binding.col("object_type"),
+				binding.col("object_language"),
 			}
 			for i, column := range constructObjectColumns {
 				columns = append(columns, exprs[i]+" AS "+quoteIdent(name+"."+column))
@@ -116,13 +117,7 @@ func constructSQL(parsed *rdflibsparql.ParsedQuery, parts groupParts, from []str
 		columns = []string{"1 AS " + quoteIdent(solutionKey)}
 	}
 
-	solutions := "SELECT DISTINCT " + strings.Join(columns, ", ") + "\n  FROM " + strings.Join(from, "\n  CROSS JOIN ")
-	if len(where) > 0 {
-		solutions += "\n  WHERE " + strings.Join(where, "\n    AND ")
-	}
-	if parsed.Limit >= 0 {
-		solutions += "\n  LIMIT " + strconv.Itoa(parsed.Limit)
-	}
+	solutions := "SELECT DISTINCT " + strings.Join(columns, ", ") + "\n  FROM " + group.fromSQL("  ") + group.whereSQL("  ") + limits
 
 	selects := make([]string, 0, len(template))
 	for _, triple := range template {
@@ -177,9 +172,9 @@ func templateTripleSQL(triple rdflibsparql.TripleTemplate, bindings map[string]s
 		if name := variableName(term); name != "" {
 			var expr string
 			switch {
-			case bindings[name].column != "object" && position == "subject":
+			case !bindings[name].typedObject() && position == "subject":
 				return solution(name), nil
-			case bindings[name].column != "object":
+			case !bindings[name].typedObject():
 				expr = "CASE WHEN NOT starts_with(" + solution(name) + ", '_:') THEN " + solution(name) + " END"
 			case position == "subject":
 				blank := solution(name + ".object_string")
@@ -214,7 +209,7 @@ func templateTripleSQL(triple rdflibsparql.TripleTemplate, bindings map[string]s
 	object := map[string]string{}
 	if label := templateBlankNode(triple.Object); label != "" {
 		object["object_string"] = blankNode(label)
-	} else if name := variableName(triple.Object); name != "" && bindings[name].column == "object" {
+	} else if name := variableName(triple.Object); name != "" && bindings[name].typedObject() {
 		for _, column := range constructObjectColumns {
 			object[column] = solution(name + "." + column)
 		}

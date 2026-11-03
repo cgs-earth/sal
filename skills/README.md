@@ -8,6 +8,14 @@ Skills that teach a coding agent (Claude Code, Codex, or anything else that read
 
 ## Install
 
+With `sal` itself, which `sal init` does when a project or module is created (`--no-skills` skips it)
+and `sal init --skills` does on its own, into both `.claude/skills/` and `.agents/skills/` of the repository:
+
+```sh
+sal init --skills              # the sal skill, in a project
+sal init --salmodule --skills  # the salmodule skill, in a module
+```
+
 As a Claude Code plugin, from the marketplace this repository publishes:
 
 ```

@@ -13,7 +13,7 @@ ontology() {
         "schema": "https://schema.org/",
         "xsd": "http://www.w3.org/2001/XMLSchema#",
         "sh": "http://www.w3.org/ns/shacl#",
-        "salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
+        "salmodule": "https://w3id.org/sal/salmodule#"
     },
     "@graph": [
         {
@@ -74,9 +74,10 @@ ontology() {
 ONTOLOGY
 }
 
-# error prints a salmodule:Error node, which is how a task reports a failure.
+# error prints a salmodule:Error node to stderr, which is how a task reports a
+# failure; stdout carries only data.
 error() {
-    printf '{"@type":"salmodule:Error","rdfs:label":"TaskFailed","rdfs:comment":"%s"}\n' "$1"
+    printf '{"@type":"salmodule:Error","rdfs:label":"TaskFailed","rdfs:comment":"%s"}\n' "$1" >&2
 }
 
 # string_property reads a plain string property of the task instance, which SAL

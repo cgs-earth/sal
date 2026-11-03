@@ -53,3 +53,25 @@ LIMIT 5;
 ```
 
 For more detail about where SAL writes generated files, see [Data Layout](/sal/reference/data-layout/).
+
+## Deploy a query endpoint on Google Cloud
+
+[`sal terraform`](/sal/reference/commands/#sal-terraform) writes a Terraform configuration that serves the data product from Cloud Run, reading it from a Cloud Storage bucket, and `sal init` writes the same files with `--with-iac`. The project's `Makefile` runs it:
+
+```sh
+sal terraform --project my-gcp-project   # writes terraform/; or sal init --with-iac
+make apply                               # terraform init && terraform apply
+sal build data/
+make upload                              # sal upload --bucket gs://<bucket>/
+terraform -chdir=terraform output service_url
+```
+
+What it creates:
+
+- A **bucket** in the chosen region, with uniform access and public access prevention, holding the copy of `.sal/data` that `sal upload --bucket gs://<bucket>/` writes: the Iceberg table under the project's name, the pinned vocabulary documents under `blobs/`, and the STAC catalog under `stac/`.
+- A **service account** with `roles/storage.objectViewer` on that bucket and nothing else.
+- A **Cloud Run service** running the `sal` image with the bucket mounted read-only at `/mnt/sal` through Cloud Storage FUSE, started as `sal serve --data /mnt/sal`. DuckDB reads the Iceberg table as local files through the mount, so the service account's access is the only credential involved and no key is written anywhere. The service is `allUsers`-invokable by default, answering SPARQL at `/sparql`, the catalog at `/stac/catalog.json`, and the vocabulary documents at `/blobs/`.
+
+The bucket and the service are created in one region, so a query never crosses one; the service runs in the second generation environment the FUSE mount needs, with CPU allocated only while a request is handled and a startup boost for DuckDB's open; and the mount caches file metadata for five minutes, since Iceberg files never change in place and `sal upload` writes new names, so a running instance sees a fresh upload within that time and a new one at once. The defaults are deliberately small (one CPU, 2 GiB, no warm instance, at most two, twenty concurrent requests) and all of them are variables in `terraform/variables.tf`; `min_instances = 1` removes the cold start at a steady cost, and `with_ui = true` serves the browser UI, which is off by default because its SQL endpoint runs arbitrary DuckDB statements against whatever the service can reach. `make destroy` removes the service and the bucket; the bucket must be emptied first unless `bucket_force_destroy = true`, so a destroy never deletes a data product by accident.
+
+`terraform/terraform.tfvars` holds the project ID and is meant to be committed; the state file is gitignored and belongs in a remote backend once more than one person applies the configuration.

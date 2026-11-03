@@ -22,7 +22,7 @@ const checkTestOntology = `{
     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
     "sh": "http://www.w3.org/ns/shacl#",
     "xsd": "http://www.w3.org/2001/XMLSchema#",
-    "salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
+    "salmodule": "https://w3id.org/sal/salmodule#"
   },
   "@graph": [
     {"@id": ".", "@type": "owl:Ontology", "rdfs:label": "Weather stations", "salmodule:taskInstanceEnvVar": "STATION_TASK"},
@@ -233,7 +233,7 @@ func TestCheckOntologyReportsAnIllFormedShapeTheSchemaCannotSee(t *testing.T) {
 }
 
 func TestCheckOntologyReportsAnUnsupportedStdoutConstraintOnce(t *testing.T) {
-	require.Equal(t, []string{"ontology.jsonld:23: sal does not support sh:uniqueLang in a salmodule:stdoutShape"}, checkOntology(t, `"sh:nodeKind": {"@id": "sh:Literal"}`, `"sh:uniqueLang": true`))
+	require.Equal(t, []string{"ontology.jsonld:23: sal does not support sh:uniqueLang in a salmodule:stdoutShape or stderrShape"}, checkOntology(t, `"sh:nodeKind": {"@id": "sh:Literal"}`, `"sh:uniqueLang": true`))
 }
 
 // The schema looks only at the shape written under salmodule:stdoutShape and
@@ -290,4 +290,18 @@ func TestCheckOntologyReportsTheFormBeingWrittenNotTheOthers(t *testing.T) {
 
 	require.Len(t, problems, 1)
 	require.Contains(t, problems[0], "ontology.jsonld:18: A property shape is either written inline with an sh:path")
+}
+
+// A stderrShape is checked for the constraints sal refuses the way a
+// stdoutShape is, including one in a shape it refers to.
+func TestCheckOntologyReportsAnUnsupportedConstraintInAReferencedStderrShape(t *testing.T) {
+	document := strings.Replace(checkTestOntology, `"salmodule:stdoutShape": {`, `"salmodule:stderrShape": {"@id": "ErrorShape"},
+      "salmodule:stdoutShape": {`, 1)
+	document = strings.Replace(document, `{"@id": "region", "@type": "owl:DatatypeProperty"`, `{"@id": "ErrorShape", "@type": "sh:NodeShape", "sh:property": [{"sh:path": {"@id": "rdfs:label"}, "sh:uniqueLang": true}]},
+    {"@id": "region", "@type": "owl:DatatypeProperty"`, 1)
+
+	problems := CheckOntologyDocument("ontology.jsonld", []byte(document), checkTestNamespace)
+
+	require.Len(t, problems, 1)
+	require.Equal(t, ModuleError{Path: "ontology.jsonld", Line: 12, Message: "the salmodule:stderrShape of " + checkTestNamespace + "StationFetcher uses sh:uniqueLang, which SAL does not support"}, problems[0])
 }

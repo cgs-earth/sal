@@ -206,25 +206,34 @@ func wipe() error {
 	if err != nil {
 		return err
 	}
+	dataProductPath, err := pkg.SalBuiltDataProductPath()
+	if err != nil {
+		return err
+	}
 
 	// the config file is something a project keeps in git rather than a build
 	// artifact, so the prompt names it when a wipe would take it with the data
-	// product
-	prompt := "This will permanently delete the entire data product. Continue?"
-	if _, err := os.Stat(configPath); err == nil {
-		prompt = "This will permanently delete the entire data product and " + configPath + ". Continue?"
-	} else if !os.IsNotExist(err) {
+	// product; with neither on disk there is nothing to confirm deleting
+	hasConfig, err := exists(configPath)
+	if err != nil {
 		return err
+	}
+	hasDataProduct, err := exists(dataProductPath)
+	if err != nil {
+		return err
+	}
+	if !hasConfig && !hasDataProduct {
+		slog.Warn("No data product to clean at " + dataProductPath)
+		return nil
+	}
+	prompt := "This will permanently delete the entire data product. Continue?"
+	if hasConfig {
+		prompt = "This will permanently delete the entire data product and " + configPath + ". Continue?"
 	}
 
 	if !pkg.Confirm(prompt) {
 		slog.Info("Wipe cancelled")
 		return nil
-	}
-
-	dataProductPath, err := pkg.SalBuiltDataProductPath()
-	if err != nil {
-		return err
 	}
 
 	var totalBytes int64
@@ -290,6 +299,16 @@ func wipe() error {
 	}
 
 	return removeProjectConfig(configPath, blobsDir)
+}
+
+// exists reports whether path is on disk, with any error but a missing path
+// returned.
+func exists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // removeCopiedFiles deletes the files and directories SAL module tasks handed

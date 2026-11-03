@@ -10,6 +10,7 @@ import { SampleQueryPicker } from '../components/SampleQueryPicker'
 import { toCSV } from '../csv'
 import { editorExtensions } from '../theme'
 import { publishResult } from '../results'
+import { MapLinkButton } from '../components/MapLinkButton'
 
 const DEFAULT_SQL = 'SELECT *\nFROM triples\nLIMIT 20'
 
@@ -97,7 +98,7 @@ export function SqlTab({
     try {
       const next = await runSQL(text)
       setResult(next)
-      // The Map tab draws whatever geometry the last result held.
+      // The Geospatial tab draws whatever geometry the last result held.
       publishResult({ source: 'SQL', query: text, header: next.header ?? [], rows: next.rows ?? [] })
     } catch (caught) {
       setResult(null)
@@ -215,6 +216,7 @@ export function SqlTab({
                 {copied ? 'Copied' : 'Copy CSV'}
               </button>
             )}
+            {result && <MapLinkButton source="SQL" header={result.header} rows={result.rows} />}
           </div>
         </header>
         {error && <p className="error-banner">{error}</p>}

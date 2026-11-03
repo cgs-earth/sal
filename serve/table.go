@@ -108,6 +108,18 @@ func (s *tableSwitch) Extent(ctx context.Context) (salsparql.Feature, error) {
 	return s.current().Extent(ctx)
 }
 
+func (s *tableSwitch) Features(ctx context.Context, query salsparql.FeatureQuery) (salsparql.FeaturePage, error) {
+	return s.current().Features(ctx, query)
+}
+
+func (s *tableSwitch) FeaturesExtent(ctx context.Context, snapshotID int64) (salsparql.Feature, error) {
+	return s.current().FeaturesExtent(ctx, snapshotID)
+}
+
+func (s *tableSwitch) Project() salsparql.ProjectInfo {
+	return s.current().Project()
+}
+
 func (s *tableSwitch) RunSQL(ctx context.Context, sql string) (salsparql.Result, error) {
 	return s.current().RunSQL(ctx, sql)
 }
@@ -122,6 +134,10 @@ func (s *tableSwitch) Stats(ctx context.Context) (salsparql.TableStats, error) {
 
 func (s *tableSwitch) Blobs(ctx context.Context, limit int) (salsparql.BlobListing, error) {
 	return s.current().Blobs(ctx, limit)
+}
+
+func (s *tableSwitch) Vocabularies(ctx context.Context) (salsparql.VocabularyListing, error) {
+	return s.current().Vocabularies(ctx)
 }
 
 // tableLocation is what /api/table reports: the remote table the UI's queries

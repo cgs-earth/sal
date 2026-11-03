@@ -9,7 +9,7 @@ export type QueryResult = {
 
 export type TableStats = {
   tablePath: string
-  /** The dc:title and rdfs:comment of the project ontology in .sal/config.jsonld; empty for a remote table or a project that never ran sal import. */
+  /** The dcterms:title and dcterms:description sal init records on the project node of .sal/config.jsonld; empty for a remote table or a project that recorded neither. */
   title: string
   description: string
   triples: number
@@ -19,8 +19,6 @@ export type TableStats = {
   snapshots: QueryResult
   properties: QueryResult
   columnStats: QueryResult
-  /** The `salmodule://` URIs of the modules the build that wrote this table downloaded. */
-  modules: string[] | null
   /** The same listing `sal get vocabularies` prints: header ["vocabulary", "version", "format", "imported"]. */
   vocabularies: QueryResult
   /** The imported data products, each queryable as a view of its own. */
@@ -41,13 +39,6 @@ export type NamedQuery = {
   sql: string
 }
 
-export type ModuleOntology = {
-  /** The salmodule:// namespace the module's own terms resolve against. */
-  module: string
-  /** The JSON-LD document the module printed in response to its ontology command. */
-  ontology: unknown
-}
-
 export type BlobResult = {
   /** The name the blob was resolved by, with any urn:sha256: or urn:git-commit-hash: prefix stripped. */
   digest: string
@@ -63,6 +54,8 @@ export type PinnedBlob = {
   iri: string
   /** The owl:versionIRI naming the blob, urn:sha256:… or urn:git-commit-hash:…, which /blobs/{hash} resolves. */
   hash: string
+  /** The subject's dcterms:modified as text, when it has one: when a vocabulary was pinned, or the mtime of a copied file. */
+  modified?: string
 }
 
 export type BlobListing = {
@@ -71,6 +64,53 @@ export type BlobListing = {
   truncated: boolean
   /** The DuckDB statement that lists the same blobs, for running by hand in the SQL tab. */
   sql: string
+}
+
+/** One statement a pinned vocabulary document makes about a term, with the predicate and an IRI value written as prefixed names where a prefix is known. */
+export type TermStatement = {
+  predicate: string
+  value: string
+  /** Whether value names a resource rather than being a literal. */
+  iri?: boolean
+  /** The language tag of a literal value, when it has one. */
+  language?: string
+}
+
+/** One vocabulary the project pins, with the terms its pinned document defines, as `/api/vocabularies` lists it. */
+export type Vocabulary = {
+  /** The IRI the pin was recorded under, which is how the Stats tab lists the vocabulary. */
+  id: string
+  /** The name to declare the namespace under, from the document or by convention. */
+  prefix: string
+  namespace: string
+  /** The owl:versionIRI the vocabulary is pinned at, urn:sha256:… or urn:git-commit-hash:…. */
+  version: string
+  format: string
+  /** Whether the project ontology imports the vocabulary with owl:imports, so its statements are in the table. */
+  imported: boolean
+  /** The local names under the namespace, each sorted: what the document types as a class, as a property, and the rest. */
+  classes: string[]
+  properties: string[]
+  others: string[]
+  /** What the pinned document says about each term, by local name, for every term it describes: its label, comment, definition, superclasses, domain, range, and the like, in that order. */
+  statements: Record<string, TermStatement[]>
+  /** Why the pinned document could not be read, in which case the term lists are empty. */
+  error?: string
+}
+
+export type VocabularyListing = {
+  vocabularies: Vocabulary[]
+}
+
+/**
+ * Lists every vocabulary the project pins with the terms its pinned document
+ * defines, read from the blob store the versions a build validated against
+ * are kept in. A remote table has no project on disk, so it lists none.
+ */
+export async function fetchVocabularies(signal?: AbortSignal): Promise<VocabularyListing> {
+  const response = await fetch('/api/vocabularies', { signal })
+  if (!response.ok) throw await failure(response)
+  return (await response.json()) as VocabularyListing
 }
 
 /** A longitude/latitude bounding box as [minX, minY, maxX, maxY]. */
@@ -97,12 +137,17 @@ export type GeometryQuery = {
   bbox?: BBox
 }
 
-/** Reads the `{"error": "..."}` body the Go handlers send, falling back to the status text. */
+/**
+ * Reads the `{"error": "..."}` body the Go handlers send, or the
+ * `{"code", "description"}` one the OGC API routes send, falling back to
+ * the status text.
+ */
 export async function failure(response: Response): Promise<Error> {
   const body = await response.text()
   try {
-    const parsed = JSON.parse(body) as { error?: string }
+    const parsed = JSON.parse(body) as { error?: string; description?: string }
     if (parsed.error) return new Error(parsed.error)
+    if (parsed.description) return new Error(parsed.description)
   } catch {
     // Not a JSON body; fall through to the raw text.
   }
@@ -178,16 +223,6 @@ export async function translateSparql(query: string, signal?: AbortSignal): Prom
 }
 
 /**
- * Clones, builds, and runs a SAL module so that it publishes its ontology. The
- * first inspection of a module can take minutes, since its image has to be built.
- */
-export async function inspectModule(module: string, signal?: AbortSignal): Promise<ModuleOntology> {
-  const response = await fetch(`/api/salmodule?module=${encodeURIComponent(module)}`, { signal })
-  if (!response.ok) throw await failure(response)
-  return (await response.json()) as ModuleOntology
-}
-
-/**
  * Fetches a document the project pinned: a vocabulary or imported ontology by
  * its SHA-256 digest, or a salmodule:// vocabulary by the git commit hash of
  * its module. The server accepts either name with or without its urn: prefix,
@@ -259,4 +294,133 @@ export function stacViewerURL(origin: string): string {
 export async function hasStacCatalog(signal?: AbortSignal): Promise<boolean> {
   const response = await fetch(STAC_COLLECTION_PATH, { method: 'HEAD', signal })
   return response.ok
+}
+
+/* ---------- OGC API Features ---------- */
+
+/** Where `sal serve` answers OGC API Features: the landing page, with the collection and its items beneath it. */
+export const OGC_PATH = '/ogc'
+
+/** The one collection the endpoint serves. */
+export const OGC_COLLECTION = 'triples'
+
+export type OgcLink = {
+  href: string
+  rel: string
+  type?: string
+  title?: string
+}
+
+/** The landing page: the data product's name and the links into the API. */
+export type OgcLanding = {
+  title: string
+  description: string
+  links: OgcLink[]
+}
+
+export type OgcCollection = {
+  id: string
+  title: string
+  description: string
+  itemType: string
+  crs: string[]
+  /** Absent when the table holds no geometries. */
+  extent?: { spatial: { bbox: BBox[]; crs: string } }
+  links: OgcLink[]
+}
+
+/**
+ * One feature: an RDF subject with a geometry, under its IRI, carrying the
+ * predicates the request named as properties keyed by their IRI, null where
+ * the subject lacks one, an array where it has several values.
+ */
+export type OgcFeature = {
+  type: 'Feature'
+  id: string
+  geometry: Geometry | null
+  properties: Record<string, unknown>
+  links?: OgcLink[]
+}
+
+export type OgcFeatureCollection = {
+  type: 'FeatureCollection'
+  timeStamp: string
+  numberReturned: number
+  features: OgcFeature[]
+  links: OgcLink[]
+}
+
+/** The parameters the items and item routes take; everything optional reads the current table. */
+export type OgcQuery = {
+  /** The Iceberg snapshot to read the table at, '' for the current one. */
+  snapshot?: string
+  /** The predicate IRIs each feature carries as properties. */
+  properties?: string[]
+  /** Only the features typed with this class IRI (items only). */
+  type?: string
+  limit?: number
+  offset?: number
+  bbox?: BBox
+}
+
+/** The relative URL of a page of features. */
+export function ogcItemsURL(query: OgcQuery): string {
+  const params = ogcParams(query)
+  if (query.type) params.set('type', query.type)
+  if (query.limit !== undefined) params.set('limit', String(query.limit))
+  if (query.offset) params.set('offset', String(query.offset))
+  if (query.bbox) params.set('bbox', query.bbox.join(','))
+  return withParams(`${OGC_PATH}/collections/${OGC_COLLECTION}/items`, params)
+}
+
+/** The relative URL of one feature, its IRI escaped into a single path segment. */
+export function ogcItemURL(id: string, query: OgcQuery): string {
+  return withParams(`${OGC_PATH}/collections/${OGC_COLLECTION}/items/${encodeURIComponent(id)}`, ogcParams(query))
+}
+
+function ogcParams(query: OgcQuery): URLSearchParams {
+  const params = new URLSearchParams()
+  if (query.snapshot) params.set('snapshot', query.snapshot)
+  if (query.properties && query.properties.length > 0) params.set('properties', query.properties.join(','))
+  return params
+}
+
+function withParams(path: string, params: URLSearchParams): string {
+  const encoded = params.toString()
+  return encoded ? `${path}?${encoded}` : path
+}
+
+async function fetchOgc<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(path, { headers: { Accept: 'application/geo+json, application/json' }, signal })
+  if (!response.ok) throw await failure(response)
+  return (await response.json()) as T
+}
+
+export function fetchOgcLanding(signal?: AbortSignal): Promise<OgcLanding> {
+  return fetchOgc<OgcLanding>(OGC_PATH, signal)
+}
+
+/** The conformance classes the endpoint declares. */
+export async function fetchOgcConformance(signal?: AbortSignal): Promise<string[]> {
+  const declaration = await fetchOgc<{ conformsTo: string[] }>(`${OGC_PATH}/conformance`, signal)
+  return declaration.conformsTo
+}
+
+/** The collection, with its extent at the snapshot or at the current table. */
+export function fetchOgcCollection(snapshot: string, signal?: AbortSignal): Promise<OgcCollection> {
+  const params = new URLSearchParams()
+  if (snapshot) params.set('snapshot', snapshot)
+  return fetchOgc<OgcCollection>(withParams(`${OGC_PATH}/collections/${OGC_COLLECTION}`, params), signal)
+}
+
+export function fetchOgcItems(query: OgcQuery, signal?: AbortSignal): Promise<OgcFeatureCollection> {
+  return fetchOgc<OgcFeatureCollection>(ogcItemsURL(query), signal)
+}
+
+/** One feature by its subject IRI, or null when the table has no such feature at that snapshot. */
+export async function fetchOgcItem(id: string, query: OgcQuery, signal?: AbortSignal): Promise<OgcFeature | null> {
+  const response = await fetch(ogcItemURL(id, query), { headers: { Accept: 'application/geo+json' }, signal })
+  if (response.status === 404) return null
+  if (!response.ok) throw await failure(response)
+  return (await response.json()) as OgcFeature
 }

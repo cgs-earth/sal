@@ -59,33 +59,32 @@ func geofLocalName(name string) (string, bool) {
 	return strings.TrimPrefix(lowered, geofNamespace), true
 }
 
-// geoFunctionSQL translates a geof: function call. boolean reports whether the
-// result is a truth value, which is what decides whether the call can stand on
-// its own in a FILTER or has to be compared against something.
-func geoFunctionSQL(call *rdflibsparql.FuncExpr, bindings map[string]sqlBinding) (sql string, boolean bool, err error) {
+// geoFunctionSQL translates a geof: function call: a relation is a truth
+// value, a constructor a geometry, and distance a number.
+func geoFunctionSQL(call *rdflibsparql.FuncExpr, bindings map[string]sqlBinding) (sqlExpr, error) {
 	local, ok := geofLocalName(call.Name)
 	if !ok {
-		return "", false, fmt.Errorf("SPARQL function %q is not supported yet", strings.ToLower(call.Name))
+		return sqlExpr{}, fmt.Errorf("SPARQL function %q is not supported yet", strings.ToLower(call.Name))
 	}
 	if relation, ok := geofRelations[local]; ok {
 		args, err := geometryArgsSQL(call, 2, bindings)
 		if err != nil {
-			return "", false, err
+			return sqlExpr{}, err
 		}
-		return relation + "(" + strings.Join(args, ", ") + ")", true, nil
+		return sqlExpr{sql: relation + "(" + strings.Join(args, ", ") + ")", kind: kindBoolean}, nil
 	}
 	if constructor, ok := geofConstructors[local]; ok {
 		args, err := geometryArgsSQL(call, constructor.arity, bindings)
 		if err != nil {
-			return "", false, err
+			return sqlExpr{}, err
 		}
-		return constructor.sql + "(" + strings.Join(args, ", ") + ")", false, nil
+		return sqlExpr{sql: constructor.sql + "(" + strings.Join(args, ", ") + ")", kind: kindGeometry}, nil
 	}
 	if local == "distance" {
 		sql, err := distanceSQL(call, bindings)
-		return sql, false, err
+		return sqlExpr{sql: sql, kind: kindNumeric}, err
 	}
-	return "", false, fmt.Errorf("GeoSPARQL function geof:%s is not supported yet", local)
+	return sqlExpr{}, fmt.Errorf("GeoSPARQL function geof:%s is not supported yet", local)
 }
 
 // distanceSQL translates geof:distance. The unit argument the spec requires is
@@ -143,10 +142,10 @@ func geometryOperandSQL(expr rdflibsparql.Expr, bindings map[string]sqlBinding) 
 		if !ok {
 			return "", fmt.Errorf("FILTER variable ?%s is not bound by a supported triple pattern", e.Name)
 		}
-		if binding.column != "object" {
+		if !binding.typedObject() {
 			return "", fmt.Errorf("?%s is bound as a %s, not as a geometry literal", e.Name, binding.column)
 		}
-		return binding.alias + ".object_geometry", nil
+		return binding.col("object_geometry"), nil
 	case *rdflibsparql.LiteralExpr:
 		wkt, err := wktFromLiteral(e.Value)
 		if err != nil {
@@ -154,14 +153,14 @@ func geometryOperandSQL(expr rdflibsparql.Expr, bindings map[string]sqlBinding) 
 		}
 		return "ST_GeomFromText(" + sqlString(wkt) + ")", nil
 	case *rdflibsparql.FuncExpr:
-		sql, boolean, err := geoFunctionSQL(e, bindings)
+		geometry, err := geoFunctionSQL(e, bindings)
 		if err != nil {
 			return "", err
 		}
-		if boolean {
-			return "", fmt.Errorf("geof:%s yields a boolean, not a geometry", strings.ToLower(strings.TrimPrefix(strings.ToLower(e.Name), geofNamespace)))
+		if geometry.kind != kindGeometry {
+			return "", fmt.Errorf("geof:%s yields a %s, not a geometry", strings.ToLower(strings.TrimPrefix(strings.ToLower(e.Name), geofNamespace)), map[exprKind]string{kindBoolean: "boolean", kindNumeric: "number"}[geometry.kind])
 		}
-		return sql, nil
+		return geometry.sql, nil
 	default:
 		return "", fmt.Errorf("unsupported geometry argument %T", expr)
 	}

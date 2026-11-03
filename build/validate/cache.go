@@ -58,6 +58,13 @@ func (c *vocabularyCache) isDefined(ctx context.Context, iri string, rdfCtx RdfC
 	if !ok {
 		return true, nil
 	}
+	// The namespace itself names the vocabulary, not a term of it: it is what
+	// owl:imports and rdfs:isDefinedBy point at, and a project that types its
+	// node schema:Project and imports <https://schema.org/> would otherwise
+	// have its own import statement fail as the undefined term "schema:".
+	if iri == base {
+		return true, nil
+	}
 	lookupIRI := replacementVocabularyTerm(iri, base, c.replacements)
 	base = replacementVocabularyBase(base, c.replacements)
 	vocab, err := c.load(ctx, base)

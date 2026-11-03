@@ -130,7 +130,12 @@ func floatSQL(value float64) string {
 // feature whose geometry is the envelope and whose bbox is its corners. A table
 // with no geometries reports a null geometry and no bbox.
 func (r DuckDBRunner) Extent(ctx context.Context) (Feature, error) {
-	result, err := r.RunSQL(ctx, extentSQL)
+	return r.extent(ctx, TriplesView)
+}
+
+// extent is Extent over source, the `triples` view or a snapshot scan.
+func (r DuckDBRunner) extent(ctx context.Context, source string) (Feature, error) {
+	result, err := r.RunSQL(ctx, extentSQL(source))
 	if err != nil {
 		return Feature{}, err
 	}
@@ -156,12 +161,13 @@ func (r DuckDBRunner) Extent(ctx context.Context) (Feature, error) {
 	return feature, nil
 }
 
-// extentSQL aggregates every geometry into one envelope, read back both as
-// GeoJSON to draw and as its four corners to fit a map to.
-const extentSQL = `
+// extentSQL aggregates every geometry of source into one envelope, read back
+// both as GeoJSON to draw and as its four corners to fit a map to.
+func extentSQL(source string) string {
+	return fmt.Sprintf(`
 WITH extent AS (
 	SELECT ST_Extent_Agg(triples.object_geometry) AS envelope, COUNT(*) AS geometries
-	FROM triples
+	FROM %s AS triples
 	WHERE triples.object_geometry IS NOT NULL
 )
 SELECT
@@ -171,4 +177,5 @@ SELECT
 	ST_XMax(envelope) AS max_x,
 	ST_YMax(envelope) AS max_y,
 	geometries
-FROM extent`
+FROM extent`, source)
+}

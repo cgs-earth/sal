@@ -43,9 +43,16 @@ func TestParseBBoxRejectsMalformedInput(t *testing.T) {
 }
 
 func TestExtentSQLReadsTheEnvelopeAndItsCorners(t *testing.T) {
-	require.Contains(t, extentSQL, "ST_Extent_Agg(triples.object_geometry)")
-	require.Contains(t, extentSQL, "ST_AsGeoJSON(envelope)")
-	require.Contains(t, extentSQL, "ST_XMin(envelope)")
-	require.Contains(t, extentSQL, "ST_YMax(envelope)")
-	require.True(t, needsSpatial(extentSQL))
+	sql := extentSQL(TriplesView)
+	require.Contains(t, sql, "ST_Extent_Agg(triples.object_geometry)")
+	require.Contains(t, sql, "FROM triples AS triples")
+	require.Contains(t, sql, "ST_AsGeoJSON(envelope)")
+	require.Contains(t, sql, "ST_XMin(envelope)")
+	require.Contains(t, sql, "ST_YMax(envelope)")
+	require.True(t, needsSpatial(sql))
+}
+
+func TestExtentSQLReadsASnapshotScan(t *testing.T) {
+	sql := extentSQL(snapshotScanSQL("/tmp/table", 42))
+	require.Contains(t, sql, "FROM iceberg_scan('/tmp/table', allow_moved_paths = true, snapshot_from_id = 42) AS triples")
 }

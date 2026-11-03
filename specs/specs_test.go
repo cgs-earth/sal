@@ -39,7 +39,7 @@ const validOntology = `{
     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
     "sh": "http://www.w3.org/ns/shacl#",
     "xsd": "http://www.w3.org/2001/XMLSchema#",
-    "salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
+    "salmodule": "https://w3id.org/sal/salmodule#"
   },
   "@graph": [
     {"@id": ".", "@type": "owl:Ontology", "rdfs:label": "Weather stations", "salmodule:taskInstanceEnvVar": "STATION_TASK"},
@@ -80,7 +80,7 @@ func TestSchemaAcceptsTheOntologyOfTheSalCLI(t *testing.T) {
 }
 
 func TestSchemaRequiresTheSalModulePrefix(t *testing.T) {
-	ontology := strings.Replace(validOntology, `"salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"`, `"sal": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"`, 1)
+	ontology := strings.Replace(validOntology, `"salmodule": "https://w3id.org/sal/salmodule#"`, `"sal": "https://w3id.org/sal/salmodule#"`, 1)
 
 	err := validate(t, ontology)
 
@@ -174,4 +174,29 @@ func TestSchemaRejectsABaseInTheContext(t *testing.T) {
 	err := validate(t, strings.Replace(validOntology, `"schema": "https://schema.org/",`, `"@base": "https://example.org/", "schema": "https://schema.org/",`, 1))
 
 	require.ErrorContains(t, err, "@base")
+}
+
+func TestSchemaAcceptsAStderrShape(t *testing.T) {
+	ontology := strings.Replace(validOntology, `"salmodule:stdoutShape": {`, `"salmodule:stderrShape": {
+        "@type": "sh:NodeShape",
+        "sh:targetClass": {"@id": "salmodule:Error"},
+        "sh:property": [{"sh:path": {"@id": "rdfs:label"}, "sh:minCount": 1}]
+      },
+      "salmodule:stdoutShape": {`, 1)
+
+	require.NoError(t, validate(t, ontology))
+}
+
+func TestSchemaRejectsAnUnsupportedConstraintOnStderr(t *testing.T) {
+	ontology := strings.Replace(validOntology, `"salmodule:stdoutShape": {`, `"salmodule:stderrShape": {
+        "@type": "sh:NodeShape",
+        "sh:targetClass": {"@id": "salmodule:Error"},
+        "sh:property": [{"sh:path": {"@id": "rdfs:label"}, "sh:uniqueLang": true}]
+      },
+      "salmodule:stdoutShape": {`, 1)
+
+	err := validate(t, ontology)
+
+	require.ErrorContains(t, err, "sh:uniqueLang")
+	require.ErrorContains(t, err, "stderrShape")
 }

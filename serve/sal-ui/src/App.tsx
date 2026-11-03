@@ -2,21 +2,21 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { fetchStats, fetchTable, type TableStats } from './api'
 import { StatsTab } from './tabs/StatsTab'
 import { SqlTab } from './tabs/SqlTab'
-import { ModulesTab } from './tabs/ModulesTab'
 import { BlobsTab } from './tabs/BlobsTab'
 import { TablePath } from './components/TablePath'
 import { ThemeToggle } from './components/ThemeToggle'
+import { LoadingState } from './components/LoadingState'
 import { TABS, useRoute } from './routing'
 import './App.css'
 
 // YASGUI and its CodeMirror 5 bundle dominate the build, so keep them out of the
 // initial chunk and load them the first time the SPARQL tab is opened.
 const SparqlTab = lazy(() => import('./tabs/SparqlTab').then((module) => ({ default: module.SparqlTab })))
-// MapLibre is nearly as large, and only the Map tab needs it.
-const MapTab = lazy(() => import('./tabs/MapTab').then((module) => ({ default: module.MapTab })))
+// MapLibre is nearly as large, and only the Geospatial tab needs it.
+const GeospatialTab = lazy(() => import('./tabs/GeospatialTab').then((module) => ({ default: module.GeospatialTab })))
 
 export function App() {
-  const { tab: active, sharedQuery, blobHash, renderBlob, navigate } = useRoute()
+  const { tab: active, sharedQuery, blobHash, mapView, ogcRequest, mapSource, arrival, navigate } = useRoute()
   const [stats, setStats] = useState<TableStats | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -109,17 +109,14 @@ export function App() {
         )}
         {/* YASGUI restores its own query state from localStorage, so remounting is safe. */}
         {active === 'SPARQL' && (
-          <Suspense fallback={<p className="empty">Loading the SPARQL editor…</p>}>
+          <Suspense fallback={<LoadingState message="Loading the SPARQL editor…" delay={200} />}>
             <SparqlTab sharedQuery={sharedQuery} snapshots={stats?.snapshots ?? null} />
           </Suspense>
         )}
-        {active === 'Modules' && <ModulesTab modules={stats?.modules ?? null} />}
-        {/* Keyed on the route so that moving between two blob links remounts the
-            tab on the new digest rather than leaving the old one in the form. */}
-        {active === 'Blobs' && <BlobsTab key={`${blobHash ?? ''}|${renderBlob}`} hash={blobHash} render={renderBlob} />}
-        {active === 'Map' && (
-          <Suspense fallback={<p className="empty">Loading the map…</p>}>
-            <MapTab />
+        {active === 'Blobs' && <BlobsTab hash={blobHash} />}
+        {active === 'Geospatial' && (
+          <Suspense fallback={<LoadingState message="Loading the map…" delay={200} />}>
+            <GeospatialTab view={mapView} request={ogcRequest} source={mapSource} arrival={arrival} snapshots={stats?.snapshots ?? null} />
           </Suspense>
         )}
         {/* Inside the content rather than under it, so the footer is

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -127,6 +128,59 @@ func graphForSnapshot(i int) *rdflibgo.Graph {
 		rdflibgo.NewLiteral(fmt.Sprintf("value-%d", i)),
 	)
 	return graph
+}
+
+// newInitializedProject makes a git repository with a remote holding an empty
+// .sal/data, the state after sal init with nothing built, and changes into it.
+func newInitializedProject(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"remote", "add", "origin", "https://github.com/cgs-earth/example.git"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(out))
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".sal", "data"), 0755))
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(dir)
+	// sal reports project paths with symlinks resolved, which on macOS puts the
+	// temp dir under /private
+	dir, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+	return dir
+}
+
+// A project with no data product and no config has nothing to wipe, so the
+// user is told so rather than asked to confirm deleting nothing.
+func TestWipeWarnsWithoutPromptingWhenThereIsNothingToClean(t *testing.T) {
+	newInitializedProject(t)
+	pkg.ConfirmPrompt = func(prompt string) bool {
+		t.Fatalf("unexpected confirmation prompt: %s", prompt)
+		return false
+	}
+	t.Cleanup(func() { pkg.ConfirmPrompt = nil })
+
+	require.NoError(t, wipe())
+}
+
+// A config file is wiped with the data product, so one on its own is still
+// something to confirm.
+func TestWipePromptsWhenOnlyTheConfigExists(t *testing.T) {
+	dir := newInitializedProject(t)
+	configPath := filepath.Join(dir, ".sal", "config.jsonld")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"@context": {}, "@graph": []}`), 0644))
+	var prompt string
+	pkg.ConfirmPrompt = func(p string) bool {
+		prompt = p
+		return true
+	}
+	t.Cleanup(func() { pkg.ConfirmPrompt = nil })
+
+	require.NoError(t, wipe())
+
+	require.Equal(t, "This will permanently delete the entire data product and "+configPath+". Continue?", prompt)
+	require.NoFileExists(t, configPath)
 }
 
 func TestRemoveProjectConfigDeletesTheFile(t *testing.T) {

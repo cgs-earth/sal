@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { STAC_COLLECTION_PATH, hasStacCatalog, stacViewerURL, type TableStats } from '../api'
 import { ResultTable } from '../components/ResultTable'
+import { LoadingState } from '../components/LoadingState'
 
 type StatsTabProps = {
   stats: TableStats | null
@@ -10,7 +11,7 @@ type StatsTabProps = {
 }
 
 // MapLibre is the largest thing the UI loads, so the card's small map comes in
-// its own chunk, shared with the Map tab, rather than in the page's.
+// its own chunk, shared with the Geospatial tab, rather than in the page's.
 const ExtentMap = lazy(() =>
   import('../components/ExtentMap').then((module) => ({
     default: module.ExtentMap,
@@ -34,7 +35,7 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
   return (
     <div className="tab-body stats">
       {error && <p className="error-banner">{error}</p>}
-      {!stats && loading && <p className="empty">Reading Iceberg metadata…</p>}
+      {!stats && loading && <LoadingState message="Reading Iceberg metadata…" />}
 
       {stats && (
         <>
@@ -91,6 +92,8 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
                     </button>
                   </div>
                 </div>
+                {/* What the project says it is, from sal init; a project that
+                    gave no description has no line here rather than a blank one. */}
                 {stats.description && <p className="dataset-description">{stats.description}</p>}
               </div>
 

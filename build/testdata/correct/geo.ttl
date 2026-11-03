@@ -18,7 +18,7 @@
 <MesaCounty>
     a schema:Place,
       schema:AdministrativeArea ;
-    schema:name "Mesa County" ;
+    schema:name "Mesaaaaaa County" ;
     schema:containedInPlace <Colorado> ;
     schema:containsPlace <GrandJunction> ;
     gsp:hasGeometry [

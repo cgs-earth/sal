@@ -19,7 +19,7 @@ const testModuleCommitHash = "abc123def456abc123def456abc123def456abc"
 const testModuleOntology = `{
 	"@context": {
 		"owl": "http://www.w3.org/2002/07/owl#",
-		"salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
+		"salmodule": "https://w3id.org/sal/salmodule#"
 	},
 	"@graph": [
 		{"@id": "EducationalHistoryFinder", "@type": "owl:Class", "rdfs:subClassOf": {"@id": "salmodule:Task"}},
@@ -33,11 +33,11 @@ func (testModuleRunner) BuildImage(context.Context, string, string) error { retu
 
 func (testModuleRunner) ImageExists(context.Context, string) (bool, error) { return false, nil }
 
-func (testModuleRunner) RunContainer(ctx context.Context, _ string, _ []string, cmd []string, consume salmodule.ContainerOutputConsumer) ([]byte, error) {
+func (testModuleRunner) RunContainer(ctx context.Context, _ string, _ []string, cmd []string, consume salmodule.ContainerOutputConsumer) error {
 	if cmd[len(cmd)-1] == salmodule.OntologyCommand {
-		return nil, consume(ctx, strings.NewReader(testModuleOntology), nil)
+		return consume(ctx, salmodule.ContainerOutput{Stdout: strings.NewReader(testModuleOntology), Stderr: strings.NewReader("")})
 	}
-	return nil, fmt.Errorf("unexpected command %v", cmd)
+	return fmt.Errorf("unexpected command %v", cmd)
 }
 
 // useFakeSalModule points the shared module resolver at test doubles so that

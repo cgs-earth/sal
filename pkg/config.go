@@ -28,11 +28,11 @@ func SalConfigPath() (string, error) {
 // file always leaves every CURIE in it resolvable, including the other
 // node kind's, which that writer never inspects.
 var SalConfigContext = map[string]string{
-	"dc":      "http://purl.org/dc/elements/1.1/",
 	"owl":     "http://www.w3.org/2002/07/owl#",
 	"dcterms": "http://purl.org/dc/terms/",
 	"xsd":     "http://www.w3.org/2001/XMLSchema#",
 	"rdfs":    "http://www.w3.org/2000/01/rdf-schema#",
+	"schema":  "https://schema.org/",
 }
 
 // ConfigDocument is the outer JSON-LD envelope of .sal/config.jsonld. Graph
@@ -79,8 +79,8 @@ func WriteConfigDocument(path string, doc *ConfigDocument) error {
 }
 
 // configNodeVersionIRIProbe reads just enough of a graph node to tell a
-// pinned vocabulary node apart from the project ontology node: the former
-// always carries owl:versionIRI, and the latter never does.
+// pinned vocabulary node apart from the project node: the former always
+// carries owl:versionIRI, and the latter never does.
 type configNodeVersionIRIProbe struct {
 	ID         string          `json:"@id"`
 	VersionIRI json.RawMessage `json:"owl:versionIRI"`

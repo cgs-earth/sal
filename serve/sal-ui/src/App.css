@@ -351,10 +351,10 @@ a.brand-mark:hover {
   gap: 18px;
 }
 
-/* The map and the module ontology fill the content's height exactly and scroll
+/* The map and a blob's view fill the content's height exactly and scroll
    inside their panels, so these two are fixed to it rather than grown past it. */
 .tab-body.map,
-.tab-body.module {
+.tab-body.blob-view {
   display: grid;
   gap: 18px;
   height: 100%;
@@ -386,12 +386,8 @@ a.brand-mark:hover {
   flex: none;
 }
 
-/* the module form is only as tall as its controls, so the ontology gets the rest */
-.tab-body.module {
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
-.tab-body.map {
+.tab-body.map,
+.tab-body.blob-view {
   grid-template-rows: minmax(0, 1fr);
 }
 
@@ -646,6 +642,55 @@ kbd {
   font-size: 13px;
 }
 
+/* The one loading state every tab shows while something it needs is on its
+   way, a spinner beside a line of text. `panel` fills the tab so the page does
+   not look empty while the Stats tab reads the table's metadata on the first
+   load; `inline` is a row for a fallback inside a frame of its own, like the
+   graph view's. */
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.loading-state.panel {
+  flex-direction: column;
+  min-height: 320px;
+  padding: 40px 16px;
+  font-size: 14px;
+}
+
+.loading-state.panel .spinner {
+  width: 36px;
+  height: 36px;
+  border-width: 3px;
+}
+
+.spinner {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 1.6s;
+  }
+}
+
 .error-banner {
   margin: 12px 16px;
   padding: 10px 14px;
@@ -730,12 +775,15 @@ kbd {
   margin-right: 10px;
 }
 
+/* The description sits under the name line as prose in the text color, a
+   step smaller than the body so the figures below it still lead. */
 .dataset-description {
-  max-width: 72ch;
   margin: 0;
+  max-width: 64ch;
   color: var(--text-muted);
   font-size: 14px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 /* The figures are one strip: the triple count leads in larger type, and the
@@ -752,7 +800,7 @@ kbd {
   border-top: 1px solid var(--line-strong);
 }
 
-/* The map is a framed window with the Map tab's control styling and the same
+/* The map is a framed window with the Geospatial tab's control styling and the same
    caption style as a figure's label. It fills the column's height, down to a
    floor that keeps it usable when there is no description beside it. */
 .dataset-extent {
@@ -764,7 +812,7 @@ kbd {
   margin: 0;
 }
 
-/* Qualified by the figure: the map shares .map-canvas with the Map tab for the
+/* Qualified by the figure: the map shares .map-canvas with the Geospatial tab for the
    control styling, and that class's flex: 1 would otherwise size it by content. */
 .dataset-extent .extent-map {
   position: relative;
@@ -1002,8 +1050,10 @@ kbd {
   color: var(--text-disabled);
 }
 
-/* ---------- modules ---------- */
+/* ---------- forms and code blocks ---------- */
 
+/* The one-line form the header's table input, the map's bounding box, and the
+   Blobs tab's hash lookup share. */
 .module-form {
   display: flex;
   gap: 10px;
@@ -1100,70 +1150,44 @@ kbd {
 
 /* ---------- blobs ---------- */
 
-.blob-toggle {
-  padding: 10px 16px 0;
-}
-
-.blob-toggle code {
-  color: var(--code);
-}
-
-/* The listing is a native disclosure: a details element cannot be laid out as a
-   flex column the way a panel is, so it is a block with the panel's frame and
-   its summary wears the panel header. */
-.blob-list {
-  display: block;
-}
-
-.blob-list-summary {
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-}
-
-.blob-list-summary::-webkit-details-marker {
-  display: none;
-}
-
-.blob-list-summary h3::before {
-  display: inline-block;
-  width: 1em;
-  color: var(--text-faint);
-  content: '▸';
-  transition: transform 120ms ease;
-}
-
-.blob-list[open] > .blob-list-summary h3::before {
-  transform: rotate(90deg);
-}
-
-.blob-list-summary:hover h3 {
-  color: var(--link);
-}
-
-.blob-list-summary:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
 .blob-list-hint {
-  padding-top: 12px;
+  padding-top: 0;
 }
 
 .blob-list-hint a {
   color: var(--link);
 }
 
+/* The listing scrolls inside its panel past this, so the lookup form below it
+   stays in reach when the table refers to a hundred blobs. */
 .blob-list-scroll {
-  max-height: 420px;
+  max-height: min(560px, 60vh);
 }
 
-/* the digest is the heading, so it keeps its case and wraps rather than overflowing */
-.blob-view-header > div {
+/* The listing's links are the row's text, so they wrap like a cell rather than
+   running the table wide. */
+.blob-list-scroll .iri {
+  overflow-wrap: anywhere;
+}
+
+/* A blob's view is headed by the back arrow, then the IRI or digest, which is
+   the heading and so keeps its case and wraps rather than overflowing, and the
+   download button at the far end. */
+.blob-view-header {
+  justify-content: flex-start;
+}
+
+.blob-view-title {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+}
+
+/* The actions keep to one row at the far end; it is the heading that wraps. */
+.blob-view-header .panel-header-actions {
+  flex: none;
 }
 
 .blob-view-header h3 {
@@ -1171,9 +1195,89 @@ kbd {
   letter-spacing: normal;
 }
 
+.blob-view-header h3 code,
+.blob-view-header p code {
+  overflow-wrap: anywhere;
+}
+
 .blob-view-header h3 code {
   font-size: 12.5px;
-  overflow-wrap: anywhere;
+}
+
+/* The back arrow and the copy and download buttons are icon buttons at the
+   height of the header's line. */
+.blob-back,
+.blob-action {
+  flex: none;
+  width: 30px;
+  height: 30px;
+}
+
+.blob-action svg {
+  width: 16px;
+  height: 16px;
+}
+
+.blob-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.blob-action:disabled:hover {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--text-muted);
+}
+
+/* The filter sits in the listing's header at the width of a hash. */
+.blob-filter {
+  flex: none;
+  width: 260px;
+  max-width: 100%;
+}
+
+/* A column heading is a button that sorts by it, worded like the heading and
+   marked with the direction it is sorted in. */
+.blob-sortable {
+  padding: 0;
+}
+
+.blob-sort {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.blob-sort:hover {
+  color: var(--link);
+}
+
+.blob-sort:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.blob-sort-mark {
+  display: inline-block;
+  width: 1em;
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+/* The modified column is a timestamp, never a link, so it keeps to one line. */
+.blob-modified {
+  white-space: nowrap;
+  color: var(--text-muted);
 }
 
 /* ---------- map ---------- */
@@ -1210,12 +1314,28 @@ kbd {
   align-self: flex-start;
 }
 
+/* The box controls while the map draws a result instead: present but grayed. */
+.map-control-group-locked > :not(.hint) {
+  opacity: 0.45;
+}
+
+.map-control-group-locked .toggle,
+.map-control-group-locked .module-input {
+  cursor: not-allowed;
+}
+
 .map-control-group .hint code {
   color: var(--code);
 }
 
 .map-chips {
   padding: 0;
+}
+
+.map-source {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12.5px;
 }
 
 .chip.active {
@@ -1315,10 +1435,6 @@ kbd {
   color: var(--code);
 }
 
-.map-link {
-  align-self: flex-start;
-}
-
 .map-controls .error-banner {
   margin: 0;
 }
@@ -1328,6 +1444,59 @@ kbd {
   flex: 1;
   min-width: 0;
   background: var(--bg);
+}
+
+/* The map with the buttons the UI lays over it, opposite MapLibre's own. */
+.map-stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.map-overlay {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Sized and framed like a MapLibre control button, so the two sets read as one. */
+.map-overlay-button {
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  padding: 0;
+  border: var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.map-overlay-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.map-overlay-button:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.map-overlay-button.active {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.map-overlay-button:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
 }
 
 /* MapLibre's own chrome is styled for a light page; recolor it to the theme. */
@@ -1343,6 +1512,19 @@ kbd {
 
 .map-canvas .maplibregl-ctrl button .maplibregl-ctrl-icon {
   filter: var(--map-ctrl-icon-filter);
+}
+
+/* MapLibre's own fullscreen glyph is four corner brackets, the same shape as
+   the zoom-to-extent overlay button's; a window with an arrow out of, and
+   back into, its corner is what tells the two apart. */
+.map-canvas .maplibregl-ctrl button.maplibregl-ctrl-fullscreen .maplibregl-ctrl-icon {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23333' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='5' width='17' height='14' rx='2'/%3E%3Cpath d='M12.5 8.5H16V12M16 8.5l-5 5'/%3E%3C/svg%3E");
+  background-size: 20px 20px;
+}
+
+.map-canvas .maplibregl-ctrl button.maplibregl-ctrl-shrink .maplibregl-ctrl-icon {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23333' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='5' width='17' height='14' rx='2'/%3E%3Cpath d='M15 10.5h-3.5V7M11.5 10.5l5-5'/%3E%3C/svg%3E");
+  background-size: 20px 20px;
 }
 
 /* The attribution's compact rule in MapLibre's own stylesheet paints it white
@@ -1417,6 +1599,461 @@ kbd {
 
 .map-popup-table a {
   color: var(--link);
+}
+
+/* The map button on a result that holds geometry, beside Copy CSV and in the Yasr header. */
+.map-link-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* The builder's listing of the requests Run would make. */
+.feature-queries td:first-child {
+  white-space: nowrap;
+}
+
+.feature-queries .icon-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ---------- the Geospatial tab's views ---------- */
+
+/* The strip in the panel header switching between the map and feature views. */
+.subtabs {
+  display: inline-flex;
+  align-self: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--glass-outline);
+  border-radius: 999px;
+  background: var(--glass-bg);
+}
+
+.subtab {
+  padding: 4px 12px;
+  white-space: nowrap;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.subtab:hover {
+  color: var(--text);
+}
+
+.subtab.active {
+  color: var(--accent-text);
+  background: var(--accent);
+}
+
+/* The feature view scrolls as one page inside the panel: the builder, then
+   the results once there are any. */
+.feature-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.feature-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.feature-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  align-items: flex-start;
+}
+
+.feature-field {
+  display: flex;
+  flex: 1 1 220px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.feature-field > span,
+.feature-field > label {
+  color: var(--text-faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.feature-field-wide {
+  flex: 2 1 360px;
+}
+
+.feature-field-narrow {
+  flex: 0 1 120px;
+}
+
+.feature-field .module-input {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12.5px;
+}
+
+.feature-toggles {
+  gap: 6px;
+}
+
+.feature-chips {
+  padding: 0;
+}
+
+.feature-chips .chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feature-actions {
+  align-items: center;
+}
+
+.feature-actions .error-banner {
+  flex: 1;
+  margin: 0;
+}
+
+/* The term box: the input with its completion list under it. */
+.term-input {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.term-input-row {
+  display: flex;
+  gap: 6px;
+}
+
+.term-input-box {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.term-suggestions {
+  position: absolute;
+  z-index: 5;
+  inset: calc(100% + 4px) 0 auto 0;
+  margin: 0;
+  padding: 4px 0;
+  max-height: 280px;
+  overflow-y: auto;
+  list-style: none;
+  background: var(--bg-raised);
+  border: var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+
+.term-suggestions li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.term-suggestions li.selected {
+  background: var(--accent);
+}
+
+.term-suggestions li code {
+  color: var(--code);
+  font-size: 12px;
+}
+
+.term-suggestions li.selected code,
+.term-suggestions li.selected .term-suggestion-note {
+  color: var(--accent-text);
+}
+
+.term-suggestion-note {
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.term-problem {
+  color: var(--danger);
+}
+
+/* The query builder's sections: a frame with its title on the edge. */
+.feature-section {
+  margin: 0;
+  padding: 10px 14px 14px;
+  border: var(--border-strong);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.feature-section legend {
+  padding: 0 6px;
+  color: var(--accent-ink);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* The builder/results strip sits inside the view, under the panel header. */
+.feature-panes {
+  align-self: flex-start;
+}
+
+.subtab:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+/* The list on the left with the selected feature's map beside it, and the properties under both. */
+.feature-results {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 42%);
+  gap: 16px;
+  align-items: start;
+}
+
+.feature-results > .feature-detail {
+  grid-column: 1 / -1;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-emphasis);
+}
+
+@media (max-width: 900px) {
+  .feature-results {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.feature-list,
+.feature-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feature-list-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+}
+
+.feature-list-header .toggle,
+.feature-list-header .map-link-button {
+  margin-left: auto;
+}
+
+.feature-list-header .toggle + .map-link-button {
+  margin-left: 8px;
+}
+
+/* The selected feature's name heads its property tables, set off from the list above by a rule. */
+.feature-detail-header {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.feature-detail-id {
+  color: var(--code);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.feature-table tbody tr.selected td {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+}
+
+.feature-status-changed {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.feature-status-only-primary {
+  color: var(--cgs-fluvial-blue);
+}
+
+.feature-status-only-compare {
+  color: var(--cgs-continental-green);
+}
+
+.feature-status-unchanged {
+  color: var(--text-faint);
+}
+
+.feature-copy {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.feature-copy .icon-button {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.feature-copy .icon-button + .icon-button {
+  margin-left: 4px;
+}
+
+.feature-pager {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* One property table, or two side by side when diffing. */
+.feature-detail-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.feature-detail-grid.side-by-side {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.feature-props h4 {
+  margin: 0 0 6px;
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.feature-props-table th {
+  position: static;
+  width: 34%;
+  text-align: left;
+  font-weight: 600;
+  color: var(--accent-ink);
+  background: transparent;
+  vertical-align: top;
+}
+
+.feature-props-table tr.changed th,
+.feature-props-table tr.changed td {
+  background: color-mix(in srgb, var(--cgs-prairie-yellow) 22%, transparent);
+  color: var(--text);
+}
+
+.feature-request {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.feature-request-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.feature-request-row code {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--code);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.feature-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.feature-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  border-radius: 3px;
+}
+
+.feature-swatch-primary {
+  background: var(--cgs-fluvial-blue);
+}
+
+.feature-swatch-compare {
+  background: var(--cgs-continental-green);
+}
+
+/* As tall as the list beside it, and never shorter than a useful map. */
+.feature-map {
+  flex: none;
+  align-self: stretch;
+  min-height: 420px;
+  border: var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.feature-table {
+  width: 100%;
+  font-size: 12px;
+}
+
+.feature-table tbody tr {
+  cursor: pointer;
+}
+
+.feature-table td {
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.feature-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feature-diff-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  align-items: center;
+}
+
+.feature-diff-primary {
+  color: var(--cgs-fluvial-blue);
+}
+
+.feature-diff-compare {
+  color: var(--cgs-continental-green);
 }
 
 /* ---------- modals: the example query picker ---------- */
@@ -1526,6 +2163,91 @@ kbd {
   flex: none;
   padding: 10px 16px;
   border-top: var(--border);
+}
+
+/* ---------- modals: the prefix picker ---------- */
+
+.modal-banner {
+  margin: 12px 16px 0;
+}
+
+/* Each row is the prefix, the namespace it binds, and at the right how many
+   terms it holds and whether the query already declares it. */
+.prefix-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.prefix-item.selected {
+  background: var(--bg-raised);
+  border-left-color: var(--accent);
+}
+
+.prefix-item.declared {
+  cursor: default;
+}
+
+.prefix-name {
+  color: var(--accent-ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.prefix-namespace {
+  min-width: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prefix-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.prefix-badge {
+  padding: 1px 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.prefix-unavailable {
+  color: var(--danger);
+}
+
+.prefix-declared {
+  color: var(--success);
+  font-weight: 700;
+}
+
+.modal-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: var(--border);
+}
+
+.modal-actions .button {
+  flex: none;
+  white-space: nowrap;
 }
 
 /* ---------- sparql ---------- */
@@ -1698,20 +2420,6 @@ kbd {
   border-radius: 10px;
 }
 
-.graph-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid var(--line-strong);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: graph-spin 0.7s linear infinite;
-}
-
-@keyframes graph-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
 .graph-empty-state {
   padding: 28px 20px;

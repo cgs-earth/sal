@@ -2,18 +2,22 @@ package salmodule
 
 import (
 	"fmt"
+	"log/slog"
 	"net/url"
 	"slices"
 	"strings"
+
+	"github.com/cgs-earth/sal/pkg"
 )
 
 // Constants describing the SAL Module specification. The command line
-// conventions mirror the salmodule:baseCommand, salmodule:ontologyCommand,
-// salmodule:runCommand, and salmodule:taskInstanceEnvVar ontology properties
-// declared in specs/salmodule.ttl.
+// conventions mirror the salmodule:SALModuleCommand, salmodule:OntologyCommand,
+// salmodule:RunCommand, and salmodule:TaskInstance individuals declared in
+// specs/salmodule.ttl, whose rdfs:label is the word on the command line or
+// the name of the variable.
 const (
 	// Namespace is the IRI of the SAL Module ontology itself.
-	Namespace = "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
+	Namespace = "https://w3id.org/sal/salmodule#"
 	// ProtocolScheme is the URI scheme used to reference a SAL module from RDF.
 	ProtocolScheme = "salmodule"
 
@@ -125,6 +129,27 @@ func ParseModuleIRI(iri string) (ModuleRef, error) {
 		CloneURL:        fmt.Sprintf("https://%s/%s/%s.git", host, owner, repo),
 		ImageRepository: imageRepository(host, owner, repo),
 	}, nil
+}
+
+// PlaceholderNamespace stands in for a module's salmodule:// namespace when
+// the repository has no git remote to derive it from. The module checks only
+// need a base for the ontology's relative terms, so any will do.
+const PlaceholderNamespace = "salmodule://github.com/OWNER/REPO/"
+
+// LocalNamespace is the salmodule:// namespace of the module in the current
+// directory, derived from its git remote the way a project referencing it
+// would write it, or PlaceholderNamespace, with a warning, when there is no
+// remote to derive it from.
+func LocalNamespace() string {
+	remote, err := pkg.DefaultGitRemote()
+	if err == nil {
+		namespace, err := ModuleNamespaceForRemote(remote)
+		if err == nil {
+			return namespace
+		}
+	}
+	slog.Warn("Cannot derive the module's salmodule:// namespace from a git remote; using the placeholder "+PlaceholderNamespace, "error", err)
+	return PlaceholderNamespace
 }
 
 // ModuleNamespaceForRemote returns the salmodule:// namespace of the module

@@ -31,6 +31,8 @@ type recordedRun struct {
 type fakeRunner struct {
 	ontology  string
 	runOutput string
+	// runStderr is what the run command's container writes to stderr.
+	runStderr string
 	// runErr is what the run command's container fails with, after its output.
 	runErr error
 	// containerFiles are the files, by absolute path, a task can name for copying.
@@ -105,18 +107,18 @@ func (f *fakeRunner) ImageExists(_ context.Context, tag string) (bool, error) {
 	return slices.Contains(f.existingImages, tag), nil
 }
 
-func (f *fakeRunner) RunContainer(ctx context.Context, image string, env []string, cmd []string, consume ContainerOutputConsumer) ([]byte, error) {
+func (f *fakeRunner) RunContainer(ctx context.Context, image string, env []string, cmd []string, consume ContainerOutputConsumer) error {
 	f.runs = append(f.runs, recordedRun{image: image, env: env, cmd: cmd})
 	switch cmd[len(cmd)-1] {
 	case OntologyCommand:
-		return nil, consume(ctx, strings.NewReader(f.ontology), f)
+		return consume(ctx, ContainerOutput{Stdout: strings.NewReader(f.ontology), Stderr: strings.NewReader(""), Files: f})
 	case RunCommand:
-		if err := consume(ctx, strings.NewReader(f.runOutput), f); err != nil {
-			return nil, err
+		if err := consume(ctx, ContainerOutput{Stdout: strings.NewReader(f.runOutput), Stderr: strings.NewReader(f.runStderr), Files: f}); err != nil {
+			return err
 		}
-		return nil, f.runErr
+		return f.runErr
 	}
-	return nil, fmt.Errorf("unexpected command %v", cmd)
+	return fmt.Errorf("unexpected command %v", cmd)
 }
 
 // fakeClone populates the clone destination the way git would, so the resolver
@@ -157,7 +159,7 @@ func TestResolverBuildsEachModuleOnlyOnce(t *testing.T) {
 	require.NoError(t, err)
 	_, err = resolver.Ontology(context.Background(), ref)
 	require.NoError(t, err)
-	_, err = resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), nil, nil)
+	_, err = resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), TaskStream{}, TaskStream{})
 	require.NoError(t, err)
 
 	require.Len(t, runner.builds, 1)
@@ -276,7 +278,7 @@ func TestResolverRunTaskPassesTaskInstanceThroughEnvironment(t *testing.T) {
 	ref, err := ParseModuleIRI(testModuleNamespace)
 	require.NoError(t, err)
 
-	_, err = newTestResolver(runner).RunTask(context.Background(), ref, "MODULE_TASK", `{"@id":"x"}`, t.TempDir(), nil, nil)
+	_, err = newTestResolver(runner).RunTask(context.Background(), ref, "MODULE_TASK", `{"@id":"x"}`, t.TempDir(), TaskStream{}, TaskStream{})
 
 	require.NoError(t, err)
 	require.Equal(t, []string{`MODULE_TASK={"@id":"x"}`}, runner.runs[0].env)
@@ -343,4 +345,52 @@ func TestRunCommandDisablesGitPrompts(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, "0||", string(out))
+}
+
+// TestResolverRunTaskReadsStderrAsAControlChannel checks that a JSON object a
+// task writes to stderr goes to the stderr sink, with its line number on that
+// stream, and never to the stdout sink, while a line of stderr that is not a
+// node is a log line shown as a warning.
+func TestResolverRunTaskReadsStderrAsAControlChannel(t *testing.T) {
+	logs := captureWarnings(t)
+	runner := &fakeRunner{
+		ontology:  testOntology,
+		runOutput: `{"@id":"a","schema:name":"A"}` + "\n",
+		runStderr: "fetching 1/2\n\n{'debug': 'a python dict is not JSON'}\n" + `{"@type":"salmodule:Error","rdfs:comment":"reference server returned 503"}` + "\n",
+	}
+	ref, err := ParseModuleIRI(testModuleNamespace)
+	require.NoError(t, err)
+
+	var stdout, stderr []string
+	var stderrLines []int
+	_, err = newTestResolver(runner).RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(),
+		TaskStream{Sink: collectLines(&stdout)},
+		TaskStream{Sink: func(line []byte, lineNumber int) error {
+			stderr = append(stderr, string(line))
+			stderrLines = append(stderrLines, lineNumber)
+			return nil
+		}})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{`{"@id":"a","schema:name":"A"}`}, stdout)
+	require.Equal(t, []string{`{"@type":"salmodule:Error","rdfs:comment":"reference server returned 503"}`}, stderr)
+	require.Equal(t, []int{4}, stderrLines)
+	require.Contains(t, logs.String(), "wrote to stderr: fetching 1/2")
+	require.Contains(t, logs.String(), "a python dict is not JSON")
+	require.NotContains(t, logs.String(), "salmodule:Error")
+}
+
+func TestResolverRunTaskStopsWhenTheStderrSinkRefuses(t *testing.T) {
+	runner := &fakeRunner{
+		ontology:  testOntology,
+		runStderr: `{"@type":"salmodule:Error","rdfs:comment":"boom"}` + "\n",
+	}
+	ref, err := ParseModuleIRI(testModuleNamespace)
+	require.NoError(t, err)
+
+	_, err = newTestResolver(runner).RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), TaskStream{}, TaskStream{Sink: func([]byte, int) error {
+		return fmt.Errorf("refused")
+	}})
+
+	require.ErrorContains(t, err, "refused")
 }

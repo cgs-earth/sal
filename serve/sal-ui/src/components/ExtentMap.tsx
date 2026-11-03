@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import maplibregl, { type GeoJSONSource } from 'maplibre-gl'
-import 'maplibre-gl/dist/maplibre-gl.css'
+import type { GeoJSONSource } from 'maplibre-gl'
 import { fetchExtent, type BBox } from '../api'
-import { addExtentLayers, BASEMAP, EXTENT_SOURCE } from '../basemap'
-import { mapPalette, useTheme } from '../theme'
+import { addExtentLayers, EXTENT_SOURCE } from '../basemap'
+import { useMapLibre } from './useMapLibre'
 
 type ExtentMapProps = {
   /** Changes whenever the stats are reloaded, so the extent is read again with them. */
@@ -12,58 +11,23 @@ type ExtentMapProps = {
 
 /**
  * The small map on the Stats card: the table's spatial extent as a dotted
- * outline over a basemap, zoomable and nothing more. The Map tab is where
+ * outline over a basemap, zoomable and nothing more. The Geospatial tab is where
  * geometries are queried; this only says where the data is.
  */
 export function ExtentMap({ refreshKey }: ExtentMapProps) {
   const container = useRef<HTMLDivElement>(null)
-  const mapRef = useRef<maplibregl.Map | null>(null)
-  const [theme] = useTheme()
-  const appliedTheme = useRef(theme)
-  // 0 until the first style has loaded, so the extent is only drawn into a map
-  // that has the layers to draw it with.
-  const [styleVersion, setStyleVersion] = useState(0)
   const [bbox, setBBox] = useState<BBox | null>(null)
   const [empty, setEmpty] = useState(false)
-
-  useEffect(() => {
-    const parent = container.current
-    if (!parent) return
-    const map = new maplibregl.Map({
-      container: parent,
-      style: BASEMAP[appliedTheme.current],
-      center: [0, 20],
-      zoom: 0.6,
-      // One world: an extent spanning the globe would otherwise be drawn on
-      // every copy, and a map this small shows two of them.
-      renderWorldCopies: false,
-      // No chrome: the zoom buttons and the attribution control would take a
-      // third of a map this size. It still zooms by wheel and double click,
-      // and the basemap credit is on the caption; the Map tab shows it in full.
-      attributionControl: false,
-    })
-    map.on('error', (event) => {
-      if (!('tile' in event)) console.error(event.error)
-    })
-    map.on('style.load', () => {
-      addExtentLayers(map, mapPalette(appliedTheme.current).extent)
-      setStyleVersion((version) => version + 1)
-    })
-    mapRef.current = map
-    return () => {
-      mapRef.current = null
-      setStyleVersion(0)
-      map.remove()
-    }
-  }, [])
-
-  // The basemap follows the theme; the layers come back through 'style.load'.
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || appliedTheme.current === theme) return
-    appliedTheme.current = theme
-    map.setStyle(BASEMAP[theme])
-  }, [theme])
+  // No chrome: the zoom buttons and the attribution control would take a
+  // third of a map this size. It still zooms by wheel and double click, and
+  // the basemap credit is on the caption; the Geospatial tab shows it in full. One
+  // world, too: an extent spanning the globe would otherwise be drawn on every
+  // copy, and a map this small shows two of them.
+  const { map: mapRef, styleVersion } = useMapLibre(container, {
+    addLayers: (map, palette) => addExtentLayers(map, palette.extent),
+    controls: false,
+    mapOptions: { zoom: 0.6, renderWorldCopies: false, attributionControl: false },
+  })
 
   useEffect(() => {
     const controller = new AbortController()
@@ -118,7 +82,7 @@ export function ExtentMap({ refreshKey }: ExtentMapProps) {
       return
     }
     map.fitBounds([west, south, east, north], { padding: 16, duration: 0, maxZoom: 12 })
-  }, [styleVersion, bbox])
+  }, [mapRef, styleVersion, bbox])
 
   return (
     <figure className="dataset-extent">

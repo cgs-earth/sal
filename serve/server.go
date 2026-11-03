@@ -30,14 +30,22 @@ const sparqlResultsJSON = "application/sparql-results+json"
 // maxUIRows bounds how many rows of a SQL result are sent to the browser.
 const maxUIRows = 1000
 
+// EndpointRunner is the query surface the bare endpoint needs: SPARQL at any
+// snapshot and the features the OGC API serves.
+type EndpointRunner interface {
+	salsparql.SnapshotRunner
+	salsparql.FeatureRunner
+}
+
 // UIRunner is the query surface the bundled web UI needs from the DuckDB backend.
 type UIRunner interface {
-	salsparql.SnapshotRunner
+	EndpointRunner
 	salsparql.GeometryRunner
 	salsparql.SQLRunner
 	salsparql.SQLTranslator
 	salsparql.StatsRunner
 	salsparql.BlobRunner
+	salsparql.VocabularyRunner
 }
 
 // defaultBlobListing is how many blobs /api/blobs lists when the request does
@@ -69,9 +77,9 @@ func Serve(ctx context.Context, addr string, runner salsparql.DuckDBRunner, blob
 		}
 	}()
 	if withUI {
-		pkg.Infof("Serving the SAL UI at http://localhost%s/, SPARQL endpoint at http://localhost%s/sparql, and STAC catalog at http://localhost%s/stac/catalog.json\n", addr, addr, addr)
+		pkg.Infof("Serving the SAL UI at http://localhost%s/, SPARQL endpoint at http://localhost%s/sparql, OGC API Features at http://localhost%s/ogc, and STAC catalog at http://localhost%s/stac/catalog.json\n", addr, addr, addr, addr)
 	} else {
-		pkg.Infof("Serving SPARQL endpoint at http://localhost%s/sparql and STAC catalog at http://localhost%s/stac/catalog.json\n", addr, addr)
+		pkg.Infof("Serving SPARQL endpoint at http://localhost%s/sparql, OGC API Features at http://localhost%s/ogc, and STAC catalog at http://localhost%s/stac/catalog.json\n", addr, addr, addr)
 	}
 	err := server.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
@@ -98,14 +106,15 @@ func instrument(handler http.Handler) http.Handler {
 
 // NewEndpoint returns an HTTP handler for the SPARQL Protocol query operation,
 // at /sparql for the current snapshot and at /v{snapshot}/sparql for an earlier
-// one, plus the /blobs endpoint serving the vocabulary and imported ontology
-// documents pinned under blobDir and the /stac endpoint serving the STAC
-// catalog build wrote under stacDir.
-func NewEndpoint(runner salsparql.SnapshotRunner, blobDir string, stacDir string) http.Handler {
+// one, plus the OGC API Features endpoint at /ogc, the /blobs endpoint serving
+// the vocabulary and imported ontology documents pinned under blobDir, and the
+// /stac endpoint serving the STAC catalog build wrote under stacDir.
+func NewEndpoint(runner EndpointRunner, blobDir string, stacDir string) http.Handler {
 	mux := http.NewServeMux()
 	handler := sparqlHandler{runner: runner}
 	mux.Handle("/", snapshotSparqlHandler{runner: runner, fallback: handler})
 	mux.Handle("/sparql", handler)
+	featuresAPI{runner: runner}.register(mux)
 	mux.Handle("/blobs/", blobHandler{dir: blobDir})
 	stac := stacHandler{dir: stacDir}
 	mux.Handle("/stac", stac)
@@ -141,7 +150,7 @@ func NewEndpointWithUI(local UIRunner, blobDir string, stacDir string) (http.Han
 	mux.Handle("/api/sparql/translate", translateHandler{translator: runner})
 	mux.Handle("/api/stats", statsHandler{runner: runner})
 	mux.Handle("/api/blobs", blobListHandler{runner: runner})
-	mux.Handle("/api/salmodule", salmoduleHandler{inspect: salmodule.Inspect})
+	mux.Handle("/api/vocabularies", vocabularyHandler{runner: runner})
 	// The tab is /blobs alone; a path beneath it names a blob, and a browser
 	// following a link to a file in a copied directory wants that file rather
 	// than the tab.
@@ -150,6 +159,9 @@ func NewEndpointWithUI(local UIRunner, blobDir string, stacDir string) (http.Han
 	// Registered so that ServeMux answers the tab's own URL rather than redirecting
 	// it to /blobs/, which is the endpoint's prefix and not a tab.
 	mux.Handle("/blobs", browserRoute{api: blobs, ui: ui})
+	// /ogc is the OGC API tab for a browser and the landing page for a client;
+	// the routes beneath it are the API whatever asked for them.
+	featuresAPI{runner: runner, ui: ui}.register(mux)
 	// The catalog has no UI tab, so it is the API whatever asked for it.
 	stac := stacHandler{dir: stacDir}
 	mux.Handle("/stac", stac)
@@ -440,40 +452,6 @@ func isBlobName(s string) bool {
 	return true
 }
 
-// ModuleInspector dereferences a SAL module reference to the ontology the module
-// publishes. It is a field on the handler so that tests do not need docker.
-type ModuleInspector func(ctx context.Context, reference string) (*salmodule.ModuleOntology, error)
-
-type salmoduleHandler struct {
-	inspect ModuleInspector
-}
-
-// ServeHTTP clones, builds, and runs the module named by the module query
-// parameter, answering with the JSON-LD ontology it printed. This can take
-// minutes the first time a module is seen, since the image has to be built.
-func (h salmoduleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
-		http.Error(w, "the SAL module endpoint only supports GET requests", http.StatusMethodNotAllowed)
-		return
-	}
-	reference := strings.TrimSpace(r.URL.Query().Get("module"))
-	if reference == "" {
-		writeJSONError(w, http.StatusBadRequest, "the SAL module request is missing a module parameter")
-		return
-	}
-
-	ontology, err := h.inspect(r.Context(), reference)
-	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	writeJSON(w, struct {
-		Module   string          `json:"module"`
-		Ontology json.RawMessage `json:"ontology"`
-	}{Module: ontology.Namespace, Ontology: ontology.Document})
-}
-
 type sqlHandler struct {
 	runner salsparql.SQLRunner
 }
@@ -608,6 +586,28 @@ func (h blobListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, listing)
 }
 
+// vocabularyHandler answers GET /api/vocabularies with every vocabulary the
+// project pins and the terms its pinned document defines, so that the SPARQL
+// tab can offer the project's prefixes and complete their terms from the
+// versions a build validated against. A remote table lists none.
+type vocabularyHandler struct {
+	runner salsparql.VocabularyRunner
+}
+
+func (h vocabularyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "the vocabulary listing endpoint only supports GET requests", http.StatusMethodNotAllowed)
+		return
+	}
+	listing, err := h.runner.Vocabularies(r.Context())
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, listing)
+}
+
 func writeJSON(w http.ResponseWriter, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(body); err != nil {
@@ -707,7 +707,11 @@ func (h sparqlHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", sparqlResultsJSON)
-	if err := json.NewEncoder(w).Encode(sparqlJSONResult(result)); err != nil {
+	var response any = sparqlJSONResult(result)
+	if salsparql.IsAsk(query) {
+		response = sparqlJSONAsk(result)
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		slog.Error("failed to write SPARQL JSON result", "error", err)
 	}
 }
@@ -891,6 +895,22 @@ type sparqlJSONResults struct {
 type sparqlJSONResponse struct {
 	Head    sparqlJSONHead    `json:"head"`
 	Results sparqlJSONResults `json:"results"`
+}
+
+// sparqlJSONAskResponse is the SPARQL JSON result of an ASK: a boolean in
+// place of the bindings.
+type sparqlJSONAskResponse struct {
+	Head    struct{} `json:"head"`
+	Boolean bool     `json:"boolean"`
+}
+
+// sparqlJSONAsk reads the one boolean the translated ASK projects.
+func sparqlJSONAsk(result salsparql.Result) sparqlJSONAskResponse {
+	response := sparqlJSONAskResponse{}
+	if len(result.Rows) == 1 && len(result.Rows[0]) == 1 {
+		response.Boolean = result.Rows[0][0] == "true"
+	}
+	return response
 }
 
 func sparqlJSONResult(result salsparql.Result) sparqlJSONResponse {

@@ -13,11 +13,11 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       // Two pages share one build: the app `sal serve --with-ui` serves, and
-      // the module init form `sal init --salmodule --ui` serves. serve/ui.go
+      // the module ontology form `sal init --salmodule` and `sal edit` serve. serve/ui.go
       // picks the page; the chunks they share are built once.
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
-        init: fileURLToPath(new URL('./salmodule-init.html', import.meta.url)),
+        init: fileURLToPath(new URL('./salmodule.html', import.meta.url)),
       },
     },
   },
@@ -37,6 +37,18 @@ export default defineConfig({
       '/geometries': 'http://localhost:8080',
       '/blobs': 'http://localhost:8080',
       '/stac': 'http://localhost:8080',
+      // The OGC API Features endpoint. A browser navigating to /ogc wants the
+      // feature view of this app, the same as the Go server decides it, so
+      // only a client's request is proxied, or a navigation that asks for
+      // JSON outright with f=json (or geojson), which the server answers.
+      '/ogc': {
+        target: 'http://localhost:8080',
+        bypass: (req) => {
+          if (req.headers['sec-fetch-mode'] !== 'navigate') return undefined
+          const format = new URL(req.url ?? '/', 'http://localhost').searchParams.get('f')
+          return format === 'json' || format === 'geojson' ? undefined : '/index.html'
+        },
+      },
     },
   },
 })

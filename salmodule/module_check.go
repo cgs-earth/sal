@@ -566,15 +566,16 @@ func (c *ontologyChecker) undeclaredTerms() []error {
 var shapeTermPattern = regexp.MustCompile(`<([^>\s]+)>`)
 
 // unsupportedConstraintPattern finds the constraint parameter a message about
-// a salmodule:stdoutShape names, whether the schema's ("sal does not support
-// sh:sparql in a salmodule:stdoutShape") or StdoutValidator's ("uses
-// sh:sparql, which SAL does not support").
+// a salmodule:stdoutShape or stderrShape names, whether the schema's ("sal
+// does not support sh:sparql in a salmodule:stdoutShape or stderrShape") or
+// StreamValidator's ("uses sh:sparql, which SAL does not support").
 var unsupportedConstraintPattern = regexp.MustCompile(`(?:support|uses) sh:(\w+)`)
 
 // shapeProblems reports every SHACL shape in the ontology that is not a
 // well-formed shape, as the shacl package that enforces the shapes reads them,
-// and every salmodule:stdoutShape that uses a constraint sal refuses when a
-// task is run, so that a module author finds out before a project runs it.
+// and every salmodule:stdoutShape or stderrShape that uses a constraint sal
+// refuses when a task is run, so that a module author finds out before a
+// project runs it.
 // alreadyReported are the problems found so far, since the schema has
 // already checked what is written inline: an ill-formed shape written inline,
 // a blank node, is reported by the schema on the line it is written on and
@@ -623,14 +624,16 @@ func (c *ontologyChecker) shapeProblems(alreadyReported []error) []error {
 	}
 	sort.Strings(classes)
 	for _, class := range classes {
-		_, err := c.ontology.StdoutValidator(class, c.ontology.Namespace)
-		if err == nil {
-			continue
+		for _, stream := range []string{"stdout", "stderr"} {
+			_, err := c.ontology.streamValidator(class, stream, c.ontology.Namespace)
+			if err == nil {
+				continue
+			}
+			if match := unsupportedConstraintPattern.FindStringSubmatch(err.Error()); match != nil && refused[match[1]] {
+				continue
+			}
+			problems = append(problems, ModuleError{Path: c.path, Line: c.lineOf(class), Message: err.Error()})
 		}
-		if match := unsupportedConstraintPattern.FindStringSubmatch(err.Error()); match != nil && refused[match[1]] {
-			continue
-		}
-		problems = append(problems, ModuleError{Path: c.path, Line: c.lineOf(class), Message: err.Error()})
 	}
 	return problems
 }

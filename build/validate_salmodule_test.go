@@ -21,7 +21,7 @@ const moduleTestOntology = `{
     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
     "sh": "http://www.w3.org/ns/shacl#",
     "xsd": "http://www.w3.org/2001/XMLSchema#",
-    "salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
+    "salmodule": "https://w3id.org/sal/salmodule#"
   },
   "@graph": [
     {"@id": ".", "@type": "owl:Ontology", "rdfs:label": "Weather stations"},
@@ -50,7 +50,7 @@ const moduleTestOntology = `{
 const moduleTestVocabulary = `@prefix owl: <http://www.w3.org/2002/07/owl#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix sh: <http://www.w3.org/ns/shacl#> .
-@prefix salmodule: <https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#> .
+@prefix salmodule: <https://w3id.org/sal/salmodule#> .
 
 owl:Ontology a owl:Class . owl:Class a owl:Class . owl:DatatypeProperty a owl:Class .
 rdfs:label a owl:AnnotationProperty . rdfs:subClassOf a owl:ObjectProperty .

@@ -85,13 +85,13 @@ def print_states_jsonld(state_pid,max_retries):
                 continue
 
 def print_err_msg(msg):
-    """Print an error message as a JSON object to stdout in conformance to salmodule:stdoutShape SHACL Shape annotation for salmodule:Task base class"""
+    """Print an error message as a JSON object to stderr in conformance to the salmodule:stderrShape SHACL Shape annotation of the salmodule:Task base class. stdout carries only data."""
     err_msg = {
         "@type": "salmodule:Error",
+        "rdfs:label": "Error",
         "rdfs:comment": msg
-
     }
-    print( json.dumps(err_msg))
+    print(json.dumps(err_msg), file=sys.stderr)
 
 def get_salmodule_task_instance():
     """Retrieve the SAL Module task instance from the environment variable SALMODULE_TASK_INSTANCE and return it as a dictionary."""

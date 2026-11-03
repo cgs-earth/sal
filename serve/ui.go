@@ -29,18 +29,18 @@ func init() {
 	}
 }
 
-// ModuleInitUIPage is the page of the embedded app that `sal init --salmodule
-// --ui` serves: the form that writes a module's ontology.jsonld. It is a second
-// entry of the Vite build next to index.html, so it shares the app's theme,
-// components, and chunks.
-const ModuleInitUIPage = "salmodule-init.html"
+// ModuleFormUIPage is the page of the embedded app that `sal init --salmodule`
+// and `sal edit` serve: the form that writes and edits a module's
+// ontology.jsonld. It is a second entry of the Vite build next to index.html,
+// so it shares the app's theme, components, and chunks.
+const ModuleFormUIPage = "salmodule.html"
 
-// ModuleInitUI serves the embedded app with the module init form as its page.
-// It is here rather than in the initialization package because the compiled
-// app is embedded from this package's directory, the only place an embed
+// ModuleFormUI serves the embedded app with the module ontology form as its
+// page. It is here rather than in the edit package because the compiled app
+// is embedded from this package's directory, the only place an embed
 // directive can reach it from.
-func ModuleInitUI() (http.Handler, error) {
-	return uiHandler(ModuleInitUIPage)
+func ModuleFormUI() (http.Handler, error) {
+	return uiHandler(ModuleFormUIPage)
 }
 
 // uiHandler serves the embedded UI with the given page as its index, falling

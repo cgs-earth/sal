@@ -38,7 +38,7 @@ const testModuleOntology = `{
 		"schema": "https://schema.org/",
 		"owl": "http://www.w3.org/2002/07/owl#",
 		"xsd": "http://www.w3.org/2001/XMLSchema#",
-		"salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
+		"salmodule": "https://w3id.org/sal/salmodule#"
 	},
 	"@graph": [
 		{"@id": ".", "@type": "owl:Ontology"},
@@ -56,7 +56,7 @@ const testModuleOntology = `{
 const testProject = `
 	@base <https://example.test/project/> .
 	@prefix history: <salmodule://www.github.com/test/history-getter/> .
-	@prefix salmodule: <https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#> .
+	@prefix salmodule: <https://w3id.org/sal/salmodule#> .
 	@prefix schema: <https://schema.org/> .
 	@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
@@ -80,6 +80,8 @@ func captureWarnings(t *testing.T) *bytes.Buffer {
 type testContainerRunner struct {
 	ontology  string
 	runOutput string
+	// runStderr is what the run command's container writes to stderr.
+	runStderr string
 	runErr    error
 	runs      int
 	// runEnv is the environment the run command was last invoked with, which is
@@ -124,19 +126,19 @@ func (r *testContainerRunner) BuildImage(context.Context, string, string) error 
 
 func (r *testContainerRunner) ImageExists(context.Context, string) (bool, error) { return false, nil }
 
-func (r *testContainerRunner) RunContainer(ctx context.Context, _ string, env []string, cmd []string, consume salmodule.ContainerOutputConsumer) ([]byte, error) {
+func (r *testContainerRunner) RunContainer(ctx context.Context, _ string, env []string, cmd []string, consume salmodule.ContainerOutputConsumer) error {
 	switch cmd[len(cmd)-1] {
 	case salmodule.OntologyCommand:
-		return nil, consume(ctx, strings.NewReader(r.ontology), r)
+		return consume(ctx, salmodule.ContainerOutput{Stdout: strings.NewReader(r.ontology), Stderr: strings.NewReader(""), Files: r})
 	case salmodule.RunCommand:
 		r.runs++
 		r.runEnv = env
-		if err := consume(ctx, strings.NewReader(r.runOutput), r); err != nil {
-			return nil, err
+		if err := consume(ctx, salmodule.ContainerOutput{Stdout: strings.NewReader(r.runOutput), Stderr: strings.NewReader(r.runStderr), Files: r}); err != nil {
+			return err
 		}
-		return nil, r.runErr
+		return r.runErr
 	}
-	return nil, fmt.Errorf("unexpected command %v", cmd)
+	return fmt.Errorf("unexpected command %v", cmd)
 }
 
 func testResolver(runner salmodule.ContainerRunner) *salmodule.Resolver {
@@ -188,12 +190,29 @@ func TestMaterializeSalModulesMergesTaskOutput(t *testing.T) {
 		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
 	}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
 	require.Equal(t, 1, runner.runs)
 	require.True(t, graphHasTriple(graph, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
+}
+
+// TestMaterializeSalModulesReportsTheVocabulariesTheOutputUses checks that
+// materialization hands the build the namespaces the tasks' output stated its
+// triples in, merged across tasks, so the build can pin them.
+func TestMaterializeSalModulesReportsTheVocabulariesTheOutputUses(t *testing.T) {
+	graph := parseTestProject(t, testProject)
+	runner := &testContainerRunner{
+		ontology:  testModuleOntology,
+		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","http://purl.org/dc/terms/title":"Bob"}`,
+	}
+
+	_, vocabularies, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+
+	require.NoError(t, err)
+	// a plain literal's datatype is xsd:string, so xsd is among them like any other datatype's namespace
+	require.Equal(t, []string{"http://purl.org/dc/terms/", "http://www.w3.org/1999/02/22-rdf-syntax-ns#", "http://www.w3.org/2001/XMLSchema#", "https://schema.org/"}, vocabularies)
 }
 
 // TestMaterializeSalModulesNamesRelativeOutputUnderTheProject checks that a
@@ -206,7 +225,7 @@ func TestMaterializeSalModulesNamesRelativeOutputUnderTheProject(t *testing.T) {
 		runOutput: `{"@id":"person/bob","@type":"schema:Person","schema:name":"Bob"}`,
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.True(t, graphHasTriple(graph, "https://example.test/project/person/bob", "https://schema.org/name", "Bob"))
@@ -219,7 +238,7 @@ func TestMaterializeSalModulesNamesRelativeOutputUnderTheProject(t *testing.T) {
 func TestMaterializeSalModulesPassesTheInstanceConfiguredInRDF(t *testing.T) {
 	runner := &testContainerRunner{ontology: testModuleOntology}
 
-	_, err := MaterializeSalModules(context.Background(), parseTestProject(t, testProject), testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), parseTestProject(t, testProject), testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Len(t, runner.runEnv, 1)
@@ -242,7 +261,7 @@ func TestMaterializeSalModulesSkipsClassesThatAreNotTasks(t *testing.T) {
 	`)
 	runner := &testContainerRunner{ontology: testModuleOntology}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Equal(t, 0, tasksRun)
@@ -256,7 +275,7 @@ func TestMaterializeSalModulesFailsWhenTheModuleReportsAnError(t *testing.T) {
 		runOutput: `{"@type":"salmodule:Error","rdfs:comment":"reference feature server is unreachable"}`,
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reference feature server is unreachable")
@@ -271,7 +290,7 @@ func TestMaterializeSalModulesPrefersTheModuleErrorOverTheContainerExitStatus(t 
 		runErr:    fmt.Errorf("container exited with status 1"),
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reference feature server is unreachable")
@@ -284,7 +303,7 @@ func TestMaterializeSalModulesReportsContainerFailuresWithoutModuleErrors(t *tes
 		runErr:   fmt.Errorf("container exited with status 137"),
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "container exited with status 137")
@@ -303,7 +322,7 @@ func TestMaterializeSalModulesCopiesTheFilesATaskNames(t *testing.T) {
 		containerFiles: map[string]string{"/tmp/test.txt": "hello\n"},
 	}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -329,7 +348,7 @@ func TestMaterializeSalModulesFailsWhenANamedFileIsMissingFromTheContainer(t *te
 		runOutput: `{"@id":"https://example.test/dataset","schema:hasPart":{"@id":"file:///tmp/missing.txt"}}`,
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no such file /tmp/missing.txt")
@@ -366,7 +385,7 @@ func TestMaterializeSalModulesCopiesADirectoryATaskNames(t *testing.T) {
 		},
 	}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -411,7 +430,7 @@ func TestMaterializeSalModulesLeavesDirectoriesEarlierRunsCopied(t *testing.T) {
 		containerFiles: map[string]string{"/out/catalog/catalog.json": `{"links":[]}`},
 	}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -431,7 +450,7 @@ const testShapedModuleOntology = `{
 		"rdfs": "http://www.w3.org/2000/01/rdf-schema#",
 		"sh": "http://www.w3.org/ns/shacl#",
 		"xsd": "http://www.w3.org/2001/XMLSchema#",
-		"salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
+		"salmodule": "https://w3id.org/sal/salmodule#"
 	},
 	"@graph": [
 		{"@id": ".", "@type": "owl:Ontology"},
@@ -464,7 +483,7 @@ func TestMaterializeSalModulesWarnsWhenTheTaskClassHasNoStdoutShape(t *testing.T
 		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
 	}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -479,7 +498,7 @@ func TestMaterializeSalModulesIsQuietWhenTheTaskClassHasAStdoutShape(t *testing.
 		runOutput: `{"@id":"person/alice","@type":"schema:Person","schema:name":"Alice"}` + "\n",
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.NotContains(t, logs.String(), "stdoutShape")
@@ -509,9 +528,9 @@ func TestMaterializeSalModulesFailsWhenOutputViolatesTheStdoutShape(t *testing.T
 			`{"@id":"person/bob","@type":"schema:Person"}` + "\n",
 	}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
-	var shapeErr salmodule.StdoutShapeError
+	var shapeErr salmodule.StreamShapeError
 	require.ErrorAs(t, err, &shapeErr)
 	require.Equal(t, 2, shapeErr.Line)
 	require.ErrorContains(t, err, "Every person needs a name")
@@ -526,7 +545,7 @@ func TestMaterializeSalModulesMergesOutputThatConformsToTheStdoutShape(t *testin
 		runOutput: `{"@id":"person/alice","@type":"schema:Person","schema:name":"Alice"}` + "\n",
 	}
 
-	tasksRun, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -546,7 +565,7 @@ func TestMaterializeSalModulesSpanCountsTheTasksAndModules(t *testing.T) {
 		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
 	}
 
-	_, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 	require.NoError(t, err)
 
 	var names []string
@@ -563,4 +582,65 @@ func TestMaterializeSalModulesSpanCountsTheTasksAndModules(t *testing.T) {
 	require.Equal(t, int64(1), tasks.AsInt64())
 	modules, _ := attrs.Value("sal.modules")
 	require.Equal(t, int64(1), modules.AsInt64())
+}
+
+// TestMaterializeSalModulesReportsErrorsATaskWritesToStderr checks that a task
+// reporting why it failed as a salmodule:Error on stderr, where the SAL Module
+// specification has it report errors, fails the run with that message rather
+// than with the container's exit status.
+func TestMaterializeSalModulesReportsErrorsATaskWritesToStderr(t *testing.T) {
+	graph := parseTestProject(t, testProject)
+	runner := &testContainerRunner{
+		ontology:  testModuleOntology,
+		runStderr: "fetching the reference features\n" + `{"@type":"salmodule:Error","rdfs:label":"Unreachable","rdfs:comment":"reference feature server is unreachable"}` + "\n",
+		runErr:    fmt.Errorf("container exited with status 1"),
+	}
+
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+
+	var taskErr salmodule.TaskError
+	require.ErrorAs(t, err, &taskErr)
+	require.Equal(t, []string{"reference feature server is unreachable"}, taskErr.Messages)
+	require.Equal(t, 0, tasksRun)
+}
+
+// What a task writes to stderr is its control channel, not data: a node
+// there, other than an error, is ignored and never reaches the graph.
+func TestMaterializeSalModulesKeepsStderrOutOfTheGraph(t *testing.T) {
+	graph := parseTestProject(t, testProject)
+	runner := &testContainerRunner{
+		ontology:  testModuleOntology,
+		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}` + "\n",
+		runStderr: "progress 1/1\n" + `{"@id":"https://example.test/person/eve","@type":"schema:Person","schema:name":"Eve"}` + "\n",
+	}
+
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, tasksRun)
+	require.True(t, graphHasTriple(graph, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
+	require.False(t, graphHasTriple(graph, "https://example.test/person/eve", "https://schema.org/name", "Eve"))
+}
+
+func TestMaterializeSalModulesFailsWhenStderrViolatesTheStderrShape(t *testing.T) {
+	graph := parseTestProject(t, testProject)
+	ontology := strings.Replace(testShapedModuleOntology, `"salmodule:stdoutShape": {`, `"salmodule:stderrShape": {
+				"@type": "sh:NodeShape",
+				"sh:targetClass": {"@id": "salmodule:Error"},
+				"sh:property": [{"sh:path": {"@id": "rdfs:label"}, "sh:minCount": 1, "sh:message": "An error needs a label"}]
+			},
+			"salmodule:stdoutShape": {`, 1)
+	runner := &testContainerRunner{
+		ontology:  ontology,
+		runOutput: `{"@id":"person/alice","@type":"schema:Person","schema:name":"Alice"}` + "\n",
+		runStderr: `{"@type":"salmodule:Error","rdfs:comment":"no label here"}` + "\n",
+	}
+
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+
+	var shapeErr salmodule.StreamShapeError
+	require.ErrorAs(t, err, &shapeErr)
+	require.Equal(t, "stderr", shapeErr.Stream)
+	require.ErrorContains(t, err, "An error needs a label")
+	require.Equal(t, 0, tasksRun)
 }

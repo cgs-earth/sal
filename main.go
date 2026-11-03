@@ -24,8 +24,10 @@ import (
 	"github.com/cgs-earth/sal/pkg/telemetry"
 	"github.com/cgs-earth/sal/push"
 	"github.com/cgs-earth/sal/query"
+	"github.com/cgs-earth/sal/rewrite"
 	"github.com/cgs-earth/sal/salmodule"
 	"github.com/cgs-earth/sal/serve"
+	"github.com/cgs-earth/sal/terraform"
 	"github.com/cgs-earth/sal/test"
 	"github.com/cgs-earth/sal/upload"
 
@@ -51,7 +53,9 @@ type args struct {
 	Push      *push.PushCmd                  `arg:"subcommand:push" help:"Push a built SAL data product to a remote OCI registry"`
 	SalModule *salmodule.SalModuleCmd        `arg:"subcommand:salmodule" help:"Output salmodule information about this project"`
 	Clone     *clone.OciArtifactRetrievalCmd `arg:"subcommand:clone" help:"Clone an OCI artifact and the associated git repository for a built SAL data product"`
-	Edit      *edit.EditCmd                  `arg:"subcommand:edit" help:"Edit the metadata of a built SAL data product"`
+	Rewrite   *rewrite.RewriteCmd            `arg:"subcommand:rewrite" help:"Rewrite the Iceberg metadata of a built SAL data product so it can be read from a new table root"`
+	Edit      *edit.EditCmd                  `arg:"subcommand:edit" help:"Edit a SAL module's ontology.jsonld in a browser form, and get the prompt that asks a coding agent to implement the module"`
+	Terraform *terraform.TerraformCmd        `arg:"subcommand:terraform" help:"Write a Terraform configuration that serves the built SAL data product from Cloud Run over a Cloud Storage bucket"`
 	Upload    *upload.UploadCmd              `arg:"subcommand:upload" help:"Upload a built SAL data product to an object store"`
 	Test      *test.TestCmd                  `arg:"subcommand:test" help:"Run tests on a built SAL data product"`
 	Pull      *clone.OciArtifactRetrievalCmd `arg:"subcommand:pull" help:"Pull a built SAL data product from a remote OCI registry"`
@@ -198,8 +202,12 @@ func main() {
 		err = cli.Push.Run()
 	case cli.Clone != nil:
 		err = cli.Clone.RunClone()
+	case cli.Rewrite != nil:
+		err = cli.Rewrite.Run()
 	case cli.Edit != nil:
 		err = cli.Edit.Run()
+	case cli.Terraform != nil:
+		err = cli.Terraform.Run()
 	case cli.Upload != nil:
 		err = cli.Upload.Run()
 	case cli.Test != nil:

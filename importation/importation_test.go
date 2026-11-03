@@ -46,12 +46,12 @@ func TestReadOntologyReturnsNilWhenTheFileIsMissing(t *testing.T) {
 func TestReadOntologyResolvesTheRelativeOntologyIRIAgainstTheProjectBase(t *testing.T) {
 	path := writeTestOntologyNode(t, `{
   "@context": {
-    "dc": "http://purl.org/dc/elements/1.1/",
+    "dcterms": "http://purl.org/dc/terms/",
     "owl": "http://www.w3.org/2002/07/owl#"
   },
   "@id": ".",
   "@type": "owl:Ontology",
-  "dc:title": "My Ontology",
+  "dcterms:title": "My Ontology",
   "owl:imports": [
     { "@id": "https://example.com/onto2" },
     { "@id": "https://example.com/onto1" }
@@ -75,28 +75,29 @@ func TestReadOntologyReportsInvalidJSONLD(t *testing.T) {
 func TestWriteOntologyRendersTheProjectAsARelativeIRI(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.jsonld")
 
-	require.NoError(t, writeOntology(path, &Ontology{
-		IRI:     testBase,
-		Base:    testBase,
-		Title:   "My Ontology",
-		Imports: []string{"https://example.com/onto1", "https://example.com/onto2"},
+	require.NoError(t, WriteOntology(path, &Ontology{
+		IRI:        testBase,
+		Base:       testBase,
+		IsOntology: true,
+		Title:      "My Ontology",
+		Imports:    []string{"https://example.com/onto1", "https://example.com/onto2"},
 	}))
 
 	content, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.JSONEq(t, `{
   "@context": {
-    "dc": "http://purl.org/dc/elements/1.1/",
     "owl": "http://www.w3.org/2002/07/owl#",
     "dcterms": "http://purl.org/dc/terms/",
     "xsd": "http://www.w3.org/2001/XMLSchema#",
-    "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "schema": "https://schema.org/"
   },
   "@graph": [
     {
       "@id": ".",
       "@type": "owl:Ontology",
-      "dc:title": "My Ontology",
+      "dcterms:title": "My Ontology",
       "owl:imports": [
         { "@id": "https://example.com/onto1" },
         { "@id": "https://example.com/onto2" }
@@ -109,28 +110,162 @@ func TestWriteOntologyRendersTheProjectAsARelativeIRI(t *testing.T) {
 func TestWriteOntologyOmitsAnEmptyImportsClause(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.jsonld")
 
-	require.NoError(t, writeOntology(path, &Ontology{IRI: testBase, Base: testBase, Title: "sal"}))
+	require.NoError(t, WriteOntology(path, &Ontology{IRI: testBase, Base: testBase, IsOntology: true, Title: "sal"}))
 
 	content, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.JSONEq(t, `{
   "@context": {
-    "dc": "http://purl.org/dc/elements/1.1/",
     "owl": "http://www.w3.org/2002/07/owl#",
     "dcterms": "http://purl.org/dc/terms/",
     "xsd": "http://www.w3.org/2001/XMLSchema#",
-    "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "schema": "https://schema.org/"
   },
   "@graph": [
-    { "@id": ".", "@type": "owl:Ontology", "dc:title": "sal" }
+    { "@id": ".", "@type": "owl:Ontology", "dcterms:title": "sal" }
   ]
 }`, string(content))
+}
+
+// configContext is the @context every write of .sal/config.jsonld leaves in
+// the file, as JSON, so a test can state the node it expects alone.
+const configContext = `{
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "dcterms": "http://purl.org/dc/terms/",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "schema": "https://schema.org/"
+  }`
+
+// The node sal init writes is the project alone: a schema:Project with its
+// description, and none of the ontology statements sal import adds.
+func TestWriteOntologyRendersTheProjectNodeInitWrites(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.jsonld")
+
+	require.NoError(t, WriteOntology(path, &Ontology{
+		IRI:         testBase,
+		Base:        testBase,
+		IsProject:   true,
+		Description: "A test project showing off sal on a small dataset",
+	}))
+
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+  "@context": `+configContext+`,
+  "@graph": [
+    {
+      "@id": ".",
+      "@type": "schema:Project",
+      "dcterms:description": "A test project showing off sal on a small dataset"
+    }
+  ]
+}`, string(content))
+}
+
+// Importing into the node sal init wrote keeps the project's type and
+// description and adds the ontology's: the node is one project that is both.
+func TestWriteOntologyKeepsTheDescriptionWhenTheProjectBecomesAnOntology(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.jsonld")
+	require.NoError(t, WriteOntology(path, &Ontology{IRI: testBase, Base: testBase, IsProject: true, Description: "A test project"}))
+
+	ontology, err := ReadOntology(path, testBase)
+	require.NoError(t, err)
+	require.True(t, ontology.IsProject)
+	require.False(t, ontology.IsOntology)
+	require.Equal(t, "A test project", ontology.Description)
+
+	ontology.IsOntology = true
+	ontology.Title = "sal"
+	ontology.Imports = []string{"https://example.com/onto1"}
+	require.NoError(t, WriteOntology(path, ontology))
+
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+  "@context": `+configContext+`,
+  "@graph": [
+    {
+      "@id": ".",
+      "@type": ["schema:Project", "owl:Ontology"],
+      "dcterms:description": "A test project",
+      "dcterms:title": "sal",
+      "owl:imports": [{ "@id": "https://example.com/onto1" }]
+    }
+  ]
+}`, string(content))
+
+	rewritten, err := ReadOntology(path, testBase)
+	require.NoError(t, err)
+	require.True(t, rewritten.IsProject)
+	require.True(t, rewritten.IsOntology)
+	require.Equal(t, "A test project", rewritten.Description)
+	require.Equal(t, "sal", rewritten.Title)
+}
+
+// A node written before sal init recorded descriptions is an ontology and
+// nothing more, and a rewrite leaves it that way rather than typing it a
+// schema:Project it never said it was; its dc:title is read and written back
+// as the dcterms:title the node carries now.
+func TestWriteOntologyDoesNotTypeAnOntologyOnlyNodeAsAProject(t *testing.T) {
+	path := writeTestOntologyNode(t, `{
+  "@context": { "dc": "http://purl.org/dc/elements/1.1/", "owl": "http://www.w3.org/2002/07/owl#" },
+  "@id": ".",
+  "@type": "owl:Ontology",
+  "dc:title": "My Ontology"
+}`)
+
+	ontology, err := ReadOntology(path, testBase)
+	require.NoError(t, err)
+	require.False(t, ontology.IsProject)
+	require.True(t, ontology.IsOntology)
+	require.NoError(t, WriteOntology(path, ontology))
+
+	doc, err := pkg.ReadConfigDocument(path)
+	require.NoError(t, err)
+	require.JSONEq(t, `{ "@id": ".", "@type": "owl:Ontology", "dcterms:title": "My Ontology" }`, string(doc.Graph[0]))
+}
+
+func TestWriteOntologyReplacesTheDescriptionInAFileWithExtraStatements(t *testing.T) {
+	path := writeTestOntologyNode(t, `{
+  "@context": {
+    "dcterms": "http://purl.org/dc/terms/",
+    "dcterms": "http://purl.org/dc/terms/",
+    "schema": "https://schema.org/"
+  },
+  "@id": ".",
+  "@type": "schema:Project",
+  "dcterms:description": "Old description",
+  "dcterms:creator": "A Person"
+}`)
+
+	ontology, err := ReadOntology(path, testBase)
+	require.NoError(t, err)
+	require.Equal(t, "Old description", ontology.Description)
+	ontology.Description = "New description"
+	require.NoError(t, WriteOntology(path, ontology))
+
+	rewritten, err := ReadOntology(path, testBase)
+	require.NoError(t, err)
+	require.Equal(t, "New description", rewritten.Description)
+	require.True(t, rewritten.IsProject)
+	require.False(t, rewritten.IsOntology)
+	subject := rdflibgo.NewURIRefUnsafe(testBase)
+	require.True(t, pkg.Contains(rewritten.Graph, subject, rdflibgo.NewURIRefUnsafe(dctermsNamespace+"creator"), rdflibgo.NewLiteral("A Person")))
+	var descriptions int
+	description := dctermsDescription
+	pkg.Triples(rewritten.Graph, nil, &description, nil)(func(rdflibgo.Triple) bool {
+		descriptions++
+		return true
+	})
+	require.Equal(t, 1, descriptions)
 }
 
 func TestWrittenOntologyReadsBackWithTheSameImports(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.jsonld")
 	imports := []string{"https://example.com/onto1", "https://example.com/onto2"}
-	require.NoError(t, writeOntology(path, &Ontology{IRI: testBase, Base: testBase, Title: `a "quoted" title`, Imports: imports}))
+	require.NoError(t, WriteOntology(path, &Ontology{IRI: testBase, Base: testBase, Title: `a "quoted" title`, Imports: imports}))
 
 	ontology, err := ReadOntology(path, testBase)
 	require.NoError(t, err)
@@ -142,7 +277,7 @@ func TestWrittenOntologyReadsBackWithTheSameImports(t *testing.T) {
 func TestWrittenOntologyReadsBackASalModuleImport(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.jsonld")
 	module := "salmodule://github.com/adplincinst/sample-salmodule-1"
-	require.NoError(t, writeOntology(path, &Ontology{IRI: testBase, Base: testBase, Title: "sal", Imports: []string{module}}))
+	require.NoError(t, WriteOntology(path, &Ontology{IRI: testBase, Base: testBase, Title: "sal", Imports: []string{module}}))
 
 	ontology, err := ReadOntology(path, testBase)
 	require.NoError(t, err)
@@ -159,7 +294,7 @@ func TestWriteOntologyPreservesAnExistingPinnedVocabularyNode(t *testing.T) {
 		Graph:   []json.RawMessage{pinned},
 	}))
 
-	require.NoError(t, writeOntology(path, &Ontology{IRI: testBase, Base: testBase, Title: "sal"}))
+	require.NoError(t, WriteOntology(path, &Ontology{IRI: testBase, Base: testBase, Title: "sal"}))
 
 	doc, err := pkg.ReadConfigDocument(path)
 	require.NoError(t, err)
@@ -172,25 +307,25 @@ func TestWriteOntologyPreservesAnExistingPinnedVocabularyNode(t *testing.T) {
 func TestWriteOntologyKeepsStatementsTheTemplateDoesNotCover(t *testing.T) {
 	path := writeTestOntologyNode(t, `{
   "@context": {
-    "dc": "http://purl.org/dc/elements/1.1/",
+    "dcterms": "http://purl.org/dc/terms/",
     "owl": "http://www.w3.org/2002/07/owl#"
   },
   "@id": ".",
   "@type": "owl:Ontology",
-  "dc:title": "My Ontology",
-  "dc:creator": "A Person"
+  "dcterms:title": "My Ontology",
+  "dcterms:creator": "A Person"
 }`)
 
 	ontology, err := ReadOntology(path, testBase)
 	require.NoError(t, err)
 	ontology.Imports = append(ontology.Imports, "https://example.com/onto1")
-	require.NoError(t, writeOntology(path, ontology))
+	require.NoError(t, WriteOntology(path, ontology))
 
 	rewritten, err := ReadOntology(path, testBase)
 	require.NoError(t, err)
 	require.Equal(t, []string{"https://example.com/onto1"}, rewritten.Imports)
 	require.Equal(t, "My Ontology", rewritten.Title)
-	creator := rdflibgo.NewURIRefUnsafe(dcNamespace + "creator")
+	creator := rdflibgo.NewURIRefUnsafe(dctermsNamespace + "creator")
 	require.True(t, pkg.Contains(rewritten.Graph, rdflibgo.NewURIRefUnsafe(testBase), creator, rdflibgo.NewLiteral("A Person")))
 }
 
@@ -198,29 +333,33 @@ func TestWriteOntologyReplacesAnExistingTitleInAFileWithExtraStatements(t *testi
 	path := writeTestOntologyNode(t, `{
   "@context": {
     "dc": "http://purl.org/dc/elements/1.1/",
+    "dcterms": "http://purl.org/dc/terms/",
     "owl": "http://www.w3.org/2002/07/owl#"
   },
   "@id": ".",
   "@type": "owl:Ontology",
   "dc:title": "Old Title",
-  "dc:creator": "A Person"
+  "dcterms:creator": "A Person"
 }`)
 
 	ontology, err := ReadOntology(path, testBase)
 	require.NoError(t, err)
 	ontology.Title = "New Title"
-	require.NoError(t, writeOntology(path, ontology))
+	require.NoError(t, WriteOntology(path, ontology))
 
 	rewritten, err := ReadOntology(path, testBase)
 	require.NoError(t, err)
 	require.Equal(t, "New Title", rewritten.Title)
+	// the one title is the dcterms one; the dc:title it replaced is gone
 	var titles int
-	title := dcTitle
-	pkg.Triples(rewritten.Graph, nil, &title, nil)(func(rdflibgo.Triple) bool {
-		titles++
-		return true
-	})
+	for _, title := range []rdflibgo.URIRef{dctermsTitle, dcTitle} {
+		pkg.Triples(rewritten.Graph, nil, &title, nil)(func(rdflibgo.Triple) bool {
+			titles++
+			return true
+		})
+	}
 	require.Equal(t, 1, titles)
+	require.True(t, pkg.Contains(rewritten.Graph, rdflibgo.NewURIRefUnsafe(testBase), dctermsTitle, rdflibgo.NewLiteral("New Title")))
 }
 
 func TestImportIRIAcceptsAnHTTPSURL(t *testing.T) {

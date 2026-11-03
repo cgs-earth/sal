@@ -1,0 +1,141 @@
+---
+title: OGC API Features
+description: How sal serve exposes the triples table as an OGC API Features endpoint, with RDF subjects as features, predicates as properties, and every Iceberg snapshot addressable.
+---
+
+`sal serve` exposes the built triples table as an [OGC API Features](https://ogcapi.ogc.org/features/) endpoint at `/ogc`, with or without `--with-ui`.
+It implements the **Core** and **GeoJSON** conformance classes of Part 1, so QGIS, pygeoapi's clients, OWSLib, and any other OGC API Features client can be pointed at `http://localhost:8080/ogc` and read the data product as GeoJSON features, without knowing anything about RDF.
+
+The endpoint is read-only and is answered by the same DuckDB engine the SPARQL and SQL endpoints use, so it needs nothing beyond a built table.
+
+## What a feature is
+
+A **feature is an RDF subject that has a geometry**, and its `id` is the subject IRI.
+Every triple whose object is a geometry (a `geo:wktLiteral`, which `sal build` stores in the table's `object_geometry` column) makes its subject a feature.
+
+When that subject is itself the object of `geo:hasGeometry` or `geo:hasDefaultGeometry`, the feature is the subject of *that* triple instead.
+This is the usual GeoSPARQL shape, where the geometry hangs off a blank node:
+
+```turtle
+<Denver> a schema:City ;
+    schema:name "Denver" ;
+    gsp:hasGeometry [ a sf:Point ; gsp:asWKT "POINT(-104.99 39.74)"^^gsp:wktLiteral ] .
+```
+
+Here the feature is `<Denver>`, not the blank node, so its `id` is the IRI the project gave it and stays the same from one build to the next.
+A subject whose geometry is on itself, say `<X> schema:geo "POINT(1 2)"^^gsp:wktLiteral`, is its own feature.
+
+A feature with **several geometries** carries them as one `GeometryCollection`; with one, that geometry as it is.
+The coordinate reference system is always `CRS84` (WGS 84 longitude/latitude), which is what the table stores.
+
+The subject IRI is the `id` rather than a hash of the triple on purpose: the same feature can then be read at any snapshot of the table (see [Snapshots](#snapshots)), and a feature whose geometry or properties changed between two builds is still the same feature.
+
+## Routes
+
+| Route | Answers |
+| --- | --- |
+| `GET /ogc` | The landing page: the data product's title and description from `.sal/config.jsonld`, and links to the routes below. |
+| `GET /ogc/conformance` | The conformance classes: `ogcapi-features-1/1.0/conf/core` and `ogcapi-features-1/1.0/conf/geojson`. |
+| `GET /ogc/collections` | The one collection, `triples`. |
+| `GET /ogc/collections/triples` | The collection: its title, its spatial extent as a bounding box, and its CRS. |
+| `GET /ogc/collections/triples/items` | A page of features as a GeoJSON `FeatureCollection`. |
+| `GET /ogc/collections/triples/items/{id}` | One feature, where `{id}` is the subject IRI percent-encoded into a single path segment, such as `items/https%3A%2F%2Fexample.org%2Fplaces%2F1`. |
+
+Every response carries absolute links, built from the host the request arrived at, honoring `X-Forwarded-Proto` and `X-Forwarded-Host` from a proxy in front of the server.
+Cross-origin reads are allowed, as they are on `/sparql` and `/stac/`.
+Every route answers `GET` and `HEAD`; the landing, conformance, and collection documents are `application/json`, and the features are `application/geo+json`.
+
+A query parameter a route does not define answers `400`, as the Core conformance class requires, so a typo in `properties` is reported rather than ignored.
+An error is answered in the shape OGC API suggests, `{"code": "Bad Request", "description": "..."}`.
+
+Every route has an HTML representation when the server runs with `--with-ui`: the UI itself, opened on the Geospatial tab's feature view.
+A browser navigating to the landing page, the collection, a page of items, or one item gets the app, and an items or item URL is run as the feature view's query on arrival, so an item link pasted into a browser shows that feature with its properties and on a map; a client asking for JSON gets the document.
+The server tells the two apart the way it does for `/sparql`: a navigation, or a request accepting HTML, is a browser.
+The `f` parameter overrides that: `f=json` (or `geojson`) answers JSON whatever the client, and `f=html` answers the app whatever the client, or `406` without `--with-ui`.
+So `f=json` on the end of an items or item URL in the address bar shows the document in the browser rather than the app; the app itself sends such a URL back to the server should a proxy in front of it hand every navigation to the app.
+Each document links its HTML reading with `rel="alternate"` and `type="text/html"`, as OGC API suggests.
+
+## Parameters of `items`
+
+| Parameter | Meaning |
+| --- | --- |
+| `limit` | Features per page, 1 to 1000; 100 when absent. |
+| `offset` | Features to skip. The response links `next` while the collection has more and `prev` past the first page, each carrying every other parameter of the request. |
+| `bbox` | `minLon,minLat,maxLon,maxLat`; only the features whose geometry intersects the box. |
+| `properties` | A comma-separated list of predicate IRIs to carry as properties; see below. |
+| `type` | A class IRI; only the features typed with it through `rdf:type`. |
+| `snapshot` | An Iceberg snapshot ID; the table as it stood at that snapshot. |
+
+Features are ordered by their IRI, so paging is stable between requests against the same snapshot.
+`numberMatched` is not reported, since counting every feature would cost a second scan of the table on every page.
+
+The single feature route takes `properties` and `snapshot` only.
+`properties` and `snapshot` are also accepted on `/ogc/collections/triples`, where `snapshot` reads the extent at that snapshot and the `items` link carries it along.
+
+## Properties
+
+By default a feature carries its `id` and `geometry` and no properties at all.
+The `properties` parameter names the predicates to join onto each feature, as their full IRIs:
+
+```
+/ogc/collections/triples/items?properties=https://schema.org/name,https://schema.org/description
+```
+
+Each predicate becomes a GeoJSON property **keyed by the IRI itself**, which is unambiguous whatever vocabularies the project mixes:
+
+```json
+{
+  "type": "Feature",
+  "id": "https://example.org/places/Chicago",
+  "geometry": { "type": "Point", "coordinates": [-87.6298, 41.8781] },
+  "properties": {
+    "https://schema.org/name": "Chicago",
+    "https://schema.org/description": null
+  }
+}
+```
+
+A feature that lacks the predicate has `null`; one with several values has an array.
+Values keep their type from the table's typed object columns: an `xsd:integer` or `xsd:double` is a JSON number, an `xsd:boolean` a JSON boolean, an `xsd:dateTime` its ISO 8601 text, a geometry its WKT, and an IRI, a blank node, or any other literal its text.
+
+Up to 50 predicates can be requested.
+Each one is a join over the table's rows with that predicate, which prunes on the table's predicate partition, so the cost grows with the number of properties and not with the size of the vocabulary.
+
+A predicate written without a scheme, such as `name`, is refused; there is no prefix expansion on the API, since the keys of the answer are the IRIs given.
+
+## Snapshots
+
+Every build commits one Iceberg snapshot, and the `snapshot` parameter reads the collection, a page, or a single feature as it stood at any of them:
+
+```
+/ogc/collections/triples/items/https%3A%2F%2Fexample.org%2Fplaces%2FChicago?snapshot=7751985076558718312
+```
+
+A snapshot the table does not have answers `404`; the snapshot is checked on every request, so one committed while the server runs is readable without a restart.
+`sal query --info snapshots` and the Stats tab of `--with-ui` list the snapshot IDs a table has.
+
+Because a feature's `id` is its subject IRI, the same URL with a different `snapshot` is the same feature at another version, which is what the UI's diff is built on.
+Nothing is computed server-side for a diff: the tab fetches the features at both snapshots and compares them in the browser.
+
+## The feature view of the Geospatial tab
+
+With `--with-ui`, the Geospatial tab has two views, switched by the strip in its header: the **map view** draws everything inside a box or what the last query returned, and the **feature view** is a query builder over this endpoint for looking at individual features.
+A browser navigating to `/ogc`, or to any route under it, opens the feature view, so the endpoint's own URLs have a human readable face; an items or item URL is run as the query on arrival, with the results pane showing what it answered.
+
+The feature view has two panes, **Query builder** and **Results**; the second is grayed out until a query has been run, and a run that resolves switches to it.
+Nothing is fetched until the query is run.
+
+The builder is three sections:
+
+- **Snapshot**: the snapshot to read the table at, from the snapshots the Stats tab lists, and a **Compare?** box that, once ticked, offers a second snapshot to **compare with** (the current table, when a snapshot is being read, or any other snapshot). A comparison always diffs the two: the results say how each feature stands between them and show a feature's properties at both snapshots side by side.
+- **Feature**: a feature IRI, for one feature, or none for a page of them with the page size given.
+- **Filters**: the **properties** to carry and, under them, an **Only features of a class** box that, once ticked, offers a box for the class the features must be typed with. Both boxes complete a term the way the SPARQL editor does: typing offers the prefixes of the pinned vocabularies, and once one is followed by a colon, that vocabulary's terms, which narrow as the name is typed, each with what its pinned document says it means; Enter or a click adds the term as a chip under its `prefix:name`, and a full IRI typed in is taken as it is. A chip's `×` removes it. Before the colon, from two characters on, the box also suggests every vocabulary's terms holding the text, so a term can be found without knowing its vocabulary.
+
+A **Show queries** box beside **Run** lists the requests Run would make as the query stands, one per snapshot when two are to be read, each with a button that copies its URL, so the same request can be handed to QGIS.
+
+The results pane lists the features five at a time: each one's IRI, when two snapshots were read how it stands between them (only here, only there, changed, or unchanged) with counts of each and an **Only what differs** box, or just **No differences** when the two snapshots agree on every feature, and two buttons per feature that copy the URL it is read at on this endpoint and its GeoJSON as the endpoint answered it.
+The list itself has no map; when it holds more than one feature, a map button at its top right, **Show all features on map**, opens the map view drawing every feature of the run, which the map view's **Show** dropdown then lists as the **Feature view result**.
+Selecting a feature shows its properties under the list, one row per property asked for, and when comparing, two tables side by side, one per snapshot, with the rows that differ marked; a feature one snapshot lacks says so, and a run that asked for no properties says so instead of a table.
+A map under them draws that one feature, at both snapshots when comparing, and nothing else; the geometry is on the map rather than in the table.
+
+The query, the last run, and the selection survive switching views and tabs.

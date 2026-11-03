@@ -22,6 +22,7 @@ import (
 	salsparql "github.com/cgs-earth/sal/query/sparql"
 	"github.com/cgs-earth/sal/salmodule"
 	"github.com/stretchr/testify/require"
+	"os/exec"
 )
 
 type endpointRunner struct {
@@ -34,6 +35,14 @@ type endpointRunner struct {
 	// snapshot is the snapshot AtSnapshot was last asked for, zero when a query
 	// went to the current table.
 	snapshot int64
+	// features is what Features answers, and featureQuery what it was last
+	// asked; extent is what FeaturesExtent answers, extentSnapshot the
+	// snapshot it was asked for.
+	features       salsparql.FeaturePage
+	featureQuery   salsparql.FeatureQuery
+	extent         salsparql.Feature
+	extentSnapshot int64
+	project        salsparql.ProjectInfo
 }
 
 func (r *endpointRunner) Run(_ context.Context, query string) (salsparql.Result, error) {
@@ -50,11 +59,32 @@ func (r *endpointRunner) AtSnapshot(snapshotID int64) salsparql.Runner {
 	return r
 }
 
+// Features reports NoSnapshotError for a snapshot HasSnapshot would not
+// report, as the real runner does, so the 404 path is exercised.
+func (r *endpointRunner) Features(_ context.Context, query salsparql.FeatureQuery) (salsparql.FeaturePage, error) {
+	r.featureQuery = query
+	if query.SnapshotID != 0 && !slices.Contains(r.snapshots, query.SnapshotID) {
+		return salsparql.FeaturePage{}, salsparql.NoSnapshotError{SnapshotID: query.SnapshotID}
+	}
+	return r.features, r.err
+}
+
+func (r *endpointRunner) FeaturesExtent(_ context.Context, snapshotID int64) (salsparql.Feature, error) {
+	r.extentSnapshot = snapshotID
+	if snapshotID != 0 && !slices.Contains(r.snapshots, snapshotID) {
+		return salsparql.Feature{}, salsparql.NoSnapshotError{SnapshotID: snapshotID}
+	}
+	return r.extent, r.err
+}
+
+func (r *endpointRunner) Project() salsparql.ProjectInfo {
+	return r.project
+}
+
 // endpointUIRunner is a UIRunner whose four query surfaces are all canned responses.
 type endpointUIRunner struct {
 	endpointRunner
 	collection salsparql.FeatureCollection
-	extent     salsparql.Feature
 	stats      salsparql.TableStats
 	sqlResult  salsparql.Result
 	sqlErr     error
@@ -62,7 +92,12 @@ type endpointUIRunner struct {
 	geometries salsparql.GeometryQuery
 	blobs      salsparql.BlobListing
 	// blobLimit is the limit Blobs was last asked for.
-	blobLimit int
+	blobLimit    int
+	vocabularies salsparql.VocabularyListing
+}
+
+func (r *endpointUIRunner) Vocabularies(_ context.Context) (salsparql.VocabularyListing, error) {
+	return r.vocabularies, r.err
 }
 
 func (r *endpointUIRunner) Blobs(_ context.Context, limit int) (salsparql.BlobListing, error) {
@@ -423,7 +458,7 @@ func TestEndpointWithUIReportsSPARQLTranslationErrorsAsJSON(t *testing.T) {
 	defer server.Close()
 
 	resp, err := http.Post(server.URL+"/api/sparql/translate", "application/json",
-		strings.NewReader(`{"query":"ASK { ?s ?p ?o }"}`))
+		strings.NewReader(`{"query":"SELECT ?s WHERE { GRAPH <http://example.org/g> { ?s ?p ?o } }"}`))
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, resp.Body.Close())
@@ -432,7 +467,7 @@ func TestEndpointWithUIReportsSPARQLTranslationErrorsAsJSON(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	var body map[string]string
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
-	require.Contains(t, body["error"], "SELECT")
+	require.Contains(t, body["error"], "GRAPH")
 }
 
 func TestEndpointWithUIRejectsEmptySPARQLTranslation(t *testing.T) {
@@ -460,78 +495,6 @@ func TestEndpointWithUIOnlyTranslatesOnPOST(t *testing.T) {
 
 	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 	require.Equal(t, "POST", resp.Header.Get("Allow"))
-}
-
-// newModuleServer serves the SAL module endpoint against a canned inspector so
-// that the handler can be tested without cloning or building a real module.
-func newModuleServer(t *testing.T, inspect ModuleInspector) *httptest.Server {
-	t.Helper()
-	mux := http.NewServeMux()
-	mux.Handle("/api/salmodule", salmoduleHandler{inspect: inspect})
-	return httptest.NewServer(mux)
-}
-
-func TestSalModuleEndpointReturnsTheOntologyDocument(t *testing.T) {
-	var inspected string
-	server := newModuleServer(t, func(_ context.Context, reference string) (*salmodule.ModuleOntology, error) {
-		inspected = reference
-		return &salmodule.ModuleOntology{
-			Namespace: "salmodule://github.com/owner/repo/",
-			Document:  []byte(`{"@context":{"@vocab":"salmodule://github.com/owner/repo/"}}`),
-		}, nil
-	})
-	defer server.Close()
-
-	resp, err := http.Get(server.URL + "/api/salmodule?module=" + url.QueryEscape("salmodule://github.com/owner/repo/"))
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, resp.Body.Close())
-	}()
-
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Equal(t, "salmodule://github.com/owner/repo/", inspected)
-
-	var body struct {
-		Module   string         `json:"module"`
-		Ontology map[string]any `json:"ontology"`
-	}
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
-	require.Equal(t, "salmodule://github.com/owner/repo/", body.Module)
-	require.Contains(t, body.Ontology, "@context")
-}
-
-func TestSalModuleEndpointReportsInspectionFailuresAsJSON(t *testing.T) {
-	server := newModuleServer(t, func(_ context.Context, _ string) (*salmodule.ModuleOntology, error) {
-		return nil, fmt.Errorf("SAL module salmodule://github.com/owner/repo/ has no Dockerfile in its repository root")
-	})
-	defer server.Close()
-
-	resp, err := http.Get(server.URL + "/api/salmodule?module=owner/repo")
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, resp.Body.Close())
-	}()
-
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	var body map[string]string
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
-	require.Contains(t, body["error"], "has no Dockerfile")
-}
-
-func TestSalModuleEndpointRejectsAMissingModuleParameter(t *testing.T) {
-	server := newModuleServer(t, func(_ context.Context, _ string) (*salmodule.ModuleOntology, error) {
-		t.Fatal("a module should not be inspected without a reference")
-		return nil, nil
-	})
-	defer server.Close()
-
-	resp, err := http.Get(server.URL + "/api/salmodule?module=%20")
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, resp.Body.Close())
-	}()
-
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
 func TestTruncateResultReportsTheFullRowCount(t *testing.T) {
@@ -601,6 +564,62 @@ func TestEndpointWithUIReportsBlobListingErrorsAsJSON(t *testing.T) {
 	var body map[string]string
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
 	require.Equal(t, "no such table", body["error"])
+}
+
+func TestEndpointWithUIListsPinnedVocabulariesWithTheirTerms(t *testing.T) {
+	runner := &endpointUIRunner{vocabularies: salsparql.VocabularyListing{Vocabularies: []salsparql.Vocabulary{{
+		ID:         "https://schema.org/",
+		Prefix:     "schema",
+		Namespace:  "https://schema.org/",
+		Version:    "urn:sha256:aaaa",
+		Format:     "application/ld+json",
+		Imported:   true,
+		Classes:    []string{"Person"},
+		Properties: []string{"name"},
+		Others:     []string{},
+	}}}}
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/vocabularies")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+	var body salsparql.VocabularyListing
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, runner.vocabularies, body)
+}
+
+func TestEndpointWithUIReportsVocabularyListingErrorsAsJSON(t *testing.T) {
+	runner := &endpointUIRunner{}
+	runner.err = errors.New("config.jsonld: invalid JSON-LD")
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/vocabularies")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, "config.jsonld: invalid JSON-LD", body["error"])
+}
+
+func TestEndpointWithUIOnlyListsVocabulariesOnGET(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/vocabularies", "application/json", strings.NewReader("{}"))
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 }
 
 func TestEndpointWithUIReturnsTableStats(t *testing.T) {
@@ -715,12 +734,12 @@ func TestEndpointWithUIRejectsMalformedBoundingBox(t *testing.T) {
 }
 
 func TestEndpointWithUIReturnsTheGeometryExtent(t *testing.T) {
-	runner := &endpointUIRunner{extent: salsparql.Feature{
+	runner := &endpointUIRunner{endpointRunner: endpointRunner{extent: salsparql.Feature{
 		Type:       "Feature",
 		BBox:       []float64{-90, 40, -89, 41},
 		Geometry:   json.RawMessage(`{"type":"Polygon","coordinates":[[[-90,40],[-89,40],[-89,41],[-90,41],[-90,40]]]}`),
 		Properties: map[string]string{"geometries": "6"},
-	}}
+	}}}
 	server := newUIServer(t, runner)
 	defer server.Close()
 
@@ -754,6 +773,21 @@ func TestSparqlJSONResultReportsWKTBindingsAsGeometryLiterals(t *testing.T) {
 		Datatype: "http://www.opengis.net/ont/geosparql#wktLiteral",
 	}, binding["wkt"])
 	require.Equal(t, sparqlJSONBinding{Type: "literal", Value: "Point of interest"}, binding["name"])
+}
+
+func TestEndpointAnswersAnAskWithABoolean(t *testing.T) {
+	runner := &endpointRunner{result: salsparql.Result{Header: []string{"ask"}, Rows: [][]string{{"true"}}}}
+	server := httptest.NewServer(NewEndpoint(runner, "", ""))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/sparql?query=" + url.QueryEscape("ASK { ?s ?p ?o }"))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"head":{},"boolean":true}`, string(body))
 }
 
 func TestEndpointAcceptsFormPOSTQuery(t *testing.T) {
@@ -1464,4 +1498,27 @@ func TestBlobEndpointAllowsCrossOriginReads(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 	require.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
 	require.Contains(t, resp.Header.Get("Access-Control-Allow-Methods"), "GET")
+}
+
+// A project initialized but never built has nothing to serve, which the
+// command says in its own words rather than as a catalog failure.
+func TestServeReportsAnUnbuiltProjectAsNoData(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"remote", "add", "origin", "https://github.com/cgs-earth/example.git"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(out))
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".sal", "data", "blobs"), 0755))
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(dir)
+
+	err := (&ServeCmd{WithUI: true}).Run()
+
+	// the project directory is reported with symlinks resolved, which on macOS
+	// puts the temp dir under /private
+	dir, resolveErr := filepath.EvalSymlinks(dir)
+	require.NoError(t, resolveErr)
+	require.EqualError(t, err, "no data found at "+filepath.Join(dir, ".sal", "data", "example", "triples")+": add data to the project before serving it")
 }

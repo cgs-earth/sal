@@ -13,7 +13,7 @@ A module is referenced through the `salmodule://` protocol scheme.
 Declare it as a prefix and type an instance with one of the classes the module's ontology defines:
 
 ```turtle
-@prefix salmodule: <https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#> .
+@prefix salmodule: <https://w3id.org/sal/salmodule#> .
 @prefix states: <salmodule://github.com/cgs-earth/python-geoconnex/> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
@@ -59,7 +59,7 @@ A task is configured in RDF, with the properties the module's own vocabulary def
 `states:maxRetries` above is one of them, so the module decides what a valid task instance looks like
 and `sal validate` reports a typo in a configuration property the same way it reports a typo in a class.
 
-SAL serializes those properties into the JSON-LD node object that `salmodule:runCommand` is invoked with.
+SAL serializes those properties into the JSON-LD node object that the module's `salmodule run` command (`salmodule:RunCommand` in the ontology) is invoked with.
 The instance above is passed as:
 
 ```json
@@ -85,15 +85,15 @@ The rules SAL follows when writing it:
 - A blank node is inlined as a nested object, so structured configuration can be expressed with the usual
   turtle `[ ... ]` syntax. A named node stays a `{"@id": ...}` reference.
 
-### Which ontology property describes what
+### Which ontology term describes what
 
-Two properties of the SAL Module ontology are involved, and it is worth keeping them apart:
+Two terms of the SAL Module ontology are involved, and it is worth keeping them apart:
 
-- `salmodule:runCommand` describes the invocation the task instance is an input to, and so is the property
-  that documents the JSON-LD node object above. Its `skos:note` is what says the value must be a JSON-LD
-  representation of the `salmodule:Task` subclass instance being invoked.
-- `salmodule:taskInstanceEnvVar` only defines a constant: the *name* of the environment variable that value
-  is carried in. A module declares it on its own ontology, and it defaults to `SALMODULE_TASK_INSTANCE`.
+- `salmodule:RunCommand` is the individual describing the `salmodule run` invocation the task instance is an
+  input to, and so is what documents the JSON-LD node object above. The `salmodule:TaskInstance` individual
+  names the environment variable it arrives in, `SALMODULE_TASK_INSTANCE`.
+- `salmodule:taskInstanceEnvVar` is the one property a module may set on its own ontology node, to carry the
+  task instance in a differently named variable. Left unset, the variable is `SALMODULE_TASK_INSTANCE`.
 
 :::caution
 Neither property is written in a project's RDF. Earlier versions of SAL took the task instance from a
@@ -131,7 +131,11 @@ ran it; the module's `salmodule://` namespace names its vocabulary, not the data
 A module that needs its output under a particular namespace, for instance the authoritative source the data
 was pulled from, writes absolute IRIs, which are kept as written.
 
-If a task emits `salmodule:Error` nodes instead of data, the run fails with the messages the module reported.
+A task reports a failure by writing `salmodule:Error` nodes to stderr, one JSON object per line, and exiting
+non-zero; the run then fails with the messages the module reported rather than with the container's exit
+status. Anything else a task writes to stderr is a log line that `sal build` shows as a warning. A module
+written before the specification moved errors to stderr may still report one on stdout; that fails the run
+too, with a warning that the node is out of place.
 
 ### Validating a task's output
 
@@ -159,7 +163,7 @@ output is converted to RDF, so the shape sees each node as it will be committed.
 stops the container and fails the build with the shape's `sh:message` and the node it is about:
 
 ```
-run: SAL module salmodule://github.com/owner/stations wrote a node on output line 3 that does not conform to the salmodule:stdoutShape of salmodule://github.com/owner/stations/StationFetcher: <https://example.test/project/station/7> A station must have a name
+run: SAL module salmodule://github.com/owner/stations wrote a node on stdout line 3 that does not conform to the salmodule:stdoutShape of salmodule://github.com/owner/stations/StationFetcher: <https://example.test/project/station/7> A station must have a name
 ```
 
 Nothing the task wrote is committed. A result whose severity the shape lowers to `sh:Warning` or `sh:Info`
@@ -306,8 +310,9 @@ the Iceberg table metadata as a JSON list under the `sal.salmodules` property:
 ```
 
 The list is rewritten on every build and run, so dropping a module from your RDF drops it from the table too.
-`sal query --info properties` prints it, and the **Modules** tab of `sal serve --with-ui` offers each entry as
-a chip and as an autocompletion so a module the table was built from can be inspected without typing its URI.
+`sal query --info properties` prints it, and `GET /api/stats` of `sal serve --with-ui` returns it as `modules`, so
+which modules a table was built from can be read without a build; `sal salmodule inspect` is how one of them is
+inspected from the command line.
 
 ## Requirements
 
