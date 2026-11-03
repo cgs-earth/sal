@@ -564,6 +564,10 @@ Input (from salmodule:stdinShape; the nodes another task produced arrive on stan
 - Write output as newline delimited JSON: one complete JSON object per line, never a wrapping array and
   never pretty printed across lines. Keys are resolved through the ontology's @context, so write them with
   the prefixes above ("schema:name", not "name"), and write a typed literal as {"@value": ..., "@type": "xsd:..."}.
+  Write every key, @type, and datatype through a bound prefix rather than as a full IRI: sal pins, as the
+  project's vocabularies, the namespaces the @context binds that the output uses terms of, and never one the
+  output only writes full IRIs of. A vocabulary the output uses that the @context does not bind yet must be
+  added to {{.OntologyFile}} under the prefix the output writes it with.
 - A relative "@id" resolves against the project that runs the task, not the module. Use absolute IRIs for
   anything owned by an external source.
 - Only stdout is data. Logs and progress go to stderr, which sal surfaces as warnings.

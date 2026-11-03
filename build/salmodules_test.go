@@ -205,14 +205,17 @@ func TestMaterializeSalModulesReportsTheVocabulariesTheOutputUses(t *testing.T) 
 	graph := parseTestProject(t, testProject)
 	runner := &testContainerRunner{
 		ontology:  testModuleOntology,
-		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","http://purl.org/dc/terms/title":"Bob"}`,
+		runOutput: `{"@context":{"dcterms":"http://purl.org/dc/terms/"},"@id":"https://example.test/person/bob","@type":["schema:Person","http://stko-kwg.geog.ucsb.edu/lod/ontology/S2Cell_Level11"],"dcterms:title":"Bob"}`,
 	}
 
 	_, vocabularies, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
-	// a plain literal's datatype is xsd:string, so xsd is among them like any other datatype's namespace
-	require.Equal(t, []string{"http://purl.org/dc/terms/", "http://www.w3.org/1999/02/22-rdf-syntax-ns#", "http://www.w3.org/2001/XMLSchema#", "https://schema.org/"}, vocabularies)
+	// dcterms is bound by the node's own @context and schema by the module's;
+	// a plain literal's datatype is xsd:string, so xsd is among them like any
+	// other datatype's namespace; the class written as a full IRI is parsed
+	// but declares no vocabulary, and nothing binds rdf for the @type itself
+	require.Equal(t, []string{"http://purl.org/dc/terms/", "http://www.w3.org/2001/XMLSchema#", "https://schema.org/"}, vocabularies)
 }
 
 // TestMaterializeSalModulesNamesRelativeOutputUnderTheProject checks that a

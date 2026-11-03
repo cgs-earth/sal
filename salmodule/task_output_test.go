@@ -183,18 +183,49 @@ func TestGraphFromTaskOutputAcceptsEmptyOutput(t *testing.T) {
 }
 
 // TestTaskOutputParserReportsTheVocabulariesTheOutputUses checks what the
-// build pins for a module's output: the namespaces of its predicates, the
-// classes it types nodes with, and its literals' datatypes, and nothing from
-// the subjects and objects it names or from a prefix the module's @context
-// binds without the output using it.
+// build pins for a module's output: the namespace a context binds a prefix to
+// when the output uses a term of it as a predicate, as the class of a typed
+// node, or as a literal's datatype, whether the binding is the module's
+// @context or one a node carries. Nothing comes from the subjects and objects
+// the output names, from a prefix the module's @context binds without the
+// output using it, or from a term the output only wrote as a full IRI, which
+// is a reference rather than a declaration that the output is stated in that
+// vocabulary.
 func TestTaskOutputParserReportsTheVocabulariesTheOutputUses(t *testing.T) {
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase(testProjectBase))
 	parser := testTaskOntology(t).NewTaskOutputParser(graph, testProjectBase)
 	lines := []string{
 		`{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
-		`{"@id":"https://example.test/person/bob","http://www.opengis.net/ont/geosparql#hasGeometry":{"@id":"https://geoconnex.us/ref/states/01"}}`,
-		`{"@id":"https://example.test/person/bob","schema:birthDate":{"@value":"1990-01-01","@type":"http://www.w3.org/2001/XMLSchema#date"}}`,
+		`{"@context":{"gsp":"http://www.opengis.net/ont/geosparql#","type":"@type"},"@id":"https://example.test/person/bob","gsp:hasGeometry":{"@id":"https://geoconnex.us/ref/states/01"}}`,
+		`{"@context":{"xsd":"http://www.w3.org/2001/XMLSchema#"},"@id":"https://example.test/person/bob","schema:birthDate":{"@value":"1990-01-01","@type":"xsd:date"}}`,
 		`{"@id":"urn:thing:1","http://purl.org/dc/terms/title":"Titled"}`,
+		`{"@id":"https://example.test/place/1","schema:containedInPlace":{"@id":"http://stko-kwg.geog.ucsb.edu/lod/resource/s2.level11.1","@type":"http://stko-kwg.geog.ucsb.edu/lod/ontology/S2Cell_Level11"}}`,
+	}
+	for i, line := range lines {
+		require.NoError(t, parser.Line([]byte(line), i+1))
+	}
+	require.NoError(t, parser.Finish())
+
+	require.True(t, graphContains(graph, "https://example.test/place/1", "https://schema.org/containedInPlace", "http://stko-kwg.geog.ucsb.edu/lod/resource/s2.level11.1"), "the full IRIs are still parsed, only not pinned")
+	require.Equal(t, []string{
+		"http://www.opengis.net/ont/geosparql#",
+		"http://www.w3.org/2001/XMLSchema#",
+		"https://schema.org/",
+	}, parser.Vocabularies())
+}
+
+// TestTaskOutputParserPinsWhatATermDefinitionOrVocabBinds checks the other
+// ways a @context declares a vocabulary: an expanded term definition whose
+// @id is a full IRI, which declares one term and so the namespace it belongs
+// to, a @vocab, and a scoped context inside a term definition, each counting
+// like a prefix for the terms the output uses through it.
+func TestTaskOutputParserPinsWhatATermDefinitionOrVocabBinds(t *testing.T) {
+	graph := rdflibgo.NewGraph(rdflibgo.WithBase(testProjectBase))
+	parser := testTaskOntology(t).NewTaskOutputParser(graph, testProjectBase)
+	lines := []string{
+		`{"@context":{"title":{"@id":"http://purl.org/dc/terms/title"}},"@id":"urn:thing:1","title":"Titled"}`,
+		`{"@context":{"@vocab":"http://xmlns.com/foaf/0.1/"},"@id":"urn:thing:2","name":"Named"}`,
+		`{"@context":{"geo":{"@id":"https://schema.org/geo","@context":{"wgs":"http://www.w3.org/2003/01/geo/wgs84_pos#"}}},"@id":"urn:thing:3","geo":{"wgs:lat":1.5}}`,
 	}
 	for i, line := range lines {
 		require.NoError(t, parser.Line([]byte(line), i+1))
@@ -203,9 +234,8 @@ func TestTaskOutputParserReportsTheVocabulariesTheOutputUses(t *testing.T) {
 
 	require.Equal(t, []string{
 		"http://purl.org/dc/terms/",
-		"http://www.opengis.net/ont/geosparql#",
-		"http://www.w3.org/1999/02/22-rdf-syntax-ns#",
-		"http://www.w3.org/2001/XMLSchema#",
+		"http://www.w3.org/2003/01/geo/wgs84_pos#",
+		"http://xmlns.com/foaf/0.1/",
 		"https://schema.org/",
 	}, parser.Vocabularies())
 }
