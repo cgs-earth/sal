@@ -644,3 +644,25 @@ func TestMaterializeSalModulesFailsWhenStderrViolatesTheStderrShape(t *testing.T
 	require.ErrorContains(t, err, "An error needs a label")
 	require.Equal(t, 0, tasksRun)
 }
+
+func TestMaterializeSalModulesFailsWhenTheModuleBindsSalmoduleToAnotherNamespace(t *testing.T) {
+	// the module declares its class a subclass of salmodule:Task, but its
+	// @context binds salmodule elsewhere, so the build must fail rather than
+	// leave the instance alone and commit nothing from the module
+	runner := &testContainerRunner{ontology: `{
+		"@context": {
+			"owl": "http://www.w3.org/2002/07/owl#",
+			"salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
+		},
+		"@graph": [
+			{"@id": ".", "@type": "owl:Ontology"},
+			{"@id": "EducationalHistoryFinder", "@type": "owl:Class", "rdfs:subClassOf": {"@id": "salmodule:Task"}}
+		]
+	}`}
+
+	_, _, err := MaterializeSalModules(context.Background(), parseTestProject(t, testProject), testResolver(runner), t.TempDir())
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "binds the salmodule prefix to https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#")
+	require.Equal(t, 0, runner.runs)
+}

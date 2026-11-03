@@ -2,6 +2,7 @@ package progress
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -132,6 +133,13 @@ func describe(step *Step) (label string, detail string) {
 		label = "Build the image"
 	case "docker.image.inspect":
 		label = "Look up the image"
+		if status, ok := step.attrInt("http.response.status_code"); ok {
+			if status == http.StatusNotFound {
+				parts = append(parts, "not found")
+			} else if status < 400 {
+				parts = append(parts, "found")
+			}
+		}
 	case "docker.container.create":
 		label = "Create the container"
 	case "docker.container.start":

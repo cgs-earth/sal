@@ -3,6 +3,7 @@ package progress
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -375,4 +377,51 @@ func TestPanesAreNotShownInCI(t *testing.T) {
 	require.False(t, terminalSupported(env(map[string]string{"TERM": "xterm-256color", "GITLAB_CI": "true"})))
 	require.False(t, terminalSupported(env(map[string]string{"TERM": "dumb"})))
 	require.False(t, terminalSupported(env(map[string]string{})))
+}
+
+func TestRenderDoesNotFailAnImageLookupThatFoundNoImage(t *testing.T) {
+	tracker := installTracker(t)
+	ctx, _ := telemetry.Start(context.Background(), "sal.build")
+	resolveCtx, _ := telemetry.Start(ctx, "salmodule.resolve", attribute.String("sal.module", "salmodule://github.com/cgs-earth/geoconnex/"))
+	// the docker client's otelhttp span marks the daemon's 404 for an image it
+	// does not hold as an error, which for sal is the usual answer before the
+	// module has been built
+	_, lookup := telemetry.Start(resolveCtx, "docker.image.inspect", attribute.Int("http.response.status_code", 404))
+	lookup.SetStatus(codes.Error, "")
+	lookup.End()
+	_, found := telemetry.Start(resolveCtx, "docker.image.inspect", attribute.Int("http.response.status_code", 200))
+	found.End()
+	_, broken := telemetry.Start(resolveCtx, "docker.image.inspect", attribute.Int("http.response.status_code", 500))
+	broken.SetStatus(codes.Error, "daemon error")
+	broken.End()
+
+	text := plain(tracker.Render(140, time.Now(), "⠋"))
+
+	require.Contains(t, text, "✓ Look up the image  not found")
+	require.Contains(t, text, "✓ Look up the image  found")
+	require.Contains(t, text, "✗ Look up the image")
+	require.Contains(t, text, "daemon error")
+}
+
+func TestRenderShowsAnErrorOnlyOnTheDeepestStepThatCarriesIt(t *testing.T) {
+	tracker := installTracker(t)
+	ctx, root := telemetry.Start(context.Background(), "sal.build")
+	tasksCtx, tasks := telemetry.Start(ctx, "build.materialize_modules", attribute.Int("sal.module.tasks", 1), attribute.Int("sal.modules", 1))
+	taskCtx, task := telemetry.Start(tasksCtx, "salmodule.task", attribute.String("sal.module.task_class", "salmodule://github.com/cgs-earth/geoconnex/Crawl"))
+	_, ontology := telemetry.Start(taskCtx, "salmodule.ontology", attribute.String("sal.module", "salmodule://github.com/cgs-earth/geoconnex/"))
+	// the error is returned through every span above the one it happened in,
+	// each wrapping it, the way a build's errors are
+	err := errors.New("ontology of salmodule://github.com/cgs-earth/geoconnex/ declares no subclass of salmodule:Task")
+	telemetry.End(ontology, err)
+	err = fmt.Errorf("run: %w", err)
+	telemetry.End(task, err)
+	telemetry.End(tasks, err)
+	telemetry.End(root, err)
+
+	text := plain(tracker.Render(200, time.Now(), "⠋"))
+
+	require.Equal(t, 1, strings.Count(text, "declares no subclass of salmodule:Task"))
+	require.Contains(t, text, "✗ Run SAL module tasks")
+	require.Contains(t, text, "✗ Task salmodule://github.com/cgs-earth/geoconnex/Crawl")
+	require.Regexp(t, `✗ Read the ontology of salmodule://github.com/cgs-earth/geoconnex/ +0.0s\n        ontology of`, text)
 }

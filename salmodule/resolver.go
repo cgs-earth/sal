@@ -142,6 +142,11 @@ func (r *Resolver) Ontology(ctx context.Context, ref ModuleRef) (_ *ModuleOntolo
 	if err != nil {
 		return nil, err
 	}
+	// a module whose ontology declares nothing sal could run is refused here,
+	// where every reference to it passes, rather than left to skip its tasks
+	if err := ontology.requireTaskClass(); err != nil {
+		return nil, err
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()

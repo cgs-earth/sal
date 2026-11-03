@@ -146,7 +146,7 @@ func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmo
 		return false, nil, fmt.Errorf("run: %w", err)
 	}
 	if !task.declaredTask && !ontology.IsTaskClass(task.classIRI) {
-		slog.Debug("Skipping " + task.subject.String() + "; " + task.classIRI + " is not a SAL module task class")
+		slog.Warn("Not running " + task.subject.String() + ": " + task.classIRI + " is not a subclass of salmodule:Task in the module's ontology, so the instance is data rather than a task; type it salmodule:Task as well if it should run")
 		return false, nil, nil
 	}
 
@@ -221,6 +221,9 @@ func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmo
 	materialized := pkg.GraphLen(graph) - before
 	span.SetAttributes(attribute.Int("sal.triples.materialized", materialized), attribute.Int("sal.module.files_copied", len(result.Files)))
 	slog.Info(fmt.Sprintf("Materialized %d triples from %s", materialized, task.classIRI))
+	if materialized == 0 && len(result.Files) == 0 {
+		slog.Warn(task.classIRI + " produced no triples and copied no files; the task ran and exited cleanly but wrote nothing to stdout, so check its configuration in " + task.subject.String())
+	}
 	if len(result.Files) > 0 {
 		slog.Info(fmt.Sprintf("Copied %d files from %s into %s", len(result.Files), task.classIRI, blobDir))
 	}

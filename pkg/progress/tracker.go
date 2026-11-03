@@ -9,6 +9,7 @@ package progress
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"time"
 
@@ -202,7 +203,7 @@ func (t *Tracker) OnEnd(span sdktrace.ReadOnlySpan) {
 	}
 	step.Ended = span.EndTime()
 	step.Attrs = attributeMap(span.Attributes())
-	if span.Status().Code == codes.Error {
+	if span.Status().Code == codes.Error && !expectedFailure(step) {
 		step.Failed = span.Status().Description
 		if step.Failed == "" {
 			step.Failed = "failed"
@@ -215,6 +216,15 @@ func (t *Tracker) OnEnd(span sdktrace.ReadOnlySpan) {
 			}
 		}
 	}
+}
+
+// expectedFailure reports a span otelhttp marked as failed that is nothing of
+// the sort for sal: the docker daemon answers an image lookup with 404 for an
+// image it does not hold, which is the usual answer before a module has been
+// built and the reason the module is then cloned and built.
+func expectedFailure(step *Step) bool {
+	status, _ := step.attrInt("http.response.status_code")
+	return step.Name == "docker.image.inspect" && status == http.StatusNotFound
 }
 
 // Shutdown implements the span processor; the tracker holds nothing to release.
