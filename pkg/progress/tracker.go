@@ -9,6 +9,7 @@ package progress
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"time"
 
@@ -27,7 +28,11 @@ type Step struct {
 	// Ended is zero while the step is still running.
 	Ended time.Time
 	// Failed is the error a failed step ended with, and empty otherwise.
-	Failed   string
+	Failed string
+	// Unmet marks a step that ended without failing but without what it
+	// was after either: the lookup of an image the daemon does not hold.
+	// The pane marks it apart from a success and a failure.
+	Unmet    bool
 	Attrs    map[string]attribute.Value
 	Parent   *Step
 	Children []*Step
@@ -203,9 +208,13 @@ func (t *Tracker) OnEnd(span sdktrace.ReadOnlySpan) {
 	step.Ended = span.EndTime()
 	step.Attrs = attributeMap(span.Attributes())
 	if span.Status().Code == codes.Error {
-		step.Failed = span.Status().Description
-		if step.Failed == "" {
-			step.Failed = "failed"
+		if imageNotFound(step) {
+			step.Unmet = true
+		} else {
+			step.Failed = span.Status().Description
+			if step.Failed == "" {
+				step.Failed = "failed"
+			}
 		}
 	}
 	if step == t.root {
@@ -215,6 +224,15 @@ func (t *Tracker) OnEnd(span sdktrace.ReadOnlySpan) {
 			}
 		}
 	}
+}
+
+// imageNotFound reports a span otelhttp marked as failed that is nothing of
+// the sort for sal: the docker daemon answers an image lookup with 404 for an
+// image it does not hold, which is the usual answer before a module has been
+// built and the reason the module is then cloned and built.
+func imageNotFound(step *Step) bool {
+	status, _ := step.attrInt("http.response.status_code")
+	return step.Name == "docker.image.inspect" && status == http.StatusNotFound
 }
 
 // Shutdown implements the span processor; the tracker holds nothing to release.

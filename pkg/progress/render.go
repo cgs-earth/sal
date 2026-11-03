@@ -28,6 +28,7 @@ const (
 var (
 	styleDone     = lipgloss.NewStyle().Foreground(lipgloss.Color(colorGreen))
 	styleFailed   = lipgloss.NewStyle().Foreground(lipgloss.Color(colorRed))
+	styleUnmet    = lipgloss.NewStyle().Foreground(lipgloss.Color(colorYellow))
 	styleRunning  = lipgloss.NewStyle().Foreground(lipgloss.Color(colorBlue))
 	stylePending  = lipgloss.NewStyle().Foreground(lipgloss.Color(colorOverlay1))
 	stylePhase    = lipgloss.NewStyle().Foreground(lipgloss.Color(colorText)).Bold(true)
@@ -116,7 +117,20 @@ func (t *Tracker) stepRows(rows []row, step *Step, depth int, label string, now 
 		r.mark = styleRunning.Render(spinner)
 	case step.Failed != "":
 		r.mark = styleFailed.Render("✗")
+		// an error travels up through every span it is returned through, each
+		// one wrapping it, so the message is shown once, on the deepest step
+		// shown that carries it, and the steps above it only mark the failure
 		r.failure = step.Failed
+		if depth < maxDepth {
+			for _, child := range step.Children {
+				if !hiddenSteps[child.Name] && child.Failed != "" && strings.Contains(step.Failed, child.Failed) {
+					r.failure = ""
+					break
+				}
+			}
+		}
+	case step.Unmet:
+		r.mark = styleUnmet.Render("○")
 	default:
 		r.mark = styleDone.Render("✓")
 	}

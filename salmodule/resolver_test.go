@@ -394,3 +394,17 @@ func TestResolverRunTaskStopsWhenTheStderrSinkRefuses(t *testing.T) {
 
 	require.ErrorContains(t, err, "refused")
 }
+
+func TestResolverRefusesAModuleWhoseOntologyDeclaresNoTask(t *testing.T) {
+	runner := &fakeRunner{ontology: `{
+		"@context": {"owl": "http://www.w3.org/2002/07/owl#", "salmodule": "https://w3id.org/sal/salmodule#"},
+		"@graph": [{"@id": ".", "@type": "owl:Ontology"}, {"@id": "NotATask", "@type": "owl:Class"}]
+	}`}
+	ref, err := ParseModuleIRI(testModuleNamespace)
+	require.NoError(t, err)
+
+	_, err = newTestResolver(runner).Ontology(context.Background(), ref)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "declares no subclass of salmodule:Task")
+}

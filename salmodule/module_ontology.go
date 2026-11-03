@@ -71,6 +71,23 @@ func parseModuleOntology(namespace string, document []byte) (*ModuleOntology, er
 	}, nil
 }
 
+// requireTaskClass reports an ontology no task of which sal could ever run,
+// so that a project referencing the module fails instead of building with the
+// module's instances silently left alone: one whose @context binds the
+// salmodule prefix to anything but the SAL Module namespace, which makes every
+// rdfs:subClassOf salmodule:Task it states name a class sal does not know, or
+// one that declares no subclass of salmodule:Task at all, which the
+// specification requires of every module.
+func (o *ModuleOntology) requireTaskClass() error {
+	if bound, ok := o.prefixes["salmodule"]; ok && bound != Namespace {
+		return fmt.Errorf("ontology of %s binds the salmodule prefix to %s, so none of its classes is a subclass of salmodule:Task sal recognizes; the SAL Module ontology is %s and the module's @context must bind salmodule to it", o.Namespace, bound, Namespace)
+	}
+	if len(o.taskClasses) == 0 {
+		return fmt.Errorf("ontology of %s declares no subclass of salmodule:Task, so it has no task sal can run; a SAL module must declare at least one class with \"rdfs:subClassOf\": {\"@id\": \"salmodule:Task\"}", o.Namespace)
+	}
+	return nil
+}
+
 // subClassParents maps every class the ontology declares a superclass for to
 // its direct superclasses.
 func subClassParents(graph *rdflibgo.Graph) map[string][]string {

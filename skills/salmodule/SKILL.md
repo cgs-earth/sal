@@ -38,7 +38,9 @@ properties. `sal validate` only asks for the ontology; `sal build` runs tasks, u
 Print one JSON-LD document to stdout and exit 0. Requirements:
 
 - A `@context` that binds every prefix the module uses. It is injected into the task output later, so
-  any key a task emits must be resolvable through it.
+  any key a task emits must be resolvable through it. `salmodule` must be bound to exactly
+  `https://w3id.org/sal/salmodule#`: bound to anything else, `rdfs:subClassOf salmodule:Task` names a
+  class sal does not know, and sal refuses the module as one with no task to run.
 - A node `{"@id": ".", "@type": "owl:Ontology"}` describing the module.
 - The module's own terms as relative IRIs (`"@id": "MyTask"`, `"@id": "maxRetries"`). They resolve
   against the project's `salmodule://.../` prefix, which is why that prefix must end in a slash.

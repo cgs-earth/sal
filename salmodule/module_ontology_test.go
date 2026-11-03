@@ -115,3 +115,55 @@ func TestParseModuleOntologyRejectsInvalidJSON(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), testModuleNamespace)
 }
+
+func TestModuleOntologyRefusesASalmodulePrefixBoundElsewhere(t *testing.T) {
+	// the module's @context binds salmodule to a namespace of its own, so its
+	// rdfs:subClassOf salmodule:Task names a class sal does not know
+	document := `{
+		"@context": {
+			"owl": "http://www.w3.org/2002/07/owl#",
+			"rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+			"salmodule": "https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#"
+		},
+		"@graph": [
+			{"@id": ".", "@type": "owl:Ontology"},
+			{"@id": "JsonLdHarvester", "@type": "owl:Class", "rdfs:subClassOf": {"@id": "salmodule:Task"}}
+		]
+	}`
+	ontology, err := parseModuleOntology(testModuleNamespace, []byte(document))
+	require.NoError(t, err)
+	require.False(t, ontology.IsTaskClass(testModuleNamespace+"JsonLdHarvester"))
+
+	err = ontology.requireTaskClass()
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "binds the salmodule prefix to https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#")
+	require.Contains(t, err.Error(), Namespace)
+}
+
+func TestModuleOntologyRefusesAnOntologyWithoutATaskClass(t *testing.T) {
+	document := `{
+		"@context": {
+			"owl": "http://www.w3.org/2002/07/owl#",
+			"salmodule": "https://w3id.org/sal/salmodule#"
+		},
+		"@graph": [
+			{"@id": ".", "@type": "owl:Ontology"},
+			{"@id": "NotATask", "@type": "owl:Class"}
+		]
+	}`
+	ontology, err := parseModuleOntology(testModuleNamespace, []byte(document))
+	require.NoError(t, err)
+
+	err = ontology.requireTaskClass()
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "declares no subclass of salmodule:Task")
+}
+
+func TestModuleOntologyWithATaskClassPassesTheTaskCheck(t *testing.T) {
+	ontology, err := parseModuleOntology(testModuleNamespace, []byte(testOntology))
+	require.NoError(t, err)
+
+	require.NoError(t, ontology.requireTaskClass())
+}
