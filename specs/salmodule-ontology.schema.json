@@ -516,7 +516,7 @@
         },
         "salmodule:stderrShape": {
           "$ref": "#/$defs/streamShapeValues",
-          "description": "The sh:NodeShape of each JSON node the task writes to stderr, its control channel: the salmodule:Error nodes a failing task reports why it failed with. The SAL Module ontology already requires an error to carry an rdfs:comment; declare a stderrShape only to require more. sal enforces it line by line like a stdoutShape, with the same constraints refused; a line of stderr that is not a JSON object is a log line it never sees."
+          "description": "The sh:NodeShape of each JSON node the task writes to stderr, its control channel: the salmodule:Error nodes a failing task reports why it failed with. The SAL Module ontology already requires an error to carry both an rdfs:label and an rdfs:comment; declare a stderrShape only to require more. sal enforces it line by line like a stdoutShape, with the same constraints refused; a line of stderr that is not a JSON object is a log line it never sees."
         },
         "salmodule:taskInstanceEnvVar": {
           "not": {},

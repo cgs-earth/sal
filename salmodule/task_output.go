@@ -15,7 +15,11 @@ import (
 )
 
 // TaskError reports the salmodule:Error nodes a module task emitted to say
-// why it failed.
+// why it failed. Messages holds one entry per node, "label: comment" for a
+// node carrying both the rdfs:label and the rdfs:comment the SAL Module
+// specification requires of an error, and for a node missing either a message
+// that says so alongside whatever the node did carry, so a module that
+// reports its failure badly is told as much without the report being hidden.
 type TaskError struct {
 	Namespace string
 	Messages  []string
@@ -147,7 +151,10 @@ func (p *TaskOutputParser) Line(line []byte, lineNumber int) error {
 // failed before it exits. The SAL Module specification has a task report its
 // errors on stderr; one reported on stdout, where a module written before that
 // was settled puts it, still fails the task, with a warning that it is out
-// of place.
+// of place. An error must carry both an rdfs:label and an rdfs:comment, as
+// the stderrShape on salmodule:Task requires; a node missing either is still
+// reported, since it is the task's own account of its failure, but the
+// message names what is missing.
 func (p *TaskOutputParser) Finish() error {
 	if err := p.flush(); err != nil {
 		return err
@@ -163,19 +170,40 @@ func (p *TaskOutputParser) Finish() error {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	var messages []string
+	messages := make([]string, 0, len(keys))
 	for _, key := range keys {
+		var label, comment string
 		pkg.Triples(p.graph, p.errorNodes[key], nil, nil)(func(triple rdflibgo.Triple) bool {
-			if literal, ok := triple.Object.(rdflibgo.Literal); ok && isCommentPredicate(triple.Predicate.Value()) {
-				messages = append(messages, literal.Lexical())
+			literal, ok := triple.Object.(rdflibgo.Literal)
+			if !ok {
+				return true
+			}
+			switch {
+			case isRDFSPredicate(triple.Predicate.Value(), "label"):
+				label = literal.Lexical()
+			case isRDFSPredicate(triple.Predicate.Value(), "comment"):
+				comment = literal.Lexical()
 			}
 			return true
 		})
-	}
-	if len(messages) == 0 {
-		messages = append(messages, "no message provided")
+		messages = append(messages, errorNodeMessage(label, comment))
 	}
 	return TaskError{Namespace: p.ontology.Namespace, Messages: messages}
+}
+
+// errorNodeMessage renders one salmodule:Error node for a TaskError from the
+// rdfs:label and rdfs:comment it carried, either of which may be missing.
+func errorNodeMessage(label, comment string) string {
+	const required = "a salmodule:Error must carry both an rdfs:label and an rdfs:comment"
+	switch {
+	case label != "" && comment != "":
+		return label + ": " + comment
+	case label != "":
+		return label + " (the error node has no rdfs:comment; " + required + ")"
+	case comment != "":
+		return comment + " (the error node has no rdfs:label; " + required + ")"
+	}
+	return "the error node has neither an rdfs:label nor an rdfs:comment; " + required
 }
 
 // FileTriples returns every triple parsed so far that names a file:/// IRI as
@@ -275,9 +303,10 @@ func (p *TaskOutputParser) flush() error {
 	return nil
 }
 
-// isCommentPredicate reports whether an IRI expresses rdfs:comment. Module
-// ontologies do not always bind the rdfs prefix in their @context, in which case
-// the JSON-LD processor keeps the term verbatim as "rdfs:comment".
-func isCommentPredicate(iri string) bool {
-	return iri == rdflibgo.RDFS.Comment.Value() || strings.HasSuffix(iri, ":comment")
+// isRDFSPredicate reports whether an IRI expresses the rdfs term named, label
+// or comment. Module ontologies do not always bind the rdfs prefix in their
+// @context, in which case the JSON-LD processor keeps the term verbatim as
+// "rdfs:comment".
+func isRDFSPredicate(iri string, term string) bool {
+	return iri == "http://www.w3.org/2000/01/rdf-schema#"+term || strings.HasSuffix(iri, ":"+term)
 }

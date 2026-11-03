@@ -133,7 +133,9 @@ was pulled from, writes absolute IRIs, which are kept as written.
 
 A task reports a failure by writing `salmodule:Error` nodes to stderr, one JSON object per line, and exiting
 non-zero; the run then fails with the messages the module reported rather than with the container's exit
-status. Anything else a task writes to stderr is a log line that `sal build` shows as a warning. A module
+status. Every error node must carry both an `rdfs:label` naming the error and an `rdfs:comment` describing
+it, and the message is reported as `label: comment`; a node missing either still fails the run, with a
+message saying which it lacks. Anything else a task writes to stderr is a log line that `sal build` shows as a warning. A module
 written before the specification moved errors to stderr may still report one on stdout; that fails the run
 too, with a warning that the node is out of place.
 

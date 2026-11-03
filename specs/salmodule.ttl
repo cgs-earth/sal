@@ -99,7 +99,7 @@ salmodule:Error a owl:Class ;
                              salmodule:RunCommand ,
                              salmodule:stderrShape ;
                 skos:note "Instances of salmodule:Error represent error conditions that occur during the execution of a salmodule:Task within a SAL Module containerized application."@en ;
-                skos:note "A task reports an instance as one newline delimited JSON node on stderr, never on stdout, which carries only data; its rdfs:comment is the message the SAL Project reports the failure with."@en .
+                skos:note "A task reports an instance as one newline delimited JSON node on stderr, never on stdout, which carries only data; it carries both an rdfs:label naming the error and an rdfs:comment describing it, which together are the message the SAL Project reports the failure with."@en .
 
 ###  https://w3id.org/sal/salmodule#Command
 salmodule:Command a owl:Class;

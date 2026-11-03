@@ -76,9 +76,10 @@ func (o *ModuleOntology) StdoutValidator(classIRI string, base string) (*StreamV
 
 // StderrValidator is StdoutValidator for stderr, built from the class's
 // salmodule:stderrShape. The SAL Module ontology's own shape for stderr, that
-// a salmodule:Error carries a message, is not among them: sal reads the
-// message itself and reports a node without one as such, rather than failing
-// the task for the shape of its failure report.
+// a salmodule:Error carries an rdfs:label and an rdfs:comment, is not among
+// them: TaskOutputParser.Finish reads both itself and reports a node missing
+// either as such, rather than stopping the task for the shape of its failure
+// report and hiding what it did say.
 func (o *ModuleOntology) StderrValidator(classIRI string, base string) (*StreamValidator, error) {
 	return o.streamValidator(classIRI, "stderr", base)
 }
