@@ -11,9 +11,10 @@ import (
 )
 
 // Constants describing the SAL Module specification. The command line
-// conventions mirror the salmodule:baseCommand, salmodule:ontologyCommand,
-// salmodule:runCommand, and salmodule:taskInstanceEnvVar ontology properties
-// declared in specs/salmodule.ttl.
+// conventions mirror the salmodule:SALModuleCommand, salmodule:OntologyCommand,
+// salmodule:RunCommand, and salmodule:TaskInstance individuals declared in
+// specs/salmodule.ttl, whose rdfs:label is the word on the command line or
+// the name of the variable.
 const (
 	// Namespace is the IRI of the SAL Module ontology itself.
 	Namespace = "https://w3id.org/sal/salmodule#"
@@ -24,9 +25,10 @@ const (
 	OntologyCommand = "ontology"
 	RunCommand      = "run"
 
-	// DefaultTaskInstanceEnvVar is used when a module ontology does not declare
-	// its own salmodule:taskInstanceEnvVar.
-	DefaultTaskInstanceEnvVar = "SALMODULE_TASK_INSTANCE"
+	// TaskInstanceEnvVar is the environment variable the task instance is
+	// passed to a module's run command in, the one the salmodule:TaskInstance
+	// individual names. Every module reads it; a module cannot rename it.
+	TaskInstanceEnvVar = "SALMODULE_TASK_INSTANCE"
 
 	// defaultModuleHost is assumed when a salmodule:// IRI omits the host.
 	defaultModuleHost = "github.com"

@@ -42,7 +42,7 @@
         },
         "sh": {
           "const": "http://www.w3.org/ns/shacl#",
-          "description": "SHACL, needed as soon as a task class declares a salmodule:taskShape, salmodule:stdinShape, or salmodule:stdoutShape."
+          "description": "SHACL, needed as soon as a task class declares a salmodule:taskShape, salmodule:stdinShape, salmodule:stdoutShape, or salmodule:stderrShape."
         },
         "xsd": {
           "const": "http://www.w3.org/2001/XMLSchema#"
@@ -447,26 +447,24 @@
           "$ref": "#/$defs/iriReferences"
         },
         "salmodule:taskInstanceEnvVar": {
-          "type": "string",
-          "description": "The environment variable sal passes the task instance in when it invokes `salmodule run`. Defaults to SALMODULE_TASK_INSTANCE when the ontology does not declare it.",
-          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
-          "patternErrorMessage": "An environment variable name holds only letters, digits, and underscores and does not start with a digit"
+          "not": {},
+          "errorMessage": "salmodule:taskInstanceEnvVar is not a term of the SAL Module ontology; the task instance always arrives in SALMODULE_TASK_INSTANCE, the variable its salmodule:TaskInstance individual names"
         },
         "salmodule:baseCommand": {
           "not": {},
-          "errorMessage": "salmodule:baseCommand is declared by the SAL Module ontology itself; sal always invokes a module as `salmodule ontology` and `salmodule run`"
+          "errorMessage": "salmodule:baseCommand is not a term of the SAL Module ontology; the command line is fixed by its salmodule:SALModuleCommand individual, and sal always invokes a module as `salmodule ontology` and `salmodule run`"
         },
         "salmodule:ontologyCommand": {
           "not": {},
-          "errorMessage": "salmodule:ontologyCommand is declared by the SAL Module ontology itself; sal always invokes a module as `salmodule ontology`"
+          "errorMessage": "salmodule:ontologyCommand is not a term of the SAL Module ontology; the command is fixed by its salmodule:OntologyCommand individual, and sal always invokes a module as `salmodule ontology`"
         },
         "salmodule:runCommand": {
           "not": {},
-          "errorMessage": "salmodule:runCommand is declared by the SAL Module ontology itself; sal always invokes a module as `salmodule run`"
+          "errorMessage": "salmodule:runCommand is not a term of the SAL Module ontology; the command is fixed by its salmodule:RunCommand individual, and sal always invokes a module as `salmodule run`"
         },
         "salmodule:protocolScheme": {
           "not": {},
-          "errorMessage": "salmodule:protocolScheme is declared by the SAL Module ontology itself"
+          "errorMessage": "salmodule:protocolScheme is declared by the SAL Module ontology itself, on its own ontology node"
         }
       },
       "propertyNames": {
@@ -475,7 +473,7 @@
     },
     "classNode": {
       "type": "object",
-      "description": "An owl:Class the module declares. A class whose rdfs:subClassOf is a salmodule task class, directly or through another class of this ontology, is a task a project can configure and run; its salmodule:taskShape, salmodule:stdinShape, and salmodule:stdoutShape describe the task instance, what it reads, and what it writes.",
+      "description": "An owl:Class the module declares. A class whose rdfs:subClassOf is a salmodule task class, directly or through another class of this ontology, is a task a project can configure and run; its salmodule:taskShape, salmodule:stdinShape, salmodule:stdoutShape, and salmodule:stderrShape describe the task instance, what it reads, what it writes, and what it reports on stderr.",
       "required": [
         "@id"
       ],
@@ -513,12 +511,16 @@
           "description": "The sh:NodeShape of each newline delimited JSON node the task reads from stdin. Declaring it makes the class a salmodule:NodeConsumer, or with stdoutShape a salmodule:NodeProcessor."
         },
         "salmodule:stdoutShape": {
-          "$ref": "#/$defs/stdoutShapeValues",
+          "$ref": "#/$defs/streamShapeValues",
           "description": "The sh:NodeShape of each newline delimited JSON node the task writes to stdout. sal enforces it line by line as the task runs, with the ontology's @context injected first, and the first violation stops the container. It may use any SHACL Core constraint except sh:languageIn, sh:uniqueLang, sh:disjoint, sh:qualifiedValueShapesDisjoint, and sh:sparql."
+        },
+        "salmodule:stderrShape": {
+          "$ref": "#/$defs/streamShapeValues",
+          "description": "The sh:NodeShape of each JSON node the task writes to stderr, its control channel: the salmodule:Error nodes a failing task reports why it failed with. The SAL Module ontology already requires an error to carry an rdfs:comment; declare a stderrShape only to require more. sal enforces it line by line like a stdoutShape, with the same constraints refused; a line of stderr that is not a JSON object is a log line it never sees."
         },
         "salmodule:taskInstanceEnvVar": {
           "not": {},
-          "errorMessage": "salmodule:taskInstanceEnvVar belongs on the owl:Ontology node, not on a class"
+          "errorMessage": "salmodule:taskInstanceEnvVar is not a term of the SAL Module ontology; the task instance always arrives in SALMODULE_TASK_INSTANCE, the variable its salmodule:TaskInstance individual names"
         }
       },
       "propertyNames": {
@@ -628,27 +630,27 @@
         "errorMessage": "A shape is either written inline with \"@type\": \"sh:NodeShape\", or references a sh:NodeShape node in @graph by its \"@id\" alone"
       }
     },
-    "stdoutShapeValues": {
+    "streamShapeValues": {
       "anyOf": [
         {
-          "$ref": "#/$defs/stdoutShapeValue"
+          "$ref": "#/$defs/streamShapeValue"
         },
         {
           "type": "array",
           "minItems": 1,
           "items": {
-            "$ref": "#/$defs/stdoutShapeValue"
+            "$ref": "#/$defs/streamShapeValue"
           }
         }
       ]
     },
-    "stdoutShapeValue": {
+    "streamShapeValue": {
       "allOf": [
         {
           "$ref": "#/$defs/shapeValue"
         },
         {
-          "$ref": "#/$defs/supportedOnStdout"
+          "$ref": "#/$defs/supportedOnStream"
         },
         {
           "type": "object",
@@ -656,12 +658,12 @@
             "sh:property": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/supportedOnStdout"
+                  "$ref": "#/$defs/supportedOnStream"
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/supportedOnStdout"
+                    "$ref": "#/$defs/supportedOnStream"
                   }
                 }
               ]
@@ -670,29 +672,29 @@
         }
       ]
     },
-    "supportedOnStdout": {
+    "supportedOnStream": {
       "type": "object",
-      "description": "The SHACL constraint parameters sal refuses in a salmodule:stdoutShape. A shape using one fails when the task is run, so it is flagged here instead. Only the shape and the property shapes directly under its sh:property are checked.",
+      "description": "The SHACL constraint parameters sal refuses in a salmodule:stdoutShape or salmodule:stderrShape. A shape using one fails when the task is run, so it is flagged here instead. Only the shape and the property shapes directly under its sh:property are checked.",
       "properties": {
         "sh:languageIn": {
           "not": {},
-          "errorMessage": "sal does not support sh:languageIn in a salmodule:stdoutShape"
+          "errorMessage": "sal does not support sh:languageIn in a salmodule:stdoutShape or stderrShape"
         },
         "sh:uniqueLang": {
           "not": {},
-          "errorMessage": "sal does not support sh:uniqueLang in a salmodule:stdoutShape"
+          "errorMessage": "sal does not support sh:uniqueLang in a salmodule:stdoutShape or stderrShape"
         },
         "sh:disjoint": {
           "not": {},
-          "errorMessage": "sal does not support sh:disjoint in a salmodule:stdoutShape"
+          "errorMessage": "sal does not support sh:disjoint in a salmodule:stdoutShape or stderrShape"
         },
         "sh:qualifiedValueShapesDisjoint": {
           "not": {},
-          "errorMessage": "sal does not support sh:qualifiedValueShapesDisjoint in a salmodule:stdoutShape"
+          "errorMessage": "sal does not support sh:qualifiedValueShapesDisjoint in a salmodule:stdoutShape or stderrShape"
         },
         "sh:sparql": {
           "not": {},
-          "errorMessage": "sal does not support sh:sparql in a salmodule:stdoutShape"
+          "errorMessage": "sal does not support sh:sparql in a salmodule:stdoutShape or stderrShape"
         }
       }
     },
@@ -712,7 +714,7 @@
         },
         "sh:targetClass": {
           "$ref": "#/$defs/iriReferences",
-          "description": "The class whose instances the shape applies to: the task class for a taskShape, or the @type of the nodes a task reads or writes for a stdinShape or stdoutShape.",
+          "description": "The class whose instances the shape applies to: the task class for a taskShape, or the @type of the nodes a task reads or writes for a stdinShape, stdoutShape, or stderrShape.",
           "errorMessage": "sh:targetClass is an IRI reference, written {\"@id\": \"schema:Place\"}"
         },
         "sh:targetNode": {

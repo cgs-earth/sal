@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -13,7 +14,8 @@ import (
 	"github.com/tggo/goRDFlib/jsonld"
 )
 
-// TaskError reports the salmodule:Error nodes a module task emitted instead of data.
+// TaskError reports the salmodule:Error nodes a module task emitted to say
+// why it failed.
 type TaskError struct {
 	Namespace string
 	Messages  []string
@@ -23,9 +25,9 @@ func (e TaskError) Error() string {
 	return fmt.Sprintf("SAL module %s reported an error: %s", e.Namespace, strings.Join(e.Messages, "; "))
 }
 
-// TaskOutputSink receives each non-empty line a task writes to stdout, trimmed
-// of surrounding whitespace, as it is read, with its 1-based line number. An
-// error it returns stops the task.
+// TaskOutputSink receives each node a task writes to one of its output
+// streams, the line trimmed of surrounding whitespace, as it is read, with
+// its 1-based line number on that stream. An error it returns stops the task.
 type TaskOutputSink func(line []byte, lineNumber int) error
 
 // A task's output is parsed in batches of lines rather than line by line, so
@@ -53,10 +55,17 @@ const (
 //
 // Line is the TaskOutputSink to hand RunTask; Finish parses whatever is still
 // pending once the task has ended and reports the errors the task declared.
+//
+// The same parser reads a task's stderr, through NewTaskStderrParser, into a
+// graph of its own: the nodes there are the task's control channel, never
+// its data, and only the salmodule:Error nodes among them are of interest.
 type TaskOutputParser struct {
 	ontology *ModuleOntology
 	graph    *rdflibgo.Graph
 	base     string
+	// stream is "stdout" or "stderr", which stream the lines come from, for
+	// the messages about them
+	stream string
 
 	// head opens the JSON-LD document every batch is parsed as, the module's
 	// @context followed by the start of the @graph array the lines go in
@@ -80,13 +89,28 @@ type TaskOutputParser struct {
 }
 
 // NewTaskOutputParser returns the parser that adds what a task of this module
-// writes to graph, resolving relative IRIs against base.
+// writes to stdout to graph, resolving relative IRIs against base.
 func (o *ModuleOntology) NewTaskOutputParser(graph *rdflibgo.Graph, base string) *TaskOutputParser {
+	return o.newTaskOutputParser(graph, base, "stdout")
+}
+
+// NewTaskStderrParser returns the parser for the nodes a task of this module
+// writes to stderr, its control channel: the salmodule:Error nodes a failing
+// task reports why it failed with, which Finish reports as a TaskError. The
+// nodes are parsed the way stdout is, with the module's @context and against
+// base, into a graph of the parser's own, since nothing on stderr is data
+// for the graph being built. RunTask hands Line only the lines of stderr that
+// are JSON objects; the rest are log lines it shows itself.
+func (o *ModuleOntology) NewTaskStderrParser(base string) *TaskOutputParser {
+	return o.newTaskOutputParser(rdflibgo.NewGraph(rdflibgo.WithBase(base)), base, "stderr")
+}
+
+func (o *ModuleOntology) newTaskOutputParser(graph *rdflibgo.Graph, base string, stream string) *TaskOutputParser {
 	head := []byte(`{"@graph":[`)
 	if len(o.Context) > 0 {
 		head = append(append([]byte(`{"@context":`), o.Context...), `,"@graph":[`...)
 	}
-	parser := &TaskOutputParser{ontology: o, graph: graph, base: base, head: head, errorNodes: map[string]rdflibgo.Subject{}, vocabularies: map[string]bool{}}
+	parser := &TaskOutputParser{ontology: o, graph: graph, base: base, stream: stream, head: head, errorNodes: map[string]rdflibgo.Subject{}, vocabularies: map[string]bool{}}
 	parser.pending.Write(head)
 	return parser
 }
@@ -99,9 +123,9 @@ func (p *TaskOutputParser) Line(line []byte, lineNumber int) error {
 		// decoding into a map is what names the problem with the line
 		var node map[string]any
 		if err := json.Unmarshal(line, &node); err != nil {
-			return fmt.Errorf("SAL module %s wrote invalid JSON on output line %d: %w", p.ontology.Namespace, lineNumber, err)
+			return fmt.Errorf("SAL module %s wrote invalid JSON on %s line %d: %w", p.ontology.Namespace, p.stream, lineNumber, err)
 		}
-		return fmt.Errorf("SAL module %s wrote invalid JSON on output line %d", p.ontology.Namespace, lineNumber)
+		return fmt.Errorf("SAL module %s wrote invalid JSON on %s line %d", p.ontology.Namespace, p.stream, lineNumber)
 	}
 	if p.pendingLines == 0 {
 		p.firstPendingLine = lineNumber
@@ -120,13 +144,19 @@ func (p *TaskOutputParser) Line(line []byte, lineNumber int) error {
 // Finish parses the lines still pending and reports the salmodule:Error nodes
 // the task emitted, if any, as a TaskError. It is called once the task has
 // ended, whether or not it succeeded, since a failing task reports why it
-// failed on stdout before it exits.
+// failed before it exits. The SAL Module specification has a task report its
+// errors on stderr; one reported on stdout, where a module written before that
+// was settled puts it, still fails the task, with a warning that it is out
+// of place.
 func (p *TaskOutputParser) Finish() error {
 	if err := p.flush(); err != nil {
 		return err
 	}
 	if len(p.errorNodes) == 0 {
 		return nil
+	}
+	if p.stream == "stdout" {
+		slog.Warn(p.ontology.Namespace + " reported a salmodule:Error on stdout; the SAL Module specification has a task report its errors on stderr, where sal reads them the same way, and keeps stdout for data")
 	}
 	keys := make([]string, 0, len(p.errorNodes))
 	for key := range p.errorNodes {
@@ -205,7 +235,7 @@ func (p *TaskOutputParser) flush() error {
 	p.pending.Write(p.head)
 	p.pendingLines = 0
 	if err != nil {
-		return fmt.Errorf("parse output lines %d-%d of SAL module %s: %w", first, last, p.ontology.Namespace, err)
+		return fmt.Errorf("parse %s lines %d-%d of SAL module %s: %w", p.stream, first, last, p.ontology.Namespace, err)
 	}
 
 	blanks := map[string]rdflibgo.BNode{}

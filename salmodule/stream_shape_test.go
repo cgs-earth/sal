@@ -44,7 +44,7 @@ const testShapedOntology = `{
 	]
 }`
 
-func testShapedValidator(t *testing.T, class string) *StdoutValidator {
+func testShapedValidator(t *testing.T, class string) *StreamValidator {
 	t.Helper()
 	ontology, err := parseModuleOntology(testModuleNamespace, []byte(testShapedOntology))
 	require.NoError(t, err)
@@ -77,7 +77,7 @@ func TestStdoutValidatorReportsTheViolatingNodeAndLine(t *testing.T) {
 
 	err := validator.ValidateLine([]byte(`{"@id":"https://example.test/place/1","@type":"schema:Place"}`), 3)
 
-	var shapeErr StdoutShapeError
+	var shapeErr StreamShapeError
 	require.ErrorAs(t, err, &shapeErr)
 	require.Equal(t, 3, shapeErr.Line)
 	require.Equal(t, testModuleNamespace+"PlaceFinder", shapeErr.Class)
@@ -85,7 +85,7 @@ func TestStdoutValidatorReportsTheViolatingNodeAndLine(t *testing.T) {
 	require.Len(t, shapeErr.Violations, 1)
 	require.Contains(t, shapeErr.Violations[0], "<https://example.test/place/1>")
 	require.Contains(t, shapeErr.Violations[0], "A place needs exactly one name")
-	require.Contains(t, err.Error(), "output line 3")
+	require.Contains(t, err.Error(), "stdout line 3")
 }
 
 // TestStdoutValidatorNamesTheConstraintWhenTheShapeHasNoMessage checks that a
@@ -96,7 +96,7 @@ func TestStdoutValidatorNamesTheConstraintWhenTheShapeHasNoMessage(t *testing.T)
 
 	err := validator.ValidateLine([]byte(`{"@id":"place/1","@type":"schema:Place","schema:name":"Lake Tahoe","schema:geo":"not an IRI"}`), 1)
 
-	var shapeErr StdoutShapeError
+	var shapeErr StreamShapeError
 	require.ErrorAs(t, err, &shapeErr)
 	require.Len(t, shapeErr.Violations, 1)
 	require.Contains(t, shapeErr.Violations[0], "<https://schema.org/geo>")
@@ -111,7 +111,7 @@ func TestStdoutValidatorResolvesRelativeIRIsAgainstTheProject(t *testing.T) {
 
 	err := validator.ValidateLine([]byte(`{"@id":"place/1","@type":"schema:Place"}`), 1)
 
-	var shapeErr StdoutShapeError
+	var shapeErr StreamShapeError
 	require.ErrorAs(t, err, &shapeErr)
 	require.Contains(t, shapeErr.Violations[0], "<"+testProjectBase+"place/1>")
 }
@@ -133,7 +133,7 @@ func TestStdoutValidatorAppliesTheShapeOfASuperclass(t *testing.T) {
 
 	err := validator.ValidateLine([]byte(`{"@id":"place/1","@type":"schema:Place"}`), 1)
 
-	var shapeErr StdoutShapeError
+	var shapeErr StreamShapeError
 	require.ErrorAs(t, err, &shapeErr)
 	require.Equal(t, testModuleNamespace+"CityFinder", shapeErr.Class)
 }
@@ -143,7 +143,7 @@ func TestStdoutValidatorRejectsInvalidJSONWithItsLineNumber(t *testing.T) {
 
 	err := validator.ValidateLine([]byte(`{"@id":`), 7)
 
-	require.ErrorContains(t, err, "invalid JSON on output line 7")
+	require.ErrorContains(t, err, "invalid JSON on stdout line 7")
 }
 
 func TestStdoutValidatorRefusesUnsupportedConstraints(t *testing.T) {
@@ -229,9 +229,9 @@ func TestRunTaskStopsAtTheFirstLineThatViolatesTheStdoutShape(t *testing.T) {
 	validator, err := ontology.StdoutValidator(testModuleNamespace+"PlaceFinder", testProjectBase)
 	require.NoError(t, err)
 
-	_, err = resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), validator, nil)
+	_, err = resolver.RunTask(context.Background(), ref, "{}", t.TempDir(), TaskStream{Validator: validator}, TaskStream{})
 
-	var shapeErr StdoutShapeError
+	var shapeErr StreamShapeError
 	require.True(t, errors.As(err, &shapeErr), err)
 	require.Equal(t, 2, shapeErr.Line)
 	require.Empty(t, runner.copies)
@@ -254,9 +254,87 @@ func TestRunTaskValidatesEveryLineWhenAllConform(t *testing.T) {
 	require.NoError(t, err)
 
 	var lines []string
-	result, err := resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), validator, collectLines(&lines))
+	result, err := resolver.RunTask(context.Background(), ref, "{}", t.TempDir(), TaskStream{Validator: validator, Sink: collectLines(&lines)}, TaskStream{})
 
 	require.NoError(t, err)
 	require.Len(t, lines, 2)
 	require.Equal(t, int64(len(runner.runOutput)), result.OutputBytes)
+}
+
+// testStderrShapedOntology declares a task class whose stderr nodes must carry
+// a label, on top of the output shape every task of the module declares.
+const testStderrShapedOntology = `{
+	"@context": {
+		"schema": "https://schema.org/",
+		"owl": "http://www.w3.org/2002/07/owl#",
+		"rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+		"sh": "http://www.w3.org/ns/shacl#",
+		"salmodule": "https://w3id.org/sal/salmodule#"
+	},
+	"@graph": [
+		{"@id": ".", "@type": "owl:Ontology"},
+		{
+			"@id": "StrictReporter",
+			"@type": "owl:Class",
+			"rdfs:subClassOf": {"@id": "salmodule:Task"},
+			"salmodule:stderrShape": {
+				"@type": "sh:NodeShape",
+				"sh:targetClass": {"@id": "salmodule:Error"},
+				"sh:property": [{"sh:path": {"@id": "rdfs:label"}, "sh:minCount": 1, "sh:message": "An error needs a label"}]
+			}
+		}
+	]
+}`
+
+func TestStderrValidatorIsNilForAClassWithoutAStderrShape(t *testing.T) {
+	ontology, err := parseModuleOntology(testModuleNamespace, []byte(testShapedOntology))
+	require.NoError(t, err)
+
+	validator, err := ontology.StderrValidator(testModuleNamespace+"PlaceFinder", testProjectBase)
+
+	require.NoError(t, err)
+	require.Nil(t, validator)
+}
+
+func TestStderrValidatorReportsTheViolatingNodeAndStream(t *testing.T) {
+	ontology, err := parseModuleOntology(testModuleNamespace, []byte(testStderrShapedOntology))
+	require.NoError(t, err)
+	validator, err := ontology.StderrValidator(testModuleNamespace+"StrictReporter", testProjectBase)
+	require.NoError(t, err)
+	require.NotNil(t, validator)
+
+	require.NoError(t, validator.ValidateLine([]byte(`{"@type":"salmodule:Error","rdfs:label":"Unreachable","rdfs:comment":"boom"}`), 1))
+	err = validator.ValidateLine([]byte(`{"@type":"salmodule:Error","rdfs:comment":"boom"}`), 2)
+
+	var shapeErr StreamShapeError
+	require.True(t, errors.As(err, &shapeErr), err)
+	require.Equal(t, "stderr", shapeErr.Stream)
+	require.Equal(t, 2, shapeErr.Line)
+	require.ErrorContains(t, err, "stderr line 2")
+	require.ErrorContains(t, err, "salmodule:stderrShape")
+	require.ErrorContains(t, err, "An error needs a label")
+}
+
+// A node on stderr that violates the class's stderrShape stops the task the
+// way a stdout violation does, with the stream named.
+func TestRunTaskStopsATaskWhoseStderrViolatesItsStderrShape(t *testing.T) {
+	runner := &fakeRunner{
+		ontology:  testStderrShapedOntology,
+		runOutput: `{"@id":"place/1","@type":"schema:Place","schema:name":"Lake Tahoe"}` + "\n",
+		runStderr: "fetching places\n" + `{"@type":"salmodule:Error","rdfs:comment":"boom"}` + "\n",
+	}
+	resolver := newTestResolver(runner)
+	ref, err := ParseModuleIRI(testModuleNamespace)
+	require.NoError(t, err)
+	ontology, err := resolver.Ontology(context.Background(), ref)
+	require.NoError(t, err)
+	validator, err := ontology.StderrValidator(testModuleNamespace+"StrictReporter", testProjectBase)
+	require.NoError(t, err)
+
+	_, err = resolver.RunTask(context.Background(), ref, "{}", t.TempDir(), TaskStream{}, TaskStream{Validator: validator})
+
+	var shapeErr StreamShapeError
+	require.True(t, errors.As(err, &shapeErr), err)
+	require.Equal(t, "stderr", shapeErr.Stream)
+	require.Equal(t, 2, shapeErr.Line, "the log line counts, since the line number names where in stderr the node is")
 }

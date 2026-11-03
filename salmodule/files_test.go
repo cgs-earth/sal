@@ -30,7 +30,7 @@ func runTestTask(t *testing.T, runner *fakeRunner, blobDir string) (TaskResult, 
 	t.Helper()
 	ref, err := ParseModuleIRI(testModuleNamespace)
 	require.NoError(t, err)
-	return newTestResolver(runner).RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", blobDir, nil, nil)
+	return newTestResolver(runner).RunTask(context.Background(), ref, "{}", blobDir, TaskStream{}, TaskStream{})
 }
 
 // collectLines is a TaskOutputSink that keeps every line it is handed.
@@ -144,7 +144,7 @@ func TestRunTaskHandsTheOutputOfAFailedContainerToTheSink(t *testing.T) {
 	require.NoError(t, err)
 	var lines []string
 
-	result, err := newTestResolver(runner).RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), nil, collectLines(&lines))
+	result, err := newTestResolver(runner).RunTask(context.Background(), ref, "{}", t.TempDir(), TaskStream{Sink: collectLines(&lines)}, TaskStream{})
 
 	require.ErrorIs(t, err, os.ErrClosed)
 	require.Equal(t, []string{`{"@type":"salmodule:Error","rdfs:comment":"boom"}`}, lines)
@@ -169,7 +169,7 @@ func TestRunTaskStopsAtTheFirstLineTheSinkRefuses(t *testing.T) {
 		return nil
 	}
 
-	_, err = newTestResolver(runner).RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), nil, refuseSecond)
+	_, err = newTestResolver(runner).RunTask(context.Background(), ref, "{}", t.TempDir(), TaskStream{Sink: refuseSecond}, TaskStream{})
 
 	require.ErrorIs(t, err, os.ErrInvalid)
 	require.Equal(t, []int{1, 2}, lines)

@@ -42,7 +42,7 @@ const validOntology = `{
     "salmodule": "https://w3id.org/sal/salmodule#"
   },
   "@graph": [
-    {"@id": ".", "@type": "owl:Ontology", "rdfs:label": "Weather stations", "salmodule:taskInstanceEnvVar": "STATION_TASK"},
+    {"@id": ".", "@type": "owl:Ontology", "rdfs:label": "Weather stations"},
     {
       "@id": "StationFetcher", "@type": "owl:Class", "rdfs:subClassOf": {"@id": "salmodule:Task"},
       "rdfs:comment": "Fetches every station in a region",
@@ -121,8 +121,10 @@ func TestSchemaRejectsASubClassOfWrittenAsAString(t *testing.T) {
 	require.ErrorContains(t, err, "rdfs:subClassOf")
 }
 
-func TestSchemaRejectsAnInvalidEnvironmentVariableName(t *testing.T) {
-	err := validate(t, strings.Replace(validOntology, `"STATION_TASK"`, `"station task"`, 1))
+// The variable the task instance arrives in is fixed by the specification's
+// salmodule:TaskInstance individual, so a module cannot rename it.
+func TestSchemaRejectsRenamingTheTaskInstanceVariable(t *testing.T) {
+	err := validate(t, strings.Replace(validOntology, `"rdfs:label": "Weather stations"`, `"rdfs:label": "Weather stations", "salmodule:taskInstanceEnvVar": "STATION_TASK"`, 1))
 
 	require.ErrorContains(t, err, "taskInstanceEnvVar")
 }
@@ -174,4 +176,29 @@ func TestSchemaRejectsABaseInTheContext(t *testing.T) {
 	err := validate(t, strings.Replace(validOntology, `"schema": "https://schema.org/",`, `"@base": "https://example.org/", "schema": "https://schema.org/",`, 1))
 
 	require.ErrorContains(t, err, "@base")
+}
+
+func TestSchemaAcceptsAStderrShape(t *testing.T) {
+	ontology := strings.Replace(validOntology, `"salmodule:stdoutShape": {`, `"salmodule:stderrShape": {
+        "@type": "sh:NodeShape",
+        "sh:targetClass": {"@id": "salmodule:Error"},
+        "sh:property": [{"sh:path": {"@id": "rdfs:label"}, "sh:minCount": 1}]
+      },
+      "salmodule:stdoutShape": {`, 1)
+
+	require.NoError(t, validate(t, ontology))
+}
+
+func TestSchemaRejectsAnUnsupportedConstraintOnStderr(t *testing.T) {
+	ontology := strings.Replace(validOntology, `"salmodule:stdoutShape": {`, `"salmodule:stderrShape": {
+        "@type": "sh:NodeShape",
+        "sh:targetClass": {"@id": "salmodule:Error"},
+        "sh:property": [{"sh:path": {"@id": "rdfs:label"}, "sh:uniqueLang": true}]
+      },
+      "salmodule:stdoutShape": {`, 1)
+
+	err := validate(t, ontology)
+
+	require.ErrorContains(t, err, "sh:uniqueLang")
+	require.ErrorContains(t, err, "stderrShape")
 }

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -119,9 +120,19 @@ func (r *Resolver) Ontology(ctx context.Context, ref ModuleRef) (_ *ModuleOntolo
 	defer func() { telemetry.End(span, err) }()
 
 	var stdout []byte
-	err = r.runModuleCommand(ctx, ref, nil, OntologyCommand, func(_ context.Context, output io.Reader, _ ContainerFiles) error {
+	err = r.runModuleCommand(ctx, ref, nil, OntologyCommand, func(_ context.Context, output ContainerOutput) error {
+		// nothing on stderr is part of the ontology, so it is read only to
+		// be shown, and read alongside stdout so neither holds up the other
+		stderr := make(chan []byte, 1)
+		go func() {
+			text, _ := io.ReadAll(output.Stderr)
+			stderr <- text
+		}()
 		var err error
-		stdout, err = io.ReadAll(output)
+		stdout, err = io.ReadAll(output.Stdout)
+		if text := strings.TrimSpace(string(<-stderr)); text != "" {
+			slog.Warn(ref.Namespace + " wrote to stderr: " + text)
+		}
 		return err
 	})
 	if err != nil {
@@ -150,64 +161,109 @@ type TaskResult struct {
 	Files       []CopiedFile
 }
 
+// TaskStream is what RunTask does with one of a task's output streams: each
+// node written on it is checked by Validator, when there is one, and then
+// handed to Sink, when there is one. A line is only ever one node, so neither
+// sees a line that is not a JSON object; on stdout that is an error, on
+// stderr it is a log line sal shows as a warning.
+type TaskStream struct {
+	Validator *StreamValidator
+	Sink      TaskOutputSink
+}
+
+// streamLine is one line read from one of a task's output streams, or the
+// end of the stream (io.EOF) or the error reading it.
+type streamLine struct {
+	stderr bool
+	line   []byte
+	err    error
+}
+
 // RunTask invokes the module's run command with taskInstance supplied through
-// the environment variable the module's ontology declares. Each line of the
-// newline delimited JSON the task writes to stdout is handed to sink as it is
-// read, so the output is never held whole, and the files the lines name with
-// file:/// IRIs are copied out of the container into blobDir as the output
-// arrives: a file named by its SHA-256 digest, a directory (a path ending in a
-// slash) verbatim under its own path. The container is kept until every copy
-// has finished.
+// the TaskInstanceEnvVar environment variable. Each line of the
+// newline delimited JSON the task writes to stdout is handed to stdout's sink
+// as it is read, so the output is never held whole, and the files the lines
+// name with file:/// IRIs are copied out of the container into blobDir as the
+// output arrives: a file named by its SHA-256 digest, a directory (a path
+// ending in a slash) verbatim under its own path. The container is kept until
+// every copy has finished.
 //
-// Every line the task wrote reaches the sink even when the container fails,
-// because a task reports its own failures as salmodule:Error nodes on stdout
-// before exiting non-zero; those messages describe the failure far better
-// than the container's exit status does.
+// Stderr is the task's control channel rather than its data: a line on it
+// that is a JSON object is a node, a salmodule:Error reporting why the task
+// failed say, and goes to stderr's sink the same way; any other line is a log
+// line, shown as a warning and otherwise ignored. Every line the task wrote
+// reaches its sink even when the container fails, because a task reports its
+// own failures as salmodule:Error nodes before exiting non-zero; those
+// messages describe the failure far better than the container's exit status
+// does.
 //
-// A non-nil validator checks each line as it arrives, before any file the line
-// names is copied or the sink sees it. The first line that fails, or that the
-// sink refuses, ends the run: the container is stopped, copies still in flight
-// are abandoned, and the error is returned in place of a result.
-func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, envVar string, taskInstance string, blobDir string, validator *StdoutValidator, sink TaskOutputSink) (result TaskResult, err error) {
+// A stream's validator checks each node as it arrives, before any file the
+// line names is copied or the sink sees it. The first node on either stream
+// that fails, or that a sink refuses, ends the run: the container is stopped,
+// copies still in flight are abandoned, and the error is returned in place of
+// a result.
+func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, taskInstance string, blobDir string, stdout TaskStream, stderr TaskStream) (result TaskResult, err error) {
 	ctx, span := telemetry.Start(ctx, "salmodule.run_task", attribute.String("sal.module", ref.Namespace))
 	defer func() {
 		span.SetAttributes(attribute.Int64("sal.module.output_bytes", result.OutputBytes), attribute.Int("sal.module.files_copied", len(result.Files)))
 		telemetry.End(span, err)
 	}()
-	err = r.runModuleCommand(ctx, ref, []string{envVar + "=" + taskInstance}, RunCommand, func(ctx context.Context, stdout io.Reader, files ContainerFiles) error {
+	err = r.runModuleCommand(ctx, ref, []string{TaskInstanceEnvVar + "=" + taskInstance}, RunCommand, func(ctx context.Context, output ContainerOutput) error {
 		// copies run under their own context so that a rejected line can
 		// abandon them rather than wait for a file the container is still
 		// writing
 		copyCtx, cancelCopies := context.WithCancel(ctx)
 		defer cancelCopies()
-		copier := &fileCopier{dir: blobDir, source: strings.TrimSuffix(ref.Namespace, "/"), files: files}
+		copier := &fileCopier{dir: blobDir, source: strings.TrimSuffix(ref.Namespace, "/"), files: output.Files}
 		reject := func(err error) error {
 			cancelCopies()
 			_, _ = copier.wait()
 			return err
 		}
-		reader := bufio.NewReader(stdout)
-		for lineNumber := 1; ; lineNumber++ {
-			line, err := reader.ReadBytes('\n')
-			result.OutputBytes += int64(len(line))
-			if trimmed := bytes.TrimSpace(line); len(trimmed) > 0 {
-				if validator != nil {
-					if err := validator.ValidateLine(trimmed, lineNumber); err != nil {
-						return reject(err)
-					}
+
+		// both streams are read at once, since the container writes them
+		// interleaved and one left unread would hold up the other, but every
+		// node is handled here on one goroutine, in the order the lines
+		// arrived, so the validators and sinks are never called concurrently.
+		// Returning early closes the streams, which ends the readers.
+		lines := make(chan streamLine)
+		done := make(chan struct{})
+		defer close(done)
+		go readStreamLines(output.Stdout, false, lines, done)
+		go readStreamLines(output.Stderr, true, lines, done)
+		var stdoutLines, stderrLines int
+		for open := 2; open > 0; {
+			item := <-lines
+			if errors.Is(item.err, io.EOF) {
+				open--
+				continue
+			}
+			if item.err != nil {
+				return reject(fmt.Errorf("read output of %s: %w", ref.Namespace, item.err))
+			}
+			if item.stderr {
+				stderrLines++
+				if err := handleStderrLine(ref.Namespace, stderr, item.line, stderrLines); err != nil {
+					return reject(err)
 				}
-				copier.observe(copyCtx, trimmed)
-				if sink != nil {
-					if err := sink(trimmed, lineNumber); err != nil {
-						return reject(err)
-					}
+				continue
+			}
+			stdoutLines++
+			result.OutputBytes += int64(len(item.line))
+			trimmed := bytes.TrimSpace(item.line)
+			if len(trimmed) == 0 {
+				continue
+			}
+			if stdout.Validator != nil {
+				if err := stdout.Validator.ValidateLine(trimmed, stdoutLines); err != nil {
+					return reject(err)
 				}
 			}
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			if err != nil {
-				return fmt.Errorf("read output of %s: %w", ref.Namespace, err)
+			copier.observe(copyCtx, trimmed)
+			if stdout.Sink != nil {
+				if err := stdout.Sink(trimmed, stdoutLines); err != nil {
+					return reject(err)
+				}
 			}
 		}
 
@@ -221,6 +277,56 @@ func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, envVar string, ta
 	return result, err
 }
 
+// readStreamLines sends each line of reader, newline included, on lines and
+// then io.EOF, or the error that ended the read. It stops once done is closed,
+// which is how a consumer that returned early is not blocked on by a reader
+// still holding a line.
+func readStreamLines(reader io.Reader, stderr bool, lines chan<- streamLine, done <-chan struct{}) {
+	buffered := bufio.NewReader(reader)
+	for {
+		line, err := buffered.ReadBytes('\n')
+		if len(line) > 0 {
+			select {
+			case lines <- streamLine{stderr: stderr, line: line}:
+			case <-done:
+				return
+			}
+		}
+		if err != nil {
+			select {
+			case lines <- streamLine{stderr: stderr, err: err}:
+			case <-done:
+			}
+			return
+		}
+	}
+}
+
+// handleStderrLine deals with one line a task wrote to stderr: a JSON object
+// is a node of the task's control channel and goes through the stream's
+// validator and sink, anything else is a log line shown as a warning. A line
+// that only starts like an object, a Python dict printed for debugging say,
+// is a log line too, so that stray logging never fails a task.
+func handleStderrLine(namespace string, stderr TaskStream, line []byte, lineNumber int) error {
+	trimmed := bytes.TrimSpace(line)
+	if len(trimmed) == 0 {
+		return nil
+	}
+	if trimmed[0] != '{' || !json.Valid(trimmed) {
+		slog.Warn(namespace + " wrote to stderr: " + string(trimmed))
+		return nil
+	}
+	if stderr.Validator != nil {
+		if err := stderr.Validator.ValidateLine(trimmed, lineNumber); err != nil {
+			return err
+		}
+	}
+	if stderr.Sink != nil {
+		return stderr.Sink(trimmed, lineNumber)
+	}
+	return nil
+}
+
 func (r *Resolver) runModuleCommand(ctx context.Context, ref ModuleRef, env []string, subcommand string, consume ContainerOutputConsumer) error {
 	image, err := r.image(ctx, ref)
 	if err != nil {
@@ -231,11 +337,7 @@ func (r *Resolver) runModuleCommand(ctx context.Context, ref ModuleRef, env []st
 	if err != nil {
 		return err
 	}
-	stderr, err := runner.RunContainer(ctx, image, env, []string{BaseCommand, subcommand}, consume)
-	if len(stderr) > 0 {
-		slog.Warn(ref.Namespace + " wrote to stderr: " + strings.TrimSpace(string(stderr)))
-	}
-	if err != nil {
+	if err := runner.RunContainer(ctx, image, env, []string{BaseCommand, subcommand}, consume); err != nil {
 		return fmt.Errorf("run %s %s for %s: %w", BaseCommand, subcommand, ref.Namespace, err)
 	}
 	return nil

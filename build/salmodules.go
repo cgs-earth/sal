@@ -54,12 +54,6 @@ func findSalModuleTasks(graph *rdflibgo.Graph) ([]salModuleTask, error) {
 				}
 			}
 		}
-		// taskInstanceEnvVar names the environment variable a module reads its
-		// task instance from; it is declared by a module's ontology, not by a
-		// project, whose instances are configured with the module's own properties
-		if triple.Predicate.Value() == salmodule.Namespace+"taskInstanceEnvVar" {
-			slog.Warn(triple.Subject.String() + " sets " + salmodule.Namespace + "taskInstanceEnvVar, which is ignored; configure the task with the properties the module's vocabulary defines")
-		}
 		return true
 	})
 
@@ -164,40 +158,58 @@ func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmo
 	// the shape a task class declares for its output is enforced line by
 	// line as the task writes. A class without one is run unchecked, with a
 	// warning: declaring what a task produces is part of the SAL Module
-	// contract, but a module that predates the shape is not failed for it
-	validator, err := ontology.StdoutValidator(task.classIRI, graph.Base())
+	// contract, but a module that predates the shape is not failed for it.
+	// The shape it declares for stderr, its control channel, is enforced the
+	// same way; a class without one is the usual case, since the SAL Module
+	// ontology already says what a salmodule:Error carries
+	stdoutValidator, err := ontology.StdoutValidator(task.classIRI, graph.Base())
+	if err != nil {
+		return false, nil, fmt.Errorf("run: %w", err)
+	}
+	stderrValidator, err := ontology.StderrValidator(task.classIRI, graph.Base())
 	if err != nil {
 		return false, nil, fmt.Errorf("run: %w", err)
 	}
 
 	slog.Info("Running SAL module task " + task.classIRI)
-	if validator != nil {
+	if stdoutValidator != nil {
 		slog.Info("Validating the output of " + task.classIRI + " against its salmodule:stdoutShape")
 	} else {
 		slog.Warn(task.classIRI + " declares no salmodule:stdoutShape, so what its task writes is not validated; a SAL module should declare the shape of the nodes it produces")
 	}
+	if stderrValidator != nil {
+		slog.Info("Validating the nodes " + task.classIRI + " writes to stderr against its salmodule:stderrShape")
+	}
 	// the output is parsed into the graph being built as the task writes it,
 	// never held whole, so a task may produce more than fits in memory as
 	// JSON; a task that fails leaves what it wrote so far in a graph the
-	// failed build discards anyway
+	// failed build discards anyway. Stderr is parsed apart from it, since
+	// what a task reports there is about the run, not data for the graph
 	before := pkg.GraphLen(graph)
 	parser := ontology.NewTaskOutputParser(graph, graph.Base())
-	result, runErr := resolver.RunTask(ctx, task.ref, ontology.TaskInstanceEnvVar, taskInstance, blobDir, validator, parser.Line)
+	reports := ontology.NewTaskStderrParser(graph.Base())
+	result, runErr := resolver.RunTask(ctx, task.ref, taskInstance, blobDir,
+		salmodule.TaskStream{Validator: stdoutValidator, Sink: parser.Line},
+		salmodule.TaskStream{Validator: stderrValidator, Sink: reports.Line})
 	// whatever was read before the task ended is parsed even when it failed:
-	// a line that violates the output shape stopped the task, so nothing
-	// after it was read; a failing task reports why it failed as
-	// salmodule:Error nodes before it exits, so those messages are
-	// preferred over the container's exit status
+	// a line that violates a shape stopped the task, so nothing after it was
+	// read; a failing task reports why it failed as salmodule:Error nodes
+	// before it exits, on stderr where the specification puts them or on
+	// stdout where an older module does, so those messages are preferred
+	// over the container's exit status
+	reportErr := reports.Finish()
 	err = parser.Finish()
-	var shapeErr salmodule.StdoutShapeError
+	var shapeErr salmodule.StreamShapeError
 	var taskErr salmodule.TaskError
 	switch {
 	case errors.As(runErr, &shapeErr):
 		return false, nil, fmt.Errorf("run: %w", shapeErr)
-	case errors.As(err, &taskErr):
+	case errors.As(reportErr, &taskErr), errors.As(err, &taskErr):
 		return false, nil, fmt.Errorf("run: %w", taskErr)
 	case runErr != nil:
 		return false, nil, fmt.Errorf("run: %w", runErr)
+	case reportErr != nil:
+		return false, nil, fmt.Errorf("run: %w", reportErr)
 	case err != nil:
 		return false, nil, fmt.Errorf("run: %w", err)
 	}

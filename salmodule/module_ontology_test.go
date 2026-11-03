@@ -109,30 +109,6 @@ func TestParseModuleOntologyIsQuietAboutSubclassingTask(t *testing.T) {
 	require.Empty(t, logs.String())
 }
 
-func TestParseModuleOntologyDefaultsTaskInstanceEnvVar(t *testing.T) {
-	ontology, err := parseModuleOntology(testModuleNamespace, []byte(testOntology))
-
-	require.NoError(t, err)
-	require.Equal(t, DefaultTaskInstanceEnvVar, ontology.TaskInstanceEnvVar)
-}
-
-func TestParseModuleOntologyUsesDeclaredTaskInstanceEnvVar(t *testing.T) {
-	document := `{
-		"@context": {
-			"owl": "http://www.w3.org/2002/07/owl#",
-			"salmodule": "https://w3id.org/sal/salmodule#"
-		},
-		"@graph": [
-			{"@id": ".", "@type": "owl:Ontology", "salmodule:taskInstanceEnvVar": "MODULE_TASK"}
-		]
-	}`
-
-	ontology, err := parseModuleOntology(testModuleNamespace, []byte(document))
-
-	require.NoError(t, err)
-	require.Equal(t, "MODULE_TASK", ontology.TaskInstanceEnvVar)
-}
-
 func TestParseModuleOntologyRejectsInvalidJSON(t *testing.T) {
 	_, err := parseModuleOntology(testModuleNamespace, []byte("not json"))
 

@@ -308,7 +308,7 @@ func (s *SalModuleSuite) TestRunStopsATaskWhoseOutputViolatesItsStdoutShape() {
 	started := time.Now()
 	_, err := (&build.RunCmd{Paths: []string{"module.ttl"}}).Run()
 
-	var shapeErr salmodule.StdoutShapeError
+	var shapeErr salmodule.StreamShapeError
 	s.Require().ErrorAs(err, &shapeErr)
 	s.Equal(2, shapeErr.Line)
 	s.Contains(err.Error(), "A place must have a schema:name")

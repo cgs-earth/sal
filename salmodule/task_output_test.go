@@ -111,7 +111,7 @@ func TestGraphFromTaskOutputRejectsNonJSONOutput(t *testing.T) {
 	_, err := parseTaskOutput(t, testTaskOntology(t), "Traceback (most recent call last):")
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "invalid JSON on output line 1")
+	require.Contains(t, err.Error(), "invalid JSON on stdout line 1")
 }
 
 // A batch is parsed as one JSON-LD document, which numbers its blank nodes
@@ -170,7 +170,7 @@ func TestTaskOutputParserRejectsALineThatIsNotAnObject(t *testing.T) {
 	_, err := parseTaskOutput(t, testTaskOntology(t), `["not","a","node"]`)
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "invalid JSON on output line 1")
+	require.Contains(t, err.Error(), "invalid JSON on stdout line 1")
 }
 
 func TestGraphFromTaskOutputAcceptsEmptyOutput(t *testing.T) {
@@ -213,4 +213,44 @@ func TestVocabularyNamespaceSplitsAtTheLastHashOrSlash(t *testing.T) {
 	require.Equal(t, "http://www.opengis.net/ont/geosparql#", VocabularyNamespace("http://www.opengis.net/ont/geosparql#asWKT"))
 	require.Equal(t, "https://www.opengis.net/def/schema/hy_features/hyf/", VocabularyNamespace("https://www.opengis.net/def/schema/hy_features/hyf/HY_HydroFeature"))
 	require.Equal(t, "", VocabularyNamespace("urn:isbn:123"))
+}
+
+func TestTaskStderrParserReportsModuleErrors(t *testing.T) {
+	parser := testTaskOntology(t).NewTaskStderrParser(testProjectBase)
+
+	require.NoError(t, parser.Line([]byte(`{"@type":"salmodule:Error","rdfs:label":"Unreachable","rdfs:comment":"reference server returned 503"}`), 2))
+	err := parser.Finish()
+
+	var taskErr TaskError
+	require.ErrorAs(t, err, &taskErr)
+	require.Equal(t, []string{"reference server returned 503"}, taskErr.Messages)
+	require.Equal(t, testModuleNamespace, taskErr.Namespace)
+}
+
+func TestTaskStderrParserReportsNothingWithoutErrorNodes(t *testing.T) {
+	parser := testTaskOntology(t).NewTaskStderrParser(testProjectBase)
+
+	require.NoError(t, parser.Line([]byte(`{"@type":"schema:Thing","schema:name":"progress"}`), 1))
+
+	require.NoError(t, parser.Finish())
+}
+
+func TestTaskStderrParserRejectsALineThatIsNotAnObject(t *testing.T) {
+	parser := testTaskOntology(t).NewTaskStderrParser(testProjectBase)
+
+	err := parser.Line([]byte(`[1]`), 4)
+
+	require.ErrorContains(t, err, "invalid JSON on stderr line 4")
+}
+
+// An error reported on stdout still fails the task, since a module written
+// before the specification moved errors to stderr reports it there, but it
+// is warned about.
+func TestGraphFromTaskOutputWarnsAboutAnErrorReportedOnStdout(t *testing.T) {
+	logs := captureWarnings(t)
+
+	_, err := parseTaskOutput(t, testTaskOntology(t), `{"@type":"salmodule:Error","rdfs:comment":"boom"}`)
+
+	require.ErrorContains(t, err, "boom")
+	require.Contains(t, logs.String(), "salmodule:Error on stdout")
 }

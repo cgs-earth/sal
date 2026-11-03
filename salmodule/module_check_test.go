@@ -25,7 +25,7 @@ const checkTestOntology = `{
     "salmodule": "https://w3id.org/sal/salmodule#"
   },
   "@graph": [
-    {"@id": ".", "@type": "owl:Ontology", "rdfs:label": "Weather stations", "salmodule:taskInstanceEnvVar": "STATION_TASK"},
+    {"@id": ".", "@type": "owl:Ontology", "rdfs:label": "Weather stations"},
     {
       "@id": "StationFetcher", "@type": "owl:Class", "rdfs:subClassOf": {"@id": "salmodule:Task"},
       "rdfs:comment": "Fetches every station in a region",
@@ -149,8 +149,11 @@ func TestCheckOntologyReportsASubClassOfWrittenAsAString(t *testing.T) {
 	require.Equal(t, `ontology.jsonld:13: rdfs:subClassOf is an IRI reference, written {"@id": "salmodule:Task"}; a bare string is a literal that sal ignores`, problems[1])
 }
 
-func TestCheckOntologyReportsAnInvalidEnvironmentVariableName(t *testing.T) {
-	require.Equal(t, []string{"ontology.jsonld:11: An environment variable name holds only letters, digits, and underscores and does not start with a digit"}, checkOntology(t, `"STATION_TASK"`, `"station task"`))
+func TestCheckOntologyRefusesRenamingTheTaskInstanceVariable(t *testing.T) {
+	problems := checkOntology(t, `"rdfs:label": "Weather stations"`, `"rdfs:label": "Weather stations", "salmodule:taskInstanceEnvVar": "STATION_TASK"`)
+
+	require.Len(t, problems, 1)
+	require.Contains(t, problems[0], "ontology.jsonld:11: salmodule:taskInstanceEnvVar is not a term of the SAL Module ontology")
 }
 
 func TestCheckOntologyReportsABaseInTheContext(t *testing.T) {
@@ -233,7 +236,7 @@ func TestCheckOntologyReportsAnIllFormedShapeTheSchemaCannotSee(t *testing.T) {
 }
 
 func TestCheckOntologyReportsAnUnsupportedStdoutConstraintOnce(t *testing.T) {
-	require.Equal(t, []string{"ontology.jsonld:23: sal does not support sh:uniqueLang in a salmodule:stdoutShape"}, checkOntology(t, `"sh:nodeKind": {"@id": "sh:Literal"}`, `"sh:uniqueLang": true`))
+	require.Equal(t, []string{"ontology.jsonld:23: sal does not support sh:uniqueLang in a salmodule:stdoutShape or stderrShape"}, checkOntology(t, `"sh:nodeKind": {"@id": "sh:Literal"}`, `"sh:uniqueLang": true`))
 }
 
 // The schema looks only at the shape written under salmodule:stdoutShape and
@@ -290,4 +293,18 @@ func TestCheckOntologyReportsTheFormBeingWrittenNotTheOthers(t *testing.T) {
 
 	require.Len(t, problems, 1)
 	require.Contains(t, problems[0], "ontology.jsonld:18: A property shape is either written inline with an sh:path")
+}
+
+// A stderrShape is checked for the constraints sal refuses the way a
+// stdoutShape is, including one in a shape it refers to.
+func TestCheckOntologyReportsAnUnsupportedConstraintInAReferencedStderrShape(t *testing.T) {
+	document := strings.Replace(checkTestOntology, `"salmodule:stdoutShape": {`, `"salmodule:stderrShape": {"@id": "ErrorShape"},
+      "salmodule:stdoutShape": {`, 1)
+	document = strings.Replace(document, `{"@id": "region", "@type": "owl:DatatypeProperty"`, `{"@id": "ErrorShape", "@type": "sh:NodeShape", "sh:property": [{"sh:path": {"@id": "rdfs:label"}, "sh:uniqueLang": true}]},
+    {"@id": "region", "@type": "owl:DatatypeProperty"`, 1)
+
+	problems := CheckOntologyDocument("ontology.jsonld", []byte(document), checkTestNamespace)
+
+	require.Len(t, problems, 1)
+	require.Equal(t, ModuleError{Path: "ontology.jsonld", Line: 12, Message: "the salmodule:stderrShape of " + checkTestNamespace + "StationFetcher uses sh:uniqueLang, which SAL does not support"}, problems[0])
 }

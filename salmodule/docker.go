@@ -30,17 +30,27 @@ type ContainerRunner interface {
 	// which is how a module built by a previous invocation is found and reused.
 	ImageExists(ctx context.Context, tag string) (bool, error)
 	// RunContainer runs cmd in a container built from image. What the container
-	// writes to stdout is handed to consume as it is written, together with a
-	// handle that copies files out of the container; the container is kept
-	// until consume returns, so a file may still be copied after the container
-	// has exited. Whatever the container wrote to stderr is returned whole.
-	RunContainer(ctx context.Context, image string, env []string, cmd []string, consume ContainerOutputConsumer) (stderr []byte, err error)
+	// writes to stdout and to stderr is handed to consume as it is written,
+	// together with a handle that copies files out of the container; the
+	// container is kept until consume returns, so a file may still be copied
+	// after the container has exited. A container that exits non-zero is an
+	// error naming its status and the end of what it wrote to stderr.
+	RunContainer(ctx context.Context, image string, env []string, cmd []string, consume ContainerOutputConsumer) error
 }
 
-// ContainerOutputConsumer reads a running container's stdout until it ends,
-// which happens when the container exits, and may copy files out of the
-// container through files until it returns.
-type ContainerOutputConsumer func(ctx context.Context, stdout io.Reader, files ContainerFiles) error
+// ContainerOutputConsumer reads a running container's stdout and stderr
+// until both end, which happens when the container exits, and may copy files
+// out of the container through output.Files until it returns. It must read
+// both streams, concurrently, since the container's output arrives
+// multiplexed and a stream left unread holds up the other.
+type ContainerOutputConsumer func(ctx context.Context, output ContainerOutput) error
+
+// ContainerOutput is what a running container writes, as it writes it.
+type ContainerOutput struct {
+	Stdout io.Reader
+	Stderr io.Reader
+	Files  ContainerFiles
+}
 
 // ContainerFiles copies files out of a container RunContainer created.
 type ContainerFiles interface {
@@ -166,13 +176,13 @@ func reportBuildProgress(body io.Reader, tag string) error {
 }
 
 // RunContainer runs cmd in a container built from image, streaming its stdout
-// to consume while it runs, and returns whatever the container wrote to stderr.
-func (d *dockerRunner) RunContainer(ctx context.Context, image string, env []string, cmd []string, consume ContainerOutputConsumer) ([]byte, error) {
+// and stderr to consume while it runs.
+func (d *dockerRunner) RunContainer(ctx context.Context, image string, env []string, cmd []string, consume ContainerOutputConsumer) error {
 	created, err := d.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config: &container.Config{Image: image, Cmd: cmd, Env: env},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create container for %s: %w", image, err)
+		return fmt.Errorf("create container for %s: %w", image, err)
 	}
 	defer func() {
 		if _, err := d.client.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{Force: true}); err != nil {
@@ -184,7 +194,7 @@ func (d *dockerRunner) RunContainer(ctx context.Context, image string, env []str
 	// exiting immediately is not missed
 	wait := d.client.ContainerWait(ctx, created.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
 	if _, err := d.client.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
-		return nil, fmt.Errorf("start container for %s: %w", image, err)
+		return fmt.Errorf("start container for %s: %w", image, err)
 	}
 
 	// the log stream is followed rather than read once the container has exited;
@@ -192,7 +202,7 @@ func (d *dockerRunner) RunContainer(ctx context.Context, image string, env []str
 	// empty. Following replays what the container has already written.
 	logs, err := d.client.ContainerLogs(ctx, created.ID, client.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Follow: true})
 	if err != nil {
-		return nil, fmt.Errorf("follow output of container for %s: %w", image, err)
+		return fmt.Errorf("follow output of container for %s: %w", image, err)
 	}
 	defer func() {
 		if err := logs.Close(); err != nil {
@@ -200,22 +210,26 @@ func (d *dockerRunner) RunContainer(ctx context.Context, image string, env []str
 		}
 	}()
 
-	// the multiplexed log stream is demuxed into a pipe the consumer reads
-	// stdout from as the container writes it; the followed stream, and so the
-	// pipe, ends when the container exits
-	var stderr bytes.Buffer
+	// the multiplexed log stream is demuxed into a pipe per stream the
+	// consumer reads as the container writes; the followed stream, and so the
+	// pipes, end when the container exits. The end of stderr is kept so that a
+	// container failing without a word on stdout still says why.
+	var tail stderrTail
 	stdoutReader, stdoutWriter := io.Pipe()
+	stderrReader, stderrWriter := io.Pipe()
 	demuxed := make(chan error, 1)
 	go func() {
-		_, err := stdcopy.StdCopy(stdoutWriter, &stderr, logs)
+		_, err := stdcopy.StdCopy(stdoutWriter, io.MultiWriter(stderrWriter, &tail), logs)
 		_ = stdoutWriter.CloseWithError(err)
+		_ = stderrWriter.CloseWithError(err)
 		demuxed <- err
 	}()
 
-	consumeErr := consume(ctx, stdoutReader, containerFiles{client: d.client, id: created.ID})
+	consumeErr := consume(ctx, ContainerOutput{Stdout: stdoutReader, Stderr: stderrReader, Files: containerFiles{client: d.client, id: created.ID}})
 	// a consumer that stopped reading early must not leave the demuxer blocked
-	// on the pipe
+	// on a pipe
 	_ = stdoutReader.Close()
+	_ = stderrReader.Close()
 	if consumeErr != nil {
 		// the consumer rejected the output part way through, so the task may
 		// well still be running; the followed log stream, and with it the
@@ -227,26 +241,49 @@ func (d *dockerRunner) RunContainer(ctx context.Context, image string, env []str
 		}
 	}
 	if err := <-demuxed; err != nil && consumeErr == nil {
-		return stderr.Bytes(), fmt.Errorf("read output of container for %s: %w", image, err)
+		return fmt.Errorf("read output of container for %s: %w", image, err)
 	}
 	if consumeErr != nil {
-		return stderr.Bytes(), consumeErr
+		return consumeErr
 	}
 
 	var exitCode int64
 	select {
 	case err := <-wait.Error:
-		return stderr.Bytes(), fmt.Errorf("wait for container %s: %w", image, err)
+		return fmt.Errorf("wait for container %s: %w", image, err)
 	case result := <-wait.Result:
 		exitCode = result.StatusCode
 	case <-ctx.Done():
-		return stderr.Bytes(), ctx.Err()
+		return ctx.Err()
 	}
 	if exitCode != 0 {
-		return stderr.Bytes(), fmt.Errorf("container %s exited with status %d: %s", image, exitCode, strings.TrimSpace(stderr.String()))
+		if text := strings.TrimSpace(tail.String()); text != "" {
+			return fmt.Errorf("container %s exited with status %d: %s", image, exitCode, text)
+		}
+		return fmt.Errorf("container %s exited with status %d", image, exitCode)
 	}
-	return stderr.Bytes(), nil
+	return nil
 }
+
+// stderrTailBytes is how much of the end of a container's stderr is kept for
+// the error a non-zero exit is reported with. The stream itself goes to the
+// consumer whole; this is only what the error message can carry.
+const stderrTailBytes = 4 << 10
+
+// stderrTail is an io.Writer keeping the last stderrTailBytes written to it.
+type stderrTail struct {
+	buf []byte
+}
+
+func (t *stderrTail) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	if excess := len(t.buf) - stderrTailBytes; excess > 0 {
+		t.buf = append(t.buf[:0], t.buf[excess:]...)
+	}
+	return len(p), nil
+}
+
+func (t *stderrTail) String() string { return string(t.buf) }
 
 // containerFiles copies files out of one container through the daemon's copy
 // endpoint, which is what `docker cp` uses.

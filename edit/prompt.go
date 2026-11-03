@@ -161,7 +161,7 @@ func promptData(dir string, namespace string, document []byte) (*promptModule, e
 		Dir:              dir,
 		OntologyFile:     salmodule.OntologyFile,
 		Namespace:        namespace,
-		EnvVar:           salmodule.DefaultTaskInstanceEnvVar,
+		EnvVar:           salmodule.TaskInstanceEnvVar,
 		Image:            "sal-module-" + strings.ToLower(filepath.Base(dir)),
 		Skills:           pkg.InstalledSkills(dir, pkg.SalModuleSkill),
 		SkillsRepository: pkg.SkillsRepository,
@@ -182,9 +182,6 @@ func promptData(dir string, namespace string, document []byte) (*promptModule, e
 			data.Creator = stringOf(node["dcterms:creator"])
 			data.Version = stringOf(node["owl:versionInfo"])
 			data.Comment = stringOf(node["rdfs:comment"])
-			if envVar := stringOf(node["salmodule:taskInstanceEnvVar"]); envVar != "" {
-				data.EnvVar = envVar
-			}
 		case isTaskClass(node):
 			data.Tasks = append(data.Tasks, promptTaskOf(node, namespace))
 		case contains(types, "owl:DatatypeProperty") || contains(types, "owl:ObjectProperty"):
@@ -570,8 +567,9 @@ Input (from salmodule:stdinShape; the nodes another task produced arrive on stan
 - A relative "@id" resolves against the project that runs the task, not the module. Use absolute IRIs for
   anything owned by an external source.
 - Only stdout is data. Logs and progress go to stderr, which sal surfaces as warnings.
-- On failure, print {"@type": "salmodule:Error", "rdfs:comment": "what went wrong"} and exit non-zero; sal
-  reports the message and fails the build.
+- On failure, print {"@type": "salmodule:Error", "rdfs:comment": "what went wrong"} on its own line to stderr
+  and exit non-zero; sal reads every JSON object on stderr as a node, reports the message, and fails the build.
+  Never print an error node to stdout, where it would have to satisfy the output shape.
 - To hand over a file, write it completely inside the container and then reference it as {"@id": "file:///abs/path"};
   a directory ends in a slash. sal copies it out while the task runs, so finish writing before printing the line.
 - The image's ENTRYPOINT must take the subcommand as its arguments: "salmodule ontology" and "salmodule run".
