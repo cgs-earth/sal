@@ -78,7 +78,6 @@ func TestTaskInstanceOmitsPropertiesFromOtherVocabularies(t *testing.T) {
 		<Finder> a history:EducationalHistoryFinder ;
 			a salmodule:Task ;
 			schema:name "described for the project, not for the module" ;
-			salmodule:taskInstanceEnvVar "IGNORED" ;
 			history:maxRetries "5"^^xsd:integer .
 	`)
 

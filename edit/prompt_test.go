@@ -66,7 +66,7 @@ func TestAgentPromptSaysWhenATaskDeclaresNoOutputShape(t *testing.T) {
 	document := `{
   "@context": {"owl": "http://www.w3.org/2002/07/owl#", "rdfs": "http://www.w3.org/2000/01/rdf-schema#", "salmodule": "https://w3id.org/sal/salmodule#"},
   "@graph": [
-    {"@id": ".", "@type": "owl:Ontology", "salmodule:taskInstanceEnvVar": "MY_TASK"},
+    {"@id": ".", "@type": "owl:Ontology"},
     {"@id": "Fetch", "@type": "owl:Class", "rdfs:subClassOf": {"@id": "salmodule:Task"}},
     {"@id": "region", "@type": "owl:DatatypeProperty", "rdfs:comment": "The region to fetch.", "rdfs:range": {"@id": "xsd:string"}},
     {"@id": "Helper", "@type": "owl:Class"}
@@ -75,12 +75,12 @@ func TestAgentPromptSaysWhenATaskDeclaresNoOutputShape(t *testing.T) {
 	prompt, err := AgentPrompt("/work/m", "salmodule://github.com/cgs-earth/m/", []byte(document))
 	require.NoError(t, err)
 
-	require.Contains(t, prompt, "- Task instance environment variable: MY_TASK")
+	require.Contains(t, prompt, "- Task instance environment variable: SALMODULE_TASK_INSTANCE")
 	require.Contains(t, prompt, "Configuration: the task shape constrains no properties")
 	require.Contains(t, prompt, "Output: the class declares no salmodule:stdoutShape")
 	require.Contains(t, prompt, "- region (xsd:string): The region to fetch.")
 	require.Contains(t, prompt, "Other nodes in the graph, which this summary does not describe: Helper.")
-	require.Contains(t, prompt, `docker run --rm -e MY_TASK='{"@id": "https://example.org/project/Fetch1", "@type": "Fetch"}' sal-module-m salmodule run`)
+	require.Contains(t, prompt, `docker run --rm -e SALMODULE_TASK_INSTANCE='{"@id": "https://example.org/project/Fetch1", "@type": "Fetch"}' sal-module-m salmodule run`)
 }
 
 func TestAgentPromptRefusesADocumentWithoutATask(t *testing.T) {

@@ -31,17 +31,6 @@ salmodule:protocolScheme a owl:AnnotationProperty ;
     the base repository directory and 3) run the container using the salmodule:OntologyCommand."""@en .
 
 
-###  https://w3id.org/sal/salmodule#taskInstanceEnvVar
-salmodule:taskInstanceEnvVar a owl:AnnotationProperty ;
-                             rdfs:comment "The name of the environment variable that carries the instance of a salmodule:Task subclass to be invoked by salmodule:RunCommand. A SAL Module declares it on its own owl:Ontology node to rename the variable; left undeclared, the variable is the one salmodule:TaskInstance names."@en ;
-                             rdfs:label "Task Instance Environment Variable"@en ;
-                             rdfs:seeAlso salmodule:TaskInstance ,
-                                          salmodule:RunCommand ;
-                             skos:example "<salmodule:taskInstanceEnvVar>=\"<JSON object representation of salmodule:Task instance>\"" ;
-                             skos:note "The environment variable must be set to a JSON representation of the SAL Module's salmodule:Task subclass instance to be invoked."@en ;
-                             skos:note "The environment variable's assigned JSON object will be converted to RDF statements by the SAL Module ontology @context."@en .
-
-
 ###  https://w3id.org/sal/salmodule#stdinShape
 salmodule:stdinShape a owl:AnnotationProperty ;
                 rdfs:range sh:NodeShape ;

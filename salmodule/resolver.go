@@ -180,7 +180,7 @@ type streamLine struct {
 }
 
 // RunTask invokes the module's run command with taskInstance supplied through
-// the environment variable the module's ontology declares. Each line of the
+// the TaskInstanceEnvVar environment variable. Each line of the
 // newline delimited JSON the task writes to stdout is handed to stdout's sink
 // as it is read, so the output is never held whole, and the files the lines
 // name with file:/// IRIs are copied out of the container into blobDir as the
@@ -202,13 +202,13 @@ type streamLine struct {
 // that fails, or that a sink refuses, ends the run: the container is stopped,
 // copies still in flight are abandoned, and the error is returned in place of
 // a result.
-func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, envVar string, taskInstance string, blobDir string, stdout TaskStream, stderr TaskStream) (result TaskResult, err error) {
+func (r *Resolver) RunTask(ctx context.Context, ref ModuleRef, taskInstance string, blobDir string, stdout TaskStream, stderr TaskStream) (result TaskResult, err error) {
 	ctx, span := telemetry.Start(ctx, "salmodule.run_task", attribute.String("sal.module", ref.Namespace))
 	defer func() {
 		span.SetAttributes(attribute.Int64("sal.module.output_bytes", result.OutputBytes), attribute.Int("sal.module.files_copied", len(result.Files)))
 		telemetry.End(span, err)
 	}()
-	err = r.runModuleCommand(ctx, ref, []string{envVar + "=" + taskInstance}, RunCommand, func(ctx context.Context, output ContainerOutput) error {
+	err = r.runModuleCommand(ctx, ref, []string{TaskInstanceEnvVar + "=" + taskInstance}, RunCommand, func(ctx context.Context, output ContainerOutput) error {
 		// copies run under their own context so that a rejected line can
 		// abandon them rather than wait for a file the container is still
 		// writing

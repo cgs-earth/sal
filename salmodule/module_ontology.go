@@ -24,9 +24,6 @@ type ModuleOntology struct {
 	// Context is the ontology's @context, injected into the JSON a module task
 	// writes so that its keys resolve to the module's vocabulary.
 	Context json.RawMessage
-	// TaskInstanceEnvVar names the environment variable carrying the task
-	// instance passed to the run command.
-	TaskInstanceEnvVar string
 
 	taskClasses map[string]bool
 	// prefixes are the namespace bindings of Context, used to write the IRIs of a
@@ -64,45 +61,14 @@ func parseModuleOntology(namespace string, document []byte) (*ModuleOntology, er
 	parents := subClassParents(graph)
 	warnAboutInferredParents(parents)
 	return &ModuleOntology{
-		Namespace:          namespace,
-		Document:           document,
-		Context:            envelope.Context,
-		TaskInstanceEnvVar: taskInstanceEnvVar(graph),
-		taskClasses:        taskClasses(parents),
-		prefixes:           contextPrefixes(envelope.Context),
-		graph:              graph,
-		parents:            parents,
+		Namespace:   namespace,
+		Document:    document,
+		Context:     envelope.Context,
+		taskClasses: taskClasses(parents),
+		prefixes:    contextPrefixes(envelope.Context),
+		graph:       graph,
+		parents:     parents,
 	}, nil
-}
-
-// taskInstanceEnvVar returns the environment variable an ontology declares for
-// its task instances, falling back to the name in the SAL Module specification.
-func taskInstanceEnvVar(graph *rdflibgo.Graph) string {
-	name := DefaultTaskInstanceEnvVar
-	ontologies := map[string]bool{}
-	pkg.Triples(graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
-		if triple.Predicate.Equal(rdflibgo.RDF.Type) && triple.Object.Equal(rdflibgo.OWL.Ontology) {
-			if subject, ok := triple.Subject.(rdflibgo.URIRef); ok {
-				ontologies[subject.Value()] = true
-			}
-		}
-		return true
-	})
-
-	pkg.Triples(graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
-		if triple.Predicate.Value() != Namespace+"taskInstanceEnvVar" {
-			return true
-		}
-		subject, ok := triple.Subject.(rdflibgo.URIRef)
-		if !ok || !ontologies[subject.Value()] {
-			return true
-		}
-		if literal, ok := triple.Object.(rdflibgo.Literal); ok && literal.Lexical() != "" {
-			name = literal.Lexical()
-		}
-		return true
-	})
-	return name
 }
 
 // subClassParents maps every class the ontology declares a superclass for to

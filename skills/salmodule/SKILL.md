@@ -59,8 +59,6 @@ Print one JSON-LD document to stdout and exit 0. Requirements:
   ontology's `@context` injected, and the first line that fails stops the container and fails the run with
   the shape's `sh:message`. Give the shape a target (`sh:targetClass` usually), and do not use
   `sh:languageIn`, `sh:uniqueLang`, `sh:disjoint`, `sh:qualifiedValueShapesDisjoint`, or `sh:sparql`.
-- Optional `salmodule:taskInstanceEnvVar` on the ontology node to rename the environment variable;
-  it defaults to `SALMODULE_TASK_INSTANCE`.
 - The JSON Schema at <https://raw.githubusercontent.com/cgs-earth/sal/main/specs/salmodule-ontology.schema.json>
   (the copy `sal init --salmodule` puts in `.vscode/`) encodes all of the above; validating a draft
   ontology against it catches a bare-string `rdfs:subClassOf`, a missing ontology node, or an

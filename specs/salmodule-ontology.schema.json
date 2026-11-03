@@ -447,10 +447,8 @@
           "$ref": "#/$defs/iriReferences"
         },
         "salmodule:taskInstanceEnvVar": {
-          "type": "string",
-          "description": "The environment variable sal passes the task instance in when it invokes `salmodule run`. Defaults to SALMODULE_TASK_INSTANCE when the ontology does not declare it.",
-          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
-          "patternErrorMessage": "An environment variable name holds only letters, digits, and underscores and does not start with a digit"
+          "not": {},
+          "errorMessage": "salmodule:taskInstanceEnvVar is not a term of the SAL Module ontology; the task instance always arrives in SALMODULE_TASK_INSTANCE, the variable its salmodule:TaskInstance individual names"
         },
         "salmodule:baseCommand": {
           "not": {},
@@ -522,7 +520,7 @@
         },
         "salmodule:taskInstanceEnvVar": {
           "not": {},
-          "errorMessage": "salmodule:taskInstanceEnvVar belongs on the owl:Ontology node, not on a class"
+          "errorMessage": "salmodule:taskInstanceEnvVar is not a term of the SAL Module ontology; the task instance always arrives in SALMODULE_TASK_INSTANCE, the variable its salmodule:TaskInstance individual names"
         }
       },
       "propertyNames": {

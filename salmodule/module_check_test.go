@@ -25,7 +25,7 @@ const checkTestOntology = `{
     "salmodule": "https://w3id.org/sal/salmodule#"
   },
   "@graph": [
-    {"@id": ".", "@type": "owl:Ontology", "rdfs:label": "Weather stations", "salmodule:taskInstanceEnvVar": "STATION_TASK"},
+    {"@id": ".", "@type": "owl:Ontology", "rdfs:label": "Weather stations"},
     {
       "@id": "StationFetcher", "@type": "owl:Class", "rdfs:subClassOf": {"@id": "salmodule:Task"},
       "rdfs:comment": "Fetches every station in a region",
@@ -149,8 +149,11 @@ func TestCheckOntologyReportsASubClassOfWrittenAsAString(t *testing.T) {
 	require.Equal(t, `ontology.jsonld:13: rdfs:subClassOf is an IRI reference, written {"@id": "salmodule:Task"}; a bare string is a literal that sal ignores`, problems[1])
 }
 
-func TestCheckOntologyReportsAnInvalidEnvironmentVariableName(t *testing.T) {
-	require.Equal(t, []string{"ontology.jsonld:11: An environment variable name holds only letters, digits, and underscores and does not start with a digit"}, checkOntology(t, `"STATION_TASK"`, `"station task"`))
+func TestCheckOntologyRefusesRenamingTheTaskInstanceVariable(t *testing.T) {
+	problems := checkOntology(t, `"rdfs:label": "Weather stations"`, `"rdfs:label": "Weather stations", "salmodule:taskInstanceEnvVar": "STATION_TASK"`)
+
+	require.Len(t, problems, 1)
+	require.Contains(t, problems[0], "ontology.jsonld:11: salmodule:taskInstanceEnvVar is not a term of the SAL Module ontology")
 }
 
 func TestCheckOntologyReportsABaseInTheContext(t *testing.T) {

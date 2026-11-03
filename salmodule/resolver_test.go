@@ -159,7 +159,7 @@ func TestResolverBuildsEachModuleOnlyOnce(t *testing.T) {
 	require.NoError(t, err)
 	_, err = resolver.Ontology(context.Background(), ref)
 	require.NoError(t, err)
-	_, err = resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), TaskStream{}, TaskStream{})
+	_, err = resolver.RunTask(context.Background(), ref, "{}", t.TempDir(), TaskStream{}, TaskStream{})
 	require.NoError(t, err)
 
 	require.Len(t, runner.builds, 1)
@@ -278,10 +278,10 @@ func TestResolverRunTaskPassesTaskInstanceThroughEnvironment(t *testing.T) {
 	ref, err := ParseModuleIRI(testModuleNamespace)
 	require.NoError(t, err)
 
-	_, err = newTestResolver(runner).RunTask(context.Background(), ref, "MODULE_TASK", `{"@id":"x"}`, t.TempDir(), TaskStream{}, TaskStream{})
+	_, err = newTestResolver(runner).RunTask(context.Background(), ref, `{"@id":"x"}`, t.TempDir(), TaskStream{}, TaskStream{})
 
 	require.NoError(t, err)
-	require.Equal(t, []string{`MODULE_TASK={"@id":"x"}`}, runner.runs[0].env)
+	require.Equal(t, []string{`SALMODULE_TASK_INSTANCE={"@id":"x"}`}, runner.runs[0].env)
 	require.Equal(t, []string{BaseCommand, RunCommand}, runner.runs[0].cmd)
 }
 
@@ -363,7 +363,7 @@ func TestResolverRunTaskReadsStderrAsAControlChannel(t *testing.T) {
 
 	var stdout, stderr []string
 	var stderrLines []int
-	_, err = newTestResolver(runner).RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(),
+	_, err = newTestResolver(runner).RunTask(context.Background(), ref, "{}", t.TempDir(),
 		TaskStream{Sink: collectLines(&stdout)},
 		TaskStream{Sink: func(line []byte, lineNumber int) error {
 			stderr = append(stderr, string(line))
@@ -388,7 +388,7 @@ func TestResolverRunTaskStopsWhenTheStderrSinkRefuses(t *testing.T) {
 	ref, err := ParseModuleIRI(testModuleNamespace)
 	require.NoError(t, err)
 
-	_, err = newTestResolver(runner).RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), TaskStream{}, TaskStream{Sink: func([]byte, int) error {
+	_, err = newTestResolver(runner).RunTask(context.Background(), ref, "{}", t.TempDir(), TaskStream{}, TaskStream{Sink: func([]byte, int) error {
 		return fmt.Errorf("refused")
 	}})
 

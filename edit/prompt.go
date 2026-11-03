@@ -161,7 +161,7 @@ func promptData(dir string, namespace string, document []byte) (*promptModule, e
 		Dir:              dir,
 		OntologyFile:     salmodule.OntologyFile,
 		Namespace:        namespace,
-		EnvVar:           salmodule.DefaultTaskInstanceEnvVar,
+		EnvVar:           salmodule.TaskInstanceEnvVar,
 		Image:            "sal-module-" + strings.ToLower(filepath.Base(dir)),
 		Skills:           pkg.InstalledSkills(dir, pkg.SalModuleSkill),
 		SkillsRepository: pkg.SkillsRepository,
@@ -182,9 +182,6 @@ func promptData(dir string, namespace string, document []byte) (*promptModule, e
 			data.Creator = stringOf(node["dcterms:creator"])
 			data.Version = stringOf(node["owl:versionInfo"])
 			data.Comment = stringOf(node["rdfs:comment"])
-			if envVar := stringOf(node["salmodule:taskInstanceEnvVar"]); envVar != "" {
-				data.EnvVar = envVar
-			}
 		case isTaskClass(node):
 			data.Tasks = append(data.Tasks, promptTaskOf(node, namespace))
 		case contains(types, "owl:DatatypeProperty") || contains(types, "owl:ObjectProperty"):

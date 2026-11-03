@@ -54,12 +54,6 @@ func findSalModuleTasks(graph *rdflibgo.Graph) ([]salModuleTask, error) {
 				}
 			}
 		}
-		// taskInstanceEnvVar names the environment variable a module reads its
-		// task instance from; it is declared by a module's ontology, not by a
-		// project, whose instances are configured with the module's own properties
-		if triple.Predicate.Value() == salmodule.Namespace+"taskInstanceEnvVar" {
-			slog.Warn(triple.Subject.String() + " sets " + salmodule.Namespace + "taskInstanceEnvVar, which is ignored; configure the task with the properties the module's vocabulary defines")
-		}
 		return true
 	})
 
@@ -194,7 +188,7 @@ func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmo
 	before := pkg.GraphLen(graph)
 	parser := ontology.NewTaskOutputParser(graph, graph.Base())
 	reports := ontology.NewTaskStderrParser(graph.Base())
-	result, runErr := resolver.RunTask(ctx, task.ref, ontology.TaskInstanceEnvVar, taskInstance, blobDir,
+	result, runErr := resolver.RunTask(ctx, task.ref, taskInstance, blobDir,
 		salmodule.TaskStream{Validator: stdoutValidator, Sink: parser.Line},
 		salmodule.TaskStream{Validator: stderrValidator, Sink: reports.Line})
 	// whatever was read before the task ended is parsed even when it failed:

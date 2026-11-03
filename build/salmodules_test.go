@@ -244,7 +244,7 @@ func TestMaterializeSalModulesPassesTheInstanceConfiguredInRDF(t *testing.T) {
 	require.Len(t, runner.runEnv, 1)
 	name, instance, found := strings.Cut(runner.runEnv[0], "=")
 	require.True(t, found)
-	require.Equal(t, salmodule.DefaultTaskInstanceEnvVar, name)
+	require.Equal(t, salmodule.TaskInstanceEnvVar, name)
 	require.JSONEq(t, `{
 		"@id": "https://example.test/project/EducationFinder",
 		"@type": "EducationalHistoryFinder",

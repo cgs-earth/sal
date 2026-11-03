@@ -25,9 +25,10 @@ const (
 	OntologyCommand = "ontology"
 	RunCommand      = "run"
 
-	// DefaultTaskInstanceEnvVar is used when a module ontology does not declare
-	// its own salmodule:taskInstanceEnvVar.
-	DefaultTaskInstanceEnvVar = "SALMODULE_TASK_INSTANCE"
+	// TaskInstanceEnvVar is the environment variable the task instance is
+	// passed to a module's run command in, the one the salmodule:TaskInstance
+	// individual names. Every module reads it; a module cannot rename it.
+	TaskInstanceEnvVar = "SALMODULE_TASK_INSTANCE"
 
 	// defaultModuleHost is assumed when a salmodule:// IRI omits the host.
 	defaultModuleHost = "github.com"

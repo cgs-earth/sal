@@ -229,7 +229,7 @@ func TestRunTaskStopsAtTheFirstLineThatViolatesTheStdoutShape(t *testing.T) {
 	validator, err := ontology.StdoutValidator(testModuleNamespace+"PlaceFinder", testProjectBase)
 	require.NoError(t, err)
 
-	_, err = resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), TaskStream{Validator: validator}, TaskStream{})
+	_, err = resolver.RunTask(context.Background(), ref, "{}", t.TempDir(), TaskStream{Validator: validator}, TaskStream{})
 
 	var shapeErr StreamShapeError
 	require.True(t, errors.As(err, &shapeErr), err)
@@ -254,7 +254,7 @@ func TestRunTaskValidatesEveryLineWhenAllConform(t *testing.T) {
 	require.NoError(t, err)
 
 	var lines []string
-	result, err := resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), TaskStream{Validator: validator, Sink: collectLines(&lines)}, TaskStream{})
+	result, err := resolver.RunTask(context.Background(), ref, "{}", t.TempDir(), TaskStream{Validator: validator, Sink: collectLines(&lines)}, TaskStream{})
 
 	require.NoError(t, err)
 	require.Len(t, lines, 2)
@@ -331,7 +331,7 @@ func TestRunTaskStopsATaskWhoseStderrViolatesItsStderrShape(t *testing.T) {
 	validator, err := ontology.StderrValidator(testModuleNamespace+"StrictReporter", testProjectBase)
 	require.NoError(t, err)
 
-	_, err = resolver.RunTask(context.Background(), ref, DefaultTaskInstanceEnvVar, "{}", t.TempDir(), TaskStream{}, TaskStream{Validator: validator})
+	_, err = resolver.RunTask(context.Background(), ref, "{}", t.TempDir(), TaskStream{}, TaskStream{Validator: validator})
 
 	var shapeErr StreamShapeError
 	require.True(t, errors.As(err, &shapeErr), err)

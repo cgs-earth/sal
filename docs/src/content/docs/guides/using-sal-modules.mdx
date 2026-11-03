@@ -87,18 +87,18 @@ The rules SAL follows when writing it:
 
 ### Which ontology term describes what
 
-Two terms of the SAL Module ontology are involved, and it is worth keeping them apart:
+Two individuals of the SAL Module ontology are involved, and it is worth keeping them apart:
 
-- `salmodule:RunCommand` is the individual describing the `salmodule run` invocation the task instance is an
-  input to, and so is what documents the JSON-LD node object above. The `salmodule:TaskInstance` individual
-  names the environment variable it arrives in, `SALMODULE_TASK_INSTANCE`.
-- `salmodule:taskInstanceEnvVar` is the one property a module may set on its own ontology node, to carry the
-  task instance in a differently named variable. Left unset, the variable is `SALMODULE_TASK_INSTANCE`.
+- `salmodule:RunCommand` describes the `salmodule run` invocation the task instance is an input to, and so
+  is what documents the JSON-LD node object above.
+- `salmodule:TaskInstance` names the environment variable it arrives in, `SALMODULE_TASK_INSTANCE`. The
+  name is fixed by the specification; a module cannot rename it.
 
 :::caution
-Neither property is written in a project's RDF. Earlier versions of SAL took the task instance from a
-JSON-LD literal attached to the instance with `salmodule:taskInstanceEnvVar`; SAL now warns that such a
-value is ignored and builds the task instance from the instance's own properties instead.
+Neither is written in a project's RDF. Earlier versions of SAL took the task instance from a JSON-LD
+literal attached to the instance with a `salmodule:taskInstanceEnvVar` property; that property no longer
+exists, so `sal validate` reports it as an undefined term, and the task instance is built from the
+instance's own properties instead.
 :::
 
 ## What SAL does with it
