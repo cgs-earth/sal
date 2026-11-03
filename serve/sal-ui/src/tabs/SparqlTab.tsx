@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Yasgui from '@zazuko/yasgui'
 import '@zazuko/yasgui/build/yasgui.min.css'
@@ -15,6 +15,11 @@ import { TermDefinitions } from './sparql/TermDefinitions'
 import { SqlPreview, type Translation } from './sparql/SqlPreview'
 import { publishResult, useResults } from '../results'
 import { MapLinkButton } from '../components/MapLinkButton'
+import { LoadingState } from '../components/LoadingState'
+
+// The OpenRouter agent toolkit is only needed once the assistant is opened,
+// so it stays out of the SPARQL tab's own chunk.
+const AssistantPane = lazy(() => import('./sparql/AssistantPane').then((module) => ({ default: module.AssistantPane })))
 
 registerGraphPlugin(Yasgui)
 // Before the first Yasgui is built, since it decides which completers a new
@@ -25,6 +30,8 @@ registerSalCompleters(Yasgui)
 const SHOW_SQL_KEY = 'sal-ui.sparql.showSql'
 /** Where the Definitions pane's on/off choice is remembered; it is on until turned off. */
 const SHOW_DEFINITIONS_KEY = 'sal-ui.sparql.showDefinitions'
+/** Where the assistant pane's on/off choice is remembered. */
+const SHOW_ASSISTANT_KEY = 'sal-ui.sparql.showAssistant'
 
 function readShowSql(): boolean {
   try {
@@ -40,6 +47,21 @@ function readShowDefinitions(): boolean {
   } catch {
     return true
   }
+}
+
+function readShowAssistant(): boolean {
+  try {
+    return localStorage.getItem(SHOW_ASSISTANT_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+/** The snapshot IDs the Stats listing holds, newest first, for the assistant's diff queries. */
+function snapshotIds(snapshots: QueryResult | null): string[] {
+  const column = snapshots?.header?.indexOf('snapshot_id') ?? -1
+  if (column < 0) return []
+  return (snapshots?.rows ?? []).map((row) => row[column] ?? '').filter((id) => id !== '')
 }
 
 /** The class on a Yasqe root that narrows its editor to make room for the Definitions pane. */
@@ -379,10 +401,8 @@ LIMIT 100`,
  * no snapshot listing there is no ID to write, so there are no samples.
  */
 function snapshotSamples(snapshots: QueryResult | null): Sample[] {
-  const column = snapshots?.header?.indexOf('snapshot_id') ?? -1
-  if (column < 0) return []
   // The Stats listing is ordered newest first.
-  const ids = (snapshots?.rows ?? []).map((row) => row[column] ?? '').filter((id) => id !== '')
+  const ids = snapshotIds(snapshots)
   const previous = ids[1] ?? ids[0]
   if (!previous) return []
   const snapshot = `SERVICE <${window.location.origin}/v${previous}/sparql> {
@@ -441,6 +461,18 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
   const showSqlRef = useRef(showSql)
   showSqlRef.current = showSql
   const [translation, setTranslation] = useState<Translation>({ status: 'empty' })
+  // The assistant is a side pane like the SQL one, off until asked for and
+  // remembered; its conversation lives in its own store, so closing the pane
+  // keeps it.
+  const [showAssistant, setShowAssistant] = useState(readShowAssistant)
+  const toggleShowAssistant = (next: boolean) => {
+    setShowAssistant(next)
+    try {
+      localStorage.setItem(SHOW_ASSISTANT_KEY, String(next))
+    } catch {
+      // Storage may be unavailable; the pane still follows the box for this visit.
+    }
+  }
   // The help note is closed until asked for and not remembered, since it only
   // explains the header's controls.
   const [showHelp, setShowHelp] = useState(false)
@@ -671,6 +703,17 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
     tab.setName(sample.name)
   }
 
+  // A query the assistant wrote goes into the active tab the same way, named
+  // for where it came from, and is run from there when asked.
+  const insertAssistantQuery = (query: string, run: boolean) => {
+    const tab = yasgui.current?.getTab()
+    if (!tab) return
+    tab.setQuery(query)
+    tab.setName('Assistant')
+    scheduleTranslation()
+    if (run) void tab.query()
+  }
+
   return (
     <div className="tab-body sparql">
       <section className="panel yasgui-panel">
@@ -704,6 +747,20 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
               <input type="checkbox" checked={showSql} onChange={(event) => toggleShowSql(event.target.checked)} />
               Show SQL
             </label>
+            {/* A star, the one icon in the strip: the assistant is the one
+                control that is not about the query already in the editor. */}
+            <button
+              type="button"
+              className={`icon-button assistant-toggle${showAssistant ? ' active' : ''}`}
+              aria-label="Assistant"
+              aria-pressed={showAssistant}
+              title="Assistant: write queries with an AI model, through your own OpenRouter key"
+              onClick={() => toggleShowAssistant(!showAssistant)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 3l2.6 6.1 6.4.6-4.9 4.3 1.5 6.5L12 17.1l-5.6 3.4 1.5-6.5L3 9.7l6.4-.6z" />
+              </svg>
+            </button>
             <button
               type="button"
               className={`button small help-button${showHelp ? ' active' : ''}`}
@@ -738,6 +795,18 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
                 Untick it to give the editor its full width back.
               </li>
               <li>
+                The <strong>star</strong> opens an assistant, a chat that writes queries from a description, explains or fixes the one in
+                the editor, and answers questions about what the dataset holds. It runs in this browser against{' '}
+                <a href="https://openrouter.ai/" target="_blank" rel="noreferrer">
+                  OpenRouter
+                </a>{' '}
+                with an API key you enter, kept in the browser and sent nowhere else; the model is given the pinned
+                vocabularies as context and tools to look terms up, read which classes and predicates the table uses,
+                and run its drafts against <code>/sparql</code> before answering. The query it hands over can be inserted
+                into the editor or run from the chat. Your messages, the editor&apos;s query, and the first rows of the
+                queries it runs go to the model.
+              </li>
+              <li>
                 A <code>SERVICE</code> naming <code>/v&#123;snapshot&#125;/sparql</code> reads the table at an earlier
                 snapshot, and <code>MINUS</code> subtracts one from the other, so one query can diff two.
               </li>
@@ -757,13 +826,30 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
             </ul>
           </div>
         )}
-        {/* The host stays mounted whether or not the SQL pane is shown, since
-            the Yasgui instance lives in it. With the pane on, the workspace
-            puts the two side by side when it is wide enough and stacks them
-            otherwise; see .sparql-workspace in App.css. */}
-        <div className={`sparql-workspace${showSql ? ' with-sql' : ''}`}>
+        {/* The host stays mounted whether or not a side pane is shown, since
+            the Yasgui instance lives in it. With the SQL pane or the assistant
+            on, the workspace puts the editor and the side column side by side
+            when it is wide enough and stacks them otherwise; see
+            .sparql-workspace in App.css. */}
+        <div className={`sparql-workspace${showSql || showAssistant ? ' with-side' : ''}`}>
           <div className="yasgui-host" ref={container} />
-          {showSql && <SqlPreview translation={translation} height={editorHeight} />}
+          {(showSql || showAssistant) && (
+            <div className="sparql-side">
+              {showSql && <SqlPreview translation={translation} height={editorHeight} />}
+              {showAssistant && (
+                <Suspense fallback={<LoadingState message="Loading the assistant…" delay={200} size="inline" />}>
+                  <AssistantPane
+                    vocabularies={vocabularies}
+                    snapshots={snapshotIds(snapshots)}
+                    currentQuery={() => yasgui.current?.getTab()?.getQuery() ?? ''}
+                    onInsert={(query) => insertAssistantQuery(query, false)}
+                    onRun={(query) => insertAssistantQuery(query, true)}
+                    onClose={() => toggleShowAssistant(false)}
+                  />
+                </Suspense>
+              )}
+            </div>
+          )}
         </div>
         {/* The host is appended last to Yasr's header, so Yasr's own flex spacer
             pushes it to the right of the Table/Graph/Response plugin buttons. */}

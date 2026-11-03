@@ -205,6 +205,38 @@ export async function runSQL(sql: string, signal?: AbortSignal): Promise<QueryRe
   return (await response.json()) as QueryResult
 }
 
+/** One bound value in a SPARQL JSON result. */
+export type SparqlBinding = {
+  type: 'uri' | 'literal' | 'bnode'
+  value: string
+  datatype?: string
+  'xml:lang'?: string
+}
+
+/** The `application/sparql-results+json` document `/sparql` answers: bindings for a SELECT or CONSTRUCT, a boolean for an ASK. */
+export type SparqlResults = {
+  head: { vars?: string[] }
+  results?: { bindings: Record<string, SparqlBinding>[] }
+  boolean?: boolean
+}
+
+/**
+ * Runs a SPARQL query against the `/sparql` endpoint the SPARQL tab's editor
+ * is pointed at, which reads whichever table the server currently serves. A
+ * query the translator rejects rejects with the message the endpoint answers,
+ * so the assistant can read why and try again.
+ */
+export async function runSparql(query: string, signal?: AbortSignal): Promise<SparqlResults> {
+  const response = await fetch('/sparql', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/sparql-query', Accept: 'application/sparql-results+json' },
+    body: query,
+    signal,
+  })
+  if (!response.ok) throw await failure(response)
+  return (await response.json()) as SparqlResults
+}
+
 /**
  * The DuckDB SQL the `/sparql` endpoint would run a SPARQL query as. Nothing is
  * run; the SPARQL tab shows this beside the editor to explain what a query does

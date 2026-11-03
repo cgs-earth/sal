@@ -2260,28 +2260,40 @@ kbd {
   min-width: 0;
 }
 
-/* The workspace holds Yasgui and, when asked for, the read-only pane showing
-   the SQL the query translates to. The pane goes beside the editor when the
-   workspace is wide enough for both to be read, and below it otherwise; the
-   decision is made on the workspace's own width rather than the viewport's, so
-   it holds whatever else the page is doing. */
-.sparql-workspace {
+/* The workspace holds Yasgui and, when asked for, a side column with the
+   read-only pane showing the SQL the query translates to and the assistant's
+   chat, either or both. The column goes beside the editor when the panel is
+   wide enough for both to be read, and below it otherwise; the decision is
+   made on the panel's width rather than the viewport's, so it holds whatever
+   else the page is doing. The panel is the query container, since an element
+   cannot answer a container query about itself. */
+.yasgui-panel {
   container-type: inline-size;
+}
+
+.sparql-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   flex: none;
 }
 
+.sparql-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
 @container (min-width: 1100px) {
-  .sparql-workspace.with-sql {
+  .sparql-workspace.with-side {
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
     align-items: start;
   }
 
-  /* Yasgui's results grow the left column past the editor; sticking the pane
-     keeps it beside the editor it explains as the tab scrolls. */
-  .sparql-workspace.with-sql > .sql-preview {
+  /* Yasgui's results grow the left column past the editor; sticking the
+     column keeps the panes beside the editor they belong to as the tab scrolls. */
+  .sparql-workspace.with-side > .sparql-side {
     position: sticky;
     top: 0;
   }
@@ -2329,6 +2341,321 @@ kbd {
   margin: 12px;
   white-space: pre-wrap;
   overflow: auto;
+}
+
+/* ---------- sparql: assistant ---------- */
+
+/* The chat docked in the side column: a header strip, the settings when
+   open, the messages scrolling in the middle, and the box to type in. */
+.assistant-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: min(72vh, 720px);
+  border: var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+.assistant-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  padding: 8px 12px;
+  border-bottom: var(--border);
+}
+
+.assistant-header h4 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--accent-ink);
+}
+
+.assistant-model {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.assistant-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.assistant-header-actions .button.small {
+  padding: 3px 10px;
+  font-size: 11px;
+}
+
+.assistant-header-actions .button.active {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* The star in the panel header, filled while the pane is open. */
+.assistant-toggle {
+  width: 28px;
+  height: 28px;
+}
+
+.assistant-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.assistant-toggle.active {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.assistant-toggle.active svg {
+  fill: currentColor;
+}
+
+.assistant-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: none;
+  padding: 12px;
+  border-bottom: var(--border);
+  background: var(--bg-panel);
+}
+
+.assistant-settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.assistant-settings .module-input {
+  font-size: 12px;
+}
+
+.assistant-settings .hint {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.assistant-settings-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.assistant-messages {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.assistant-welcome p {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+}
+
+.assistant-welcome code,
+.assistant-message code {
+  color: var(--code);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.assistant-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.assistant-suggestions .chip {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  text-align: left;
+}
+
+.assistant-suggestions .chip:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+/* A user's message is a bubble at the right in the accent tint; the
+   assistant's is the column's own text, with its tool rows between the
+   paragraphs. */
+.assistant-message {
+  margin-bottom: 12px;
+}
+
+.assistant-message p {
+  margin: 0 0 8px;
+}
+
+.assistant-message ul {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.assistant-message.user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.assistant-message.user p {
+  max-width: 85%;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border-bottom-right-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.assistant-code {
+  margin: 0 0 10px;
+  border: var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+.assistant-code pre {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.assistant-code-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px 8px;
+  border-top: var(--border);
+}
+
+.assistant-code-actions .button.small {
+  padding: 3px 10px;
+  font-size: 11px;
+}
+
+/* One tool call, closed to a line with a status dot: amber while running,
+   green when it answered, red when it failed. Open, the call and its
+   answer as JSON. */
+.assistant-tool {
+  --tool-ink: var(--warn-ink);
+  margin: 0 0 8px;
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  font-size: 12px;
+}
+
+.assistant-tool.done {
+  --tool-ink: var(--success);
+}
+
+.assistant-tool.failed {
+  --tool-ink: var(--danger);
+}
+
+.assistant-tool summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.assistant-tool summary::-webkit-details-marker {
+  display: none;
+}
+
+.assistant-tool-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tool-ink);
+}
+
+.assistant-tool.running .assistant-tool-dot {
+  animation: header-table-pulse 900ms ease-in-out infinite;
+}
+
+.assistant-tool-title {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.assistant-tool-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-tool.failed .assistant-tool-summary {
+  color: var(--danger);
+}
+
+.assistant-tool pre {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 260px;
+  border-top: var(--border);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.assistant-thinking {
+  color: var(--text-faint);
+  animation: header-table-pulse 900ms ease-in-out infinite;
+}
+
+.assistant-error {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.assistant-compose {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex: none;
+  padding: 10px 12px;
+  border-top: var(--border);
+  background: var(--bg-panel);
+}
+
+.assistant-input {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.assistant-input:disabled {
+  opacity: 0.6;
 }
 
 /* ---------- sparql: graph tab ---------- */

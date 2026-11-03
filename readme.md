@@ -16,3 +16,4 @@ To install the latest version of SAL, run the following command:
 ```
 go install -a github.com/cgs-earth/sal@latest
 ```
+
