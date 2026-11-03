@@ -132,10 +132,10 @@ func describe(step *Step) (label string, detail string) {
 	case "docker.image.build":
 		label = "Build the image"
 	case "docker.image.inspect":
-		label = "Look up the image"
+		label = "Check for a cached image"
 		if status, ok := step.attrInt("http.response.status_code"); ok {
 			if status == http.StatusNotFound {
-				parts = append(parts, "not found")
+				parts = append(parts, "not found, so the module is built")
 			} else if status < 400 {
 				parts = append(parts, "found")
 			}

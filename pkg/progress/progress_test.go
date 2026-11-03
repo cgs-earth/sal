@@ -397,9 +397,9 @@ func TestRenderDoesNotFailAnImageLookupThatFoundNoImage(t *testing.T) {
 
 	text := plain(tracker.Render(140, time.Now(), "⠋"))
 
-	require.Contains(t, text, "✓ Look up the image  not found")
-	require.Contains(t, text, "✓ Look up the image  found")
-	require.Contains(t, text, "✗ Look up the image")
+	require.Contains(t, text, "○ Check for a cached image  not found, so the module is built")
+	require.Contains(t, text, "✓ Check for a cached image  found")
+	require.Contains(t, text, "✗ Check for a cached image")
 	require.Contains(t, text, "daemon error")
 }
 

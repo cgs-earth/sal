@@ -28,6 +28,7 @@ const (
 var (
 	styleDone     = lipgloss.NewStyle().Foreground(lipgloss.Color(colorGreen))
 	styleFailed   = lipgloss.NewStyle().Foreground(lipgloss.Color(colorRed))
+	styleUnmet    = lipgloss.NewStyle().Foreground(lipgloss.Color(colorYellow))
 	styleRunning  = lipgloss.NewStyle().Foreground(lipgloss.Color(colorBlue))
 	stylePending  = lipgloss.NewStyle().Foreground(lipgloss.Color(colorOverlay1))
 	stylePhase    = lipgloss.NewStyle().Foreground(lipgloss.Color(colorText)).Bold(true)
@@ -128,6 +129,8 @@ func (t *Tracker) stepRows(rows []row, step *Step, depth int, label string, now 
 				}
 			}
 		}
+	case step.Unmet:
+		r.mark = styleUnmet.Render("○")
 	default:
 		r.mark = styleDone.Render("✓")
 	}
