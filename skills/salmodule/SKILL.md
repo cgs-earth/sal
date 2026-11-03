@@ -52,7 +52,7 @@ Print one JSON-LD document to stdout and exit 0. Requirements:
 - SHACL shapes on the task class, which are how a module declares its contract: `salmodule:taskShape`
   (what a valid instance looks like), `salmodule:stdinShape` (what the task consumes),
   `salmodule:stdoutShape` (what the task produces), and optionally `salmodule:stderrShape` (what the nodes
-  it reports on stderr look like, beyond the `rdfs:comment` every `salmodule:Error` carries). A task that
+  it reports on stderr look like, beyond the `rdfs:label` and `rdfs:comment` every `salmodule:Error` must carry). A task that
   writes nodes to stdout should declare a `salmodule:stdoutShape`; `sal build` warns when the class has
   none and runs the task unchecked.
   `salmodule:stdoutShape` is enforced: `sal build` validates every line the task writes against it, with the
@@ -115,8 +115,10 @@ Write output as newline delimited JSON, one node object per line, using keys the
 - Only stdout is data. Logs and progress go to stderr, which `sal` surfaces as warnings.
 - On failure, print an error node on its own line to stderr and exit non-zero; `sal` reads every line of
   stderr that is a JSON object as a node, reports the message, and fails the run:
-  `{"@type": "salmodule:Error", "rdfs:comment": "reference server returned 503"}`
-  Never print an error node to stdout, where it would have to satisfy the output shape.
+  `{"@type": "salmodule:Error", "rdfs:label": "Unreachable", "rdfs:comment": "reference server returned 503"}`
+  An error node must carry both an `rdfs:label` naming the error and an `rdfs:comment` describing it; `sal`
+  reports the failure as `label: comment`, and a node missing either still fails the run with a message
+  saying which it lacks. Never print an error node to stdout, where it would have to satisfy the output shape.
 
 ### Handing over files
 
@@ -186,6 +188,6 @@ build without rebuilding the sources, which is quicker while iterating on the mo
       and at least one class that subclasses a `salmodule:` task class.
 - [ ] Every configuration property is declared in the ontology.
 - [ ] `salmodule run` reads `SALMODULE_TASK_INSTANCE`, writes NDJSON to stdout, logs to stderr.
-- [ ] Failures print a `salmodule:Error` node to stderr and exit non-zero.
+- [ ] Failures print a `salmodule:Error` node carrying both `rdfs:label` and `rdfs:comment` to stderr and exit non-zero.
 - [ ] Files, or every file in a directory, are fully written before the line that references them with `file:///`.
 - [ ] Repository is pushed; `sal salmodule inspect` succeeds against it.

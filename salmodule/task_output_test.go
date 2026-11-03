@@ -98,12 +98,14 @@ func TestGraphFromTaskOutputReadsEveryOutputLine(t *testing.T) {
 }
 
 func TestGraphFromTaskOutputReportsModuleErrors(t *testing.T) {
-	output := `{"@type":"salmodule:Error","rdfs:comment":"Failed to fetch data: status code = 500"}`
+	output := `{"@type":"salmodule:Error","rdfs:label":"FetchFailed","rdfs:comment":"Failed to fetch data: status code = 500"}`
 
 	_, err := parseTaskOutput(t, testTaskOntology(t), output)
 
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "Failed to fetch data: status code = 500")
+	var taskErr TaskError
+	require.ErrorAs(t, err, &taskErr)
+	require.Equal(t, []string{"FetchFailed: Failed to fetch data: status code = 500"}, taskErr.Messages)
+	require.Contains(t, err.Error(), "FetchFailed: Failed to fetch data: status code = 500")
 	require.Contains(t, err.Error(), testModuleNamespace)
 }
 
@@ -140,7 +142,7 @@ func TestTaskOutputParserKeepsBlankNodesOfDifferentBatchesApart(t *testing.T) {
 // An error node and its message can arrive in different batches and still be
 // reported together, since the message is read back out of the graph.
 func TestTaskOutputParserReportsAnErrorSplitAcrossBatches(t *testing.T) {
-	lines := []string{`{"@id":"https://example.test/failure","@type":"salmodule:Error"}`}
+	lines := []string{`{"@id":"https://example.test/failure","@type":"salmodule:Error","rdfs:label":"Upstream"}`}
 	for i := 0; i < taskOutputBatchLines; i++ {
 		lines = append(lines, `{"@id":"https://example.test/a","schema:name":"A"}`)
 	}
@@ -150,7 +152,7 @@ func TestTaskOutputParserReportsAnErrorSplitAcrossBatches(t *testing.T) {
 
 	var taskErr TaskError
 	require.ErrorAs(t, err, &taskErr)
-	require.Equal(t, []string{"upstream is down"}, taskErr.Messages)
+	require.Equal(t, []string{"Upstream: upstream is down"}, taskErr.Messages)
 }
 
 func TestTaskOutputParserCollectsTheTriplesNamingFiles(t *testing.T) {
@@ -223,8 +225,45 @@ func TestTaskStderrParserReportsModuleErrors(t *testing.T) {
 
 	var taskErr TaskError
 	require.ErrorAs(t, err, &taskErr)
-	require.Equal(t, []string{"reference server returned 503"}, taskErr.Messages)
+	require.Equal(t, []string{"Unreachable: reference server returned 503"}, taskErr.Messages)
 	require.Equal(t, testModuleNamespace, taskErr.Namespace)
+}
+
+// An error node must carry both an rdfs:label and an rdfs:comment. One
+// missing either still fails the task, since it is the task's own account of
+// why it failed, but the message says what the node lacks next to what it
+// did say.
+func TestTaskStderrParserReportsAnErrorMissingItsLabel(t *testing.T) {
+	parser := testTaskOntology(t).NewTaskStderrParser(testProjectBase)
+
+	require.NoError(t, parser.Line([]byte(`{"@type":"salmodule:Error","rdfs:comment":"reference server returned 503"}`), 1))
+	err := parser.Finish()
+
+	var taskErr TaskError
+	require.ErrorAs(t, err, &taskErr)
+	require.Equal(t, []string{"reference server returned 503 (the error node has no rdfs:label; a salmodule:Error must carry both an rdfs:label and an rdfs:comment)"}, taskErr.Messages)
+}
+
+func TestTaskStderrParserReportsAnErrorMissingItsComment(t *testing.T) {
+	parser := testTaskOntology(t).NewTaskStderrParser(testProjectBase)
+
+	require.NoError(t, parser.Line([]byte(`{"@type":"salmodule:Error","rdfs:label":"Unreachable"}`), 1))
+	err := parser.Finish()
+
+	var taskErr TaskError
+	require.ErrorAs(t, err, &taskErr)
+	require.Equal(t, []string{"Unreachable (the error node has no rdfs:comment; a salmodule:Error must carry both an rdfs:label and an rdfs:comment)"}, taskErr.Messages)
+}
+
+func TestTaskStderrParserReportsAnErrorWithNeitherLabelNorComment(t *testing.T) {
+	parser := testTaskOntology(t).NewTaskStderrParser(testProjectBase)
+
+	require.NoError(t, parser.Line([]byte(`{"@type":"salmodule:Error"}`), 1))
+	err := parser.Finish()
+
+	var taskErr TaskError
+	require.ErrorAs(t, err, &taskErr)
+	require.Equal(t, []string{"the error node has neither an rdfs:label nor an rdfs:comment; a salmodule:Error must carry both an rdfs:label and an rdfs:comment"}, taskErr.Messages)
 }
 
 func TestTaskStderrParserReportsNothingWithoutErrorNodes(t *testing.T) {
@@ -249,8 +288,8 @@ func TestTaskStderrParserRejectsALineThatIsNotAnObject(t *testing.T) {
 func TestGraphFromTaskOutputWarnsAboutAnErrorReportedOnStdout(t *testing.T) {
 	logs := captureWarnings(t)
 
-	_, err := parseTaskOutput(t, testTaskOntology(t), `{"@type":"salmodule:Error","rdfs:comment":"boom"}`)
+	_, err := parseTaskOutput(t, testTaskOntology(t), `{"@type":"salmodule:Error","rdfs:label":"Boom","rdfs:comment":"boom"}`)
 
-	require.ErrorContains(t, err, "boom")
+	require.ErrorContains(t, err, "Boom: boom")
 	require.Contains(t, logs.String(), "salmodule:Error on stdout")
 }

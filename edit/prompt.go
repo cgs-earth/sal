@@ -567,8 +567,9 @@ Input (from salmodule:stdinShape; the nodes another task produced arrive on stan
 - A relative "@id" resolves against the project that runs the task, not the module. Use absolute IRIs for
   anything owned by an external source.
 - Only stdout is data. Logs and progress go to stderr, which sal surfaces as warnings.
-- On failure, print {"@type": "salmodule:Error", "rdfs:comment": "what went wrong"} on its own line to stderr
-  and exit non-zero; sal reads every JSON object on stderr as a node, reports the message, and fails the build.
+- On failure, print {"@type": "salmodule:Error", "rdfs:label": "what failed", "rdfs:comment": "what went wrong"}
+  on its own line to stderr and exit non-zero; sal reads every JSON object on stderr as a node, reports the
+  failure as "label: comment", and fails the build. Both the rdfs:label and the rdfs:comment are required.
   Never print an error node to stdout, where it would have to satisfy the output shape.
 - To hand over a file, write it completely inside the container and then reference it as {"@id": "file:///abs/path"};
   a directory ends in a slash. sal copies it out while the task runs, so finish writing before printing the line.

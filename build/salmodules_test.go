@@ -272,13 +272,13 @@ func TestMaterializeSalModulesFailsWhenTheModuleReportsAnError(t *testing.T) {
 	graph := parseTestProject(t, testProject)
 	runner := &testContainerRunner{
 		ontology:  testModuleOntology,
-		runOutput: `{"@type":"salmodule:Error","rdfs:comment":"reference feature server is unreachable"}`,
+		runOutput: `{"@type":"salmodule:Error","rdfs:label":"Unreachable","rdfs:comment":"reference feature server is unreachable"}`,
 	}
 
 	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "reference feature server is unreachable")
+	require.Contains(t, err.Error(), "Unreachable: reference feature server is unreachable")
 }
 
 func TestMaterializeSalModulesPrefersTheModuleErrorOverTheContainerExitStatus(t *testing.T) {
@@ -286,7 +286,7 @@ func TestMaterializeSalModulesPrefersTheModuleErrorOverTheContainerExitStatus(t 
 	// a task reports why it failed on stdout and then exits non-zero
 	runner := &testContainerRunner{
 		ontology:  testModuleOntology,
-		runOutput: `{"@type":"salmodule:Error","rdfs:comment":"reference feature server is unreachable"}`,
+		runOutput: `{"@type":"salmodule:Error","rdfs:label":"Unreachable","rdfs:comment":"reference feature server is unreachable"}`,
 		runErr:    fmt.Errorf("container exited with status 1"),
 	}
 
@@ -600,7 +600,7 @@ func TestMaterializeSalModulesReportsErrorsATaskWritesToStderr(t *testing.T) {
 
 	var taskErr salmodule.TaskError
 	require.ErrorAs(t, err, &taskErr)
-	require.Equal(t, []string{"reference feature server is unreachable"}, taskErr.Messages)
+	require.Equal(t, []string{"Unreachable: reference feature server is unreachable"}, taskErr.Messages)
 	require.Equal(t, 0, tasksRun)
 }
 

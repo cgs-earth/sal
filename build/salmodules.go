@@ -161,7 +161,8 @@ func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmo
 	// contract, but a module that predates the shape is not failed for it.
 	// The shape it declares for stderr, its control channel, is enforced the
 	// same way; a class without one is the usual case, since the SAL Module
-	// ontology already says what a salmodule:Error carries
+	// ontology already says what a salmodule:Error carries, an rdfs:label
+	// and an rdfs:comment, which the stderr parser requires of every one
 	stdoutValidator, err := ontology.StdoutValidator(task.classIRI, graph.Base())
 	if err != nil {
 		return false, nil, fmt.Errorf("run: %w", err)
