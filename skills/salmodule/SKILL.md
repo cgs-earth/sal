@@ -38,14 +38,20 @@ properties. `sal validate` only asks for the ontology; `sal build` runs tasks, u
 Print one JSON-LD document to stdout and exit 0. Requirements:
 
 - A `@context` that binds every prefix the module uses, in the ontology and in what its tasks print. It
-  is injected into the task output later, so any key a task emits must be resolvable through it. Binding a
-  prefix here is also how the module declares which vocabularies its output is stated in: `sal build` pins,
-  among the project's vocabularies, every namespace a `@context` binds that the output uses a term of as a
-  key, a `@type`, or a literal datatype, and nothing the output only writes as a full IRI. So bind a prefix
-  for every vocabulary the output uses, under the same prefix the output writes its terms with
-  (`schema:name` in the output needs `"schema": "https://schema.org/"` here). `salmodule` must be bound to exactly
-  `https://w3id.org/sal/salmodule#`: bound to anything else, `rdfs:subClassOf salmodule:Task` names a
-  class sal does not know, and sal refuses the module as one with no task to run.
+  is injected into the task output later, so any key a task emits must be resolvable through it.
+  `salmodule` must be bound to exactly `https://w3id.org/sal/salmodule#`: bound to anything else,
+  `rdfs:subClassOf salmodule:Task` names a class sal does not know, and sal refuses the module as one
+  with no task to run.
+- Extra `@context` entries are how the module gets vocabularies pinned. The `@context` is expected to
+  bind prefixes the ontology document itself never uses a term from: they are not stray entries to tidy
+  away but the module declaring which vocabularies its output is stated in. `sal build` pins, among the
+  project's vocabularies, every namespace a `@context` binds that the output uses a term of as a key, a
+  `@type`, or a literal datatype, and nothing the output only writes as a full IRI. So bind a prefix for
+  every vocabulary the output uses, under the same prefix the output writes its terms with: a task that
+  prints `schema:name` and `gsp:asWKT` needs `"schema": "https://schema.org/"` and
+  `"gsp": "http://www.opengis.net/ont/geosparql#"` here, even when no shape or property in the ontology
+  mentions either. A binding the output never uses pins nothing and costs nothing (unlike a prefix a project's
+  own RDF declares, which must resolve), so binding a vocabulary the task may emit is always safe.
 - A node `{"@id": ".", "@type": "owl:Ontology"}` describing the module.
 - The module's own terms as relative IRIs (`"@id": "MyTask"`, `"@id": "maxRetries"`). They resolve
   against the project's `salmodule://.../` prefix, which is why that prefix must end in a slash.
@@ -79,11 +85,13 @@ Print one JSON-LD document to stdout and exit 0. Requirements:
 ```json
 {
   "@context": {
-    "schema": "https://schema.org/",
     "owl": "http://www.w3.org/2002/07/owl#",
     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
     "xsd": "http://www.w3.org/2001/XMLSchema#",
-    "salmodule": "https://w3id.org/sal/salmodule#"
+    "salmodule": "https://w3id.org/sal/salmodule#",
+    "schema": "https://schema.org/",
+    "gsp": "http://www.opengis.net/ont/geosparql#",
+    "sf": "http://www.opengis.net/ont/sf#"
   },
   "@graph": [
     {"@id": ".", "@type": "owl:Ontology", "rdfs:label": "Weather stations"},
@@ -94,6 +102,10 @@ Print one JSON-LD document to stdout and exit 0. Requirements:
   ]
 }
 ```
+
+Nothing in this `@graph` uses `schema`, `gsp`, or `sf`. They are bound because the task output below writes
+`schema:Place`, `gsp:hasGeometry`, and `sf:Point`, and binding them is what makes `sal build` pin
+schema.org, GeoSPARQL, and Simple Features for the project that runs the task.
 
 ## 2. The run command
 
@@ -120,6 +132,8 @@ Write output as newline delimited JSON, one node object per line, using keys the
 - Write every key, `@type`, and literal datatype with a prefix the ontology's `@context` binds, not as a
   full IRI. What is written through a bound prefix is what `sal build` pins as the project's vocabularies;
   a full IRI is parsed as it is but declares no vocabulary, so a term written that way is never pinned.
+  When the output starts using a vocabulary the `@context` does not bind yet, add the prefix to the
+  ontology's `@context` (section 1) rather than spelling the IRI out; the ontology need not use it itself.
   A node may carry a `@context` of its own, as harvested JSON-LD does, and what it binds counts the same.
 - A relative `@id` resolves against the project's namespace, not the module's. Use absolute IRIs for
   anything owned by an external source.
@@ -198,6 +212,8 @@ build without rebuilding the sources, which is quicker while iterating on the mo
 - [ ] `salmodule ontology` prints JSON-LD with a `@context`, an `owl:Ontology` node, relative terms,
       and at least one class that subclasses a `salmodule:` task class.
 - [ ] Every configuration property is declared in the ontology.
+- [ ] The `@context` binds a prefix for every vocabulary the output writes keys, `@type`s, or datatypes
+      with, including ones the ontology itself never uses, so `sal build` pins them.
 - [ ] `salmodule run` reads `SALMODULE_TASK_INSTANCE`, writes NDJSON to stdout, logs to stderr.
 - [ ] Failures print a `salmodule:Error` node carrying both `rdfs:label` and `rdfs:comment` to stderr and exit non-zero.
 - [ ] Files, or every file in a directory, are fully written before the line that references them with `file:///`.
