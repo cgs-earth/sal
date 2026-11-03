@@ -86,10 +86,12 @@ type TaskOutputParser struct {
 	// fileTriples are the triples naming a file:/// IRI as subject or object,
 	// which LinkCopiedFiles rewrites once the copies have landed
 	fileTriples []rdflibgo.Triple
-	// vocabularies are the namespaces of every predicate, class, and
-	// datatype the output has used so far, which the build pins; see
-	// Vocabularies
-	vocabularies map[string]bool
+	// terms are the IRIs of every predicate, class, and datatype the output
+	// has used so far, and bindings the IRIs the module's @context and the
+	// @context of any node bind a prefix or a term to; together they decide
+	// what the build pins, see Vocabularies
+	terms    map[string]bool
+	bindings map[string]bool
 }
 
 // NewTaskOutputParser returns the parser that adds what a task of this module
@@ -114,8 +116,14 @@ func (o *ModuleOntology) newTaskOutputParser(graph *rdflibgo.Graph, base string,
 	if len(o.Context) > 0 {
 		head = append(append([]byte(`{"@context":`), o.Context...), `,"@graph":[`...)
 	}
-	parser := &TaskOutputParser{ontology: o, graph: graph, base: base, stream: stream, head: head, errorNodes: map[string]rdflibgo.Subject{}, vocabularies: map[string]bool{}}
+	parser := &TaskOutputParser{ontology: o, graph: graph, base: base, stream: stream, head: head, errorNodes: map[string]rdflibgo.Subject{}, terms: map[string]bool{}, bindings: map[string]bool{}}
 	parser.pending.Write(head)
+	if len(o.Context) > 0 {
+		var moduleContext any
+		if err := json.Unmarshal(o.Context, &moduleContext); err == nil {
+			parser.noteBindings(moduleContext)
+		}
+	}
 	return parser
 }
 
@@ -130,6 +138,14 @@ func (p *TaskOutputParser) Line(line []byte, lineNumber int) error {
 			return fmt.Errorf("SAL module %s wrote invalid JSON on %s line %d: %w", p.ontology.Namespace, p.stream, lineNumber, err)
 		}
 		return fmt.Errorf("SAL module %s wrote invalid JSON on %s line %d", p.ontology.Namespace, p.stream, lineNumber)
+	}
+	if bytes.Contains(line, []byte("@context")) {
+		// a node that carries a context of its own declares vocabularies
+		// the module's does not; the decode is paid only on such a line
+		var node any
+		if err := json.Unmarshal(line, &node); err == nil {
+			p.noteContexts(node)
+		}
 	}
 	if p.pendingLines == 0 {
 		p.firstPendingLine = lineNumber
@@ -210,21 +226,108 @@ func errorNodeMessage(label, comment string) string {
 // its subject or object, for LinkCopiedFiles to rewrite.
 func (p *TaskOutputParser) FileTriples() []rdflibgo.Triple { return p.fileTriples }
 
-// Vocabularies returns, sorted, the namespace of every term the output has
-// used so far as a predicate, as the class of a typed node, or as a literal's
-// datatype: what the output's triples are stated in, which the build pins so
-// that the vocabularies the table ends up holding terms of are the ones the
-// project lists. Only the output counts: a prefix the module's own @context
-// binds without the output using it, sh for the shapes of its ontology say,
-// is not among them, and neither is a namespace that only names subjects or
-// objects, since those are instances rather than vocabulary.
+// Vocabularies returns, sorted, the namespaces the output's triples are
+// stated in, which the build pins so that the vocabularies the table ends up
+// holding terms of are the ones the project lists. A namespace counts when a
+// @context binds a prefix (or a term, or @vocab) to it, the module ontology's
+// context or one a node carried, and the output used a term of it as a
+// predicate, as the class of a typed node, or as a literal's datatype; the
+// namespace reported is the bound IRI, the longest one the term starts with,
+// the way a source file's declared prefix is what gets pinned. A prefix bound
+// without the output using it, sh for the shapes of the module's ontology
+// say, is not among them, nor is a namespace that only names subjects or
+// objects, since those are instances rather than vocabulary, nor one the
+// output only ever wrote terms of as full IRIs: writing a full IRI is a
+// reference to something, the way a Turtle file writing one is, while
+// binding a prefix declares that the output is stated in that vocabulary. A
+// harvested node typed with a class of an ontology the module never bound,
+// a KnowWhereGraph S2 cell in Geoconnex data say, is left to the project to
+// declare if it wants it pinned.
 func (p *TaskOutputParser) Vocabularies() []string {
-	namespaces := make([]string, 0, len(p.vocabularies))
-	for namespace := range p.vocabularies {
-		namespaces = append(namespaces, namespace)
+	namespaces := map[string]bool{}
+	for term := range p.terms {
+		if namespace := p.boundNamespace(term); namespace != "" {
+			namespaces[namespace] = true
+		}
 	}
-	sort.Strings(namespaces)
-	return namespaces
+	sorted := make([]string, 0, len(namespaces))
+	for namespace := range namespaces {
+		sorted = append(sorted, namespace)
+	}
+	sort.Strings(sorted)
+	return sorted
+}
+
+// boundNamespace is the longest IRI a context bound that term starts with,
+// or "" when no binding covers it.
+func (p *TaskOutputParser) boundNamespace(term string) string {
+	longest := ""
+	for binding := range p.bindings {
+		if len(binding) > len(longest) && strings.HasPrefix(term, binding) {
+			longest = binding
+		}
+	}
+	return longest
+}
+
+// noteContexts records the bindings of every @context the decoded JSON
+// value carries, at its top or on any node nested in it, since JSON-LD lets
+// an embedded node carry a context of its own.
+func (p *TaskOutputParser) noteContexts(value any) {
+	switch value := value.(type) {
+	case map[string]any:
+		for key, nested := range value {
+			if key == "@context" {
+				p.noteBindings(nested)
+			} else {
+				p.noteContexts(nested)
+			}
+		}
+	case []any:
+		for _, element := range value {
+			p.noteContexts(element)
+		}
+	}
+}
+
+// noteBindings records every namespace one decoded @context binds: the value
+// of a prefix or @vocab entry as it is, the namespace of the @id of an
+// expanded term definition, since that declares one term of a vocabulary,
+// and the bindings of a scoped context inside one. A keyword alias ("type":
+// "@type") binds nothing, and a remote context, a string in place of an
+// object, is not fetched.
+func (p *TaskOutputParser) noteBindings(context any) {
+	switch context := context.(type) {
+	case []any:
+		for _, element := range context {
+			p.noteBindings(element)
+		}
+	case map[string]any:
+		for key, value := range context {
+			if strings.HasPrefix(key, "@") && key != "@vocab" {
+				continue
+			}
+			switch value := value.(type) {
+			case string:
+				p.noteBinding(value)
+			case map[string]any:
+				if id, ok := value["@id"].(string); ok {
+					p.noteBinding(VocabularyNamespace(id))
+				}
+				if scoped, ok := value["@context"]; ok {
+					p.noteBindings(scoped)
+				}
+			}
+		}
+	}
+}
+
+// noteBinding records one bound IRI; a keyword or a relative name is not one.
+func (p *TaskOutputParser) noteBinding(iri string) {
+	if strings.HasPrefix(iri, "@") || !strings.Contains(iri, ":") {
+		return
+	}
+	p.bindings[iri] = true
 }
 
 // VocabularyNamespace is the namespace a term IRI belongs to: everything up
@@ -240,12 +343,8 @@ func VocabularyNamespace(iri string) string {
 	return ""
 }
 
-// noteVocabulary records the namespace of a term the output used, if it has one.
-func (p *TaskOutputParser) noteVocabulary(iri string) {
-	if namespace := VocabularyNamespace(iri); namespace != "" {
-		p.vocabularies[namespace] = true
-	}
-}
+// noteTerm records a term the output used as a predicate, class, or datatype.
+func (p *TaskOutputParser) noteTerm(iri string) { p.terms[iri] = true }
 
 // flush parses the pending batch as one JSON-LD document and adds its triples
 // to the graph. The JSON-LD processor labels the blank nodes of every
@@ -282,17 +381,17 @@ func (p *TaskOutputParser) flush() error {
 	pkg.Triples(batch, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		subject := relabel(triple.Subject).(rdflibgo.Subject)
 		object := relabel(triple.Object)
-		p.noteVocabulary(triple.Predicate.Value())
+		p.noteTerm(triple.Predicate.Value())
 		if triple.Predicate.Equal(rdflibgo.RDF.Type) {
 			if class, ok := object.(rdflibgo.URIRef); ok {
-				p.noteVocabulary(class.Value())
+				p.noteTerm(class.Value())
 				if class.Value() == Namespace+"Error" {
 					p.errorNodes[subject.String()] = subject
 				}
 			}
 		}
 		if literal, ok := object.(rdflibgo.Literal); ok {
-			p.noteVocabulary(literal.Datatype().Value())
+			p.noteTerm(literal.Datatype().Value())
 		}
 		if isFileIRI(subject) || isFileIRI(object) {
 			p.fileTriples = append(p.fileTriples, rdflibgo.Triple{Subject: subject, Predicate: triple.Predicate, Object: object})

@@ -238,7 +238,7 @@ func TestBuildPinsTheVocabulariesModuleOutputUses(t *testing.T) {
 			switch source {
 			case testModuleNamespace:
 				return []byte(testModuleOntology), "application/ld+json", validate.PinnedVersion{}, nil
-			case "https://vocab.test/things":
+			case "https://vocab.test/things", "https://vocab.test/other":
 				return []byte(pinsTestVocabulary), "text/turtle", validate.PinnedVersion{}, nil
 			}
 			return nil, "", validate.PinnedVersion{}, fmt.Errorf("bad response status code: 404")
@@ -246,9 +246,11 @@ func TestBuildPinsTheVocabulariesModuleOutputUses(t *testing.T) {
 		return pins, nil
 	}
 	t.Cleanup(func() { projectVocabularies = original })
+	// things is bound by the node's own @context; other is only ever written
+	// as a full IRI, which refers to a term without declaring its vocabulary
 	runner := &testContainerRunner{
 		ontology:  testModuleOntology,
-		runOutput: `{"@id":"https://example.test/widgets/1","@type":"https://vocab.test/things#Widget","https://vocab.test/things#label":"One","schema:name":"Bob"}`,
+		runOutput: `{"@context":{"things":"https://vocab.test/things#"},"@id":"https://example.test/widgets/1","@type":"things:Widget","things:label":"One","https://vocab.test/other#label":"Two","schema:name":"Bob"}`,
 	}
 	installFakeModuleRunner(t, runner)
 
@@ -258,6 +260,7 @@ func TestBuildPinsTheVocabulariesModuleOutputUses(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(".sal", "config.jsonld"))
 	require.NoError(t, err)
 	require.Contains(t, string(content), `"@id": "https://vocab.test/things#"`)
+	require.NotContains(t, string(content), `"@id": "https://vocab.test/other#"`, "a namespace the output only writes full IRIs of is not pinned")
 	require.NotContains(t, string(content), `"@id": "https://schema.org/"`)
 	require.Equal(t, 1, strings.Count(string(content), `"@id": "`+testModuleNamespace+`"`), "the module is pinned once, under its namespace")
 	// the pin is provenance in the graph too, not only in the lockfile

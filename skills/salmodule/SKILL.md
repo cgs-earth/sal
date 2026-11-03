@@ -37,8 +37,13 @@ properties. `sal validate` only asks for the ontology; `sal build` runs tasks, u
 
 Print one JSON-LD document to stdout and exit 0. Requirements:
 
-- A `@context` that binds every prefix the module uses. It is injected into the task output later, so
-  any key a task emits must be resolvable through it. `salmodule` must be bound to exactly
+- A `@context` that binds every prefix the module uses, in the ontology and in what its tasks print. It
+  is injected into the task output later, so any key a task emits must be resolvable through it. Binding a
+  prefix here is also how the module declares which vocabularies its output is stated in: `sal build` pins,
+  among the project's vocabularies, every namespace a `@context` binds that the output uses a term of as a
+  key, a `@type`, or a literal datatype, and nothing the output only writes as a full IRI. So bind a prefix
+  for every vocabulary the output uses, under the same prefix the output writes its terms with
+  (`schema:name` in the output needs `"schema": "https://schema.org/"` here). `salmodule` must be bound to exactly
   `https://w3id.org/sal/salmodule#`: bound to anything else, `rdfs:subClassOf salmodule:Task` names a
   class sal does not know, and sal refuses the module as one with no task to run.
 - A node `{"@id": ".", "@type": "owl:Ontology"}` describing the module.
@@ -112,6 +117,10 @@ Write output as newline delimited JSON, one node object per line, using keys the
 ```
 
 - Each line must be a complete JSON object. Do not print a wrapping array or pretty print across lines.
+- Write every key, `@type`, and literal datatype with a prefix the ontology's `@context` binds, not as a
+  full IRI. What is written through a bound prefix is what `sal build` pins as the project's vocabularies;
+  a full IRI is parsed as it is but declares no vocabulary, so a term written that way is never pinned.
+  A node may carry a `@context` of its own, as harvested JSON-LD does, and what it binds counts the same.
 - A relative `@id` resolves against the project's namespace, not the module's. Use absolute IRIs for
   anything owned by an external source.
 - Only stdout is data. Logs and progress go to stderr, which `sal` surfaces as warnings.
