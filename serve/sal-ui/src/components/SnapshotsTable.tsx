@@ -1,9 +1,11 @@
-import { CopyButton } from './CopyButton'
+import { shareLink, visit } from '../routing'
 
 type SnapshotsTableProps = {
   /** The `sal query --info snapshots` result: a header naming the columns and a row per snapshot, newest first. */
   header: string[] | null
   rows: string[][] | null
+  /** The table the SQL sample scans at a snapshot, the path `iceberg_scan` takes. */
+  tablePath: string
 }
 
 /** One row of the listing, read from the result by column name so the order the SQL projects does not matter here. */
@@ -14,7 +16,6 @@ type Snapshot = {
   added: number
   removed: number
   gitCommits: string[]
-  metadataFile: string
 }
 
 const formatCount = (value: number) => new Intl.NumberFormat().format(value)
@@ -22,11 +23,11 @@ const formatCount = (value: number) => new Intl.NumberFormat().format(value)
 /**
  * The Stats tab's snapshot listing: every commit to the Iceberg table with
  * what it changed in triples, the message the build was given, the git
- * commits the build tagged it with, and the metadata file it was committed in,
- * which the copy button puts on the clipboard as the full path DuckDB's
- * iceberg_scan takes.
+ * commits the build tagged it with, and a pair of buttons that open the SQL
+ * and SPARQL tabs on a sample query reading the table as it stood at that
+ * snapshot.
  */
-export function SnapshotsTable({ header, rows }: SnapshotsTableProps) {
+export function SnapshotsTable({ header, rows, tablePath }: SnapshotsTableProps) {
   const snapshots = readSnapshots(header, rows)
   if (snapshots.length === 0) {
     return <p className="empty">No snapshots yet; run sal build to commit one</p>
@@ -41,7 +42,7 @@ export function SnapshotsTable({ header, rows }: SnapshotsTableProps) {
             <th scope="col">Message</th>
             <th scope="col">Triples</th>
             <th scope="col">Git commit</th>
-            <th scope="col">Metadata file</th>
+            <th scope="col">Query</th>
           </tr>
         </thead>
         <tbody>
@@ -72,15 +73,23 @@ export function SnapshotsTable({ header, rows }: SnapshotsTableProps) {
                   ))
                 )}
               </td>
-              <td className="snapshot-metadata" title={snapshot.metadataFile}>
-                {snapshot.metadataFile ? (
-                  <>
-                    <code>{fileName(snapshot.metadataFile)}</code>
-                    <CopyButton text={snapshot.metadataFile} label="Copy the metadata file's full path" />
-                  </>
-                ) : (
-                  <span className="null">∅</span>
-                )}
+              <td className="snapshot-query">
+                <button
+                  type="button"
+                  className="button small"
+                  title="Open the SQL tab on a query reading the table at this snapshot"
+                  onClick={() => visit(shareLink('SQL', snapshotSQL(tablePath, snapshot.id)))}
+                >
+                  SQL
+                </button>
+                <button
+                  type="button"
+                  className="button small"
+                  title="Open the SPARQL tab on a query reading the table at this snapshot through SERVICE"
+                  onClick={() => visit(shareLink('SPARQL', snapshotSPARQL(snapshot.id)))}
+                >
+                  SPARQL
+                </button>
               </td>
             </tr>
           ))}
@@ -88,6 +97,34 @@ export function SnapshotsTable({ header, rows }: SnapshotsTableProps) {
       </table>
     </div>
   )
+}
+
+/**
+ * The SQL sample for a snapshot: the table scanned at that snapshot, which
+ * `iceberg_scan` only takes as a literal ID, so the statement is written per
+ * row rather than offered as one fixed sample.
+ */
+function snapshotSQL(tablePath: string, snapshotID: string) {
+  const escaped = tablePath.replaceAll("'", "''")
+  return `SELECT *
+FROM iceberg_scan('${escaped}', allow_moved_paths = true, snapshot_from_id = ${snapshotID})
+LIMIT 20`
+}
+
+/**
+ * The SPARQL sample for a snapshot: a SERVICE on this server's own versioned
+ * endpoint, which reads the table as it stood at that snapshot while the rest
+ * of a query reads the current table. The endpoint is written with this page's
+ * own origin so the query runs wherever the server is reached from.
+ */
+function snapshotSPARQL(snapshotID: string) {
+  return `SELECT ?subject ?predicate ?object
+WHERE {
+  SERVICE <${window.location.origin}/v${snapshotID}/sparql> {
+    ?subject ?predicate ?object .
+  }
+}
+LIMIT 20`
 }
 
 /** Picks the listing's columns out of the result by name; a column the server does not send reads as empty. */
@@ -108,7 +145,6 @@ function readSnapshots(header: string[] | null, rows: string[][] | null): Snapsh
       .split(',')
       .map((commit) => commit.trim())
       .filter((commit) => commit !== ''),
-    metadataFile: at(row, 'metadata_file'),
   }))
 }
 
@@ -119,10 +155,4 @@ function readSnapshots(header: string[] | null, rows: string[][] | null): Snapsh
 function toMinute(timestamp: string) {
   const match = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(timestamp)
   return match ? `${match[1]} ${match[2]}` : timestamp
-}
-
-/** The last segment of a path or URL, `v12.metadata.json`. */
-function fileName(path: string) {
-  const segments = path.replace(/\/+$/, '').split('/')
-  return segments[segments.length - 1] || path
 }
