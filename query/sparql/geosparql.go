@@ -48,6 +48,30 @@ var geofConstructors = map[string]struct {
 	"symdifference": {sql: "ST_SymDifference", arity: 2},
 }
 
+// geofFunctions are the geof: functions the translator answers, as written in
+// the GeoSPARQL specification with what each becomes, which is what the
+// SPARQL editor completes `geof:` with and shows for the one under the
+// caret. TestGeofFunctionsAreTheTranslatedOnes keeps it in step with the
+// tables above.
+var geofFunctions = []struct{ name, comment string }{
+	{"sfEquals", "geof:sfEquals(a, b): whether two geometries are spatially equal, as ST_Equals."},
+	{"sfDisjoint", "geof:sfDisjoint(a, b): whether two geometries share no point, as ST_Disjoint."},
+	{"sfIntersects", "geof:sfIntersects(a, b): whether two geometries share a point, as ST_Intersects."},
+	{"sfTouches", "geof:sfTouches(a, b): whether two geometries touch only at their boundaries, as ST_Touches."},
+	{"sfCrosses", "geof:sfCrosses(a, b): whether two geometries cross, as ST_Crosses."},
+	{"sfWithin", "geof:sfWithin(a, b): whether a lies within b, as ST_Within."},
+	{"sfContains", "geof:sfContains(a, b): whether a contains b, as ST_Contains."},
+	{"sfOverlaps", "geof:sfOverlaps(a, b): whether two geometries overlap, as ST_Overlaps."},
+	{"distance", "geof:distance(a, b, unit): the distance between two geometries, in degrees (uom:degree, the default, as ST_Distance) or in great-circle metres between their nearest points (uom:metre)."},
+	{"envelope", "geof:envelope(a): the bounding box of a geometry, as ST_Envelope."},
+	{"boundary", "geof:boundary(a): the boundary of a geometry, as ST_Boundary."},
+	{"convexHull", "geof:convexHull(a): the convex hull of a geometry, as ST_ConvexHull."},
+	{"intersection", "geof:intersection(a, b): the geometry two geometries share, as ST_Intersection."},
+	{"union", "geof:union(a, b): the geometry two geometries make together, as ST_Union."},
+	{"difference", "geof:difference(a, b): the part of a outside b, as ST_Difference."},
+	{"symDifference", "geof:symDifference(a, b): the parts of a and b outside each other, as ST_SymDifference."},
+}
+
 // geofLocalName returns the local name of a geof: function. The parser expands a
 // prefixed function name to its IRI and upper-cases it, so the comparison is
 // case-insensitive.
@@ -89,13 +113,12 @@ func geoFunctionSQL(call *rdflibsparql.FuncExpr, bindings map[string]sqlBinding)
 
 // distanceSQL translates geof:distance. The unit argument the spec requires is
 // optional here and defaults to degrees, the unit of the stored coordinates;
-// metres are answered with the spherical distance, which DuckDB only computes
-// between points.
+// metres are answered by metreDistanceSQL.
 func distanceSQL(call *rdflibsparql.FuncExpr, bindings map[string]sqlBinding) (string, error) {
 	if len(call.Args) != 2 && len(call.Args) != 3 {
 		return "", fmt.Errorf("geof:distance takes two geometries and an optional unit, got %d arguments", len(call.Args))
 	}
-	function := "ST_Distance"
+	metres := false
 	if len(call.Args) == 3 {
 		unit, ok := call.Args[2].(*rdflibsparql.IRIExpr)
 		if !ok {
@@ -104,7 +127,7 @@ func distanceSQL(call *rdflibsparql.FuncExpr, bindings map[string]sqlBinding) (s
 		switch unit.Value {
 		case uomNamespace + "degree":
 		case uomNamespace + "metre":
-			function = "ST_Distance_Sphere"
+			metres = true
 		default:
 			return "", fmt.Errorf("geof:distance unit %q is not supported; use uom:degree or uom:metre", unit.Value)
 		}
@@ -113,7 +136,28 @@ func distanceSQL(call *rdflibsparql.FuncExpr, bindings map[string]sqlBinding) (s
 	if err != nil {
 		return "", err
 	}
-	return function + "(" + strings.Join(args, ", ") + ")", nil
+	if metres {
+		return metreDistanceSQL(args[0], args[1]), nil
+	}
+	return "ST_Distance(" + args[0] + ", " + args[1] + ")", nil
+}
+
+// metreDistanceSQL is the great-circle distance in metres between two
+// geometries of any kind. DuckDB's ST_Distance_Sphere takes points only, so
+// the pair of nearest points is found first, in Web Mercator, which is
+// conformal and so picks the same nearest points a local metric projection
+// would for anything but a geometry spanning a continent, and the spherical
+// distance is taken between those two points. A point is its own nearest
+// point, so between points this is ST_Distance_Sphere exactly. Projecting
+// through a per-row azimuthal projection centred on the geometry would be
+// exact but builds a PROJ transformation per row, which costs seconds per
+// thousand rows; the constant transformations here are cached by DuckDB.
+func metreDistanceSQL(a, b string) string {
+	mercator := func(geometry string) string { return "ST_Transform(" + geometry + ", 'EPSG:4326', 'EPSG:3857')" }
+	nearest := func(on, to string) string {
+		return "ST_Transform(ST_ClosestPoint(" + mercator(on) + ", " + mercator(to) + "), 'EPSG:3857', 'EPSG:4326')"
+	}
+	return "ST_Distance_Sphere(" + nearest(a, b) + ", " + nearest(b, a) + ")"
 }
 
 func geometryArgsSQL(call *rdflibsparql.FuncExpr, arity int, bindings map[string]sqlBinding) ([]string, error) {

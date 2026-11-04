@@ -50,8 +50,8 @@ func (c *vocabularyCache) isDefined(ctx context.Context, iri string, rdfCtx RdfC
 	if c.base != "" && strings.HasPrefix(iri, c.base) {
 		return true, nil
 	}
-	if iriWithoutXsdNamepace, found := strings.CutPrefix(iri, xsdNamespaceIRI); found {
-		return slices.Contains(xsdBuiltinDatatypeLocalNames, iriWithoutXsdNamepace), nil
+	if iriWithoutXsdNamepace, found := strings.CutPrefix(iri, XSDNamespace); found {
+		return slices.Contains(XSDDatatypes, iriWithoutXsdNamepace), nil
 	}
 
 	_, base, ok := longestPrefixBase(iri, rdfCtx)
@@ -82,7 +82,7 @@ func (c *vocabularyCache) resolvable(namespace string) bool {
 	if c.base != "" && strings.HasPrefix(namespace, c.base) {
 		return false
 	}
-	return namespace != xsdNamespaceIRI
+	return namespace != XSDNamespace
 }
 
 func replacementVocabularyBase(base string, replacements map[string]string) string {

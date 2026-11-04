@@ -269,7 +269,9 @@ export function FeatureView({ subtabs, snapshots, request }: FeatureViewProps) {
   useEffect(() => {
     const controller = new AbortController()
     fetchVocabularies(controller.signal)
-      .then((listing) => setVocabularies(listing.vocabularies))
+      // The engine's built-in vocabularies (geof: functions, xsd: datatypes)
+      // name no feature type or property, so the term boxes leave them out.
+      .then((listing) => setVocabularies(listing.vocabularies.filter((vocabulary) => !vocabulary.builtin)))
       .catch(() => setVocabularies([]))
     return () => controller.abort()
   }, [])

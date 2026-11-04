@@ -350,7 +350,10 @@ WHERE {
 }`)
 
 	require.NoError(t, err)
-	require.Contains(t, query, "ST_Distance_Sphere(t0.object_geometry, ST_GeomFromText('POINT(-89.5 40.5)')) < 5000")
+	require.Contains(t, query, "ST_Distance_Sphere("+
+		"ST_Transform(ST_ClosestPoint(ST_Transform(t0.object_geometry, 'EPSG:4326', 'EPSG:3857'), ST_Transform(ST_GeomFromText('POINT(-89.5 40.5)'), 'EPSG:4326', 'EPSG:3857')), 'EPSG:3857', 'EPSG:4326'), "+
+		"ST_Transform(ST_ClosestPoint(ST_Transform(ST_GeomFromText('POINT(-89.5 40.5)'), 'EPSG:4326', 'EPSG:3857'), ST_Transform(t0.object_geometry, 'EPSG:4326', 'EPSG:3857')), 'EPSG:3857', 'EPSG:4326')"+
+		") < 5000")
 
 	query, err = ToSQL(`
 PREFIX geo: <http://www.opengis.net/ont/geosparql#>

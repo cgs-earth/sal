@@ -7,9 +7,11 @@ import type { TermStatement, Vocabulary } from '../../api'
  * prefixes on every keystroke: slow, offline-blind, and ignorant of what this
  * project pinned, a salmodule:// ontology above all. These two replace them
  * with lookups over what /api/vocabularies lists, the terms of the versions
- * a build validated against, so a suggestion is always a term the table can
- * hold. Both read the module-level store below at call time, so they work
- * from the moment the listing arrives, whichever tab was built first.
+ * a build validated against plus the engine's built-in geof:, uom:, and
+ * xsd:, so a suggestion is always a term the table can hold or a function the
+ * engine answers. Both read the module-level store below at call time, so
+ * they work from the moment the listing arrives, whichever tab was built
+ * first.
  */
 
 type Yasqe = InstanceType<typeof Yasgui.Yasqe>

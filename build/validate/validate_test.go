@@ -258,7 +258,7 @@ func TestPinMaterializedVocabulariesPinsWhatResolvesAndSkipsTheRest(t *testing.T
 	validator := NewValidator(pins, testBase, nil)
 	pinned := validator.PinMaterializedVocabularies(context.Background(), []string{
 		testBase + "widgets/",
-		xsdNamespaceIRI,
+		XSDNamespace,
 		"urn:thing:",
 		"https://vocab.test/gone#",
 		testVocabularyNamespace,

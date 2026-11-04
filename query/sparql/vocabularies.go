@@ -41,9 +41,14 @@ type Vocabulary struct {
 	// Error is why the pinned document could not be read, in which case the
 	// term lists are empty; the prefix can still be inserted.
 	Error string `json:"error,omitempty"`
+	// Builtin marks a vocabulary the query engine defines rather than the
+	// project pins: the geof: functions and uom: units the translator
+	// answers and the xsd: datatypes. It has no Version or Format.
+	Builtin bool `json:"builtin,omitempty"`
 }
 
-// VocabularyListing is every vocabulary the project pins, sorted by ID.
+// VocabularyListing is every vocabulary the project pins, sorted by ID, and
+// after them the built-in ones.
 type VocabularyListing struct {
 	Vocabularies []Vocabulary `json:"vocabularies"`
 }
@@ -56,25 +61,25 @@ type VocabularyRunner interface {
 
 // Vocabularies lists every vocabulary the project pins in .sal/config.jsonld
 // with the terms its pinned document defines, read from the blob store and
-// never fetched. A remote table has no project on disk, so it lists nothing,
-// the same as the Stats tab's vocabulary listing; so does a directory that is
-// not a SAL project. A vocabulary whose document cannot be read is listed
-// with its error rather than failing the listing, since the others are still
-// worth completing from.
+// never fetched, and then the built-in ones. A remote table has no project on
+// disk, so it lists only the built-ins, the same as a directory that is not a
+// SAL project; the Stats tab's vocabulary listing shows nothing for either. A
+// vocabulary whose document cannot be read is listed with its error rather
+// than failing the listing, since the others are still worth completing from.
 func (r DuckDBRunner) Vocabularies(_ context.Context) (VocabularyListing, error) {
 	listing := VocabularyListing{Vocabularies: []Vocabulary{}}
 	if isRemoteTablePath(r.TablePath) {
-		return listing, nil
+		return withBuiltinVocabularies(listing), nil
 	}
 	path, err := pkg.SalConfigPath()
 	if err != nil {
 		slog.Debug("not reporting project vocabularies", "error", err)
-		return listing, nil
+		return withBuiltinVocabularies(listing), nil
 	}
 	blobDir, err := pkg.SalBlobsDir()
 	if err != nil {
 		slog.Debug("not reporting project vocabularies", "error", err)
-		return listing, nil
+		return withBuiltinVocabularies(listing), nil
 	}
 	pins, err := validate.LoadPinnedVocabularies(path, blobDir)
 	if err != nil {
@@ -104,5 +109,56 @@ func (r DuckDBRunner) Vocabularies(_ context.Context) (VocabularyListing, error)
 		}
 		listing.Vocabularies = append(listing.Vocabularies, vocabulary)
 	}
-	return listing, nil
+	return withBuiltinVocabularies(listing), nil
+}
+
+// withBuiltinVocabularies appends the vocabularies the query engine itself
+// defines, so the editor completes and declares them whether or not the
+// project pins anything: the geof: functions and uom: units geoFunctionSQL
+// translates, and the xsd: datatypes, which validation accepts without a
+// document and castSQL answers some of. One the project pins under the same
+// namespace is left as pinned, since that document says more.
+func withBuiltinVocabularies(listing VocabularyListing) VocabularyListing {
+	for _, builtin := range builtinVocabularies() {
+		pinned := slices.ContainsFunc(listing.Vocabularies, func(vocabulary Vocabulary) bool {
+			return vocabulary.Namespace == builtin.Namespace
+		})
+		if !pinned {
+			listing.Vocabularies = append(listing.Vocabularies, builtin)
+		}
+	}
+	return listing
+}
+
+func builtinVocabularies() []Vocabulary {
+	builtin := func(prefix, namespace string) Vocabulary {
+		return Vocabulary{
+			ID: namespace, Prefix: prefix, Namespace: namespace, Builtin: true,
+			Classes: []string{}, Properties: []string{}, Others: []string{},
+			Statements: map[string][]validate.TermStatement{},
+		}
+	}
+	comment := func(vocabulary Vocabulary, name, text string) {
+		vocabulary.Statements[name] = []validate.TermStatement{{Predicate: "rdfs:comment", Value: text}}
+	}
+
+	geof := builtin("geof", geofNamespace)
+	for _, function := range geofFunctions {
+		geof.Others = append(geof.Others, function.name)
+		comment(geof, function.name, function.comment)
+	}
+	slices.Sort(geof.Others)
+
+	uom := builtin("uom", uomNamespace)
+	uom.Others = []string{"degree", "metre"}
+	comment(uom, "degree", "Degrees of the stored longitude/latitude coordinates, a planar distance in that frame; the default when geof:distance is given no unit.")
+	comment(uom, "metre", "Great-circle metres between the nearest points of the two geometries.")
+
+	xsd := builtin("xsd", validate.XSDNamespace)
+	xsd.Classes = append(xsd.Classes, validate.XSDDatatypes...)
+	slices.Sort(xsd.Classes)
+	for _, name := range []string{"string", "integer", "int", "long", "short", "byte", "nonNegativeInteger", "positiveInteger", "nonPositiveInteger", "negativeInteger", "unsignedLong", "unsignedInt", "unsignedShort", "unsignedByte", "decimal", "double", "float", "boolean", "dateTime", "date"} {
+		comment(xsd, name, "An XML Schema datatype. xsd:"+name+"(?x) is also a constructor, a TRY_CAST that leaves ?x unbound when it cannot be converted.")
+	}
+	return []Vocabulary{geof, uom, xsd}
 }
