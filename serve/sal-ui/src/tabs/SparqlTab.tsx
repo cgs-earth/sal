@@ -724,11 +724,13 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
                 than evaluating it in a triplestore. <strong>Show SQL</strong> opens that translation beside the editor.
               </li>
               <li>
-                <strong>Prefixes</strong> lists the vocabularies the project pins, the ones the Stats tab shows, and adds
-                the <code>PREFIX</code> line of any of them to the query. Once a prefix is declared, typing it and a colon
-                (<code>schema:na</code>) suggests the terms its pinned document defines, so what is offered is what the
-                build validated against; <kbd>Ctrl</kbd>+<kbd>Space</kbd> asks for the list by hand. A prefix typed
-                without a declaration is declared for you when it names one of those vocabularies.
+                <strong>Prefixes</strong> lists the vocabularies the project pins, the ones the Stats tab shows, plus the
+                engine&apos;s built-in <code>geof:</code>, <code>uom:</code>, and <code>xsd:</code>, and adds the{' '}
+                <code>PREFIX</code> line of any of them to the query. Once a prefix is declared, typing it and a colon
+                (<code>schema:na</code>, <code>geof:sf</code>) suggests the terms its pinned document defines, or the
+                functions the engine answers, so what is offered is what the build validated against;{' '}
+                <kbd>Ctrl</kbd>+<kbd>Space</kbd> asks for the list by hand. A prefix typed without a declaration is
+                declared for you when it names one of those vocabularies.
               </li>
               <li>
                 <strong>Show RDF Definitions</strong> keeps a pane down the right of the editor describing the term

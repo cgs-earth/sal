@@ -45,11 +45,13 @@ function freeLabel(declared: Prefixes, vocabulary: Vocabulary): string {
 /**
  * The **Prefixes** button of the SPARQL editor and the dialog it opens: every
  * vocabulary the project pins, the same ones the Stats tab lists, each with
- * the prefix it is known by and how many terms its pinned document defines.
- * Choosing one adds its PREFIX line to the active query, after which typing
- * the prefix and a colon completes its terms; **Add all** declares every
- * vocabulary not yet declared. A vocabulary the query already declares, under
- * whatever label, is marked rather than added twice.
+ * the prefix it is known by and how many terms its pinned document defines,
+ * and after them the ones the query engine itself defines (geof:, uom:,
+ * xsd:), marked as built in. Choosing one adds its PREFIX line to the active
+ * query, after which typing the prefix and a colon completes its terms;
+ * **Add all** declares every vocabulary not yet declared. A vocabulary the
+ * query already declares, under whatever label, is marked rather than added
+ * twice.
  */
 export function PrefixPicker({ vocabularies, error, declared, onInsert, compact = false }: PrefixPickerProps) {
   const [open, setOpen] = useState(false)
@@ -113,6 +115,7 @@ export function PrefixPicker({ vocabularies, error, declared, onInsert, compact 
   }
 
   const undeclared = (vocabularies ?? []).filter((vocabulary) => !declaredAs(current, vocabulary.namespace))
+  const pinsNothing = vocabularies !== null && vocabularies.every((vocabulary) => vocabulary.builtin)
 
   return (
     <>
@@ -121,7 +124,7 @@ export function PrefixPicker({ vocabularies, error, declared, onInsert, compact 
         className={`button ${compact ? 'small' : ''}`.trim()}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Declare the prefixes of the vocabularies this project pins"
+        title="Declare the prefixes of the vocabularies this project pins and the engine's built-in ones"
         onClick={() => setOpen(true)}
       >
         Prefixes
@@ -182,6 +185,11 @@ export function PrefixPicker({ vocabularies, error, declared, onInsert, compact 
                           <span>{formatCount(termCount(vocabulary))} terms</span>
                         )}
                         {vocabulary.imported && <span className="badge prefix-badge">imported</span>}
+                        {vocabulary.builtin && (
+                          <span className="badge prefix-badge" title="Defined by the query engine, not pinned by the project">
+                            built in
+                          </span>
+                        )}
                         {label && (
                           <span className="prefix-declared" aria-label="Declared">
                             ✓
@@ -191,10 +199,11 @@ export function PrefixPicker({ vocabularies, error, declared, onInsert, compact 
                     </li>
                   )
                 })}
-                {vocabularies && vocabularies.length === 0 && !error && (
+                {pinsNothing && !error && search === '' && (
                   <li className="sample-empty">
-                    The project pins no vocabularies yet. Run <code>sal build</code> or <code>sal validate</code> to pin the
-                    ones it resolves against; a remote table lists none.
+                    The project pins no vocabularies yet; only the engine&apos;s built-in ones are listed. Run{' '}
+                    <code>sal build</code> or <code>sal validate</code> to pin the ones it resolves against; a remote
+                    table lists none.
                   </li>
                 )}
                 {vocabularies && vocabularies.length > 0 && matches.length === 0 && (

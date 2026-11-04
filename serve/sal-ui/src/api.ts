@@ -96,6 +96,8 @@ export type Vocabulary = {
   statements: Record<string, TermStatement[]>
   /** Why the pinned document could not be read, in which case the term lists are empty. */
   error?: string
+  /** A vocabulary the query engine defines rather than the project pins (geof:, uom:, xsd:), with no version. */
+  builtin?: boolean
 }
 
 export type VocabularyListing = {

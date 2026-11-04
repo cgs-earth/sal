@@ -80,7 +80,11 @@ func (d *duckdbInstance) prepare(ctx context.Context, tablePath string, imports 
 	if withSpatial && !d.spatial {
 		// the spatial extension is tens of megabytes, downloaded on first use
 		spatialCtx, span := telemetry.Start(ctx, "duckdb.load_spatial")
-		_, err := d.db.ExecContext(spatialCtx, "INSTALL spatial; LOAD spatial;")
+		// Every geometry sal stores is longitude then latitude, so the
+		// functions that care about axis order (the spherical distances and
+		// ST_Transform) are told so; DuckDB 2.0 refuses to run them until
+		// the setting is given either way.
+		_, err := d.db.ExecContext(spatialCtx, "INSTALL spatial; LOAD spatial; SET geometry_always_xy = true;")
 		telemetry.End(span, err)
 		if err != nil {
 			return nil, fmt.Errorf("load the duckdb spatial extension: %w", err)

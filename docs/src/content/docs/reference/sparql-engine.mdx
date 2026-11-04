@@ -602,7 +602,7 @@ That data becomes three kinds of row: `<MyPoint> geo:hasGeometry _:b` with the b
 | `geof:sfOverlaps(a, b)` | `ST_Overlaps(a, b)` | boolean | |
 | `geof:distance(a, b)` | `ST_Distance(a, b)` | number | In the units of the coordinates, which is degrees. |
 | `geof:distance(a, b, uom:degree)` | `ST_Distance(a, b)` | number | Same as above; `uom:` is `http://www.opengis.net/def/uom/OGC/1.0/`. |
-| `geof:distance(a, b, uom:metre)` | `ST_Distance_Sphere(a, b)` | number | Great-circle metres. DuckDB computes this between points only. |
+| `geof:distance(a, b, uom:metre)` | `ST_Distance_Sphere(nearest point of a to b, nearest point of b to a)` | number | Great-circle metres between any two geometries. DuckDB computes the spherical distance between points only, so the nearest points are found first with `ST_ClosestPoint` in Web Mercator (`ST_Transform` to `EPSG:3857` and back), a conformal projection that picks the same nearest points a local metric projection would for anything short of a continent; between two points it is `ST_Distance_Sphere` exactly. |
 | `geof:envelope(a)` | `ST_Envelope(a)` | geometry | |
 | `geof:boundary(a)` | `ST_Boundary(a)` | geometry | |
 | `geof:convexHull(a)` | `ST_ConvexHull(a)` | geometry | |
@@ -662,7 +662,7 @@ WHERE t0.predicate = 'https://schema.org/name'
   AND ST_Intersects(t2.object_geometry, ST_GeomFromText('POLYGON((-91 39, -88 39, -88 42, -91 42, -91 39))'))
 ```
 
-Everything within 25 km of a point. The `uom:metre` unit selects the spherical distance:
+Everything within 25 km of a point. The `uom:metre` unit selects the spherical distance, between the nearest points of the two geometries, so the place may be a line or a polygon as well as a point:
 
 ```sparql
 PREFIX geo: <http://www.opengis.net/ont/geosparql#>
@@ -685,7 +685,7 @@ CROSS JOIN triples AS t1
 WHERE t0.predicate = 'http://www.opengis.net/ont/geosparql#hasGeometry'
   AND COALESCE(t0.object_iri, CAST(t0.object_float AS VARCHAR), CAST(t0.object_integer AS VARCHAR), CAST(t0.object_byte AS VARCHAR), replace(CAST(t0.object_time AS VARCHAR), ' ', 'T') || 'Z', t0.object_string) = t1.subject
   AND t1.predicate = 'http://www.opengis.net/ont/geosparql#asWKT'
-  AND ST_Distance_Sphere(t1.object_geometry, ST_GeomFromText('POINT(-89.5 40.5)')) < 25000
+  AND ST_Distance_Sphere(ST_Transform(ST_ClosestPoint(ST_Transform(t1.object_geometry, 'EPSG:4326', 'EPSG:3857'), ST_Transform(ST_GeomFromText('POINT(-89.5 40.5)'), 'EPSG:4326', 'EPSG:3857')), 'EPSG:3857', 'EPSG:4326'), ST_Transform(ST_ClosestPoint(ST_Transform(ST_GeomFromText('POINT(-89.5 40.5)'), 'EPSG:4326', 'EPSG:3857'), ST_Transform(t1.object_geometry, 'EPSG:4326', 'EPSG:3857')), 'EPSG:3857', 'EPSG:4326')) < 25000
 ```
 
 Relations between two geometries in the data, rather than against a literal. Each `geo:asWKT` pattern scans the table once, so this is a self-join, and the `FILTER` compares the two geometry columns:
@@ -740,7 +740,7 @@ A projected object variable is rendered with `ST_AsText`, so a geometry comes ba
 ### Limitations
 
 - **One coordinate system.** CRS IRIs are dropped, not honored. All geometries are taken to share the CRS84 longitude/latitude frame the table declares, and `geof:distance` in degrees is a planar distance in that frame.
-- **Metres between points only.** `uom:metre` is answered with `ST_Distance_Sphere`, which DuckDB defines for points; between lines or polygons it is an error. Use degrees, or a bounding box, for those.
+- **Metres are measured between nearest points.** `uom:metre` is the great-circle distance between the nearest points of the two geometries, found in Web Mercator. That is exact between points and within a fraction of a percent for lines and polygons whose segments are a few kilometres long; a segment hundreds of kilometres long is a straight line in the projection rather than a geodesic, and a geometry beyond 85° of latitude is outside the projection. The stored coordinates are taken as longitude then latitude (`SET geometry_always_xy = true`), which is the order sal writes them in.
 - **Geometry output is WKT.** A projected geometry function, `SELECT (geof:envelope(?g) AS ?box)`, is rendered with `ST_AsText`; a geometry cannot be bound with `BIND` and compared as a geometry afterwards.
 - **No spatial index.** A relation against a literal evaluates the `ST_` function on every geometry row. That is quick for the sizes a data product usually holds, but it is a scan, not an R-tree lookup.
 - **First use loads the extension.** DuckDB's spatial extension is loaded on the first query that needs it, which adds a moment to that query and nothing to the ones after it in the same process.

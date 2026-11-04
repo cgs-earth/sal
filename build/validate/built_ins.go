@@ -1,9 +1,13 @@
 package validate
 
-// const rdfLangStringIRI = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString"
-const xsdNamespaceIRI = "http://www.w3.org/2001/XMLSchema#"
+// XSDNamespace is the namespace of the XML Schema datatypes, which every RDF
+// parser knows and no project has to pin.
+const XSDNamespace = "http://www.w3.org/2001/XMLSchema#"
 
-var xsdBuiltinDatatypeLocalNames = []string{
+// XSDDatatypes are the local names of the XML Schema datatypes, sorted
+// ignoring case: what validation accepts under XSDNamespace without a
+// document, and what the SPARQL editor completes `xsd:` with.
+var XSDDatatypes = []string{
 	"anyAtomicType",
 	"anySimpleType",
 	"anyURI",
