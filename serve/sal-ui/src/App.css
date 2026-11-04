@@ -1053,8 +1053,9 @@ kbd {
 /* ---------- snapshots ---------- */
 
 /* The Stats tab's snapshot listing is a result table whose cells are drawn
-   by hand: the triple change in two colours, each git commit as its short
-   hash, and the metadata file as its name with the copy button beside it. */
+   by hand: the triple change in two colours, each git commit as its whole
+   hash, and the pair of buttons that open the SQL and SPARQL tabs on a query
+   over the snapshot. */
 .snapshots-table td {
   max-width: 360px;
 }
@@ -1080,20 +1081,12 @@ kbd {
   display: block;
 }
 
-.snapshots-table .snapshot-metadata {
-  overflow: visible;
+.snapshots-table .snapshot-query {
+  white-space: nowrap;
 }
 
-.snapshots-table .snapshot-metadata code {
-  vertical-align: middle;
-}
-
-.snapshots-table .copy-button {
-  display: inline-flex;
-  width: 22px;
-  height: 22px;
+.snapshots-table .snapshot-query .button + .button {
   margin-left: 6px;
-  vertical-align: middle;
 }
 
 /* ---------- forms and code blocks ---------- */

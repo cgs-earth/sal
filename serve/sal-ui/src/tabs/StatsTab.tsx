@@ -135,9 +135,9 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
 
           <Section
             title="Snapshots"
-            caption="Every build committed to the Iceberg table, newest first, with the triples it added and removed, its message, the git commit it was built from, and the metadata file that reads the table at that snapshot."
+            caption="Every build committed to the Iceberg table with its associated metadata"
           >
-            <SnapshotsTable header={stats.snapshots.header} rows={stats.snapshots.rows} />
+            <SnapshotsTable header={stats.snapshots.header} rows={stats.snapshots.rows} tablePath={stats.tablePath} />
           </Section>
 
           <Section title="Vocabularies" caption="Every RDF vocabulary that is imported or pinned in the project">
