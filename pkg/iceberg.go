@@ -67,17 +67,20 @@ func IcebergTablePaths(root string) ([]string, error) {
 	return tables, nil
 }
 
-func SalIcebergCatalog() (catalog.Catalog, error) {
+// SalIcebergCatalog opens the Hadoop catalog over the project's data
+// directory. The context only bounds the catalog's filesystem setup.
+func SalIcebergCatalog(ctx context.Context) (catalog.Catalog, error) {
 	dataDir, err := SalDataDir()
 	if err != nil {
 		return nil, err
 	}
-	cat, err := hadoop.NewCatalog("local-catalog", dataDir, nil)
+	cat, err := hadoop.NewCatalog(ctx, "local-catalog", dataDir, nil)
 	return cat, err
 }
 
 func GetSalIcebergTable() (*table.Table, error) {
-	cat, err := SalIcebergCatalog()
+	ctx := context.Background()
+	cat, err := SalIcebergCatalog(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +97,6 @@ func GetSalIcebergTable() (*table.Table, error) {
 		return nil, err
 	}
 
-	ctx := context.Background()
 	defaultNS := catalog.ToIdentifier(gitProjectName)
 	if err := cat.CreateNamespace(ctx, defaultNS, nil); err != nil &&
 		!errors.Is(err, catalog.ErrNamespaceAlreadyExists) {

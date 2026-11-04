@@ -134,7 +134,7 @@ func SquashSnapshots(tbl *table.Table, cat catalog.Catalog, localOnlySnapshotIDs
 	// snapshot's manifest list, whose rows already carry their IDs, so it
 	// assigns none: it starts at the cursor and adds zero rows, which leaves the
 	// cursor where it was.
-	if tbl.Metadata().Version() >= 3 {
+	if tbl.Metadata().FormatVersion() >= 3 {
 		firstRowID := tbl.Metadata().NextRowID()
 		addedRows := int64(0)
 		newSnapshot.FirstRowID = &firstRowID
@@ -415,7 +415,7 @@ func cleanDiff(cmd *CleanCmd) error {
 		return fmt.Errorf("error getting snapshot data from %s %w", cmd.Artifact, err)
 	}
 
-	cat, err := pkg.SalIcebergCatalog()
+	cat, err := pkg.SalIcebergCatalog(ctx)
 	if err != nil {
 		return err
 	}

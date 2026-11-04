@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import type { DataFile, QueryResult, TableLayout } from '../api'
-import { fileName, formatBytes, formatCount, formatShare, layoutNotes, pruningVerdict } from './layoutSummary'
+import type { ColumnPruning, DataFile, QueryResult, TableLayout } from '../api'
+import { fileName, formatBytes, formatCount, formatShare, layoutNotes, pruningVerdict, type Note } from './layoutSummary'
 
 type StorageLayoutProps = {
   layout: TableLayout | null
@@ -16,6 +16,8 @@ type StorageLayoutProps = {
  * can skip files, and under all of that the list of every file.
  */
 export function StorageLayout({ layout, error, tablePath, snapshots }: StorageLayoutProps) {
+  // the column whose filter performance is opened beside the table
+  const [selected, setSelected] = useState<string | null>(null)
   if (!layout) {
     return <p className="empty">{error ? `The layout could not be read: ${error}` : 'No layout to show'}</p>
   }
@@ -31,6 +33,7 @@ export function StorageLayout({ layout, error, tablePath, snapshots }: StorageLa
   const sortedBy = new Map(sortOrder.map((entry) => entry.split(' ') as [string, string]))
   const notes = layoutNotes(layout, outliers)
   const builds = snapshotsBySequence(snapshots)
+  const selectedColumn = columns.find((column) => column.name === selected) ?? null
 
   return (
     <div className="layout">
@@ -61,16 +64,7 @@ export function StorageLayout({ layout, error, tablePath, snapshots }: StorageLa
         </div>
       </dl>
 
-      {notes.length > 0 && (
-        <ul className="layout-notes">
-          {notes.map((note) => (
-            <li key={note.text} className={`layout-note ${note.tone}`}>
-              {note.text}
-            </li>
-          ))}
-        </ul>
-      )}
-
+      <div className="layout-pruning-row">
       <div className="table-scroll layout-pruning">
         <table className="result-table pruning-table">
           <thead>
@@ -78,7 +72,7 @@ export function StorageLayout({ layout, error, tablePath, snapshots }: StorageLa
               <th scope="col">Column</th>
               <th
                 scope="col"
-                title="The most data files a scan filtered to one value of this column has to read: every file whose recorded lowest-to-highest range admits that value. A scan skips the other files by their bounds without opening them."
+                title="The most data files a scan filtered to one value of this column has to read: every file whose recorded lowest-to-highest range admits that value, or for a geometry every file whose bounding box a query can meet plus those recording no box and no null count. A scan skips the other files by their bounds without opening them."
               >
                 Worst-case files read per scan
               </th>
@@ -96,8 +90,15 @@ export function StorageLayout({ layout, error, tablePath, snapshots }: StorageLa
           <tbody>
             {columns.map((column) => {
               const verdict = pruningVerdict(column, data.count)
+              const open = column.name === selected
               return (
-                <tr key={column.name}>
+                <tr
+                  key={column.name}
+                  className={`pruning-row${open ? ' selected' : ''}`}
+                  aria-selected={open}
+                  title="Click for what a filter on this column performs like"
+                  onClick={() => setSelected(open ? null : column.name)}
+                >
                   <td>
                     <code>{column.name}</code>
                     {partitionedBy.has(column.name) && (
@@ -112,13 +113,15 @@ export function StorageLayout({ layout, error, tablePath, snapshots }: StorageLa
                     )}
                   </td>
                   <td title={column.filesWithBounds > 0 ? `${column.lower} … ${column.upper}` : undefined}>
-                    {column.filesWithBounds === 0 || column.maxFilesPerValue === 0
+                    {column.maxFilesPerValue === 0
                       ? '—'
-                      : `${formatCount(column.maxFilesPerValue)} of ${formatCount(column.filesWithBounds)}`}
+                      : `${formatCount(column.maxFilesPerValue)} of ${formatCount(column.type.toUpperCase().startsWith('GEOMETRY') ? data.count : column.filesWithBounds)}`}
                   </td>
                   <td>{formatShare(column.nulls, data.rows)}</td>
-                  <td className={`layout-verdict ${verdict.tone}`} title={verdict.detail}>
-                    {verdict.grade}
+                  <td className={`layout-verdict ${verdict.tone}`}>
+                    <button type="button" className="layout-grade">
+                      {verdict.grade}
+                    </button>
                   </td>
                 </tr>
               )
@@ -126,6 +129,19 @@ export function StorageLayout({ layout, error, tablePath, snapshots }: StorageLa
           </tbody>
         </table>
         {columns.length === 0 && <p className="empty">No column statistics recorded</p>}
+      </div>
+      {selectedColumn ? (
+        <ColumnDetail
+          column={selectedColumn}
+          dataFiles={data.count}
+          rows={data.rows}
+          partitionTransform={partitionedBy.get(selectedColumn.name)}
+          sortDirection={sortedBy.get(selectedColumn.name)}
+          onClose={() => setSelected(null)}
+        />
+      ) : (
+        <Overview notes={notes} />
+      )}
       </div>
 
       <FileList files={files} tablePath={tablePath} builds={builds} />
@@ -252,4 +268,137 @@ function FileList({ files, tablePath, builds }: FileListProps) {
       </div>
     </details>
   )
+}
+
+/**
+ * The pane beside the table before a column is chosen: what stands out
+ * about the files, and how to get the detail of a column.
+ */
+function Overview({ notes }: { notes: Note[] }) {
+  return (
+    <aside className="column-detail layout-overview" aria-label="Overview of the layout">
+      <header className="column-detail-header">
+        <h4>Overview</h4>
+      </header>
+      {notes.length > 0 ? (
+        <ul className="layout-notes">
+          {notes.map((note) => (
+            <li key={note.text} className={`layout-note ${note.tone}`}>
+              {note.text}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="column-detail-text">Nothing stands out: the files are evenly sized and no delete file is applied.</p>
+      )}
+      <p className="column-detail-hint">Click a column for what a filter on it performs like.</p>
+    </aside>
+  )
+}
+
+type ColumnDetailProps = {
+  column: ColumnPruning
+  dataFiles: number
+  rows: number
+  partitionTransform?: string
+  sortDirection?: string
+  onClose: () => void
+}
+
+/**
+ * What a filter on the selected column performs like, beside the table: the
+ * grade, how many of the files a scan reads at worst as a bar, the reasoning,
+ * the range the files record, and a query shape that filter takes.
+ */
+function ColumnDetail({ column, dataFiles, rows, partitionTransform, sortDirection, onClose }: ColumnDetailProps) {
+  const verdict = pruningVerdict(column, dataFiles)
+  const geometry = column.type.toUpperCase().startsWith('GEOMETRY')
+  const worst = column.maxFilesPerValue
+  const share = dataFiles > 0 ? worst / dataFiles : 0
+  return (
+    <aside className="column-detail" aria-label={`Filter performance of ${column.name}`}>
+      <header className="column-detail-header">
+        <h4>
+          <code>{column.name}</code>
+        </h4>
+        <span className={`layout-verdict column-detail-grade ${verdict.tone}`}>{verdict.grade}</span>
+        <button type="button" className="icon-button column-detail-close" aria-label="Close" onClick={onClose}>
+          ×
+        </button>
+      </header>
+      {worst > 0 ? (
+        <>
+          <p className="column-detail-headline">
+            A scan filtered on this column reads at worst <strong>{formatCount(worst)}</strong> of{' '}
+            <strong>{formatCount(dataFiles)}</strong> data files
+          </p>
+          <div
+            className="column-detail-bar"
+            role="img"
+            aria-label={`${Math.round(share * 100)} percent of the files at worst`}
+          >
+            <div className={`column-detail-bar-fill ${verdict.tone}`} style={{ width: `${Math.max(2, share * 100)}%` }} />
+          </div>
+        </>
+      ) : (
+        <p className="column-detail-headline">Nothing lets a scan filtered on this column skip a file</p>
+      )}
+      <p className="column-detail-text">{verdict.detail}</p>
+      <dl className="column-detail-facts">
+        <dt>Role</dt>
+        <dd>
+          {partitionTransform ? `partition column, ${partitionTransform}` : ''}
+          {partitionTransform && sortDirection ? '; ' : ''}
+          {sortDirection ? `sort column, ${sortDirection}` : ''}
+          {!partitionTransform && !sortDirection && 'neither partition nor sort column'}
+        </dd>
+        <dt>Files with bounds</dt>
+        <dd>
+          {formatCount(column.filesWithBounds)} of {formatCount(dataFiles)}
+        </dd>
+        <dt>Null share</dt>
+        <dd>{formatShare(column.nulls, rows)}</dd>
+        {column.filesWithBounds > 0 && !geometry && (
+          <>
+            <dt>Range over all files</dt>
+            <dd>
+              <code title={column.lower}>{column.lower}</code> … <code title={column.upper}>{column.upper}</code>
+            </dd>
+          </>
+        )}
+      </dl>
+      <p className="column-detail-label">A filter that takes this path</p>
+      <pre className="column-detail-query">{sampleFilter(column)}</pre>
+    </aside>
+  )
+}
+
+/** The SPARQL pattern or FILTER whose constant lands in the column, as the translator writes it. */
+function sampleFilter(column: ColumnPruning): string {
+  switch (column.name) {
+    case 'subject':
+      return '<https://example.org/thing> ?p ?o .'
+    case 'predicate':
+      return '?s <https://schema.org/name> ?o .'
+    case 'object_iri':
+      return '?s ?p <https://example.org/thing> .'
+    case 'object_string':
+      return '?s ?p "a literal" .'
+    case 'object_language':
+      return '?s ?p ?o .\nFILTER(LANG(?o) = "en")'
+    case 'object_type':
+      return '?s ?p ?o .\nFILTER(DATATYPE(?o) = xsd:dateTime)'
+    case 'object_integer':
+    case 'object_byte':
+    case 'object_float':
+      return '?s ?p ?o .\nFILTER(?o > 21)'
+    case 'object_time':
+      return '?s ?p ?o .\nFILTER(?o > "2020-01-01T00:00:00Z"^^xsd:dateTime)'
+    case 'object_geometry':
+      return '?s geo:asWKT ?g .\nFILTER(geof:sfIntersects(?g, "POLYGON(...)"^^geo:wktLiteral))'
+    case 'triple_hash':
+      return 'SELECT * FROM triples WHERE triple_hash = \'…\''
+    default:
+      return `?s ?p ?o .\nFILTER(?o = …)   -- ${column.name}`
+  }
 }

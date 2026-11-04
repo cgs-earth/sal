@@ -67,7 +67,7 @@ func (cmd *InstallExtensionsCmd) Run() error {
 }
 
 func queryForSnapshotDiff(ctx context.Context, warehouse string, namespace string, tablePath string, snapshotDiff string) (string, error) {
-	cat, err := hadoop.NewCatalog("local-catalog", warehouse, nil)
+	cat, err := hadoop.NewCatalog(ctx, "local-catalog", warehouse, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create catalog: %w", err)
 	}

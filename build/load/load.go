@@ -79,7 +79,7 @@ func writeGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCo
 		return err
 	}
 
-	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
+	cat, err := hadoop.NewCatalog(ctx, "local-catalog", cfg.Warehouse, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create catalog: %w", err)
 	}
@@ -394,7 +394,10 @@ func commitGraphDelta(ctx context.Context, tbl *table.Table, branch string, data
 	snapshotProps[pkg.SnapshotTriplesAddedProperty] = strconv.FormatInt(rows, 10)
 	snapshotProps[pkg.SnapshotTriplesRemovedProperty] = strconv.Itoa(len(toDrop))
 
-	txn := tbl.NewTransactionOnBranch(branch)
+	txn, err := tbl.NewTransactionOnBranch(branch)
+	if err != nil {
+		return nil, err
+	}
 	var deleteFiles []iceberg.DataFile
 	if len(toDrop) > 0 {
 		deleteFiles, err = writeTripleHashDeletes(ctx, txn, tbl.Schema(), toDrop)

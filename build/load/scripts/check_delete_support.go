@@ -14,7 +14,7 @@ func main() {
 	ctx := context.Background()
 
 	// Create / load Hadoop catalog (same warehouse as your loader)
-	cat, err := hadoop.NewCatalog("local-catalog", "/tmp/iceberg-warehouse", nil)
+	cat, err := hadoop.NewCatalog(ctx, "local-catalog", "/tmp/iceberg-warehouse", nil)
 	if err != nil {
 		log.Fatal("failed to create catalog:", err)
 	}

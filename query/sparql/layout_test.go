@@ -36,7 +36,7 @@ func layoutFiles(rows ...[]string) Result {
 }
 
 func layoutBounds(rows ...[]string) Result {
-	return Result{Header: []string{"file_path", "column_name", "column_type", "lower_bound", "upper_bound", "null_value_count"}, Rows: rows}
+	return Result{Header: []string{"file_path", "column_name", "column_type", "lower_bound", "upper_bound", "value_count", "null_value_count"}, Rows: rows}
 }
 
 func TestLayoutReadsTheCurrentPartitionSpecAndSortOrder(t *testing.T) {
@@ -147,24 +147,27 @@ func TestLayoutMeasuresHowManyFilesOneValueCanTouch(t *testing.T) {
 	a, b, c := layoutTable+"/data/p=x/a.parquet", layoutTable+"/data/p=y/b.parquet", layoutTable+"/data/p=z/c.parquet"
 	layout, err := layoutFromResults(layoutTable, layoutMetadata, layoutFiles(), layoutBounds(
 		// predicate ranges are disjoint: a value falls in one file
-		[]string{a, "predicate", "VARCHAR", "http://a", "http://b", "0"},
-		[]string{b, "predicate", "VARCHAR", "http://c", "http://d", "0"},
-		[]string{c, "predicate", "VARCHAR", "http://e", "http://f", "0"},
+		[]string{a, "predicate", "VARCHAR", "http://a", "http://b", "10", "0"},
+		[]string{b, "predicate", "VARCHAR", "http://c", "http://d", "10", "0"},
+		[]string{c, "predicate", "VARCHAR", "http://e", "http://f", "10", "0"},
 		// subject ranges all overlap: a value can fall in every file
-		[]string{a, "subject", "VARCHAR", "http://a", "http://z", "0"},
-		[]string{b, "subject", "VARCHAR", "http://b", "http://y", "0"},
-		[]string{c, "subject", "VARCHAR", "http://c", "http://x", "0"},
+		[]string{a, "subject", "VARCHAR", "http://a", "http://z", "10", "0"},
+		[]string{b, "subject", "VARCHAR", "http://b", "http://y", "10", "0"},
+		[]string{c, "subject", "VARCHAR", "http://c", "http://x", "10", "0"},
 		// two of three numeric ranges share a point, compared as numbers
-		[]string{a, "object_integer", "BIGINT", "1", "9", "5"},
-		[]string{b, "object_integer", "BIGINT", "10", "100", "0"},
-		[]string{c, "object_integer", "BIGINT", "50", "60", "7"},
+		[]string{a, "object_integer", "BIGINT", "1", "9", "10", "5"},
+		[]string{b, "object_integer", "BIGINT", "10", "100", "10", "0"},
+		[]string{c, "object_integer", "BIGINT", "50", "60", "10", "7"},
 		// one file records no bounds for the column
-		[]string{a, "object_float", "DOUBLE", "", "", "9"},
-		[]string{b, "object_float", "DOUBLE", "1.5", "2.5", "0"},
-		[]string{c, "object_float", "DOUBLE", "", "", "9"},
-		// a geometry's bounds are boxes, not a range a value falls in
-		[]string{a, "object_geometry", "GEOMETRY('OGC:CRS84')", `{"bbox_x":-1}`, `{"bbox_x":1}`, "0"},
-		[]string{b, "object_geometry", "GEOMETRY('OGC:CRS84')", `{"bbox_x":-1}`, `{"bbox_x":1}`, "0"},
+		[]string{a, "object_float", "DOUBLE", "", "", "10", "9"},
+		[]string{b, "object_float", "DOUBLE", "1.5", "2.5", "10", "0"},
+		[]string{c, "object_float", "DOUBLE", "", "", "10", "9"},
+		// a geometry's bounding box is what a spatial filter is checked
+		// against: a has one, b proves by its null count that it holds no
+		// geometry, and c records neither, so a filter must read a and c
+		[]string{a, "object_geometry", "GEOMETRY('OGC:CRS84')", `{"bbox_x":-1}`, `{"bbox_x":1}`, "10", "0"},
+		[]string{b, "object_geometry", "GEOMETRY('OGC:CRS84')", "", "", "10", "10"},
+		[]string{c, "object_geometry", "GEOMETRY('OGC:CRS84')", "", "", "10", ""},
 	))
 
 	require.NoError(t, err)
@@ -177,7 +180,7 @@ func TestLayoutMeasuresHowManyFilesOneValueCanTouch(t *testing.T) {
 	require.Equal(t, ColumnPruning{Name: "predicate", Type: "VARCHAR", FilesWithBounds: 3, MaxFilesPerValue: 1, Lower: "http://a", Upper: "http://f"}, layout.Columns[1])
 	require.Equal(t, ColumnPruning{Name: "object_integer", Type: "BIGINT", FilesWithBounds: 3, MaxFilesPerValue: 2, Nulls: 12, Lower: "1", Upper: "100"}, layout.Columns[2])
 	require.Equal(t, ColumnPruning{Name: "object_float", Type: "DOUBLE", FilesWithBounds: 1, MaxFilesPerValue: 1, Nulls: 18, Lower: "1.5", Upper: "2.5"}, layout.Columns[3])
-	require.Equal(t, ColumnPruning{Name: "object_geometry", Type: "GEOMETRY('OGC:CRS84')", FilesWithBounds: 2, MaxFilesPerValue: 0, Lower: `{"bbox_x":-1}`, Upper: `{"bbox_x":1}`}, layout.Columns[4])
+	require.Equal(t, ColumnPruning{Name: "object_geometry", Type: "GEOMETRY('OGC:CRS84')", FilesWithBounds: 1, MaxFilesPerValue: 2, Nulls: 10, Lower: `{"bbox_x":-1}`, Upper: `{"bbox_x":1}`}, layout.Columns[4])
 }
 
 func TestMaxOverlapCountsAnInclusiveTouchAsShared(t *testing.T) {

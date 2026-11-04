@@ -86,7 +86,7 @@ func TestSquashSnapshotsCondensesLocalSnapshotsIntoNewSnapshot(t *testing.T) {
 	for name, ref := range loaded.Metadata().Refs() {
 		refs[name] = ref
 	}
-	require.Equal(t, table.TagRef, refs[latestGitHash].SnapshotRefType)
+	require.Equal(t, table.TagRef, refs[latestGitHash].Type)
 	require.Equal(t, loaded.CurrentSnapshot().SnapshotID, refs[latestGitHash].SnapshotID)
 }
 
@@ -105,7 +105,7 @@ func createTableWithSnapshots(t *testing.T, count int) (*hadoop.Catalog, *table.
 		require.NoError(t, load.WriteGraphToIceberg(ctx, graphForSnapshot(i), cfg, map[string]string{"sal.test-snapshot": fmt.Sprintf("%d", i)}, ""))
 	}
 
-	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
+	cat, err := hadoop.NewCatalog(context.Background(), "local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
 	tbl, err := cat.LoadTable(ctx, table.Identifier{"default", "triples"})
 	require.NoError(t, err)

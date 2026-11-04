@@ -233,7 +233,7 @@ func TestBuildFailsWhenADeclaredPrefixCannotBeResolved(t *testing.T) {
 func tableStatements(t *testing.T, project string) map[string]struct{} {
 	t.Helper()
 	ctx := context.Background()
-	cat, err := hadoop.NewCatalog("local-catalog", filepath.Join(project, ".sal", "data"), nil)
+	cat, err := hadoop.NewCatalog(context.Background(), "local-catalog", filepath.Join(project, ".sal", "data"), nil)
 	require.NoError(t, err)
 	tbl, err := cat.LoadTable(ctx, table.Identifier{"sal-pins-test-project", "triples"})
 	require.NoError(t, err)
