@@ -52,11 +52,9 @@ func TestOnlyCommandsWithAPlanWorkUnderTheProgressPanes(t *testing.T) {
 	require.Equal(t, "run", command)
 	require.True(t, noTUI)
 
-	// a build or run refused for want of a message opens no panes
+	// a build or run without a message takes the commit's, so it opens them too
 	_, noTUI = progressCommand(args{Build: &build.BuildCmd{}})
-	require.True(t, noTUI)
-	_, noTUI = progressCommand(args{RunTasks: &build.RunCmd{Message: "  "}})
-	require.True(t, noTUI)
+	require.False(t, noTUI)
 
 	command, noTUI = progressCommand(args{Push: &push.PushCmd{NoTUI: true}})
 	require.Equal(t, "push", command)

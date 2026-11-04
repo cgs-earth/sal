@@ -5,8 +5,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -382,6 +384,15 @@ func commitGraphDelta(ctx context.Context, tbl *table.Table, branch string, data
 	}
 	ctx, span := telemetry.Start(ctx, "iceberg.commit", attribute.Int("sal.iceberg.data_files", len(dataFiles)), attribute.Int64("sal.triples.added", rows), attribute.Int("sal.triples.removed", len(toDrop)))
 	defer func() { telemetry.End(span, err) }()
+
+	// the counts go into the summary with the message, so the snapshot says
+	// what it changed in triples without reading its files
+	snapshotProps = maps.Clone(snapshotProps)
+	if snapshotProps == nil {
+		snapshotProps = iceberg.Properties{}
+	}
+	snapshotProps[pkg.SnapshotTriplesAddedProperty] = strconv.FormatInt(rows, 10)
+	snapshotProps[pkg.SnapshotTriplesRemovedProperty] = strconv.Itoa(len(toDrop))
 
 	txn := tbl.NewTransactionOnBranch(branch)
 	var deleteFiles []iceberg.DataFile

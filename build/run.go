@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/apache/iceberg-go"
 	"github.com/apache/iceberg-go/catalog"
@@ -15,16 +14,10 @@ import (
 
 type RunCmd struct {
 	Paths                           []string `arg:"positional" help:"RDF files declaring the SAL module tasks to run"`
-	Message                         string   `arg:"--message,-m" help:"required: what this run changes, recorded in the Iceberg snapshot the way a git commit message is"`
+	Message                         string   `arg:"--message,-m" help:"what this run changes, recorded in the Iceberg snapshot the way a git commit message is; defaults to the message of the git commit HEAD is at, and is required with uncommitted changes"`
 	Force                           bool     `arg:"--force" help:"run modules even if the git worktree is dirty or the data product was not built from the current commit"`
 	AllowPrefixesWithoutSlashOrHash bool     `arg:"--allow-prefixes-without-slash-or-hash" help:"include a prefix whose namespace does not end in / or # without asking"`
 	NoTUI                           bool     `arg:"--no-tui" help:"write the log to stderr as it happens instead of opening the progress and log panes"`
-}
-
-// MissingMessage reports whether the run was given no --message, which the
-// build it makes refuses before doing anything.
-func (cfg *RunCmd) MissingMessage() bool {
-	return strings.TrimSpace(cfg.Message) == ""
 }
 
 var ErrRunUncommittedChanges = errors.New("git repository has uncommitted changes; commit them and run `sal build` before `sal run`")
@@ -36,6 +29,7 @@ var ErrNoModuleTasks = errors.New("the project declares no SAL module tasks, so 
 var (
 	uncommittedChangesInGit = pkg.UncommittedChangesInGit
 	gitCommitHash           = pkg.GitCommitHash
+	gitCommitMessage        = pkg.GitCommitMessage
 	salTableHead            = func() (tableHead, error) {
 		tbl, err := pkg.GetSalIcebergTable()
 		if err != nil {

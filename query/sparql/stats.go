@@ -262,6 +262,18 @@ func (r DuckDBRunner) latestMetadataFile(ctx context.Context) (string, error) {
 	return r.TablePath + "/metadata/*.metadata.json", nil
 }
 
+// metadataFiles is what the snapshots query reads to find the metadata file
+// each snapshot was committed in: every metadata file of the table, which
+// a local table and one on object storage can be asked for with a glob,
+// and for an https table, whose directory the generic HTTP reader cannot
+// list, the latest file alone.
+func metadataFiles(tablePath string, latest string) string {
+	if scheme, _, ok := strings.Cut(tablePath, "://"); ok && (strings.EqualFold(scheme, "http") || strings.EqualFold(scheme, "https")) {
+		return latest
+	}
+	return tablePath + "/metadata/*.metadata.json"
+}
+
 // infoSQL is InfoSQL over an explicit metadata file, a single path or a glob,
 // which the properties and snapshots queries read.
 func infoSQL(info string, tablePath string, metadataFile string) (string, error) {
@@ -287,9 +299,13 @@ FROM latest_metadata,
 json_each(json_extract(metadata_json, '$.properties')) AS prop
 ORDER BY prop.key`, escapedMetadataFile), nil
 	case "snapshots":
-		// the message a build recorded in a snapshot's summary and the git
-		// tags on it are read from the latest metadata file, since
-		// iceberg_snapshots() reports neither
+		// the message and triple counts a build recorded in a snapshot's
+		// summary and the git commits tagged on it are read from the latest
+		// metadata file, since iceberg_snapshots() reports none of them. The
+		// metadata file a snapshot was committed in is the lowest version
+		// naming it as current, found by reading every metadata file the
+		// table has; an https table cannot be listed, so there only the
+		// latest file is read and only the current snapshot has one.
 		return fmt.Sprintf(`
 WITH snapshots AS (
 	SELECT *
@@ -303,30 +319,47 @@ latest_metadata AS (
 	ORDER BY regexp_extract(filename, 'v([0-9]+)\.metadata\.json', 1)::BIGINT DESC
 	LIMIT 1
 ),
-tags AS (
+git_commits AS (
 	SELECT
 		json_extract(ref.value, '$."snapshot-id"')::BIGINT AS snapshot_id,
-		string_agg(ref.key, ', ' ORDER BY ref.key) AS tags
+		string_agg(ref.key, ', ' ORDER BY ref.key) AS git_commits
 	FROM latest_metadata,
 	json_each(json_extract(metadata_json, '$.refs')) AS ref
 	WHERE json_extract_string(ref.value, '$.type') = 'tag'
 	GROUP BY snapshot_id
 ),
-messages AS (
+summaries AS (
 	SELECT
 		json_extract(snapshot.value, '$."snapshot-id"')::BIGINT AS snapshot_id,
+		COALESCE(json_extract_string(snapshot.value, '$.summary."%s"'), json_extract_string(snapshot.value, '$.summary."added-records"'), '0')::BIGINT AS triples_added,
+		COALESCE(json_extract_string(snapshot.value, '$.summary."%s"'), json_extract_string(snapshot.value, '$.summary."added-equality-deletes"'), '0')::BIGINT AS triples_removed,
 		json_extract_string(snapshot.value, '$.summary."%s"') AS message
 	FROM latest_metadata,
 	json_each(json_extract(metadata_json, '$.snapshots')) AS snapshot
+),
+metadata_files AS (
+	SELECT
+		json_extract(content::JSON, '$."current-snapshot-id"')::BIGINT AS snapshot_id,
+		arg_min(filename, regexp_extract(filename, 'v([0-9]+)\.metadata\.json', 1)::BIGINT) AS metadata_file
+	FROM read_text('%s')
+	GROUP BY snapshot_id
 )
 SELECT
-	snapshots.*,
-	messages.message,
-	tags.tags
+	snapshots.sequence_number,
+	snapshots.snapshot_id,
+	snapshots.parent_id,
+	snapshots.timestamp_ms,
+	snapshots.operation,
+	summaries.triples_added,
+	summaries.triples_removed,
+	summaries.message,
+	git_commits.git_commits,
+	metadata_files.metadata_file
 FROM snapshots
-LEFT JOIN messages ON messages.snapshot_id = snapshots.snapshot_id
-LEFT JOIN tags ON tags.snapshot_id = snapshots.snapshot_id
-ORDER BY snapshots.sequence_number DESC`, escapedTablePath, escapedMetadataFile, pkg.SnapshotMessageProperty), nil
+LEFT JOIN summaries ON summaries.snapshot_id = snapshots.snapshot_id
+LEFT JOIN git_commits ON git_commits.snapshot_id = snapshots.snapshot_id
+LEFT JOIN metadata_files ON metadata_files.snapshot_id = snapshots.snapshot_id
+ORDER BY snapshots.sequence_number DESC`, escapedTablePath, escapedMetadataFile, pkg.SnapshotTriplesAddedProperty, pkg.SnapshotTriplesRemovedProperty, pkg.SnapshotMessageProperty, escapeSQLLiteral(metadataFiles(tablePath, metadataFile))), nil
 	case "column-stats":
 		return fmt.Sprintf("SELECT * FROM iceberg_column_stats('%s')", escapedTablePath), nil
 	default:

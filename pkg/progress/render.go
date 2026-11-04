@@ -87,6 +87,10 @@ func (t *Tracker) Render(width int, now time.Time, spinner string) []string {
 		case phase.Step != nil:
 			bound[phase.Step] = true
 			rows = t.stepRows(rows, phase.Step, 0, phase.Label, now, spinner)
+		case t.skipReason(phase) != "":
+			// the command decided there was nothing for the phase to do and
+			// said why, so the phase is as good as done
+			rows = append(rows, row{mark: styleDone.Render("✓"), label: stylePhase.Render(phase.Label), detail: styleDetail.Render(t.skipReason(phase)), phase: true})
 		case phase.Skipped:
 			rows = append(rows, row{mark: stylePending.Render("–"), label: stylePending.Render(phase.Label), detail: stylePending.Render("skipped"), phase: true})
 		default:

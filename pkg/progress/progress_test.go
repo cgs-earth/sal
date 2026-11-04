@@ -24,7 +24,13 @@ import (
 // telemetry.Start for the rest of the test.
 func installTracker(t *testing.T) *Tracker {
 	t.Helper()
-	tracker := NewTracker(buildPlan)
+	return installPlan(t, buildPlan)
+}
+
+// installPlan is installTracker over the given plan.
+func installPlan(t *testing.T, plan []Phase) *Tracker {
+	t.Helper()
+	tracker := NewTracker(plan)
 	previous := otel.GetTracerProvider()
 	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(tracker)))
 	t.Cleanup(func() { otel.SetTracerProvider(previous) })
@@ -393,6 +399,42 @@ func TestSummaryReportsAFinishedBuild(t *testing.T) {
 
 	require.Contains(t, summary, "✓ sal run finished in")
 	require.NotContains(t, summary, "log:")
+}
+
+func TestSummarySaysWhyAPullPulledNothing(t *testing.T) {
+	ui := New("pull", nil, "")
+	ui.tracker = installPlan(t, pullPlan)
+	ctx, root := telemetry.Start(context.Background(), "sal.pull", attribute.String("sal.oci.repository", "ghcr.io/org/data"))
+	_, manifest := telemetry.Start(ctx, "oci.fetch_manifest", attribute.String("sal.oci.reference", "latest"))
+	telemetry.End(manifest, nil)
+	// the pull found the same snapshots on both sides and says so on its
+	// root span, so the pull phase is shown done with that reason rather
+	// than skipped, and the headline carries it too
+	root.SetAttributes(attribute.String(pkg.PullSkippedAttribute, "up to date, nothing to pull"))
+	telemetry.End(root, nil)
+
+	summary := ansi.Strip(ui.Summary())
+
+	require.Contains(t, summary, "✓ sal pull finished in")
+	require.Contains(t, summary, "s · up to date, nothing to pull\n")
+	require.Contains(t, summary, "✓ Pull the data product  up to date, nothing to pull")
+	require.Contains(t, summary, "– Initialize the SAL project  skipped")
+	require.NotContains(t, summary, "Pull the data product  skipped")
+}
+
+func TestSummaryOfAPullThatPulledSaysNothingMore(t *testing.T) {
+	ui := New("pull", nil, "")
+	ui.tracker = installPlan(t, pullPlan)
+	ctx, root := telemetry.Start(context.Background(), "sal.pull")
+	_, layers := telemetry.Start(ctx, "oci.pull_layers")
+	telemetry.End(layers, nil)
+	telemetry.End(root, nil)
+
+	summary := ansi.Strip(ui.Summary())
+
+	require.Contains(t, summary, "✓ sal pull finished in")
+	require.NotContains(t, summary, " · ")
+	require.Contains(t, summary, "✓ Pull the data product")
 }
 
 func TestFormatDuration(t *testing.T) {

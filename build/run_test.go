@@ -78,24 +78,21 @@ func TestRunRefusesADirtyWorktree(t *testing.T) {
 }
 
 // A run commits a snapshot the way a build does, so it needs the message a
-// build needs; the checks that the table matches the worktree come first.
-func TestRunRequiresAMessage(t *testing.T) {
+// build needs: a forced run over uncommitted changes matches no commit whose
+// message could stand in for one.
+func TestRunOfUncommittedChangesRequiresAMessage(t *testing.T) {
 	originalChanges := uncommittedChangesInGit
-	uncommittedChangesInGit = func() (bool, error) { return false, nil }
-	snapshot := &table.Snapshot{SnapshotID: 7}
+	uncommittedChangesInGit = func() (bool, error) { return true, nil }
 	originalHead := salTableHead
 	salTableHead = func() (tableHead, error) {
-		return &fakeTableHead{current: snapshot, tags: map[string]*table.Snapshot{"abc123": snapshot}}, nil
+		return &fakeTableHead{current: &table.Snapshot{SnapshotID: 7}}, nil
 	}
-	originalCommit := gitCommitHash
-	gitCommitHash = func() (string, error) { return "abc123", nil }
 	t.Cleanup(func() {
 		uncommittedChangesInGit = originalChanges
 		salTableHead = originalHead
-		gitCommitHash = originalCommit
 	})
 
-	_, err := (&RunCmd{}).Run()
+	_, err := (&RunCmd{Force: true}).Run()
 
 	require.ErrorIs(t, err, ErrMessageRequired)
 }
