@@ -1,4 +1,6 @@
 {
   "accessibility.signals.terminalBell": { "sound": "on" },
-  "terminal.integrated.enableVisualBell": true
+  "accessibility.signalOptions.volume": 100,
+  "terminal.integrated.enableVisualBell": true,
+  "terminal.integrated.bellDuration": 10000
 }
