@@ -117,7 +117,7 @@ func TestProcessGraphDiffAddsAndRemovesByTripleHash(t *testing.T) {
 	first := rdflibgo.NewGraph()
 	pkg.AddTriple(first, rdflibgo.NewURIRefUnsafe("http://example.com/keep"), predicate, rdflibgo.NewLiteral("same"))
 	pkg.AddTriple(first, rdflibgo.NewURIRefUnsafe("http://example.com/drop"), predicate, rdflibgo.NewLiteral("old"))
-	require.NoError(t, processGraph(ctx, first, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, nil))
+	require.NoError(t, processGraph(ctx, first, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, nil, nil))
 	loaded, err := cat.LoadTable(ctx, tbl.Identifier())
 	require.NoError(t, err)
 	firstSnapshotID := loaded.CurrentSnapshot().SnapshotID
@@ -125,7 +125,7 @@ func TestProcessGraphDiffAddsAndRemovesByTripleHash(t *testing.T) {
 	second := rdflibgo.NewGraph()
 	pkg.AddTriple(second, rdflibgo.NewURIRefUnsafe("http://example.com/keep"), predicate, rdflibgo.NewLiteral("same"))
 	pkg.AddTriple(second, rdflibgo.NewURIRefUnsafe("http://example.com/add"), predicate, rdflibgo.NewLiteral("new"))
-	require.NoError(t, processGraph(ctx, second, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, nil))
+	require.NoError(t, processGraph(ctx, second, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, nil, nil))
 
 	loaded, err = cat.LoadTable(ctx, tbl.Identifier())
 	require.NoError(t, err)
@@ -151,7 +151,7 @@ func TestWriteGraphToIcebergDoesNotRewriteEquivalentBlankNodeGraph(t *testing.T)
 		Namespace:          "default",
 	}
 
-	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("first"), cfg, map[string]string{"sal.hash": "first"}))
+	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("first"), cfg, map[string]string{"sal.hash": "first"}, ""))
 	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
 	tbl, err := cat.LoadTable(ctx, table.Identifier{"default", "triples"})
@@ -159,7 +159,7 @@ func TestWriteGraphToIcebergDoesNotRewriteEquivalentBlankNodeGraph(t *testing.T)
 	firstHashes, err := readExistingTripleHashes(ctx, tbl)
 	require.NoError(t, err)
 
-	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("second"), cfg, map[string]string{"sal.hash": "second"}))
+	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("second"), cfg, map[string]string{"sal.hash": "second"}, ""))
 	tbl, err = cat.LoadTable(ctx, table.Identifier{"default", "triples"})
 	require.NoError(t, err)
 	secondHashes, err := readExistingTripleHashes(ctx, tbl)
@@ -182,7 +182,7 @@ func TestWriteGraphToIcebergStoresBlankNodesWithNTriplesPrefix(t *testing.T) {
 		Namespace:          "default",
 	}
 
-	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("b1"), cfg, map[string]string{"sal.hash": "h"}))
+	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("b1"), cfg, map[string]string{"sal.hash": "h"}, ""))
 	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
 	tbl, err := cat.LoadTable(ctx, table.Identifier{"default", "triples"})

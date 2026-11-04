@@ -27,8 +27,10 @@ const (
 // the build downloaded, which are recorded in the Iceberg table metadata.
 // staged is the build as MaterializeConstructs staged it in the project's
 // table, whose data files an Iceberg export commits rather than writing them
-// again; it is nil for a build that staged nothing there.
-func ExportGraph(ctx context.Context, graph *rdflibgo.Graph, format GraphExportFormat, hash string, modules []string, staged *load.StagedGraph) error {
+// again; it is nil for a build that staged nothing there. message is the
+// build's --message, recorded in the summary of the snapshot an Iceberg
+// export commits; an N-Quads file has nowhere to carry it.
+func ExportGraph(ctx context.Context, graph *rdflibgo.Graph, format GraphExportFormat, hash string, modules []string, staged *load.StagedGraph, message string) error {
 
 	switch format {
 	case "nq":
@@ -61,9 +63,9 @@ func ExportGraph(ctx context.Context, graph *rdflibgo.Graph, format GraphExportF
 			return err
 		}
 		if staged != nil {
-			err = staged.Commit(ctx, graph, properties)
+			err = staged.Commit(ctx, graph, properties, message)
 		} else {
-			err = load.WriteGraphToIceberg(ctx, graph, cfg, properties)
+			err = load.WriteGraphToIceberg(ctx, graph, cfg, properties, message)
 		}
 		if err != nil {
 			return err

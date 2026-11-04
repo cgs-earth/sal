@@ -67,6 +67,19 @@ Under it:
 
 `sal construct` produces one trace, named `sal.construct`, with a `construct.query` and a `sparql.construct` span per query under it.
 
+`sal push`, `sal pull`, and `sal clone` each produce one trace, named `sal.push`, `sal.pull`, or `sal.clone`, carrying `sal.oci.repository`.
+The transfer spans update their attributes while they run, which is what the [progress pane](/sal/reference/commands/#progress-and-log-panes) draws the transfer from; an exporter sees the final counts.
+
+| Span | What it covers | Attributes |
+| --- | --- | --- |
+| `oci.fetch_manifest` | Fetching the artifact's manifest from the registry. In a `sal push` trace it is the check of which snapshots the remote already has, and ends cleanly whether or not the remote exists. | `sal.oci.reference` |
+| `oci.push_layers` | Uploading every file of `.sal/data` as a layer, `sal.oci.parallel` at a time. `sal.oci.bytes_done` counts the bytes as the registry reads them, so it can exceed `sal.oci.bytes` when a body is sent again after an auth challenge. | `sal.oci.repository`, `sal.oci.parallel`, `sal.oci.files`, `sal.oci.bytes`, `sal.oci.files_done`, `sal.oci.bytes_done` |
+| `oci.push_manifest` | Packing the manifest and tagging it `latest` and with the commit hash. | `sal.oci.repository`, `sal.oci.tags` |
+| `oci.pull_layers` | Restoring every titled layer into the destination, `sal.oci.parallel` at a time, counting the bytes as they arrive. Also recorded by the `oci://` imports `sal build` pulls. | `sal.oci.reference`, `sal.oci.destination`, `sal.oci.parallel`, `sal.oci.files`, `sal.oci.bytes`, `sal.oci.files_done`, `sal.oci.bytes_done` |
+| `clone.repository` | The `git clone` of the source repository the artifact names. | `sal.clone.source` |
+| `clone.checkout` | The `git checkout` of the commit the artifact was built from. | `sal.clone.commit` |
+| `clone.init` | The `sal init` of the cloned repository, or, in a `sal pull` trace, the initialization of the empty directory the data product is pulled into; absent from a pull inside a project. | `sal.clone.directory` |
+
 Every request sal makes to the docker daemon while resolving or running a module is a span of its own under the step that made it, named after what the request does rather than after its path: `docker.image.build`, `docker.image.inspect`, `docker.container.create`, `docker.container.start`, `docker.container.logs`, `docker.container.wait`, `docker.container.kill`, `docker.container.remove`, `docker.container.copy`, and `docker.ping`. The HTTP attributes the docker client records, such as `url.full`, still name the container.
 
 A span whose step failed carries the error as its status and as an `exception` event, so a failed build shows where it stopped.

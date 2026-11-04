@@ -79,6 +79,7 @@ type row struct {
 func (t *Tracker) Render(width int, now time.Time, spinner string) []string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.refresh()
 	var rows []row
 	bound := map[*Step]bool{}
 	for _, phase := range t.phases {
@@ -107,7 +108,7 @@ func (t *Tracker) Render(width int, now time.Time, spinner string) []string {
 // A label overrides the one describe gives the step, which is how a phase
 // is named by the plan rather than by its span.
 func (t *Tracker) stepRows(rows []row, step *Step, depth int, label string, now time.Time, spinner string) []row {
-	described, detail := describe(step)
+	described, detail := describe(step, now)
 	if label == "" {
 		label = described
 	}

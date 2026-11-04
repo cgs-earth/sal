@@ -80,7 +80,7 @@ func TestBuildCommitsConstructedTriplesInTheSameSnapshot(t *testing.T) {
 	runner := installStagedConstructRunner(t)
 	commitConstructQuery(t, git, "aliases.rq", constructTestQuery)
 
-	graph, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	graph, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg}).Run()
 
 	require.NoError(t, err)
 	require.Equal(t, 1, runner.runs)
@@ -108,14 +108,14 @@ func TestBuildHashesTheConstructQueries(t *testing.T) {
 	installFakeModuleRunner(t, &testContainerRunner{})
 	installStagedConstructRunner(t)
 
-	_, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg}).Run()
 	require.NoError(t, err)
 	tbl, err := pkg.GetSalIcebergTable()
 	require.NoError(t, err)
 	withoutQuery := tbl.Properties()["sal.hash"]
 
 	commitConstructQuery(t, git, "aliases.rq", constructTestQuery)
-	_, err = (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	_, err = (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg}).Run()
 	require.NoError(t, err)
 	tbl, err = pkg.GetSalIcebergTable()
 	require.NoError(t, err)
@@ -133,7 +133,7 @@ func TestBuildRefusesAConstructQueryItCannotTranslate(t *testing.T) {
 	runner := installStagedConstructRunner(t)
 	commitConstructQuery(t, git, "broken.rq", `CONSTRUCT { ?s ?p ?missing } WHERE { ?s ?p ?o }`)
 
-	_, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg}).Run()
 
 	require.ErrorContains(t, err, "broken.rq")
 	require.Equal(t, 0, runner.runs)
@@ -155,7 +155,7 @@ func TestBuildWithoutConstructQueriesStagesNothing(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(stale), 0755))
 	require.NoError(t, os.WriteFile(stale, []byte("# stale\n"), 0644))
 
-	_, err = (&BuildCmd{Format: GraphExportFormatIceberg, Force: true}).Run()
+	_, err = (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg, Force: true}).Run()
 
 	require.NoError(t, err)
 	require.Nil(t, runner.staged)
@@ -228,7 +228,7 @@ func TestBuildStagesOnABranchAndCommitsOneSnapshot(t *testing.T) {
 	staged := installRealStaging(t, runner)
 	commitConstructQuery(t, git, "aliases.rq", constructTestQuery)
 
-	graph, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	graph, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg}).Run()
 
 	require.NoError(t, err)
 	require.Equal(t, 1, runner.runs)
@@ -268,7 +268,7 @@ func TestEveryBuildWithConstructQueriesAddsOneSnapshot(t *testing.T) {
 		return tbl
 	}
 
-	_, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg}).Run()
 	require.NoError(t, err)
 	require.Len(t, built().Metadata().Snapshots(), 1)
 	first := built().CurrentSnapshot().SnapshotID
@@ -276,7 +276,7 @@ func TestEveryBuildWithConstructQueriesAddsOneSnapshot(t *testing.T) {
 	// the first build pinned the vocabulary into .sal/config.jsonld
 	git("add", "-A")
 	git("commit", "-m", "pin vocabularies")
-	_, err = (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	_, err = (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg}).Run()
 	require.NoError(t, err)
 	require.Len(t, built().Metadata().Snapshots(), 1)
 	require.Equal(t, first, built().CurrentSnapshot().SnapshotID)
@@ -286,7 +286,7 @@ func TestEveryBuildWithConstructQueriesAddsOneSnapshot(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(cwd, "data.ttl"), []byte(pinsTestSource+"\n<widgets/2> a things:Widget ;\n    things:label \"Another widget\" .\n"), 0644))
 	git("add", "-A")
 	git("commit", "-m", "another widget")
-	graph, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	graph, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg}).Run()
 	require.NoError(t, err)
 	require.Len(t, built().Metadata().Snapshots(), 2)
 	require.Equal(t, first, *built().CurrentSnapshot().ParentSnapshotID)
@@ -306,7 +306,7 @@ func TestBuildCommitsNothingWhenAConstructQueryFails(t *testing.T) {
 	installRealStaging(t, failingConstructRunner{})
 	commitConstructQuery(t, git, "aliases.rq", constructTestQuery)
 
-	_, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg}).Run()
 
 	require.ErrorIs(t, err, os.ErrDeadlineExceeded)
 	require.ErrorContains(t, err, "aliases.rq")
@@ -324,7 +324,7 @@ func TestAFailedConstructQueryLeavesTheLastBuildAsItWas(t *testing.T) {
 	git := newRunTestProject(t, pinsTestSource)
 	servePinsTestVocabulary(t)
 	installFakeModuleRunner(t, &testContainerRunner{})
-	_, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg}).Run()
 	require.NoError(t, err)
 	tbl, err := pkg.GetSalIcebergTable()
 	require.NoError(t, err)
@@ -340,7 +340,7 @@ func TestAFailedConstructQueryLeavesTheLastBuildAsItWas(t *testing.T) {
 	git("add", "-A")
 	git("commit", "-m", "another widget")
 
-	_, err = (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	_, err = (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg}).Run()
 
 	require.ErrorIs(t, err, os.ErrDeadlineExceeded)
 	tbl, err = pkg.GetSalIcebergTable()

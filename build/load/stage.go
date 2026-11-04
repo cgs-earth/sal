@@ -130,7 +130,7 @@ func StageGraph(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig) (_ 
 			return nil, fmt.Errorf("load table: %w", err)
 		}
 	}
-	committed, err := commitGraphDelta(ctx, tbl, StagingBranch, staged.dataFiles, int64(len(diff.toAdd)), diff.toDrop)
+	committed, err := commitGraphDelta(ctx, tbl, StagingBranch, staged.dataFiles, int64(len(diff.toAdd)), diff.toDrop, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -146,8 +146,8 @@ func StageGraph(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig) (_ 
 
 // Commit writes the graph to the main branch of the table it was staged in,
 // the way WriteGraphToIceberg does, reusing the data files staging wrote.
-func (s *StagedGraph) Commit(ctx context.Context, graph *rdflibgo.Graph, customMetadata map[string]string) error {
-	return writeGraphToIceberg(ctx, graph, s.cfg, customMetadata, s)
+func (s *StagedGraph) Commit(ctx context.Context, graph *rdflibgo.Graph, customMetadata map[string]string, message string) error {
+	return writeGraphToIceberg(ctx, graph, s.cfg, customMetadata, message, s)
 }
 
 // reusableFiles returns the data files staging wrote when every triple in

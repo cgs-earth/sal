@@ -19,7 +19,7 @@ sal push ghcr.io/my-org/my-data-product --username "$OCI_USERNAME" --password "$
 ```
 
 The pushed artifact is tagged as `latest` and with the current Git commit hash.
-SAL adds OCI annotations that connect the artifact back to the source repository and commit.
+SAL adds OCI annotations that connect the artifact back to the source repository and commit, and its description ends with the `--message` of the latest build, so the registry says what the data product last changed.
 
 Consumers can use [`sal clone`](/sal/reference/commands/#sal-clone) to clone the source repository, check out the pinned commit, initialize SAL, and restore the data product into `.sal/data`.
 
@@ -61,7 +61,7 @@ For more detail about where SAL writes generated files, see [Data Layout](/sal/r
 ```sh
 sal terraform --project my-gcp-project   # writes terraform/; or sal init --with-iac
 make apply                               # terraform init && terraform apply
-sal build data/
+sal build --message "Add the station data" data/
 make upload                              # sal upload --bucket gs://<bucket>/
 terraform -chdir=terraform output service_url
 ```

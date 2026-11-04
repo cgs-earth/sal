@@ -7,17 +7,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 
+	"github.com/cgs-earth/sal/importation"
 	"github.com/cgs-earth/sal/pkg"
+	"github.com/cgs-earth/sal/pkg/telemetry"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"go.opentelemetry.io/otel/attribute"
 	"golang.org/x/sync/errgroup"
 
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/registry/remote"
+	"oras.land/oras-go/v2/registry/remote/auth"
 )
-
-const maxConcurrentUploads = 8
 
 const SalGitHashAnnotation = "sal.git-commit-hash"
 
@@ -25,6 +26,8 @@ type PushCmd struct {
 	Repository string `arg:"positional" help:"Full URL of the OCI registry and repository to push the built SAL data product to. Example: ghcr.io/my-username/my-repository"`
 	Username   string `arg:"--username,env:OCI_USERNAME" help:"Username for the OCI registry. This should match the username used to create the password token"`
 	Password   string `arg:"--password,env:OCI_PASSWORD" help:"Password or access token for the OCI registry."`
+	NoTUI      bool   `arg:"--no-tui" help:"write the log to stderr as it happens instead of opening the progress and log panes"`
+	Parallel   int    `arg:"--parallel" default:"16" help:"how many files to upload to the registry at once"`
 }
 
 func (p *PushCmd) GetUsername() string {
@@ -38,16 +41,23 @@ func (p *PushCmd) GetPassword() string {
 var _ pkg.CmdWithAuth = (*PushCmd)(nil)
 
 // push uploads all files in dataDir as OCI layers, then packs and tags a
-// manifest that references those uploaded layers.
-func push(dataDir string, repo *remote.Repository, destination string) error {
-	ctx := context.Background()
+// manifest that references those uploaded layers. The upload is the
+// `oci.push_layers` span, which counts the files and bytes sent as the
+// registry reads them, so the progress pane can follow it; the manifest is
+// `oci.push_manifest`.
+func push(ctx context.Context, dataDir string, repo *remote.Repository, destination string, parallel int) error {
+	if parallel <= 0 {
+		parallel = pkg.DefaultParallelTransfers
+	}
 	slog.Info("Pushing SAL data product in " + dataDir + " to " + destination)
 
 	type uploadFile struct {
 		path  string
 		title string
+		size  int64
 	}
 	var files []uploadFile
+	var bytes int64
 	err := filepath.WalkDir(dataDir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -60,8 +70,13 @@ func push(dataDir string, repo *remote.Repository, destination string) error {
 		if err != nil {
 			return fmt.Errorf("relative path for %s: %w", path, err)
 		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
 
-		files = append(files, uploadFile{path: path, title: filepath.ToSlash(rel)})
+		files = append(files, uploadFile{path: path, title: filepath.ToSlash(rel), size: info.Size()})
+		bytes += info.Size()
 		return nil
 	})
 	if err != nil {
@@ -77,11 +92,17 @@ func push(dataDir string, repo *remote.Repository, destination string) error {
 		return fmt.Errorf("error getting snapshot data %w", err)
 	}
 
+	// the uploads are counted as the registry reads them, through the
+	// client's transport, since the client buffers what it pushes before
+	// sending any of it
+	uploadCtx, uploadSpan := telemetry.Start(ctx, "oci.push_layers", attribute.String("sal.oci.repository", destination), attribute.Int("sal.oci.parallel", parallel))
+	transfer := pkg.NewTransfer(uploadSpan, "Uploaded", len(files), bytes)
+	if client, ok := repo.Client.(*auth.Client); ok {
+		repo.Client = pkg.CountUploads(client, transfer.Transport)
+	}
 	layers := make([]ocispec.Descriptor, len(files))
-	var uploadedFiles atomic.Int64
-	var uploadedBytes atomic.Int64
-	group, uploadCtx := errgroup.WithContext(ctx)
-	group.SetLimit(maxConcurrentUploads)
+	group, uploadCtx := errgroup.WithContext(uploadCtx)
+	group.SetLimit(parallel)
 	for i, file := range files {
 		group.Go(func() error {
 			b, err := os.ReadFile(file.path)
@@ -99,16 +120,13 @@ func push(dataDir string, repo *remote.Repository, destination string) error {
 			}
 
 			layers[i] = desc
-			completed := uploadedFiles.Add(1)
-			uploadedBytes.Add(int64(len(b)))
-			if completed%5 == 0 {
-				msg := fmt.Sprintf("Uploaded %d/%d files (%s)", completed, len(files), pkg.BytesToHumanReadable(uploadedBytes.Load()))
-				slog.Info(msg)
-			}
+			transfer.FileDone()
 			return nil
 		})
 	}
-	if err := group.Wait(); err != nil {
+	err = group.Wait()
+	telemetry.End(uploadSpan, err)
+	if err != nil {
 		return err
 	}
 
@@ -122,16 +140,42 @@ func push(dataDir string, repo *remote.Repository, destination string) error {
 		slog.Warn("failed to get git commit hash for artifact annotation: " + err.Error())
 	}
 
+	// the latest snapshot's build message goes in the description, the way
+	// the latest commit's message is what a repository is browsed by
 	description := fmt.Sprintf("SAL-produced iceberg data product for %s at commit %s", gitRemote, gitHash)
+	if message := latestSnapshotMessage(); message != "" {
+		description += ": " + message
+	}
 
+	annotations := map[string]string{
+		"org.opencontainers.image.source":      gitRemote,
+		SalGitHashAnnotation:                   gitHash,
+		"org.opencontainers.image.description": description,
+		pkg.SalIcebergSnapshotsAnnotation:      strings.Join(SnapShots, ","),
+	}
+	// the project's own description travels with the artifact, so a pull
+	// into an empty directory can initialize the project with it
+	if projectDescription := projectDescription(); projectDescription != "" {
+		annotations[pkg.SalDescriptionAnnotation] = projectDescription
+	}
+	manifestCtx, manifestSpan := telemetry.Start(ctx, "oci.push_manifest", attribute.String("sal.oci.repository", destination), attribute.StringSlice("sal.oci.tags", []string{"latest", gitHash}))
+	err = pushManifest(manifestCtx, repo, layers, gitHash, annotations)
+	telemetry.End(manifestSpan, err)
+	if err != nil {
+		return err
+	}
+
+	slog.Info("Pushed data product to " + destination + ":latest totaling " + pkg.BytesToHumanReadable(bytes) + " in " + fmt.Sprint(len(files)) + " files at " + transfer.Rate())
+	return nil
+}
+
+// pushManifest packs the manifest referencing the uploaded layers with its
+// annotations, and tags it latest and with the commit the data product was
+// built from.
+func pushManifest(ctx context.Context, repo *remote.Repository, layers []ocispec.Descriptor, gitHash string, annotations map[string]string) error {
 	desc, err := oras.PackManifest(ctx, repo, oras.PackManifestVersion1_1, "application/octet-stream", oras.PackManifestOptions{
-		Layers: layers,
-		ManifestAnnotations: map[string]string{
-			"org.opencontainers.image.source":      gitRemote,
-			SalGitHashAnnotation:                   gitHash,
-			"org.opencontainers.image.description": description,
-			pkg.SalIcebergSnapshotsAnnotation:      strings.Join(SnapShots, ","),
-		},
+		Layers:              layers,
+		ManifestAnnotations: annotations,
 	})
 	if err != nil {
 		return fmt.Errorf("pack manifest: %w", err)
@@ -144,14 +188,56 @@ func push(dataDir string, repo *remote.Repository, destination string) error {
 	if err := repo.Tag(ctx, desc, gitHash); err != nil {
 		return fmt.Errorf("push artifact: %w", err)
 	}
-
-	slog.Info("Pushed data product to " + destination + ":latest totaling " + pkg.BytesToHumanReadable(uploadedBytes.Load()))
 	return nil
 }
 
+// projectDescription is the dcterms:description of the project node in
+// .sal/config.jsonld, or empty when the project has none or the file cannot
+// be read, which only warns since the description only annotates the push.
+func projectDescription() string {
+	path, err := pkg.SalConfigPath()
+	if err != nil {
+		slog.Warn("failed to find the project config for the artifact description annotation: " + err.Error())
+		return ""
+	}
+	base, err := pkg.DefaultSalBase()
+	if err != nil {
+		slog.Warn("failed to read the git remote for the artifact description annotation: " + err.Error())
+		return ""
+	}
+	ontology, err := importation.ReadOntology(path, base)
+	if err != nil {
+		slog.Warn("failed to read the project description for the artifact description annotation: " + err.Error())
+		return ""
+	}
+	if ontology == nil {
+		return ""
+	}
+	return ontology.Description
+}
+
+// latestSnapshotMessage is the --message of the build that committed the
+// table's current snapshot, or empty when the table cannot be read, has no
+// snapshot, or the snapshot was written before builds carried a message;
+// the push goes ahead either way, since the message only describes it.
+func latestSnapshotMessage() string {
+	tbl, err := pkg.GetSalIcebergTable()
+	if err != nil {
+		slog.Warn("failed to read the latest snapshot's build message for the artifact description: " + err.Error())
+		return ""
+	}
+	snapshot := tbl.CurrentSnapshot()
+	if snapshot == nil || snapshot.Summary == nil {
+		return ""
+	}
+	return snapshot.Summary.Properties[pkg.SnapshotMessageProperty]
+}
+
 // Run executes the push command, which pushes all files in the SAL data directory
-// to the specified OCI registry.
-func (p *PushCmd) Run() error {
+// to the specified OCI registry. The invocation is one trace, `sal.push`,
+// which the progress pane follows: the check of the remote's snapshots, the
+// upload, and the manifest.
+func (p *PushCmd) Run() (err error) {
 	if p.Password == "" {
 		return fmt.Errorf("password is required for pushing to an OCI registry. See https://oras.land/docs/how_to_guides/remote_registries/#authentication for more information")
 	}
@@ -173,7 +259,14 @@ func (p *PushCmd) Run() error {
 
 	repo.Client = pkg.NewOciClientWithOptionalAuth(p, artifactRef)
 
+	ctx, span := telemetry.Start(context.Background(), "sal.push", attribute.String("sal.oci.repository", artifactRef.Repository))
+	defer func() { telemetry.End(span, err) }()
+
+	// a remote that cannot be read is pushed to all the same, since it is
+	// usually a repository that does not exist yet
+	_, manifestSpan := telemetry.Start(ctx, "oci.fetch_manifest", attribute.String("sal.oci.reference", artifactRef.Reference))
 	diff, _ := pkg.FetchAndDiffSnapshots(repo, artifactRef.Reference)
+	telemetry.End(manifestSpan, nil)
 	if len(diff.SnapshotsInRemoteNotLocal) > 0 {
 		proceed := pkg.Confirm(fmt.Sprintf("Remote %s contains %d snapshots not present locally. Continue pushing anyways?", p.Repository, len(diff.SnapshotsInRemoteNotLocal)))
 		if !proceed {
@@ -181,5 +274,5 @@ func (p *PushCmd) Run() error {
 		}
 	}
 
-	return push(dataDir, repo, artifactRef.Repository)
+	return push(ctx, dataDir, repo, artifactRef.Repository, p.Parallel)
 }

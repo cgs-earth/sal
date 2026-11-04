@@ -139,7 +139,7 @@ func PullArtifact(ctx context.Context, importsDir string, iri string, credential
 	}
 
 	slog.Info("Pulling imported artifact " + reference)
-	if err := pkg.PullManifestLayers(ctx, repo, manifest, desc, ref.Reference, destination); err != nil {
+	if err := pkg.PullManifestLayers(ctx, repo, manifest, desc, ref.Reference, destination, 0); err != nil {
 		// a partial pull would otherwise look like an artifact that is already
 		// on disk and never be retried
 		_ = os.RemoveAll(destination)

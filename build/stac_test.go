@@ -40,7 +40,7 @@ func writeStacTestTable(t *testing.T, graph *rdflibgo.Graph) *table.Table {
 		Warehouse:          t.TempDir(),
 		Namespace:          stacTestProject.Name,
 	}
-	require.NoError(t, load.WriteGraphToIceberg(ctx, graph, cfg, map[string]string{"sal.hash": "abc"}))
+	require.NoError(t, load.WriteGraphToIceberg(ctx, graph, cfg, map[string]string{"sal.hash": "abc"}, ""))
 
 	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
@@ -230,7 +230,7 @@ func TestBuildWritesTheStacCatalogLast(t *testing.T) {
 	project := newPinsTestProject(t)
 	servePinsTestVocabulary(t)
 
-	_, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg}).Run()
 	require.NoError(t, err)
 
 	collection := readStacJSON(t, filepath.Join(project, ".sal", "data", "stac", "triples", "collection.json"))

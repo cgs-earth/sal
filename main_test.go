@@ -7,6 +7,9 @@ import (
 	"testing"
 
 	"github.com/cgs-earth/sal/build"
+	"github.com/cgs-earth/sal/clone"
+	"github.com/cgs-earth/sal/pkg/progress"
+	"github.com/cgs-earth/sal/push"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,14 +43,35 @@ func TestOpenLogFileReportsATempDirectoryThatCannotBeCreated(t *testing.T) {
 	require.Contains(t, stderr.String(), "failed to create SAL log directory")
 }
 
-func TestOnlyBuildAndRunWorkUnderTheProgressPanes(t *testing.T) {
-	command, noTUI := progressCommand(args{Build: &build.BuildCmd{}})
+func TestOnlyCommandsWithAPlanWorkUnderTheProgressPanes(t *testing.T) {
+	command, noTUI := progressCommand(args{Build: &build.BuildCmd{Message: "Add gauges"}})
 	require.Equal(t, "build", command)
 	require.False(t, noTUI)
 
-	command, noTUI = progressCommand(args{RunTasks: &build.RunCmd{NoTUI: true}})
+	command, noTUI = progressCommand(args{RunTasks: &build.RunCmd{Message: "Rerun", NoTUI: true}})
 	require.Equal(t, "run", command)
 	require.True(t, noTUI)
+
+	// a build or run refused for want of a message opens no panes
+	_, noTUI = progressCommand(args{Build: &build.BuildCmd{}})
+	require.True(t, noTUI)
+	_, noTUI = progressCommand(args{RunTasks: &build.RunCmd{Message: "  "}})
+	require.True(t, noTUI)
+
+	command, noTUI = progressCommand(args{Push: &push.PushCmd{NoTUI: true}})
+	require.Equal(t, "push", command)
+	require.True(t, noTUI)
+
+	command, _ = progressCommand(args{Pull: &clone.OciArtifactRetrievalCmd{}})
+	require.Equal(t, "pull", command)
+
+	command, _ = progressCommand(args{Clone: &clone.OciArtifactRetrievalCmd{}})
+	require.Equal(t, "clone", command)
+
+	// every command the panes open for has a plan to draw
+	for _, command := range []string{"build", "run", "push", "pull", "clone"} {
+		require.NotEmpty(t, progress.Plan(command), command)
+	}
 
 	command, _ = progressCommand(args{Validate: &build.ValidateCmd{}})
 	require.Empty(t, command)

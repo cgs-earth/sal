@@ -1,10 +1,13 @@
-// Package progress is the terminal UI `sal build` and `sal run` show while
-// they work: a progress pane following every step of the invocation, and a
-// log pane holding the log as it would otherwise have been printed, toggled
-// with a key. The progress pane is a view over the OpenTelemetry spans sal
-// already records around its slow steps (see pkg/telemetry), fed by a span
-// processor rather than by progress calls of its own, so a step shows up here
-// exactly when it shows up in a trace.
+// Package progress is the terminal UI `sal build`, `sal run`, `sal push`,
+// `sal pull`, and `sal clone` show while they work: a progress pane
+// following every step of the invocation, and a log pane holding the log as
+// it would otherwise have been printed, toggled with a key. The progress
+// pane is a view over the OpenTelemetry spans sal already records around its
+// slow steps (see pkg/telemetry), fed by a span processor rather than by
+// progress calls of its own, so a step shows up here exactly when it shows
+// up in a trace. A transfer span updates its attributes while it runs, and
+// the pane reads them off the live span, which is how a push or pull shows
+// how far along it is.
 package progress
 
 import (
@@ -36,6 +39,10 @@ type Step struct {
 	Attrs    map[string]attribute.Value
 	Parent   *Step
 	Children []*Step
+	// live is the span while it is still recording, whose attributes a
+	// running step's Attrs are refreshed from when the pane draws, so a
+	// step that reports its progress as attributes is drawn as it goes
+	live sdktrace.ReadWriteSpan
 }
 
 // Running reports whether the step has not ended yet.
@@ -115,6 +122,45 @@ var buildPlan = []Phase{
 	{Span: "iceberg.write", Label: "Write the Iceberg table"},
 }
 
+// pushPlan is the order a `sal push` goes through its phases.
+var pushPlan = []Phase{
+	{Span: "oci.fetch_manifest", Label: "Check the remote artifact"},
+	{Span: "oci.push_layers", Label: "Upload the data product"},
+	{Span: "oci.push_manifest", Label: "Push the manifest"},
+}
+
+// pullPlan is the order a `sal pull` goes through its phases.
+var pullPlan = []Phase{
+	{Span: "oci.fetch_manifest", Label: "Fetch the manifest"},
+	{Span: "clone.init", Label: "Initialize the SAL project"},
+	{Span: "oci.pull_layers", Label: "Pull the data product"},
+}
+
+// clonePlan is the order a `sal clone` goes through its phases.
+var clonePlan = []Phase{
+	{Span: "oci.fetch_manifest", Label: "Fetch the manifest"},
+	{Span: "clone.repository", Label: "Clone the source repository"},
+	{Span: "clone.checkout", Label: "Check out the pinned commit"},
+	{Span: "clone.init", Label: "Initialize the SAL project"},
+	{Span: "oci.pull_layers", Label: "Pull the data product"},
+}
+
+// Plan is the phases the panes follow for a command, nil for a command
+// that has none, which is how main knows which commands run under them.
+func Plan(command string) []Phase {
+	switch command {
+	case "build", "run":
+		return buildPlan
+	case "push":
+		return pushPlan
+	case "pull":
+		return pullPlan
+	case "clone":
+		return clonePlan
+	}
+	return nil
+}
+
 // Tracker follows the spans of one invocation as a tree of steps and binds
 // the ones directly under the root to the phases of the plan. It is a span
 // processor, so it is installed through telemetry.Setup, and it is safe to
@@ -126,10 +172,10 @@ type Tracker struct {
 	phases []*Phase
 }
 
-// NewTracker returns a tracker following the build plan.
-func NewTracker() *Tracker {
+// NewTracker returns a tracker following the given plan.
+func NewTracker(plan []Phase) *Tracker {
 	tracker := &Tracker{steps: map[trace.SpanID]*Step{}}
-	for _, phase := range buildPlan {
+	for _, phase := range plan {
 		phase := phase
 		tracker.phases = append(tracker.phases, &phase)
 	}
@@ -142,7 +188,7 @@ func NewTracker() *Tracker {
 func (t *Tracker) OnStart(_ context.Context, span sdktrace.ReadWriteSpan) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	step := &Step{Name: span.Name(), Started: span.StartTime(), Attrs: attributeMap(span.Attributes())}
+	step := &Step{Name: span.Name(), Started: span.StartTime(), Attrs: attributeMap(span.Attributes()), live: span}
 	if parent, ok := t.steps[span.Parent().SpanID()]; ok {
 		step.Parent = parent
 	} else if t.root != nil {
@@ -207,6 +253,7 @@ func (t *Tracker) OnEnd(span sdktrace.ReadOnlySpan) {
 	}
 	step.Ended = span.EndTime()
 	step.Attrs = attributeMap(span.Attributes())
+	step.live = nil
 	if span.Status().Code == codes.Error {
 		if imageNotFound(step) {
 			step.Unmet = true
@@ -240,6 +287,17 @@ func (t *Tracker) Shutdown(context.Context) error { return nil }
 
 // ForceFlush implements the span processor; the tracker exports nothing.
 func (t *Tracker) ForceFlush(context.Context) error { return nil }
+
+// refresh reads the attributes of every running step off its live span, so
+// what a step has reported since it started is drawn. It is called with the
+// lock held.
+func (t *Tracker) refresh() {
+	for _, step := range t.steps {
+		if step.live != nil && step.Running() {
+			step.Attrs = attributeMap(step.live.Attributes())
+		}
+	}
+}
 
 // Root returns the invocation's root step, nil before it starts.
 func (t *Tracker) Root() *Step {

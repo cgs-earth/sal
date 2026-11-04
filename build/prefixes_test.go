@@ -59,7 +59,7 @@ func TestBuildRefusesAPrefixWithoutTerminatorTheUserDeclines(t *testing.T) {
 	fetched := writeBareNamespaceSource(t, project)
 	asked := answerPrompt(t, false)
 
-	_, err := (&BuildCmd{Format: GraphExportFormatNQuads, Force: true}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatNQuads, Force: true}).Run()
 
 	require.ErrorIs(t, err, ErrPrefixRejected)
 	require.Len(t, *asked, 1)
@@ -76,7 +76,7 @@ func TestBuildIncludesAPrefixWithoutTerminatorTheUserAccepts(t *testing.T) {
 	writeBareNamespaceSource(t, project)
 	asked := answerPrompt(t, true)
 
-	_, err := (&BuildCmd{Format: GraphExportFormatNQuads, Force: true}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatNQuads, Force: true}).Run()
 
 	require.NoError(t, err)
 	require.Len(t, *asked, 1)
@@ -91,7 +91,7 @@ func TestAllowPrefixesWithoutSlashOrHashIncludesThemWithoutAsking(t *testing.T) 
 	writeBareNamespaceSource(t, project)
 	asked := answerPrompt(t, false)
 
-	_, err := (&BuildCmd{Format: GraphExportFormatNQuads, Force: true, AllowPrefixesWithoutSlashOrHash: true}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatNQuads, Force: true, AllowPrefixesWithoutSlashOrHash: true}).Run()
 
 	require.NoError(t, err)
 	require.Empty(t, *asked)
@@ -116,7 +116,7 @@ func TestBuildDoesNotAskAboutWellFormedPrefixes(t *testing.T) {
 	servePinsTestVocabulary(t)
 	asked := answerPrompt(t, false)
 
-	_, err := (&BuildCmd{Format: GraphExportFormatNQuads}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatNQuads}).Run()
 
 	require.NoError(t, err)
 	require.Empty(t, *asked)
@@ -131,7 +131,7 @@ func TestBuildRejectsTheSameVocabularyDeclaredUnderHttpAndHttps(t *testing.T) {
 <widgets/2> a things:Widget .
 `), 0644))
 
-	_, err := (&BuildCmd{Format: GraphExportFormatNQuads, Force: true}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatNQuads, Force: true}).Run()
 
 	require.ErrorIs(t, err, ErrConflictingPrefixes)
 	require.NoFileExists(t, filepath.Join(project, ".sal", "config.jsonld"))
@@ -144,7 +144,7 @@ func TestBuildRefusesTheHttpSchemaOrgPrefix(t *testing.T) {
 @prefix schema: <http://schema.org/> .
 `), 0644))
 
-	_, err := (&BuildCmd{Format: GraphExportFormatNQuads, Force: true}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatNQuads, Force: true}).Run()
 
 	var insecure validate.InsecurePrefixError
 	require.ErrorAs(t, err, &insecure)

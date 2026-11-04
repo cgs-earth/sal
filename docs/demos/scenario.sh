@@ -8,7 +8,7 @@
 #   fresh       a git repo with a remote and RDF sources, but no `sal init` yet
 #   initialized fresh + `sal init`
 #   committed   initialized + every file committed, so `sal build` sees a clean tree
-#   built       committed + `sal build data/`
+#   built       committed + `sal build --message ... data/`
 set -euo pipefail
 
 STATE="${1:?usage: scenario.sh <fresh|initialized|committed|built>}"
@@ -49,5 +49,5 @@ if [ "$STATE" = "committed" ] || [ "$STATE" = "built" ]; then
 fi
 
 if [ "$STATE" = "built" ]; then
-	sal build data/
+	sal build --message "Add the station data" data/
 fi

@@ -287,6 +287,9 @@ FROM latest_metadata,
 json_each(json_extract(metadata_json, '$.properties')) AS prop
 ORDER BY prop.key`, escapedMetadataFile), nil
 	case "snapshots":
+		// the message a build recorded in a snapshot's summary and the git
+		// tags on it are read from the latest metadata file, since
+		// iceberg_snapshots() reports neither
 		return fmt.Sprintf(`
 WITH snapshots AS (
 	SELECT *
@@ -308,13 +311,22 @@ tags AS (
 	json_each(json_extract(metadata_json, '$.refs')) AS ref
 	WHERE json_extract_string(ref.value, '$.type') = 'tag'
 	GROUP BY snapshot_id
+),
+messages AS (
+	SELECT
+		json_extract(snapshot.value, '$."snapshot-id"')::BIGINT AS snapshot_id,
+		json_extract_string(snapshot.value, '$.summary."%s"') AS message
+	FROM latest_metadata,
+	json_each(json_extract(metadata_json, '$.snapshots')) AS snapshot
 )
 SELECT
 	snapshots.*,
+	messages.message,
 	tags.tags
 FROM snapshots
+LEFT JOIN messages ON messages.snapshot_id = snapshots.snapshot_id
 LEFT JOIN tags ON tags.snapshot_id = snapshots.snapshot_id
-ORDER BY snapshots.sequence_number DESC`, escapedTablePath, escapedMetadataFile), nil
+ORDER BY snapshots.sequence_number DESC`, escapedTablePath, escapedMetadataFile, pkg.SnapshotMessageProperty), nil
 	case "column-stats":
 		return fmt.Sprintf("SELECT * FROM iceberg_column_stats('%s')", escapedTablePath), nil
 	default:

@@ -35,11 +35,11 @@ func TestDiffSpanReportsHowManyTriplesChanged(t *testing.T) {
 	first := rdflibgo.NewGraph()
 	pkg.AddTriple(first, rdflibgo.NewURIRefUnsafe("http://example.com/keep"), predicate, rdflibgo.NewLiteral("same"))
 	pkg.AddTriple(first, rdflibgo.NewURIRefUnsafe("http://example.com/drop"), predicate, rdflibgo.NewLiteral("old"))
-	require.NoError(t, processGraph(ctx, first, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, nil))
+	require.NoError(t, processGraph(ctx, first, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, nil, nil))
 	second := rdflibgo.NewGraph()
 	pkg.AddTriple(second, rdflibgo.NewURIRefUnsafe("http://example.com/keep"), predicate, rdflibgo.NewLiteral("same"))
 	pkg.AddTriple(second, rdflibgo.NewURIRefUnsafe("http://example.com/add"), predicate, rdflibgo.NewLiteral("new"))
-	require.NoError(t, processGraph(ctx, second, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, nil))
+	require.NoError(t, processGraph(ctx, second, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, nil, nil))
 
 	var names []string
 	var lastDiff attribute.Set

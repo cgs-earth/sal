@@ -478,7 +478,7 @@ func TestInitWritesTheProjectMakefile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, projectMakefile, string(makefile))
 	require.Contains(t, projectMakefile, "\nvalidate: ## ")
-	require.Contains(t, projectMakefile, "\n\tsal build $(SOURCES)\n")
+	require.Contains(t, projectMakefile, "\n\tsal build --message \"$(MESSAGE)\" $(SOURCES)\n")
 	require.Contains(t, projectMakefile, "\napply: $(TF_DIR)/.terraform ## ")
 	require.Contains(t, projectMakefile, "\n\tterraform -chdir=$(TF_DIR) destroy\n")
 	require.NoFileExists(t, filepath.Join(dir, "terraform", "main.tf"), "the Terraform configuration is written only with --with-iac")

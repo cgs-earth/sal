@@ -26,12 +26,16 @@ file that is committed is `.sal/config.jsonld`, the lockfile of pinned vocabular
 sal init                 # once, at the repo root; creates .sal/data and gitignores it
 sal validate data/       # parse and check every term against its vocabulary; commits nothing, works on a dirty worktree
 git add -A && git commit # build refuses a dirty worktree
-sal build data/          # validate, run any SAL module tasks the RDF declares, then commit new triples to .sal/data as an Iceberg snapshot
-sal build --without-sal-modules data/  # the same without running module tasks; only their configuration is committed
+sal build -m "Add gauges" data/  # validate, run any SAL module tasks the RDF declares, then commit new triples to .sal/data as an Iceberg snapshot
+sal build -m "Add gauges" --without-sal-modules data/  # the same without running module tasks; only their configuration is committed
 sal query                # SQL shell over the `triples` view; `sal query --sparql` for SPARQL
 sal serve --with-ui      # http://localhost:8080 with SPARQL, SQL, map, and stats tabs
 ```
 
+`sal build` requires `--message` (`-m`), what the build changes, like a git commit message; it is
+recorded in the snapshot and listed by `sal query --info snapshots`, the UI's Stats tab, and the
+description of a pushed artifact. A build without one is an error; `sal validate` is the command
+to check the project without committing. `sal run` takes the same flag.
 `sal build` refuses to run on an uncommitted worktree so a snapshot always maps to a commit.
 `--force` skips that check for debugging only. After a build that pinned new vocabularies, commit
 `.sal/config.jsonld` before the next build. `sal build` is the only operation that produces a
@@ -113,12 +117,13 @@ declare that class a task:
 ```sh
 sal push ghcr.io/org/product --username "$U" --password "$P"   # OCI artifact tagged latest and by commit
 sal clone ghcr.io/org/product:latest                           # clone source at that commit and restore .sal/data
+sal pull ghcr.io/org/product:latest                            # restore .sal/data only; in an empty directory it initializes a project from the artifact
 sal upload --bucket gs://bucket/                               # copy .sal/data to an object store
 sal rewrite --new-table-root gs://bucket/sal/triples           # point local Iceberg metadata at another root
 sal clean --wipe                                               # remove .sal/data and .sal/config.jsonld
 ```
 
-`sal init` also writes a `Makefile` whose targets are the commands above (`make validate`, `make build`,
+`sal init` also writes a `Makefile` whose targets are the commands above (`make validate`, `make build MESSAGE="..."`,
 `make serve`, ...) plus the deployment: `sal terraform --project <gcp-project>` (or `sal init --with-iac`)
 writes `terraform/`, a Cloud Storage bucket plus a Cloud Run service running `sal serve --data /mnt/sal`
 over the bucket mounted with Cloud Storage FUSE, with small defaults and every knob a variable in

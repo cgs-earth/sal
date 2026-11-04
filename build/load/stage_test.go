@@ -84,7 +84,7 @@ func requireNoStagedFiles(t *testing.T, tbl *table.Table) {
 func TestStageGraphLeavesTheMainBranchWhereItWas(t *testing.T) {
 	ctx := context.Background()
 	cfg := stageTestConfig(t)
-	require.NoError(t, WriteGraphToIceberg(ctx, stageTestGraph("keep", "drop"), cfg, nil))
+	require.NoError(t, WriteGraphToIceberg(ctx, stageTestGraph("keep", "drop"), cfg, nil, ""))
 	lastBuild := stageTestTable(t, cfg).CurrentSnapshot().SnapshotID
 
 	staged, err := StageGraph(ctx, stageTestGraph("keep", "add"), cfg)
@@ -105,14 +105,14 @@ func TestStageGraphLeavesTheMainBranchWhereItWas(t *testing.T) {
 func TestCommitReusesTheDataFilesTheGraphWasStagedIn(t *testing.T) {
 	ctx := context.Background()
 	cfg := stageTestConfig(t)
-	require.NoError(t, WriteGraphToIceberg(ctx, stageTestGraph("keep", "drop"), cfg, nil))
+	require.NoError(t, WriteGraphToIceberg(ctx, stageTestGraph("keep", "drop"), cfg, nil, ""))
 	lastBuild := stageTestTable(t, cfg).CurrentSnapshot().SnapshotID
 	staged, err := StageGraph(ctx, stageTestGraph("keep", "add"), cfg)
 	require.NoError(t, err)
 	require.Len(t, staged.dataFiles, 1)
 	final := stageTestGraph("keep", "add", "constructed")
 
-	require.NoError(t, staged.Commit(ctx, final, map[string]string{"sal.hash": "abc"}))
+	require.NoError(t, staged.Commit(ctx, final, map[string]string{"sal.hash": "abc"}, "Add constructed"))
 	require.NoError(t, staged.Discard(ctx))
 
 	tbl := stageTestTable(t, cfg)
@@ -133,7 +133,7 @@ func TestCommitReusesTheDataFilesTheGraphWasStagedIn(t *testing.T) {
 func TestStagingAGraphTheTableHoldsWritesNothing(t *testing.T) {
 	ctx := context.Background()
 	cfg := stageTestConfig(t)
-	require.NoError(t, WriteGraphToIceberg(ctx, stageTestGraph("keep"), cfg, nil))
+	require.NoError(t, WriteGraphToIceberg(ctx, stageTestGraph("keep"), cfg, nil, ""))
 	lastBuild := stageTestTable(t, cfg).CurrentSnapshot().SnapshotID
 
 	staged, err := StageGraph(ctx, stageTestGraph("keep"), cfg)
@@ -150,7 +150,7 @@ func TestStagingAGraphTheTableHoldsWritesNothing(t *testing.T) {
 func TestDiscardWithoutCommitRemovesWhatWasStaged(t *testing.T) {
 	ctx := context.Background()
 	cfg := stageTestConfig(t)
-	require.NoError(t, WriteGraphToIceberg(ctx, stageTestGraph("keep", "drop"), cfg, nil))
+	require.NoError(t, WriteGraphToIceberg(ctx, stageTestGraph("keep", "drop"), cfg, nil, ""))
 	lastBuild := stageTestTable(t, cfg).CurrentSnapshot().SnapshotID
 	staged, err := StageGraph(ctx, stageTestGraph("keep", "add"), cfg)
 	require.NoError(t, err)
@@ -184,7 +184,7 @@ func TestDiscardDropsATableThatStagingCreated(t *testing.T) {
 func TestStageGraphRemovesTheBranchAnEarlierBuildLeft(t *testing.T) {
 	ctx := context.Background()
 	cfg := stageTestConfig(t)
-	require.NoError(t, WriteGraphToIceberg(ctx, stageTestGraph("keep"), cfg, nil))
+	require.NoError(t, WriteGraphToIceberg(ctx, stageTestGraph("keep"), cfg, nil, ""))
 	killed, err := StageGraph(ctx, stageTestGraph("keep", "killed"), cfg)
 	require.NoError(t, err)
 
@@ -215,7 +215,7 @@ func TestCommitWritesAgainWhatChangedSinceItWasStaged(t *testing.T) {
 	final := graph()
 	pkg.AddTriple(final, rdflibgo.NewBNode("b"), stageTestPredicate, rdflibgo.NewLiteral("constructed"))
 
-	require.NoError(t, staged.Commit(ctx, final, nil))
+	require.NoError(t, staged.Commit(ctx, final, nil, ""))
 	require.NoError(t, staged.Discard(ctx))
 
 	tbl := stageTestTable(t, cfg)
@@ -225,4 +225,35 @@ func TestCommitWritesAgainWhatChangedSinceItWasStaged(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, graphHashes(final), hashes)
 	requireNoStagedFiles(t, tbl)
+}
+
+// snapshotMessage is the build message the table's current snapshot carries.
+func snapshotMessage(t *testing.T, cfg *LoadConfig) string {
+	t.Helper()
+	snapshot := stageTestTable(t, cfg).CurrentSnapshot()
+	require.NotNil(t, snapshot)
+	require.NotNil(t, snapshot.Summary)
+	return snapshot.Summary.Properties[pkg.SnapshotMessageProperty]
+}
+
+// The message a build is given is recorded in the summary of the snapshot it
+// commits, whether the graph was written directly or staged first, and a
+// build that changes nothing commits no snapshot and so records no message.
+func TestWriteGraphToIcebergRecordsTheMessageInTheSnapshotSummary(t *testing.T) {
+	ctx := context.Background()
+	cfg := stageTestConfig(t)
+
+	require.NoError(t, WriteGraphToIceberg(ctx, stageTestGraph("keep"), cfg, nil, "Add keep"))
+	require.Equal(t, "Add keep", snapshotMessage(t, cfg))
+	first := stageTestTable(t, cfg).CurrentSnapshot().SnapshotID
+
+	staged, err := StageGraph(ctx, stageTestGraph("keep", "add"), cfg)
+	require.NoError(t, err)
+	require.NoError(t, staged.Commit(ctx, stageTestGraph("keep", "add"), nil, "Add add"))
+	require.NoError(t, staged.Discard(ctx))
+	require.Equal(t, "Add add", snapshotMessage(t, cfg))
+	require.NotEqual(t, first, stageTestTable(t, cfg).CurrentSnapshot().SnapshotID)
+
+	require.NoError(t, WriteGraphToIceberg(ctx, stageTestGraph("keep", "add"), cfg, nil, "Nothing changed"))
+	require.Equal(t, "Add add", snapshotMessage(t, cfg))
 }

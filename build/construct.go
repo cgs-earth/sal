@@ -55,7 +55,7 @@ var stageGraph = func(ctx context.Context, graph *rdflibgo.Graph, format GraphEx
 		ParquetCompression: "snappy",
 		Warehouse:          warehouse,
 		Namespace:          stagedNamespace,
-	}, nil)
+	}, nil, "")
 	if err != nil {
 		cleanup()
 		return nil, nil, nil, fmt.Errorf("stage the build: %w", err)
