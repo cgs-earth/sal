@@ -16,7 +16,7 @@ file that is committed is `.sal/config.jsonld`, the lockfile of pinned vocabular
 
 ## Prerequisites
 
-- `sal` on `PATH`: `go install -a github.com/cgs-earth/sal@latest` (needs cgo and a C toolchain, since DuckDB is linked in).
+- `sal` on `PATH`: `curl -fsSL https://raw.githubusercontent.com/cgs-earth/sal/main/install.sh | sh` installs or updates the latest release binary (Linux amd64, macOS arm64); elsewhere `go install github.com/cgs-earth/sal@latest` builds it (needs cgo and a C toolchain, since DuckDB is linked in, and carries no web UI).
 - `git`, and a repository with a remote. `sal init` refuses a repo without one.
 - A docker daemon only if the project references SAL modules.
 

@@ -11,8 +11,12 @@ node_modules
 dist-ssr
 *.local
 
-# dist/ is intentionally committed: serve/ui.go embeds it into the sal binary,
-# so `go install` has to be able to see it. Rebuild it with `make ui`.
+# dist/ is build output: `make ui` writes it and serve/ui.go embeds whatever it
+# holds, so it is never committed. The .gitkeep is what keeps the embed
+# directive compiling in a tree where the UI has not been built; the release
+# workflow and the Dockerfile build the UI before building sal.
+dist/*
+!dist/.gitkeep
 
 # Editor directories and files
 .vscode/*

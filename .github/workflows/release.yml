@@ -1,0 +1,168 @@
+# Copyright 2025 Lincoln Institute of Land Policy
+# SPDX-License-Identifier: Apache-2.0
+
+# Publishes a GitHub Release with prebuilt sal binaries on every push to main.
+#
+# Each release gets the next patch version after the newest v* tag (v0.1.0 when
+# there is none), tagged on the pushed commit, so `go install ...@latest` and
+# `sal --version` agree with the release page; push a v<major>.<minor>.0 tag by
+# hand to start a new minor or major series. The binaries are built natively
+# on a runner per platform rather than cross-compiled, since DuckDB is linked
+# in through cgo and cross-linking its C++ library is the fragile part of a
+# cross build. The web UI is built once and embedded into every binary.
+# install.sh at the repository root downloads from here.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Releases queue rather than cancel, since two runs tagging at once would
+# compute the same next version.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag the next version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+      previous: ${{ steps.next.outputs.previous }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute the next patch version
+        id: next
+        run: |
+          previous="$(git tag --list 'v*' --sort=-v:refname | head -n 1)"
+          if [ -z "$previous" ]; then
+            tag="v0.1.0"
+          else
+            IFS=. read -r major minor patch <<<"${previous#v}"
+            tag="v${major}.${minor}.$((patch + 1))"
+          fi
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "releasing $tag (after ${previous:-no previous tag})"
+
+      # A tag pushed with the workflow token starts no other workflow, which is
+      # what is wanted: the push to main already ran the tests.
+      - name: Push the tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.next.outputs.tag }}" -m "Release ${{ steps.next.outputs.tag }}"
+          git push origin "${{ steps.next.outputs.tag }}"
+
+  ui:
+    name: Build the web UI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: serve/sal-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: serve/sal-ui/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sal-ui-dist
+          path: serve/sal-ui/dist
+          retention-days: 1
+          if-no-files-found: error
+
+  build:
+    name: Build ${{ matrix.os }}/${{ matrix.arch }}
+    needs: [tag, ui]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            os: linux
+            arch: amd64
+          - runner: macos-15
+            os: darwin
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      ARCHIVE: sal_${{ matrix.os }}_${{ matrix.arch }}.tar.gz
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sal-ui-dist
+          path: serve/sal-ui/dist
+
+      # Same flags as the Dockerfile: -trimpath keeps runner paths out of the
+      # binary and -s -w strips the symbol and debug tables. The version is the
+      # tag just pushed, which `sal --version` prints.
+      - name: Build sal
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          go build -trimpath \
+            -ldflags="-s -w -X main.version=${{ needs.tag.outputs.tag }}" \
+            -o sal .
+          ./sal --version
+
+      - name: Archive
+        run: tar -czf "$ARCHIVE" sal
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARCHIVE }}
+          path: ${{ env.ARCHIVE }}
+          retention-days: 1
+          if-no-files-found: error
+
+  release:
+    name: Publish the release
+    needs: [tag, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sal_*.tar.gz
+          path: release
+          merge-multiple: true
+
+      - name: Write checksums
+        working-directory: release
+        run: sha256sum sal_*.tar.gz > checksums.txt && cat checksums.txt
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
+          PREVIOUS: ${{ needs.tag.outputs.previous }}
+        run: |
+          notes_from=()
+          if [ -n "$PREVIOUS" ]; then
+            notes_from=(--notes-start-tag "$PREVIOUS")
+          fi
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --generate-notes "${notes_from[@]}" \
+            release/sal_*.tar.gz release/checksums.txt

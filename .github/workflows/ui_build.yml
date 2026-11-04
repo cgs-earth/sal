@@ -30,14 +30,7 @@ jobs:
         run: npm ci
       - name: Lint
         run: npm run lint
+      # The build output is not committed; release.yml builds it again for the
+      # binaries it publishes, so this only checks that the sources compile.
       - name: Build
         run: npm run build
-      # serve/ui.go embeds serve/sal-ui/dist, so the committed build output has to
-      # match the sources. Otherwise `go install` ships a stale UI.
-      - name: Check that the committed dist matches the sources
-        run: |
-          if ! git diff --quiet -- dist; then
-            echo "serve/sal-ui/dist is out of date; run 'make ui' and commit the result." >&2
-            git diff --stat -- dist >&2
-            exit 1
-          fi
