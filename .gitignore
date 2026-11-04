@@ -15,3 +15,5 @@ sal-cli
 docs/demos/.bin/
 docs/public/demos/
 .sal/constructed
+# roborev snapshots
+/.roborev/
