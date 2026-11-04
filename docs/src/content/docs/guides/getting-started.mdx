@@ -14,21 +14,59 @@ Install the latest release, or update the one you have, with:
 curl -fsSL https://raw.githubusercontent.com/cgs-earth/sal/main/install.sh | sh
 ```
 
-The script downloads the prebuilt binary for your machine from the [latest GitHub release](https://github.com/cgs-earth/sal/releases/latest), checks it against the release's checksums, and installs it as `~/.local/bin/sal`, replacing an earlier one.
-Set `SAL_INSTALL_DIR` to install somewhere else and `SAL_VERSION` (a tag such as `v0.1.2`) to pin a release.
-Releases are published for Linux amd64 and macOS Apple Silicon on every push to `main`, and `sal --version` prints the release a binary came from.
+The installer supports **Linux amd64** and **macOS Apple Silicon**. It downloads the binary from the [latest release](https://github.com/cgs-earth/sal/releases/latest), verifies its SHA-256 checksum, and installs it as `~/.local/bin/sal`, replacing any existing binary there. Release binaries include the web UI and do not require Go or Node.js.
 
-On another platform, build from source with Go:
+If `~/.local/bin` is not on your `PATH`, add this line to your shell configuration (`~/.zshrc` or `~/.bashrc`) and open a new terminal:
 
 ```sh
-go install github.com/cgs-earth/sal@latest
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-DuckDB is linked into `sal` rather than shelled out to, so there is no DuckDB to install.
-It is a C++ library, though, so building `sal` needs cgo and a C toolchain (`build-essential` on Debian or Ubuntu, the Xcode command line tools on macOS).
-A binary built this way has no web UI for `sal serve --with-ui`, since the UI is built from its own sources with Node rather than committed; the release binaries carry it.
+Check the installation:
 
-SAL also expects Git for project metadata.
+```sh
+sal --version
+```
+
+### Install options
+
+To choose another installation directory, pass `SAL_INSTALL_DIR` to the installer's shell:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cgs-earth/sal/main/install.sh | SAL_INSTALL_DIR="$HOME/bin" sh
+```
+
+Add that directory to your `PATH` if needed. To install a specific release, pass `SAL_VERSION` with its tag instead:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cgs-earth/sal/main/install.sh | SAL_VERSION=v0.1.2 sh
+```
+
+Choose a tag from the [releases page](https://github.com/cgs-earth/sal/releases). You can set both options together. Run the default install command again to update to the latest release.
+
+### Build from source
+
+To build from source, install Go 1.26 or newer and a C/C++ toolchain (`build-essential` on Debian or Ubuntu, or the Xcode command line tools on macOS), then run:
+
+```sh
+CGO_ENABLED=1 go install github.com/cgs-earth/sal@latest
+```
+
+Go installs the binary into `GOBIN`, or `$(go env GOPATH)/bin` when `GOBIN` is unset; add that directory to your `PATH`.
+DuckDB is linked into SAL, so no separate DuckDB installation is needed.
+
+A binary installed with `go install` has no web UI for `sal serve --with-ui`, because the UI is built separately from the Go binary. To include it in a source build, clone the repository and build the UI before installing SAL (also requires Make and Node.js 22 with npm):
+
+```sh
+git clone https://github.com/cgs-earth/sal.git
+cd sal
+make ui
+make install
+```
+
+This installs SAL with the web UI into `~/.local/bin`.
+
+SAL also requires Git for project metadata and Docker to build and run [SAL modules](/sal/reference/salmodule-description/).
 
 ## Initialize a repository
 

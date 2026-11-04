@@ -343,3 +343,59 @@ func TestExprRejectsAnUnboundVariableAndAnUnknownFunction(t *testing.T) {
 	_, err = ToSQL(samplePrefixes + `SELECT ?s WHERE { ?s ?p ?o FILTER(REGEX(?o, "a", "x")) }`)
 	require.ErrorContains(t, err, `the REGEX flag "x" is not supported`)
 }
+
+func TestEncodeForURIEscapesEverythingButTheUnreservedCharacters(t *testing.T) {
+	_, rows := answer(t, sampleTriples(t), samplePrefixes+`
+SELECT (ENCODE_FOR_URI(CONCAT(?n, " & co/é_-.~")) AS ?e) WHERE { <http://a> schema:name ?n }`)
+
+	require.Equal(t, [][]string{{"alice%20%26%20co%2F%C3%A9_-.~"}}, rows)
+}
+
+// A dateTime stored natively is normalized to UTC, so its timezone is Z;
+// one stored without a timezone keeps its datatype on a string, so it has
+// none, which TZ reports as "" and TIMEZONE as an error, so unbound.
+func TestTZAndTimezoneReadTheStoredDateTime(t *testing.T) {
+	db := sampleTriples(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO triples VALUES
+	 ('http://b', 'https://schema.org/birthDate', NULL, NULL, NULL, NULL, NULL, NULL, '2001-01-01T00:00:00', 'http://www.w3.org/2001/XMLSchema#dateTime', NULL, 'h10')`)
+	require.NoError(t, err)
+
+	_, rows := answer(t, db, samplePrefixes+`
+SELECT ?s (TZ(?born) AS ?tz) (TIMEZONE(?born) AS ?zone) (TZ(NOW()) AS ?now) WHERE { ?s schema:birthDate ?born } ORDER BY ?s`)
+
+	require.Equal(t, [][]string{{"http://b", "", "", "Z"}, {"http://c", "Z", "PT0S", "Z"}}, rows)
+
+	_, rows = answer(t, db, samplePrefixes+`SELECT ?s WHERE { ?s schema:birthDate ?born . FILTER(TIMEZONE(?born) = "PT0S") }`)
+
+	require.Equal(t, [][]string{{"http://c"}}, rows)
+
+	// TZ of something that is not a dateTime is unbound
+	_, rows = answer(t, db, samplePrefixes+`SELECT (TZ(?n) AS ?tz) WHERE { <http://a> schema:name ?n }`)
+
+	require.Equal(t, [][]string{{""}}, rows)
+}
+
+func TestUUIDAndBNODEAreFreshPerSolution(t *testing.T) {
+	_, rows := answer(t, sampleTriples(t), samplePrefixes+`
+SELECT ?s (UUID() AS ?u) (STRUUID() AS ?su) (BNODE() AS ?b) WHERE { ?s schema:name ?n }`)
+
+	require.Len(t, rows, 2)
+	for _, row := range rows {
+		require.Regexp(t, `^urn:uuid:[0-9a-f-]{36}$`, row[1])
+		require.Regexp(t, `^[0-9a-f-]{36}$`, row[2])
+		require.Regexp(t, `^_:[0-9a-f]{32}$`, row[3])
+	}
+	require.NotEqual(t, rows[0][1], rows[1][1])
+	require.NotEqual(t, rows[0][2], rows[1][2])
+	require.NotEqual(t, rows[0][3], rows[1][3])
+
+	_, rows = answer(t, sampleTriples(t), samplePrefixes+`SELECT ?s WHERE { ?s schema:name ?n . FILTER(isIRI(UUID()) && isBlank(BNODE()) && isLiteral(STRUUID())) }`)
+
+	require.Len(t, rows, 2)
+}
+
+func TestBNODEWithALabelIsRefused(t *testing.T) {
+	_, err := ToSQL(samplePrefixes + `SELECT (BNODE(?n) AS ?b) WHERE { ?s schema:name ?n }`)
+
+	require.ErrorContains(t, err, "BNODE with a label is not supported yet; BNODE() makes a fresh blank node per solution")
+}

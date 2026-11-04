@@ -824,8 +824,9 @@ func (t *translator) optionalSQL(group *groupSQL, optional optionalGroup, scope 
 // bound by an enclosing query, in outer, becomes a correlation instead, so that
 // a MINUS or EXISTS group is evaluated per solution of the query it belongs to.
 // A path step scans the same source with its subject and object columns
-// swapped for an inverse, and a repeated step scans the closure of its edges
-// instead, a derived table whose start and finish the pattern's ends bind.
+// swapped for an inverse; a repeated step scans the closure of its edges
+// instead, and a compound one the edges themselves, a derived table whose
+// start and finish the pattern's ends bind.
 func (t *translator) patternSQL(triples []patternTriple, aliasPrefix string, outer map[string]sqlBinding) (groupSQL, error) {
 	result := groupSQL{bindings: make(map[string]sqlBinding)}
 	for i, triple := range triples {
@@ -842,7 +843,7 @@ func (t *translator) patternSQL(triples []patternTriple, aliasPrefix string, out
 		switch {
 		case triple.step == nil:
 			result.from = append(result.from, source+" AS "+alias)
-		case triple.step.closure():
+		case triple.step.derived():
 			var identity string
 			var lateral bool
 			// only a zero-length match needs to know what it is the identity of
@@ -851,7 +852,7 @@ func (t *translator) patternSQL(triples []patternTriple, aliasPrefix string, out
 					return groupSQL{}, err
 				}
 			}
-			from := closureSQL(source, *triple.step, identity) + " AS " + alias
+			from := triple.step.scanSQL(source, identity, 0) + " AS " + alias
 			if lateral {
 				from = "LATERAL " + from
 			}

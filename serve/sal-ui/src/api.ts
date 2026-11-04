@@ -18,13 +18,78 @@ export type TableStats = {
   objects: number
   snapshots: QueryResult
   properties: QueryResult
-  columnStats: QueryResult
+  /** How the table is laid out at its current snapshot, or null with layoutError saying why it could not be read. */
+  layout: TableLayout | null
+  layoutError?: string
   /** The same listing `sal get vocabularies` prints: header ["vocabulary", "version", "format", "imported"]. */
   vocabularies: QueryResult
   /** The imported data products, each queryable as a view of its own. */
   importedTables: ImportedTable[] | null
   /** Sample queries only the server can write, such as time travel and the import listing. */
   sampleQueries: NamedQuery[] | null
+}
+
+/** The Iceberg layout of the triples table: partitioning, files, and how well each column's bounds prune. */
+export type TableLayout = {
+  partitioning: PartitionField[] | null
+  /** Each column of the sort order as "name asc" or "name desc". */
+  sortOrder: string[] | null
+  /** How many distinct partition values the data files fall in. */
+  partitions: number
+  dataFiles: FileSummary
+  deleteFiles: FileSummary
+  outliers: FileOutlier[] | null
+  columns: ColumnPruning[] | null
+  files: DataFile[] | null
+}
+
+export type PartitionField = {
+  name: string
+  column: string
+  transform: string
+}
+
+export type FileSummary = {
+  count: number
+  rows: number
+  bytes: number
+  averageRows: number
+  medianRows: number
+  minRows: number
+  maxRows: number
+}
+
+export type DataFile = {
+  /** The file's path under the table root. */
+  path: string
+  partition: string
+  kind: 'data' | 'equality-deletes' | 'position-deletes'
+  rows: number
+  bytes: number
+  sequenceNumber: number
+}
+
+/** A data file that stands out: small is under a tenth of the median, large over four times the average, and ratio its rows over that reference. */
+export type FileOutlier = {
+  file: DataFile
+  kind: 'small' | 'large'
+  ratio: number
+}
+
+/**
+ * How a filter on one column fares against the bounds Iceberg records per data
+ * file: filesWithBounds data files record a range for it, and a single value can
+ * fall in at most maxFilesPerValue of them, which is the most files an equality
+ * filter reads. A geometry has no such range and reports 0.
+ */
+export type ColumnPruning = {
+  name: string
+  type: string
+  filesWithBounds: number
+  maxFilesPerValue: number
+  nulls: number
+  lower: string
+  upper: string
 }
 
 /** An imported SAL data product, registered as a DuckDB view named after its OCI artifact. */

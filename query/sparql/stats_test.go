@@ -15,14 +15,13 @@ func tableProperties(rows ...[]string) Result {
 	return Result{Header: []string{"key", "value"}, Rows: rows}
 }
 
-// statsResults mimics what the four statements Stats issues return, in order.
+// statsResults mimics what the three statements Stats issues return, in order.
 func statsResults(counts Result, properties Result) []Result {
 	snapshots := Result{
 		Header: []string{"sequence_number", "snapshot_id"},
 		Rows:   [][]string{{"2", "222"}, {"1", "111"}},
 	}
-	columnStats := Result{Header: []string{"column_name"}, Rows: [][]string{{"subject"}}}
-	return []Result{counts, snapshots, properties, columnStats}
+	return []Result{counts, snapshots, properties}
 }
 
 func TestStatsFromResultsPopulatesCountsAndSections(t *testing.T) {
@@ -43,7 +42,6 @@ func TestStatsFromResultsPopulatesCountsAndSections(t *testing.T) {
 	require.Equal(t, []string{"salmodule://github.com/test/one"}, stats.Modules)
 	require.Equal(t, properties, stats.Properties)
 	require.Len(t, stats.Snapshots.Rows, 2)
-	require.Equal(t, [][]string{{"subject"}}, stats.ColumnStats.Rows)
 	require.NotEmpty(t, stats.SampleQueries)
 }
 
@@ -58,7 +56,7 @@ func TestStatsFromResultsRejectsAnEmptyCountsResult(t *testing.T) {
 func TestStatsFromResultsRejectsTheWrongNumberOfResults(t *testing.T) {
 	_, err := statsFromResults("/tmp/table", []Result{{}, {}})
 
-	require.ErrorContains(t, err, "expected 4 stats results, got 2")
+	require.ErrorContains(t, err, "expected 3 stats results, got 2")
 }
 
 func TestModulesFromPropertiesReadsRecordedModules(t *testing.T) {

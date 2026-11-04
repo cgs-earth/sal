@@ -122,7 +122,7 @@ In a `FILTER`, the same rule applies to whichever side the variable is compared 
 | `MINUS { ... }` | Yes | Becomes a correlated `NOT EXISTS` subquery; see [MINUS and EXISTS](#minus-and-exists). |
 | `FILTER EXISTS { ... }`, `FILTER NOT EXISTS { ... }` | Yes | Become a correlated `EXISTS` / `NOT EXISTS` subquery, usable inside `&&`, `\|\|`, and `!`. |
 | `GRAPH` | No | `a GRAPH clause is not supported; the table holds a single graph`. |
-| Property paths, e.g. `rdf:type/rdfs:subClassOf*` | Partly | Sequences, inverses, alternatives, negated sets, and repetition of a single step; see [Property paths](#property-paths). |
+| Property paths, e.g. `rdf:type/rdfs:subClassOf*` | Yes | Sequences, inverses, alternatives, negated sets, and repetition, nested however the query writes them; see [Property paths](#property-paths). |
 | `REDUCED` | Ignored | Accepted, but results are not deduplicated. Use `DISTINCT` if you need that. |
 
 Everything the engine supports is read-only. There is no SPARQL Update surface at all; the way to change a data product is to edit its RDF source files and run `sal build` again.
@@ -331,11 +331,14 @@ A string function over an object variable reads `object_string`, so it yields `N
 | `ABS`, `ROUND`, `CEIL`, `FLOOR`, `RAND` | The same functions, `random()`. |
 | `NOW`, `YEAR`, `MONTH`, `DAY`, `HOURS`, `MINUTES`, `SECONDS` | `now()`, `year`, `month`, `day`, `hour`, `minute`, `second` over `object_time`. `SECONDS` is whole seconds. |
 | `MD5`, `SHA1`, `SHA256` | The same functions. |
+| `ENCODE_FOR_URI` | `url_encode`, which leaves exactly the unreserved characters `A-Z a-z 0-9 - _ . ~` alone. |
+| `TZ`, `TIMEZONE` | A stored dateTime is normalized to UTC, so `TZ` is `"Z"` and `TIMEZONE` is `"PT0S"` for one stored with a timezone; a dateTime written without one is stored as a string, so `TZ` of it is `""` and `TIMEZONE` is unbound. |
+| `UUID`, `STRUUID`, `BNODE()` | `uuid()`, evaluated per row, so every solution gets its own `urn:uuid:` IRI, string, or blank node. |
 | `xsd:integer(?x)`, `xsd:decimal`, `xsd:double`, `xsd:float`, `xsd:string`, `xsd:boolean`, `xsd:dateTime` | `TRY_CAST`, so a value that cannot be converted is unbound rather than an error. |
 | GeoSPARQL `geof:` functions | The Simple Features relations, `geof:distance`, and the geometry constructors; see [GeoSPARQL](#geosparql). |
 | `EXISTS { ... }`, `NOT EXISTS { ... }` | A correlated subquery; see [MINUS and EXISTS](#minus-and-exists). |
 
-Anything else, `STRDT`, `STRLANG`, `ENCODE_FOR_URI`, `TZ`, `TIMEZONE`, `UUID`, `STRUUID`, `BNODE`, and a function named by any other IRI, is reported as `SPARQL function "..." is not supported yet`.
+Anything else, `STRDT`, `STRLANG`, `BNODE(label)`, and a function named by any other IRI, is reported as `SPARQL function "..." is not supported yet`.
 
 ```sparql
 PREFIX schema: <https://schema.org/>
@@ -406,10 +409,11 @@ The path is reduced to one or more triple patterns before translation, so every 
 | `^p` (inverse) | The same scan with subject and object swapped: the pattern's subject reads the object column and its object reads `subject`. An inverse of a sequence reverses the sequence. |
 | `p1\|p2` (alternative) | `predicate IN ('p1', 'p2')`. Every branch must be a plain IRI, or every branch an inverse IRI. |
 | `!p`, `!(p1\|p2)` (negated set) | `predicate NOT IN (...)`. |
+| `!^p`, `!(p1\|^p2)` (negated set with inverses) | `predicate NOT IN (...)` with subject and object swapped for the inverse members, united with the forward ones. |
 | `p*`, `p+`, `p?` (repetition) | A derived table holding the closure of the step's edges, with columns `start` and `finish` that the pattern's subject and object bind. `p+` and `p*` compute it with a recursive CTE; `p?` needs no recursion. |
+| `(p1/p2)+`, `(p1\|^p2)*`, `(p+)?` (repetition or alternative of a compound path) | The same derived table, over edges that are the join of the parts of a sequence or the union of the arms of an alternative, each of which may itself be a closure; see below. |
 
-A repeated step may be a single IRI, its inverse, or an alternative of IRIs; a repeated sequence such as `(p1/p2)*` and a repetition of a repetition are not supported yet.
-Nor is a negated inverse, `!^p`.
+Any path the grammar allows is translated; what is not is only the identity of a zero-length match when nothing is bound, described below.
 The parser needs an inverse that is repeated in parentheses, `(^rdfs:subClassOf)+`.
 
 The query this engine exists for, every instance of a class or of any class below it:
@@ -437,7 +441,7 @@ CROSS JOIN LATERAL (WITH RECURSIVE edges AS (
     UNION
     SELECT closure.start, edges.finish FROM closure JOIN edges ON edges.start = closure.finish)
   SELECT start, finish FROM closure
-  UNION ALL SELECT COALESCE(t0.object_iri, ...), COALESCE(t0.object_iri, ...)) AS t1
+  UNION SELECT COALESCE(t0.object_iri, ...), COALESCE(t0.object_iri, ...)) AS t1
 WHERE t0.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'
   AND COALESCE(t0.object_iri, ...) = t1.start
   AND t1.finish = 'https://schema.org/Organization'
@@ -445,12 +449,27 @@ WHERE t0.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'
 
 The `rdf:type` step is an ordinary scan, `t0`.
 The `rdfs:subClassOf*` step is the closure of every `rdfs:subClassOf` edge in the table, joined to `t0` through its `start`, and since `*` matches a path of length zero, the closure also holds the identity of the class `t0` bound, which is what makes a direct instance of `schema:Organization` match even when nothing is stated below it.
-`UNION` rather than `UNION ALL` in the recursion is what stops it on a cycle.
+`UNION` rather than `UNION ALL` in the recursion is what stops it on a cycle, and for the identity row is what keeps a node the closure leads back to from matching twice, since a repeated path matches each pair of nodes once.
+
+A compound path is the same shape with other edges. A repeated sequence joins the edges of its parts through the node they share, an alternative mixing directions or holding a path unites the edges of its arms, and a repetition inside either is a closure of its own, so `(schema:knows/schema:spouse?)+` becomes:
+
+```sql
+WITH RECURSIVE edges AS (
+    SELECT start, finish FROM (SELECT start, finish FROM (<knows edges>) AS p0) AS a0
+    UNION ALL SELECT start, finish FROM (SELECT p0.start, p1.finish
+    FROM (<knows edges>) AS p0
+    JOIN (<spouse edges>) AS p1 ON p1.start = p0.finish) AS a1),
+  closure(start, finish) AS (...)
+SELECT start, finish FROM closure
+```
+
+A part of a sequence that may match nothing, the `spouse?` here, is expanded away rather than given an identity: `knows/spouse?` is `knows` together with `knows/spouse`, which is what reaches someone through a friend who has no spouse.
+The CTEs of a closure nested in another's edges are named `edges1` and `closure1`, and so on by depth, so they never shadow the outer ones.
 
 Two things to know about this translation:
 
 - **The closure is computed whole.** DuckDB builds every path the step's edges make, and only then keeps the ones the rest of the query asks for. That is cheap for `rdfs:subClassOf`, `rdfs:subPropertyOf`, or `rdf:rest`, whose edges are few, and can be slow for a repeated step over a predicate with millions of edges.
-- **A zero-length match needs something to be the identity of.** When the pattern's subject or object is a constant or is bound by an earlier pattern, the closure carries that term. When neither is, `?a p* ?b` matches every node an edge of `p` touches, where SPARQL defines it as every term in the graph.
+- **A zero-length match needs something to be the identity of.** When the pattern's subject or object is a constant or is bound by an earlier pattern, the closure carries that term. When neither is, `?a p* ?b` matches every node an edge of `p` touches, where SPARQL defines it as every term in the graph. The same narrowing applies to a zero-length arm inside an alternative, `(p|q?)+`, whose identity is the nodes `q` touches.
 
 A path inside a `MINUS` or `EXISTS` group translates the same way, inside the subquery.
 
@@ -560,7 +579,7 @@ WHERE t0.predicate = 'http://www.w3.org/2000/01/rdf-schema#label'
 [GeoSPARQL](https://www.ogc.org/standards/geosparql/) is the OGC standard for geospatial RDF. It has two halves, and SAL supports a subset of each:
 
 - The **vocabulary**, `geo:` (`http://www.opengis.net/ont/geosparql#`), is how geometry is written into the data: a feature has a `geo:hasGeometry`, and that geometry carries its shape as a `geo:asWKT` literal typed `geo:wktLiteral`. This is plain RDF, and `sal build` handles it like any other data.
-- The **functions**, `geof:` (`http://www.opengis.net/def/function/geosparql/`), are how geometry is queried: topological relations such as `geof:sfIntersects`, `geof:distance`, and geometry constructors such as `geof:envelope`. These are what the translator maps to DuckDB's [spatial extension](https://duckdb.org/docs/stable/core_extensions/spatial/overview).
+- The **functions**, `geof:` (`http://www.opengis.net/def/function/geosparql/`), are how geometry is queried: topological relations such as `geof:sfIntersects`, `geof:distance`, geometry constructors such as `geof:envelope`, and the measures and properties GeoSPARQL 1.1 adds, `geof:area`, `geof:centroid`, `geof:asGeoJSON`, and the rest. These are what the translator maps to DuckDB's [spatial extension](https://duckdb.org/docs/stable/core_extensions/spatial/overview).
 
 The mapping is deliberately mechanical. Each supported `geof:` function becomes the `ST_` function of the same meaning, and there is no geometry logic in SAL itself: what DuckDB's spatial extension computes is what the query answers. A function with no direct analog is an error rather than an approximation.
 
@@ -588,7 +607,7 @@ That data becomes three kinds of row: `<MyPoint> geo:hasGeometry _:b` with the b
 
 ### Function mapping
 
-`geof:` functions are accepted inside `FILTER`. The supported ones and what each becomes:
+`geof:` functions are accepted wherever an expression is, a `FILTER`, a `BIND`, or a projection. The supported ones and what each becomes:
 
 | GeoSPARQL | DuckDB spatial | Result | Notes |
 | --- | --- | --- | --- |
@@ -610,14 +629,29 @@ That data becomes three kinds of row: `<MyPoint> geo:hasGeometry _:b` with the b
 | `geof:union(a, b)` | `ST_Union(a, b)` | geometry | |
 | `geof:difference(a, b)` | `ST_Difference(a, b)` | geometry | |
 | `geof:symDifference(a, b)` | `ST_SymDifference(a, b)` | geometry | |
+| `geof:centroid(a)` | `ST_Centroid(a)` | geometry | |
+| `geof:buffer(a, r, uom:degree)` | `ST_Buffer(a, r)` | geometry | `r` is any numeric expression. |
+| `geof:buffer(a, r, uom:metre)`, `geof:metricBuffer(a, r)` | `ST_Transform(ST_Buffer(ST_Transform(a, 'EPSG:4326', 'EPSG:3857'), r / cos(radians(ST_Y(ST_Centroid(a))))), 'EPSG:3857', 'EPSG:4326')` | geometry | Buffered in Web Mercator, where a metre on the ground is `1/cos(latitude)` projected units, at the latitude of `a`'s centroid; exact for a point and within a fraction of a percent for a geometry a few kilometres across, like `geof:distance` in metres. |
+| `geof:metricDistance(a, b)` | as `geof:distance(a, b, uom:metre)` | number | |
+| `geof:area(a, uom:degree)`, `geof:length(a, uom:degree)`, `geof:perimeter(a, uom:degree)` | `ST_Area(a)`, `ST_Length(a)`, `ST_Perimeter(a)` | number | Planar, in the units of the coordinates: square degrees and degrees. |
+| `geof:area(a, uom:metre)`, `geof:length(a, uom:metre)`, `geof:perimeter(a, uom:metre)` | `ST_Area_Spheroid(a)`, `ST_Length_Spheroid(a)`, `ST_Perimeter_Spheroid(a)` | number | On the WGS84 spheroid, in square metres and metres. |
+| `geof:metricArea(a)`, `geof:metricLength(a)`, `geof:metricPerimeter(a)` | The same spheroidal functions | number | |
+| `geof:minX(a)`, `geof:maxX(a)`, `geof:minY(a)`, `geof:maxY(a)`, `geof:minZ(a)`, `geof:maxZ(a)` | `ST_XMin(a)`, `ST_XMax(a)`, `ST_YMin(a)`, `ST_YMax(a)`, `ST_ZMin(a)`, `ST_ZMax(a)` | number | X is longitude and Y latitude. |
+| `geof:dimension(a)`, `geof:numGeometries(a)` | `ST_Dimension(a)`, `ST_NumGeometries(a)` | number | |
+| `geof:coordinateDimension(a)`, `geof:spatialDimension(a)` | `2` plus one for `ST_HasZ(a)` and, for the coordinate dimension, one for `ST_HasM(a)` | number | |
+| `geof:isEmpty(a)`, `geof:isSimple(a)`, `geof:is3D(a)`, `geof:isMeasured(a)` | `ST_IsEmpty(a)`, `ST_IsSimple(a)`, `ST_HasZ(a)`, `ST_HasM(a)` | boolean | |
+| `geof:geometryType(a)` | A `CASE` over `ST_GeometryType(a)` | IRI | The Simple Features class, `sf:Point`, `sf:Polygon`, and so on. |
+| `geof:getSRID(a)` | `'http://www.opengis.net/def/crs/OGC/1.3/CRS84'` | IRI | Every geometry is stored in CRS84, so the answer is a constant. |
+| `geof:asWKT(a)`, `geof:asGeoJSON(a)` | `ST_AsText(a)`, `ST_AsGeoJSON(a)` | string | A string, so it can be compared and passed to the string functions. |
 
-Not supported: `geof:buffer` (it takes a unit SAL would have to convert), `geof:getSRID`, `geof:relate`, and the Egenhofer `geof:eh*` and RCC8 `geof:rcc8*` relation families. Calling one reports `GeoSPARQL function geof:... is not supported yet`.
+Not supported: `geof:relate`, since DuckDB's spatial extension has no DE-9IM function to answer a pattern matrix with, and with it the Egenhofer `geof:eh*` and RCC8 `geof:rcc8*` relation families, which are fixed patterns; `geof:transform`, since every geometry is stored in CRS84 and nothing is reprojected; `geof:boundingCircle`, `geof:concaveHull`, `geof:geometryN`, and the `geof:asGML`, `geof:asKML`, and `geof:asDGGS` serializations, which have no `ST_` analog; and the `geof:agg*` aggregates. Calling one reports `GeoSPARQL function geof:... is not supported` with the reason where there is one.
 
 How a function may be used follows from what it returns:
 
 - A **boolean** function stands on its own in the `FILTER`, and can be negated with `!` or combined with `&&` and `||` like any other condition.
-- A **number**, which is only `geof:distance`, must be compared against a number with `<`, `<=`, `>`, `>=`, `=`, or `!=`.
-- A **geometry** function can be projected, `(geof:envelope(?g) AS ?box)`, which renders it as WKT, or nested as the argument of a boolean or numeric one, such as `geof:sfContains(geof:envelope(?g), ...)`; it cannot be compared with `=`.
+- A **number** is compared against a number with `<`, `<=`, `>`, `>=`, `=`, or `!=`, or projected.
+- A **geometry** function can be projected, `(geof:envelope(?g) AS ?box)`, which renders it as WKT, or nested as the argument of a boolean, numeric, or geometry one, such as `geof:sfContains(geof:buffer(?g, 500, uom:metre), ...)`; it cannot be compared with `=`.
+- A **string** or **IRI** is a value like any other: `FILTER(geof:geometryType(?g) = sf:Polygon)`, `STRSTARTS(geof:asWKT(?g), "MULTI")`.
 
 Each geometry argument of a function is one of:
 
@@ -740,7 +774,7 @@ A projected object variable is rendered with `ST_AsText`, so a geometry comes ba
 ### Limitations
 
 - **One coordinate system.** CRS IRIs are dropped, not honored. All geometries are taken to share the CRS84 longitude/latitude frame the table declares, and `geof:distance` in degrees is a planar distance in that frame.
-- **Metres are measured between nearest points.** `uom:metre` is the great-circle distance between the nearest points of the two geometries, found in Web Mercator. That is exact between points and within a fraction of a percent for lines and polygons whose segments are a few kilometres long; a segment hundreds of kilometres long is a straight line in the projection rather than a geodesic, and a geometry beyond 85° of latitude is outside the projection. The stored coordinates are taken as longitude then latitude (`SET geometry_always_xy = true`), which is the order sal writes them in.
+- **Metres are measured between nearest points, and buffered at the centroid.** `uom:metre` is the great-circle distance between the nearest points of the two geometries, found in Web Mercator, and a buffer in metres is drawn in Web Mercator at the scale of the geometry's centroid. That is exact between points and within a fraction of a percent for lines and polygons whose segments are a few kilometres long; a segment hundreds of kilometres long is a straight line in the projection rather than a geodesic, and a geometry beyond 85° of latitude is outside the projection. The stored coordinates are taken as longitude then latitude (`SET geometry_always_xy = true`), which is the order sal writes them in.
 - **Geometry output is WKT.** A projected geometry function, `SELECT (geof:envelope(?g) AS ?box)`, is rendered with `ST_AsText`; a geometry cannot be bound with `BIND` and compared as a geometry afterwards.
 - **No spatial index.** A relation against a literal evaluates the `ST_` function on every geometry row. That is quick for the sizes a data product usually holds, but it is a scan, not an R-tree lookup.
 - **First use loads the extension.** DuckDB's spatial extension is loaded on the first query that needs it, which adds a moment to that query and nothing to the ones after it in the same process.

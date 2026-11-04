@@ -542,13 +542,70 @@ func (t *translator) functionSQL(call *rdflibsparql.FuncExpr, bindings map[strin
 		}
 		s, err := t.termSQL(call.Args[0], bindings)
 		return sqlExpr{sql: s, kind: kindIRI}, err
+	case "ENCODE_FOR_URI":
+		if err := args(1); err != nil {
+			return sqlExpr{}, err
+		}
+		s, err := t.stringSQL(call.Args[0], bindings)
+		// url_encode leaves exactly the unreserved characters alone, as
+		// the function is specified to
+		return sqlExpr{sql: "url_encode(" + s + ")", kind: kindString}, err
+	case "TZ", "TIMEZONE":
+		if err := args(1); err != nil {
+			return sqlExpr{}, err
+		}
+		return t.timezoneSQL(call, bindings)
+	case "UUID", "STRUUID", "BNODE":
+		if call.Name == "BNODE" && len(call.Args) > 0 {
+			return sqlExpr{}, fmt.Errorf("BNODE with a label is not supported yet; BNODE() makes a fresh blank node per solution")
+		}
+		if err := args(0); err != nil {
+			return sqlExpr{}, err
+		}
+		// uuid() is evaluated per row, so each solution gets its own
+		switch call.Name {
+		case "UUID":
+			return sqlExpr{sql: "'urn:uuid:' || CAST(uuid() AS VARCHAR)", kind: kindIRI}, nil
+		case "STRUUID":
+			return sqlExpr{sql: "CAST(uuid() AS VARCHAR)", kind: kindString}, nil
+		default:
+			return sqlExpr{sql: "'_:' || replace(CAST(uuid() AS VARCHAR), '-', '')", kind: kindTerm}, nil
+		}
 	case "COUNT", "SUM", "AVG", "MIN", "MAX", "GROUP_CONCAT", "SAMPLE":
 		return t.aggregateSQL(call, bindings)
 	}
 	if local, ok := strings.CutPrefix(call.IRI, pkg.XSDNamespace); ok {
 		return t.castSQL(local, call, bindings)
 	}
-	return geoFunctionSQL(call, bindings)
+	return t.geoFunctionSQL(call, bindings)
+}
+
+// timezoneSQL translates TZ and TIMEZONE. The table normalizes every
+// dateTime it stores natively to UTC and keeps one written without a
+// timezone as a string, so a stored dateTime has the timezone Z when
+// object_time holds it and none when its datatype is left on a string; any
+// other dateTime, NOW() say, is UTC too. TZ of a dateTime without a timezone
+// is the empty string, TIMEZONE of one is an error, so unbound.
+func (t *translator) timezoneSQL(call *rdflibsparql.FuncExpr, bindings map[string]sqlBinding) (sqlExpr, error) {
+	zone, none := "'Z'", "''"
+	if call.Name == "TIMEZONE" {
+		zone, none = "'PT0S'", "NULL"
+	}
+	if v, ok := call.Args[0].(*rdflibsparql.VarExpr); ok {
+		binding, err := boundVariable(v.Name, bindings)
+		if err != nil {
+			return sqlExpr{}, err
+		}
+		if binding.typedObject() {
+			sql := "CASE WHEN " + binding.col("object_time") + " IS NOT NULL THEN " + zone + " WHEN " + binding.col("object_type") + " = " + sqlString(pkg.XSDNamespace+"dateTime") + " THEN " + none + " END"
+			return sqlExpr{sql: sql, kind: kindString}, nil
+		}
+	}
+	timestamp, err := t.dateTimeSQL(call.Args[0], bindings)
+	if err != nil {
+		return sqlExpr{}, err
+	}
+	return sqlExpr{sql: "CASE WHEN " + timestamp + " IS NOT NULL THEN " + zone + " END", kind: kindString}, nil
 }
 
 // sharedKind is the kind of a COALESCE or an IF and the SQL of its branches:
@@ -583,9 +640,14 @@ func (t *translator) termTestSQL(name string, arg rdflibsparql.Expr, bindings ma
 		if err != nil {
 			return sqlExpr{}, err
 		}
+		if e.kind == kindTerm {
+			// any term, BNODE() or a COALESCE of variables say, is told by
+			// its text like a variable bound to any term is
+			return sqlExpr{sql: termTextTests(e.sql)[name], kind: kindBoolean}, nil
+		}
 		truth := map[string]bool{
 			"ISIRI": e.kind == kindIRI, "ISURI": e.kind == kindIRI, "ISBLANK": false,
-			"ISLITERAL": e.kind != kindIRI && e.kind != kindTerm, "ISNUMERIC": e.kind == kindNumeric,
+			"ISLITERAL": e.kind != kindIRI, "ISNUMERIC": e.kind == kindNumeric,
 		}[name]
 		return sqlExpr{sql: strings.ToUpper(strconv.FormatBool(truth)), kind: kindBoolean}, nil
 	}
@@ -612,17 +674,24 @@ func (t *translator) termTestSQL(name string, arg rdflibsparql.Expr, bindings ma
 			"ISNUMERIC": "FALSE",
 		}[name]
 	default:
-		value := binding.expr()
-		iri := "(regexp_matches(" + value + ", '^[A-Za-z][A-Za-z0-9+.-]*:') AND NOT starts_with(" + value + ", '_:'))"
-		sql = map[string]string{
-			"ISIRI":     iri,
-			"ISURI":     iri,
-			"ISBLANK":   "starts_with(" + value + ", '_:')",
-			"ISLITERAL": "(" + value + " IS NOT NULL AND NOT " + iri + " AND NOT starts_with(" + value + ", '_:'))",
-			"ISNUMERIC": "TRY_CAST(" + value + " AS DOUBLE) IS NOT NULL",
-		}[name]
+		sql = termTextTests(binding.expr())[name]
 	}
 	return sqlExpr{sql: sql, kind: kindBoolean}, nil
+}
+
+// termTextTests are the term tests over a value known only as text, the way
+// a derived table's column or a BIND of any term is: an IRI has a scheme and
+// is not a blank node label, a blank node starts with _:, and a literal is
+// whatever else is bound.
+func termTextTests(value string) map[string]string {
+	iri := "(regexp_matches(" + value + ", '^[A-Za-z][A-Za-z0-9+.-]*:') AND NOT starts_with(" + value + ", '_:'))"
+	return map[string]string{
+		"ISIRI":     iri,
+		"ISURI":     iri,
+		"ISBLANK":   "starts_with(" + value + ", '_:')",
+		"ISLITERAL": "(" + value + " IS NOT NULL AND NOT " + iri + " AND NOT starts_with(" + value + ", '_:'))",
+		"ISNUMERIC": "TRY_CAST(" + value + " AS DOUBLE) IS NOT NULL",
+	}
 }
 
 // regexSQL translates REGEX and REPLACE to DuckDB's regexp_matches and
