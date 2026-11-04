@@ -49,12 +49,22 @@ func TestBuiltinVocabulariesCompleteTheEngineTerms(t *testing.T) {
 func TestGeofFunctionsAreTheTranslatedOnes(t *testing.T) {
 	// Every documented function is one geoFunctionSQL translates, and every
 	// translated one is documented.
-	translated := map[string]bool{"distance": true}
+	translated := map[string]bool{}
+	for _, name := range []string{"distance", "metricdistance", "buffer", "metricbuffer", "coordinatedimension", "spatialdimension", "geometrytype", "getsrid"} {
+		translated[name] = true
+	}
 	for name := range geofRelations {
 		translated[name] = true
 	}
 	for name := range geofConstructors {
 		translated[name] = true
+	}
+	for name := range geofProperties {
+		translated[name] = true
+	}
+	for name := range geofMeasures {
+		translated[name] = true
+		translated["metric"+name] = true
 	}
 	documented := map[string]bool{}
 	for _, function := range geofFunctions {

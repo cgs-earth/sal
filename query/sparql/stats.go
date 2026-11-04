@@ -30,7 +30,11 @@ type TableStats struct {
 	Objects     int64  `json:"objects"`
 	Snapshots   Result `json:"snapshots"`
 	Properties  Result `json:"properties"`
-	ColumnStats Result `json:"columnStats"`
+	// Layout is how the table is laid out at its current snapshot, read from
+	// the Iceberg metadata; LayoutError says why it could not be when it is
+	// nil, so the rest of the view still answers.
+	Layout      *TableLayout `json:"layout"`
+	LayoutError string       `json:"layoutError,omitempty"`
 	// Modules are the SAL module URIs the build that wrote this table downloaded.
 	Modules []string `json:"modules"`
 	// Vocabularies is the same listing `sal get vocabularies` prints: every
@@ -49,9 +53,9 @@ type TableStats struct {
 
 // statsSections are the `sal query --info` options the stats view reports, in the
 // order statsFromResults expects them after the counts.
-var statsSections = []string{"snapshots", "properties", "column-stats"}
+var statsSections = []string{"snapshots", "properties"}
 
-// Stats collects the counts, snapshots, table properties, and column statistics of the triples table.
+// Stats collects the counts, snapshots, table properties, and layout of the triples table.
 //
 // The four queries run one after another on the shared DuckDB handle. They used
 // to be batched into a single duckdb process because starting one cost far more
@@ -79,6 +83,10 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 	stats, err := statsFromResults(r.TablePath, results)
 	if err != nil {
 		return TableStats{}, err
+	}
+	if stats.Layout, err = r.Layout(ctx); err != nil {
+		slog.Warn("reading the table layout for the stats view", "error", err)
+		stats.LayoutError = err.Error()
 	}
 	// the vocabulary listing comes from the project's own .sal/config.jsonld,
 	// which says nothing about a table on object storage
@@ -162,14 +170,13 @@ func statsFromResults(tablePath string, results []Result) (TableStats, error) {
 	}
 
 	stats := TableStats{
-		TablePath:   tablePath,
-		Triples:     parseCount(counts.Rows[0][0]),
-		Subjects:    parseCount(counts.Rows[0][1]),
-		Predicates:  parseCount(counts.Rows[0][2]),
-		Objects:     parseCount(counts.Rows[0][3]),
-		Snapshots:   results[1],
-		Properties:  results[2],
-		ColumnStats: results[3],
+		TablePath:  tablePath,
+		Triples:    parseCount(counts.Rows[0][0]),
+		Subjects:   parseCount(counts.Rows[0][1]),
+		Predicates: parseCount(counts.Rows[0][2]),
+		Objects:    parseCount(counts.Rows[0][3]),
+		Snapshots:  results[1],
+		Properties: results[2],
 	}
 	stats.Modules = modulesFromProperties(stats.Properties)
 	stats.SampleQueries = snapshotQueries(tablePath, stats.Snapshots)

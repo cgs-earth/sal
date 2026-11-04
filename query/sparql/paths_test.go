@@ -20,7 +20,8 @@ PREFIX ex: <https://example.test/>
 // column so that nothing here needs the spatial extension. It holds the class
 // hierarchy schema.org states, as a project that imports schema.org with
 // owl:imports would, beside the project's own rows: a subclass of its own, a
-// cycle, a list, and one instance of each class.
+// cycle, a list, and one instance of each class, plus a few people who know
+// each other for the paths that walk in both directions.
 const pathTable = `CREATE TABLE triples AS
 SELECT * FROM (VALUES
 	('https://schema.org/Organization', 'http://www.w3.org/2000/01/rdf-schema#subClassOf', 'https://schema.org/Thing', NULL, 'h1'),
@@ -42,7 +43,10 @@ SELECT * FROM (VALUES
 	('_:b1', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#first', NULL, 'b', 'h17'),
 	('_:b1', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#rest', NULL, '_:b2', 'h18'),
 	('_:b2', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#first', NULL, 'c', 'h19'),
-	('_:b2', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#rest', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#nil', NULL, 'h20')
+	('_:b2', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#rest', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#nil', NULL, 'h20'),
+	('https://example.test/alice', 'https://schema.org/knows', 'https://example.test/bob', NULL, 'h21'),
+	('https://example.test/bob', 'https://schema.org/knows', 'https://example.test/carol', NULL, 'h22'),
+	('https://example.test/bob', 'https://schema.org/spouse', 'https://example.test/dana', NULL, 'h23')
 ) AS rows(subject, predicate, object_iri, object_string, triple_hash),
 (SELECT NULL::DOUBLE AS object_float, NULL::BIGINT AS object_integer, NULL::INTEGER AS object_byte,
 	NULL::TIMESTAMP AS object_time, NULL::VARCHAR AS object_language, NULL::VARCHAR AS object_type)`
@@ -107,6 +111,8 @@ func TestPathClosureTerminatesOnACycle(t *testing.T) {
 	db := pathDB(t)
 
 	require.Equal(t, []string{"https://example.test/x"}, firstColumn(t, db, `SELECT ?x WHERE { ?x rdf:type/rdfs:subClassOf* ex:Y }`))
+	// the cycle leads back to X, which matches once, as the identity
+	require.Equal(t, []string{"https://example.test/X", "https://example.test/Y"}, firstColumn(t, db, `SELECT ?c WHERE { ex:X rdfs:subClassOf* ?c }`))
 }
 
 func TestPathInverseClosureWalksDownward(t *testing.T) {
@@ -217,7 +223,7 @@ CROSS JOIN LATERAL (WITH RECURSIVE edges AS (
     UNION
     SELECT closure.start, edges.finish FROM closure JOIN edges ON edges.start = closure.finish)
   SELECT start, finish FROM closure
-  UNION ALL SELECT `+bindingExpr("t0", "object")+`, `+bindingExpr("t0", "object")+`) AS t1
+  UNION SELECT `+bindingExpr("t0", "object")+`, `+bindingExpr("t0", "object")+`) AS t1
 WHERE t0.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'
   AND `+bindingExpr("t0", "object")+` = t1.start
   AND t1.finish = 'https://schema.org/Organization'`, sql)
@@ -228,7 +234,7 @@ func TestToSQLTranslatesOneOrMoreWithoutIdentity(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Contains(t, sql, "WITH RECURSIVE edges AS")
-	require.NotContains(t, sql, "UNION ALL")
+	require.NotContains(t, sql, "UNION SELECT")
 	// the identity is what would have needed the enclosing scan
 	require.NotContains(t, sql, "LATERAL")
 }
@@ -239,7 +245,7 @@ func TestToSQLTranslatesZeroOrOneWithoutRecursion(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, sql, "RECURSIVE")
 	require.Contains(t, sql, "LATERAL (WITH edges AS (")
-	require.Contains(t, sql, "SELECT start, finish FROM edges\n  UNION ALL SELECT "+bindingExpr("t0", "object")+", "+bindingExpr("t0", "object")+")")
+	require.Contains(t, sql, "SELECT start, finish FROM edges\n  UNION SELECT "+bindingExpr("t0", "object")+", "+bindingExpr("t0", "object")+")")
 }
 
 func TestToSQLTranslatesAnInverseClosureWithSwappedEdges(t *testing.T) {
@@ -256,7 +262,7 @@ func TestToSQLUsesTheEdgeNodesAsIdentityWhenNothingIsBound(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotContains(t, sql, "LATERAL")
-	require.Contains(t, sql, "UNION ALL SELECT node, node FROM (SELECT start AS node FROM edges UNION SELECT finish FROM edges)")
+	require.Contains(t, sql, "UNION SELECT node, node FROM (SELECT start AS node FROM edges UNION SELECT finish FROM edges)")
 	require.Contains(t, sql, `SELECT t0.start AS "a", t0.finish AS "b"`)
 }
 
@@ -265,7 +271,7 @@ func TestToSQLUsesAConstantAsIdentityWithoutLateral(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotContains(t, sql, "LATERAL")
-	require.Contains(t, sql, "UNION ALL SELECT 'https://schema.org/NGO', 'https://schema.org/NGO'")
+	require.Contains(t, sql, "UNION SELECT 'https://schema.org/NGO', 'https://schema.org/NGO'")
 	require.Contains(t, sql, "t0.start = 'https://schema.org/NGO'")
 }
 
@@ -299,20 +305,118 @@ SELECT ?x WHERE { ?x rdf:type ?t . MINUS { SERVICE <http://localhost:8080/v7/spa
 	require.Contains(t, sql, "x0_0.start = "+bindingExpr("t0", "object"))
 }
 
-func TestToSQLRejectsANegatedInversePath(t *testing.T) {
-	_, err := ToSQL(pathPrefixes + `SELECT ?s WHERE { ?s !^rdf:type ?o }`)
+func TestPathRepeatedSequenceWalksTwoStepsAtATime(t *testing.T) {
+	db := pathDB(t)
 
-	require.ErrorContains(t, err, "a negated inverse path, !^p, is not supported yet")
+	// every other node of the list; nil has no rest, so the walk ends there
+	require.Equal(t, []string{"_:b2"}, firstColumn(t, db, `SELECT ?tail WHERE { ex:list (rdf:rest/rdf:rest)+ ?tail }`))
+	require.Equal(t, []string{"https://schema.org/Organization"}, firstColumn(t, db, `SELECT ?c WHERE { ex:Charity (rdfs:subClassOf/rdfs:subClassOf)+ ?c }`))
+	require.Equal(t, []string{"https://example.test/Charity", "https://schema.org/Organization"}, firstColumn(t, db, `SELECT ?c WHERE { ex:Charity (rdfs:subClassOf/rdfs:subClassOf)* ?c }`))
 }
 
-func TestToSQLRejectsARepeatedSequencePath(t *testing.T) {
-	_, err := ToSQL(pathPrefixes + `SELECT ?s WHERE { ?s (rdf:type/rdfs:subClassOf)* ?o }`)
+func TestPathInverseOfARepeatedSequenceReversesIt(t *testing.T) {
+	db := pathDB(t)
 
-	require.ErrorContains(t, err, "only a single IRI, its inverse, or an alternative of IRIs can be repeated with *, + or ?")
+	require.Equal(t, []string{"https://schema.org/Organization"}, firstColumn(t, db, `SELECT ?c WHERE { ?c ^(rdfs:subClassOf/rdfs:subClassOf)+ ex:Charity }`))
 }
 
-func TestToSQLRejectsAMixedAlternativePath(t *testing.T) {
-	_, err := ToSQL(pathPrefixes + `SELECT ?s WHERE { ?s schema:knows|^schema:knows ?o }`)
+func TestPathMixedAlternativeWalksBothDirections(t *testing.T) {
+	db := pathDB(t)
 
-	require.ErrorContains(t, err, "only an alternative of plain IRIs")
+	require.Equal(t, []string{"https://example.test/alice", "https://example.test/carol"}, firstColumn(t, db, `SELECT ?o WHERE { ex:bob (schema:knows|^schema:knows) ?o }`))
+	// the whole connected component, dana being reachable only by spouse
+	require.Equal(t, []string{"https://example.test/alice", "https://example.test/bob", "https://example.test/carol"}, firstColumn(t, db, `SELECT ?o WHERE { ex:carol (schema:knows|^schema:knows)* ?o }`))
+	require.Equal(t, []string{"https://example.test/bob", "https://example.test/dana"}, firstColumn(t, db, `SELECT ?o WHERE { ex:alice (schema:knows/schema:spouse|schema:knows) ?o }`))
+}
+
+// Inside a repetition, a step that may match nothing is expanded away:
+// knows/spouse? is knows together with knows/spouse, so carol, who has no
+// spouse, is still reached through bob.
+func TestPathZeroLengthStepInsideARepeatedSequence(t *testing.T) {
+	db := pathDB(t)
+
+	require.Equal(t, []string{"https://example.test/bob", "https://example.test/carol", "https://example.test/dana"}, firstColumn(t, db, `SELECT ?o WHERE { ex:alice (schema:knows/schema:spouse?)+ ?o }`))
+	require.Equal(t, []string{"https://example.test/bob", "https://example.test/carol", "https://example.test/dana"}, firstColumn(t, db, `SELECT ?o WHERE { ex:alice (schema:knows/schema:spouse*)+ ?o }`))
+}
+
+func TestPathNegatedInverseExcludesThePredicateOnTheWayIn(t *testing.T) {
+	db := pathDB(t)
+
+	// what points at NGO by anything but rdf:type: its subclass
+	require.Equal(t, []string{"https://example.test/Charity"}, firstColumn(t, db, `SELECT ?o WHERE { schema:NGO !^rdf:type ?o }`))
+	// out by anything but rdf:type, in by anything but rdfs:subClassOf
+	require.Equal(t, []string{"https://example.test/ngo", "https://schema.org/Organization"}, firstColumn(t, db, `SELECT ?o WHERE { schema:NGO !(rdf:type|^rdfs:subClassOf) ?o }`))
+}
+
+func TestPathRepetitionOfARepetition(t *testing.T) {
+	db := pathDB(t)
+
+	require.Equal(t, []string{
+		"https://example.test/Charity",
+		"https://schema.org/Corporation",
+		"https://schema.org/NGO",
+		"https://schema.org/Organization",
+	}, firstColumn(t, db, `SELECT ?sub WHERE { schema:Organization ((^rdfs:subClassOf)+)? ?sub }`))
+	// two steps up from Charity, or none from Organization itself
+	require.Equal(t, []string{"https://example.test/charity", "https://example.test/org"}, firstColumn(t, db, `SELECT ?x WHERE { ?x rdf:type/((rdfs:subClassOf/rdfs:subClassOf)*)+ schema:Organization }`))
+}
+
+func TestPathCompoundStepRunsInsideAMinus(t *testing.T) {
+	db := pathDB(t)
+
+	require.Equal(t, []string{"https://example.test/thing", "https://example.test/x"}, firstColumn(t, db, `SELECT ?x WHERE { ?x rdf:type ?t . MINUS { ?t (rdfs:subClassOf/rdfs:subClassOf?)* schema:Organization } }`))
+}
+
+func TestToSQLTranslatesARepeatedSequenceAsAJoinOfEdges(t *testing.T) {
+	sql, err := ToSQL(pathPrefixes + `SELECT ?tail WHERE { ex:list (rdf:rest/rdf:rest)+ ?tail }`)
+
+	require.NoError(t, err)
+	require.Contains(t, sql, `WITH RECURSIVE edges AS (
+    SELECT p0.start, p1.finish
+    FROM (SELECT edge.subject AS start, `+bindingExpr("edge", "object")+` AS finish
+    FROM triples AS edge
+    WHERE edge.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#rest') AS p0
+    JOIN (SELECT edge.subject AS start, `+bindingExpr("edge", "object")+` AS finish
+    FROM triples AS edge
+    WHERE edge.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#rest') AS p1 ON p1.start = p0.finish),
+  closure(start, finish) AS (`)
+	require.Contains(t, sql, "t0.start = 'https://example.test/list'")
+}
+
+func TestToSQLTranslatesAMixedAlternativeAsAUnionOfEdges(t *testing.T) {
+	sql, err := ToSQL(pathPrefixes + `SELECT ?o WHERE { ex:bob (schema:knows|^schema:knows) ?o }`)
+
+	require.NoError(t, err)
+	require.NotContains(t, sql, "RECURSIVE")
+	require.Contains(t, sql, "FROM (SELECT start, finish FROM (SELECT edge.subject AS start, "+bindingExpr("edge", "object")+" AS finish")
+	require.Contains(t, sql, "\n    UNION ALL SELECT start, finish FROM (SELECT "+bindingExpr("edge", "object")+" AS start, edge.subject AS finish")
+	require.Contains(t, sql, "t0.start = 'https://example.test/bob'")
+}
+
+func TestToSQLNamesNestedClosuresByDepth(t *testing.T) {
+	sql, err := ToSQL(pathPrefixes + `SELECT ?sub WHERE { schema:Organization ((^rdfs:subClassOf)+)? ?sub }`)
+
+	require.NoError(t, err)
+	require.Contains(t, sql, "WITH edges AS (\n    SELECT start, finish FROM (WITH RECURSIVE edges1 AS (")
+	require.Contains(t, sql, "closure1(start, finish) AS (")
+	require.Contains(t, sql, "SELECT closure1.start, edges1.finish FROM closure1 JOIN edges1 ON edges1.start = closure1.finish)")
+	require.Contains(t, sql, "UNION SELECT 'https://schema.org/Organization', 'https://schema.org/Organization'")
+}
+
+func TestToSQLExpandsAZeroLengthPartOfASequence(t *testing.T) {
+	sql, err := ToSQL(pathPrefixes + `SELECT ?o WHERE { ex:alice (schema:knows/schema:spouse?)+ ?o }`)
+
+	require.NoError(t, err)
+	require.Contains(t, sql, "SELECT start, finish FROM (SELECT start, finish FROM (SELECT edge.subject AS start")
+	require.Contains(t, sql, "AS p0) AS a0\n    UNION ALL SELECT start, finish FROM (SELECT p0.start, p1.finish")
+	require.Contains(t, sql, "WHERE edge.predicate = 'https://schema.org/spouse') AS p1 ON p1.start = p0.finish) AS a1")
+}
+
+func TestToSQLTranslatesANegatedInversePathBySwappingColumns(t *testing.T) {
+	sql, err := ToSQL(pathPrefixes + `SELECT ?o WHERE { schema:NGO !^rdf:type ?o }`)
+
+	require.NoError(t, err)
+	require.Contains(t, sql, "t0.predicate NOT IN ('http://www.w3.org/1999/02/22-rdf-syntax-ns#type')")
+	require.Contains(t, sql, "t0.object_iri = 'https://schema.org/NGO'")
+	require.Contains(t, sql, `t0.subject AS "o"`)
 }

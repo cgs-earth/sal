@@ -2567,3 +2567,140 @@ kbd {
 .graph-context-menu-item:hover {
   background: var(--bg-hover);
 }
+
+/* ---------- storage layout ---------- */
+
+/* The layout card: the planner's figures in a row, a line on the
+   partitioning, what stands out, the per-column pruning table, and the
+   list of every file folded away under them. */
+.layout {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 20px 20px;
+}
+
+.layout-figures {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 0;
+  margin: 0 0 4px;
+}
+
+/* six figures in the narrower card: tighter than the landing card's */
+.layout-figures .figure {
+  padding: 0 20px;
+}
+
+.layout-figures .figure:first-child {
+  padding-left: 0;
+}
+
+.layout-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.layout code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.layout-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.layout-note::marker {
+  color: var(--text-muted);
+}
+
+.layout-note.warn::marker,
+.layout-verdict.warn {
+  color: var(--danger);
+}
+
+.layout-verdict.good {
+  color: var(--success);
+}
+
+/* one row per column of the table, a dozen, which the card shows whole */
+.tab-body.stats .layout-pruning.table-scroll {
+  max-height: none;
+}
+
+.pruning-table td,
+.files-table td {
+  white-space: nowrap;
+}
+
+.layout-role {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid var(--line-emphasis);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+.files-table .layout-build {
+  color: var(--text-muted);
+}
+
+.files-table .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The file list's heading reads like the card's own: the title in the
+   small caps the panel headers use, the count and path as its caption. */
+.layout-detail summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.layout-detail-title {
+  color: var(--accent-ink);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.layout-detail-caption {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.layout-detail summary:hover .layout-detail-title {
+  color: var(--accent);
+}
+
+.layout-detail[open] summary {
+  margin-bottom: 10px;
+}
+
+.files-table th.numeric .blob-sort {
+  justify-content: flex-end;
+}
+
+.layout-detail .table-scroll {
+  max-height: 420px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}

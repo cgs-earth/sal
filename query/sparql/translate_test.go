@@ -384,6 +384,110 @@ WHERE {
 	require.Contains(t, query, "ST_Intersects(ST_Envelope(t0.object_geometry), ST_GeomFromText('POINT(-89.5 40.5)'))")
 }
 
+const geoPrefixes = `
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+PREFIX uom: <http://www.opengis.net/def/uom/OGC/1.0/>
+`
+
+func TestToSQLTranslatesGeoSPARQLMeasuresByUnit(t *testing.T) {
+	query, err := ToSQL(geoPrefixes + `SELECT ?g (geof:area(?wkt, uom:degree) AS ?a) (geof:metricArea(?wkt) AS ?m) WHERE { ?g geo:asWKT ?wkt . FILTER(geof:length(?wkt, uom:metre) > 100 && geof:perimeter(?wkt, uom:degree) < 1) }`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, `ST_Area(t0.object_geometry) AS "a", ST_Area_Spheroid(t0.object_geometry) AS "m"`)
+	require.Contains(t, query, "(ST_Length_Spheroid(t0.object_geometry) > 100 AND ST_Perimeter(t0.object_geometry) < 1)")
+
+	query, err = ToSQL(geoPrefixes + `SELECT ?g WHERE { ?g geo:asWKT ?wkt . FILTER(geof:metricLength(?wkt) > 100 && geof:metricPerimeter(?wkt) > 100) }`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "(ST_Length_Spheroid(t0.object_geometry) > 100 AND ST_Perimeter_Spheroid(t0.object_geometry) > 100)")
+}
+
+func TestToSQLRejectsAMeasureInAnUnknownUnit(t *testing.T) {
+	_, err := ToSQL(geoPrefixes + `SELECT ?g WHERE { ?g geo:asWKT ?wkt . FILTER(geof:area(?wkt, uom:foot) > 1) }`)
+
+	require.ErrorContains(t, err, `geof:area unit "http://www.opengis.net/def/uom/OGC/1.0/foot" is not supported; use uom:degree or uom:metre`)
+
+	_, err = ToSQL(geoPrefixes + `SELECT ?g WHERE { ?g geo:asWKT ?wkt . FILTER(geof:area(?wkt) > 1) }`)
+
+	require.ErrorContains(t, err, "geof:area takes a geometry and a unit, got 1 arguments")
+
+	_, err = ToSQL(geoPrefixes + `SELECT ?g WHERE { ?g geo:asWKT ?wkt . FILTER(geof:metricArea(?wkt, uom:metre) > 1) }`)
+
+	require.ErrorContains(t, err, "geof:metricarea takes one geometry, got 2 arguments")
+}
+
+func TestToSQLTranslatesGeoSPARQLBufferByUnit(t *testing.T) {
+	query, err := ToSQL(geoPrefixes + `SELECT ?g WHERE { ?g geo:asWKT ?wkt . FILTER(geof:sfWithin("POINT(-89.5 40.5)"^^geo:wktLiteral, geof:buffer(?wkt, 0.5, uom:degree))) }`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "ST_Within(ST_GeomFromText('POINT(-89.5 40.5)'), ST_Buffer(t0.object_geometry, 0.5))")
+
+	metres := "ST_Transform(ST_Buffer(ST_Transform(t0.object_geometry, 'EPSG:4326', 'EPSG:3857'), 1000 / cos(radians(ST_Y(ST_Centroid(t0.object_geometry))))), 'EPSG:3857', 'EPSG:4326')"
+	query, err = ToSQL(geoPrefixes + `SELECT ?g (geof:buffer(?wkt, 1000, uom:metre) AS ?b) WHERE { ?g geo:asWKT ?wkt }`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "ST_AsText("+metres+`) AS "b"`)
+
+	query, err = ToSQL(geoPrefixes + `SELECT ?g (geof:metricBuffer(?wkt, 1000) AS ?b) WHERE { ?g geo:asWKT ?wkt }`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "ST_AsText("+metres+`) AS "b"`)
+
+	// the radius is an expression like any other
+	query, err = ToSQL(geoPrefixes + `PREFIX schema: <https://schema.org/>
+SELECT ?g WHERE { ?g geo:asWKT ?wkt ; schema:radius ?r . FILTER(geof:sfContains(geof:buffer(?wkt, ?r * 2, uom:degree), ?wkt)) }`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "ST_Buffer(t0.object_geometry, (COALESCE(t1.object_float, CAST(t1.object_integer AS DOUBLE), CAST(t1.object_byte AS DOUBLE)) * 2))")
+
+	_, err = ToSQL(geoPrefixes + `SELECT ?g WHERE { ?g geo:asWKT ?wkt . FILTER(geof:sfContains(geof:buffer(?wkt, 1), ?wkt)) }`)
+
+	require.ErrorContains(t, err, "geof:buffer takes a geometry, a radius, and a unit, got 2 arguments")
+}
+
+func TestToSQLTranslatesGeoSPARQLMetricDistance(t *testing.T) {
+	query, err := ToSQL(geoPrefixes + `SELECT ?g WHERE { ?g geo:asWKT ?wkt . FILTER(geof:metricDistance(?wkt, "POINT(-89.5 40.5)"^^geo:wktLiteral) < 5000) }`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "ST_Distance_Sphere(ST_Transform(ST_ClosestPoint(")
+	require.Contains(t, query, ") < 5000")
+}
+
+func TestToSQLTranslatesGeoSPARQLGeometryProperties(t *testing.T) {
+	query, err := ToSQL(geoPrefixes + `SELECT ?g (geof:minX(?wkt) AS ?x0) (geof:maxY(?wkt) AS ?y1) (geof:dimension(?wkt) AS ?d) (geof:numGeometries(?wkt) AS ?n) (geof:centroid(?wkt) AS ?c)
+WHERE { ?g geo:asWKT ?wkt . FILTER(geof:isSimple(?wkt) && !geof:isEmpty(?wkt) && geof:minZ(?wkt) < 10) }`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, `ST_XMin(t0.object_geometry) AS "x0", ST_YMax(t0.object_geometry) AS "y1", ST_Dimension(t0.object_geometry) AS "d", ST_NumGeometries(t0.object_geometry) AS "n", ST_AsText(ST_Centroid(t0.object_geometry)) AS "c"`)
+	require.Contains(t, query, "(ST_IsSimple(t0.object_geometry) AND NOT (ST_IsEmpty(t0.object_geometry))) AND ST_ZMin(t0.object_geometry) < 10")
+
+	query, err = ToSQL(geoPrefixes + `SELECT ?g (geof:coordinateDimension(?wkt) AS ?cd) (geof:spatialDimension(?wkt) AS ?sd) WHERE { ?g geo:asWKT ?wkt . FILTER(!geof:is3D(?wkt) && !geof:isMeasured(?wkt)) }`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, `2 + CASE WHEN ST_HasZ(t0.object_geometry) THEN 1 ELSE 0 END + CASE WHEN ST_HasM(t0.object_geometry) THEN 1 ELSE 0 END AS "cd", 2 + CASE WHEN ST_HasZ(t0.object_geometry) THEN 1 ELSE 0 END AS "sd"`)
+	require.Contains(t, query, "(NOT (ST_HasZ(t0.object_geometry)) AND NOT (ST_HasM(t0.object_geometry)))")
+}
+
+// A serialization is a string, so it is projected as it is rather than
+// through the ST_AsText a geometry goes through.
+func TestToSQLTranslatesGeoSPARQLSerializations(t *testing.T) {
+	query, err := ToSQL(geoPrefixes + `SELECT ?g (geof:asWKT(?wkt) AS ?w) (geof:asGeoJSON(?wkt) AS ?j) WHERE { ?g geo:asWKT ?wkt . FILTER(STRSTARTS(geof:asWKT(?wkt), "POINT")) }`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, `ST_AsText(t0.object_geometry) AS "w", ST_AsGeoJSON(t0.object_geometry) AS "j"`)
+	require.Contains(t, query, "starts_with(ST_AsText(t0.object_geometry), 'POINT')")
+}
+
+func TestToSQLTranslatesGeoSPARQLGeometryTypeAndSRID(t *testing.T) {
+	query, err := ToSQL(geoPrefixes + `PREFIX sf: <http://www.opengis.net/ont/sf#>
+SELECT ?g (geof:getSRID(?wkt) AS ?crs) WHERE { ?g geo:asWKT ?wkt . FILTER(geof:geometryType(?wkt) = sf:Polygon) }`)
+
+	require.NoError(t, err)
+	require.Contains(t, query, `CASE WHEN t0.object_geometry IS NOT NULL THEN 'http://www.opengis.net/def/crs/OGC/1.3/CRS84' END AS "crs"`)
+	require.Contains(t, query, "CASE CAST(ST_GeometryType(t0.object_geometry) AS VARCHAR) WHEN 'POINT' THEN 'http://www.opengis.net/ont/sf#Point' WHEN 'LINESTRING' THEN 'http://www.opengis.net/ont/sf#LineString' WHEN 'POLYGON' THEN 'http://www.opengis.net/ont/sf#Polygon' WHEN 'MULTIPOINT' THEN 'http://www.opengis.net/ont/sf#MultiPoint' WHEN 'MULTILINESTRING' THEN 'http://www.opengis.net/ont/sf#MultiLineString' WHEN 'MULTIPOLYGON' THEN 'http://www.opengis.net/ont/sf#MultiPolygon' WHEN 'GEOMETRYCOLLECTION' THEN 'http://www.opengis.net/ont/sf#GeometryCollection' END = 'http://www.opengis.net/ont/sf#Polygon'")
+}
+
 func TestToSQLRejectsGeoSPARQLOnNonGeometryVariables(t *testing.T) {
 	_, err := ToSQL(`
 PREFIX geo: <http://www.opengis.net/ont/geosparql#>
@@ -407,10 +511,34 @@ PREFIX uom: <http://www.opengis.net/def/uom/OGC/1.0/>
 SELECT ?g
 WHERE {
   ?g geo:asWKT ?wkt .
-  FILTER(geof:sfIntersects(geof:buffer(?wkt, 1, uom:metre), ?wkt))
+  FILTER(geof:relate(?wkt, ?wkt, "T*F**FFF*"))
 }`)
 
-	require.ErrorContains(t, err, "GeoSPARQL function geof:buffer is not supported yet")
+	require.ErrorContains(t, err, "GeoSPARQL function geof:relate is not supported: DuckDB's spatial extension has no DE-9IM function to answer it")
+
+	_, err = ToSQL(`
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+
+SELECT ?g
+WHERE {
+  ?g geo:asWKT ?wkt .
+  FILTER(geof:sfIntersects(geof:transform(?wkt, <http://www.opengis.net/def/crs/EPSG/0/3857>), ?wkt))
+}`)
+
+	require.ErrorContains(t, err, "GeoSPARQL function geof:transform is not supported: every geometry is stored in CRS84")
+
+	_, err = ToSQL(`
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+
+SELECT ?g
+WHERE {
+  ?g geo:asWKT ?wkt .
+  FILTER(geof:sfIntersects(geof:boundingCircle(?wkt), ?wkt))
+}`)
+
+	require.ErrorContains(t, err, "GeoSPARQL function geof:boundingcircle is not supported yet")
 
 	_, err = ToSQL(`
 SELECT ?s

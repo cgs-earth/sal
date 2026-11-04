@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { STAC_COLLECTION_PATH, hasStacCatalog, stacViewerURL, type TableStats } from '../api'
 import { ResultTable } from '../components/ResultTable'
 import { SnapshotsTable } from '../components/SnapshotsTable'
+import { StorageLayout } from '../components/StorageLayout'
 import { LoadingState } from '../components/LoadingState'
 
 type StatsTabProps = {
@@ -148,12 +149,20 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
             />
           </Section>
 
-          <Section title="Table properties" caption="Iceberg metadata properties from the latest metadata file.">
-            <ResultTable header={stats.properties.header} rows={stats.properties.rows} empty="No properties set" />
+          <Section
+            title="Storage layout"
+            caption="How the table is partitioned and split into files, and what that means for a query."
+          >
+            <StorageLayout
+              layout={stats.layout}
+              error={stats.layoutError}
+              tablePath={stats.tablePath}
+              snapshots={stats.snapshots}
+            />
           </Section>
 
-          <Section title="Column statistics" caption="Per-column value counts and bounds recorded by Iceberg.">
-            <ResultTable header={stats.columnStats.header} rows={stats.columnStats.rows} empty="No column statistics" />
+          <Section title="Table properties" caption="From the latest Iceberg metadata file">
+            <ResultTable header={stats.properties.header} rows={stats.properties.rows} empty="No properties set" />
           </Section>
         </>
       )}
