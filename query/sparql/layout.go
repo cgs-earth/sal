@@ -88,8 +88,11 @@ type FileOutlier struct {
 // many of those files a single value can fall in by its bounds, the most
 // files an equality filter has to read; a column every file holds a wide
 // range of touches every file, and a column the files partition or sort by
-// touches few. A geometry's bounds are boxes, which no value falls in the
-// way a point falls in a range, so its MaxFilesPerValue is 0. Nulls is the
+// touches few. A geometry's bounds are a bounding box, which a spatial
+// filter is checked against the way a value is checked against a range, so
+// for it MaxFilesPerValue is the files whose box a query can meet, plus the
+// files that record neither a box nor a null count proving they hold no
+// geometry, which a filter must read whatever it asks for. Nulls is the
 // null count summed over the data files.
 type ColumnPruning struct {
 	Name             string `json:"name"`
@@ -129,7 +132,7 @@ ORDER BY files.file_path`, escaped, escaped)
 // per column.
 func layoutBoundsSQL(tablePath string) string {
 	return fmt.Sprintf(`
-SELECT file_path, column_name, column_type, lower_bound, upper_bound, null_value_count
+SELECT file_path, column_name, column_type, lower_bound, upper_bound, value_count, null_value_count
 FROM iceberg_column_stats('%s')
 WHERE status <> 'DELETED' AND content = 'DATA'
 ORDER BY file_path, column_name`, escapeSQLLiteral(tablePath))
@@ -379,12 +382,22 @@ type columnBound struct {
 	lower, upper string
 }
 
+// geometryWorstCase is the files a spatial filter may have to read: every
+// file that records a bounding box, since a query box can meet it, and every
+// file that records neither a box nor a null count showing the column is
+// null throughout, which nothing lets a filter skip. A file whose null count
+// equals its row count holds no geometry and is skipped by the null count
+// alone, as DuckDB's Iceberg reader does.
+func geometryWorstCase(bounded int, unprovable int) int {
+	return bounded + unprovable
+}
+
 // readBounds folds the per-file column statistics into one ColumnPruning
 // per column, in the order the columns first appear.
 func (l *TableLayout) readBounds(bounds Result) {
 	column := func(name string) int { return slices.Index(bounds.Header, name) }
-	nameIndex, typeIndex, lowerIndex, upperIndex, nullsIndex :=
-		column("column_name"), column("column_type"), column("lower_bound"), column("upper_bound"), column("null_value_count")
+	nameIndex, typeIndex, lowerIndex, upperIndex, valuesIndex, nullsIndex :=
+		column("column_name"), column("column_type"), column("lower_bound"), column("upper_bound"), column("value_count"), column("null_value_count")
 	if nameIndex < 0 {
 		return
 	}
@@ -396,6 +409,9 @@ func (l *TableLayout) readBounds(bounds Result) {
 	}
 	ranges := map[string][]columnBound{}
 	pruning := map[string]*ColumnPruning{}
+	// files that record neither bounds nor a null count proving a column
+	// is null throughout, per column
+	unprovable := map[string]int{}
 	for _, row := range bounds.Rows {
 		name := cell(row, nameIndex)
 		if name == "" {
@@ -410,6 +426,10 @@ func (l *TableLayout) readBounds(bounds Result) {
 		entry.Nulls += parseCount(cell(row, nullsIndex))
 		lower, upper := cell(row, lowerIndex), cell(row, upperIndex)
 		if lower == "" || upper == "" {
+			nulls, values := cell(row, nullsIndex), cell(row, valuesIndex)
+			if nulls == "" || values == "" || nulls != values {
+				unprovable[name]++
+			}
 			continue
 		}
 		entry.FilesWithBounds++
@@ -429,7 +449,9 @@ func (l *TableLayout) readBounds(bounds Result) {
 	slices.SortFunc(names, func(a, b string) int { return columnOrder(a) - columnOrder(b) })
 	for _, name := range names {
 		entry := pruning[name]
-		if !strings.HasPrefix(strings.ToUpper(entry.Type), "GEOMETRY") {
+		if strings.HasPrefix(strings.ToUpper(entry.Type), "GEOMETRY") {
+			entry.MaxFilesPerValue = geometryWorstCase(entry.FilesWithBounds, unprovable[name])
+		} else {
 			entry.MaxFilesPerValue = maxOverlap(entry.Type, ranges[name])
 		}
 		l.Columns = append(l.Columns, *entry)

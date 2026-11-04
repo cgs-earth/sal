@@ -80,7 +80,8 @@ export type FileOutlier = {
  * How a filter on one column fares against the bounds Iceberg records per data
  * file: filesWithBounds data files record a range for it, and a single value can
  * fall in at most maxFilesPerValue of them, which is the most files an equality
- * filter reads. A geometry has no such range and reports 0.
+ * filter reads. For a geometry it is the files whose bounding box a query can meet
+ * plus the files that record neither a box nor a null count proving they hold none.
  */
 export type ColumnPruning = {
   name: string

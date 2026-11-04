@@ -33,7 +33,7 @@ func stageTestConfig(t *testing.T) *LoadConfig {
 
 func stageTestTable(t *testing.T, cfg *LoadConfig) *table.Table {
 	t.Helper()
-	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
+	cat, err := hadoop.NewCatalog(context.Background(), "local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
 	tbl, err := cat.LoadTable(context.Background(), catalog.ToIdentifier(cfg.Namespace, "triples"))
 	require.NoError(t, err)

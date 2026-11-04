@@ -42,7 +42,7 @@ func writeStacTestTable(t *testing.T, graph *rdflibgo.Graph) *table.Table {
 	}
 	require.NoError(t, load.WriteGraphToIceberg(ctx, graph, cfg, map[string]string{"sal.hash": "abc"}, ""))
 
-	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
+	cat, err := hadoop.NewCatalog(context.Background(), "local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
 	tbl, err := cat.LoadTable(ctx, catalog.ToIdentifier(cfg.Namespace, "triples"))
 	require.NoError(t, err)

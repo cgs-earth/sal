@@ -2613,9 +2613,23 @@ kbd {
 .layout-notes {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
   margin: 0;
   padding-left: 18px;
+}
+
+.layout-overview .column-detail-header h4 {
+  color: var(--accent-ink);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.column-detail-hint {
+  margin: auto 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .layout-note::marker {
@@ -2629,6 +2643,172 @@ kbd {
 
 .layout-verdict.good {
   color: var(--success);
+}
+
+/* The pruning table with, once a row is clicked, the pane beside it saying
+   what a filter on that column performs like. */
+.layout-pruning-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* The column, worst-case, and null share cells take the width their
+   text needs; the grade column takes what is left. */
+.pruning-table th:not(:last-child),
+.pruning-table td:not(:last-child) {
+  width: 1%;
+}
+
+.layout-pruning-row.with-pane {
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+
+@media (max-width: 1100px) {
+  .layout-pruning-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.pruning-row {
+  cursor: pointer;
+}
+
+.pruning-row.selected td {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-panel));
+  color: var(--text);
+}
+
+.layout-grade {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.column-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+}
+
+.column-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.column-detail-header h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.column-detail-grade {
+  padding: 1px 8px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.column-detail-close {
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.column-detail-headline {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.column-detail-headline strong {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.column-detail-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+
+.column-detail-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--text-muted);
+}
+
+.column-detail-bar-fill.good {
+  background: var(--success);
+}
+
+.column-detail-bar-fill.warn {
+  background: var(--danger);
+}
+
+.column-detail-text {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.column-detail-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.column-detail-facts dt {
+  color: var(--text-muted);
+}
+
+.column-detail-facts dd {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.column-detail-label {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.column-detail-query {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* one row per column of the table, a dozen, which the card shows whole */

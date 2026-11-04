@@ -337,6 +337,123 @@ WHERE {
 LIMIT 500`,
   },
   {
+    name: 'Features near a point',
+    query: `PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+PREFIX uom: <http://www.opengis.net/def/uom/OGC/1.0/>
+
+# Every feature within 50 km of a point, nearest first. geof:distance in
+# uom:metre is the great-circle distance; replace the point with one
+# inside the extent the Stats tab draws.
+SELECT ?feature ?wkt (geof:distance(?wkt, "POINT(-89.5 40.5)"^^geo:wktLiteral, uom:metre) AS ?metres)
+WHERE {
+  ?feature geo:hasGeometry ?geometry .
+  ?geometry geo:asWKT ?wkt .
+  FILTER(geof:distance(?wkt, "POINT(-89.5 40.5)"^^geo:wktLiteral, uom:metre) < 50000)
+}
+ORDER BY ?metres
+LIMIT 50`,
+  },
+  {
+    name: 'Inside a buffer',
+    query: `PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+PREFIX uom: <http://www.opengis.net/def/uom/OGC/1.0/>
+
+# The features lying within 10 km of a line: geof:buffer in uom:metre
+# draws the band, and geof:sfWithin tests each geometry against it.
+SELECT ?feature ?wkt
+WHERE {
+  ?feature geo:hasGeometry ?geometry .
+  ?geometry geo:asWKT ?wkt .
+  FILTER(geof:sfWithin(?wkt, geof:buffer("LINESTRING(-90 40, -89 41)"^^geo:wktLiteral, 10000, uom:metre)))
+}
+LIMIT 50`,
+  },
+  {
+    name: 'Largest polygons',
+    query: `PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+PREFIX sf: <http://www.opengis.net/ont/sf#>
+
+# The polygons by area in square kilometres, largest first:
+# geof:geometryType keeps the polygons and geof:metricArea measures them
+# on the spheroid, with the perimeter in kilometres beside it.
+SELECT ?feature (geof:metricArea(?wkt) / 1000000 AS ?km2) (geof:metricPerimeter(?wkt) / 1000 AS ?perimeterKm)
+WHERE {
+  ?feature geo:hasGeometry ?geometry .
+  ?geometry geo:asWKT ?wkt .
+  FILTER(geof:geometryType(?wkt) = sf:Polygon || geof:geometryType(?wkt) = sf:MultiPolygon)
+}
+ORDER BY DESC(?km2)
+LIMIT 25`,
+  },
+  {
+    name: 'Centroids as GeoJSON',
+    query: `PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
+
+# One point per feature, its centroid, serialized as GeoJSON, with the
+# geometry's kind and bounding box corners beside it. The map button on
+# the result draws the GeoJSON column.
+SELECT ?feature (geof:geometryType(?wkt) AS ?kind) (geof:asGeoJSON(geof:centroid(?wkt)) AS ?centroid)
+       (geof:minX(?wkt) AS ?west) (geof:minY(?wkt) AS ?south) (geof:maxX(?wkt) AS ?east) (geof:maxY(?wkt) AS ?north)
+WHERE {
+  ?feature geo:hasGeometry ?geometry .
+  ?geometry geo:asWKT ?wkt .
+}
+LIMIT 100`,
+  },
+  {
+    name: 'Two steps up the hierarchy',
+    query: `${PREFIXES}
+# Every class reached from another by an even number of rdfs:subClassOf
+# steps: a repeated sequence path, (a/b)+, whose closure DuckDB computes
+# with a recursive query.
+SELECT ?class ?ancestor
+WHERE {
+  ?class (rdfs:subClassOf/rdfs:subClassOf)+ ?ancestor .
+}
+LIMIT 50`,
+  },
+  {
+    name: 'Linked either way',
+    query: `${PREFIXES}
+# Everything reachable from a subject by following rdfs:seeAlso in either
+# direction, any number of times: an alternative of a predicate and its
+# inverse, repeated. Replace the IRI with one from the All triples sample.
+SELECT ?linked
+WHERE {
+  <https://example.org/a> (rdfs:seeAlso|^rdfs:seeAlso)+ ?linked .
+}
+LIMIT 50`,
+  },
+  {
+    name: 'Everything but typing',
+    query: `${PREFIXES}
+# Every statement about a subject other than its type and label, by a
+# negated property set; !(a|^b) also excludes a predicate on the way in.
+SELECT ?subject ?predicate ?object
+WHERE {
+  ?subject rdf:type ?type .
+  ?subject !(rdf:type|rdfs:label) ?object .
+  ?subject ?predicate ?object .
+}
+LIMIT 50`,
+  },
+  {
+    name: 'Slugs and fresh identifiers',
+    query: `${PREFIXES}
+# A URL-safe slug for each label with ENCODE_FOR_URI, and a fresh
+# urn:uuid: IRI per solution with UUID(), the way a build script might
+# mint identifiers for things that have none.
+SELECT ?subject ?label (ENCODE_FOR_URI(LCASE(?label)) AS ?slug) (UUID() AS ?fresh)
+WHERE {
+  ?subject rdfs:label ?label .
+}
+LIMIT 50`,
+  },
+  {
     name: 'Ontology versions',
     query: `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX owl: <http://www.w3.org/2002/07/owl#>

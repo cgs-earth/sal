@@ -26,7 +26,7 @@ func TestDiffSpanReportsHowManyTriplesChanged(t *testing.T) {
 	cfg := &LoadConfig{BatchSize: 10, ParquetCompression: "snappy", Warehouse: t.TempDir(), Namespace: "default"}
 	arrowSchema, icebergSchema, err := GetSchemas()
 	require.NoError(t, err)
-	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
+	cat, err := hadoop.NewCatalog(context.Background(), "local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
 	tbl, err := NewIcebergTableFromCfg(ctx, icebergSchema, cat, cfg)
 	require.NoError(t, err)

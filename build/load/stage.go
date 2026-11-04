@@ -62,7 +62,7 @@ func StageGraph(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig) (_ 
 	if err != nil {
 		return nil, err
 	}
-	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
+	cat, err := hadoop.NewCatalog(ctx, "local-catalog", cfg.Warehouse, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create catalog: %w", err)
 	}
@@ -197,7 +197,7 @@ func (s *StagedGraph) Discard(ctx context.Context) error {
 		return err
 	}
 	for _, file := range s.dataFiles {
-		err = errors.Join(err, fs.Remove(file.FilePath()))
+		err = errors.Join(err, fs.Remove(ctx, file.FilePath()))
 	}
 	return err
 }

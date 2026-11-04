@@ -351,7 +351,7 @@ func stacCollectionOf(ctx context.Context, tbl *table.Table, project StacProject
 				Href:        metadataLocation,
 				Type:        icebergMediaType,
 				Roles:       []string{"data", "metadata"},
-				Description: fmt.Sprintf("Apache Iceberg v%d table metadata JSON", tbl.Metadata().Version()),
+				Description: fmt.Sprintf("Apache Iceberg v%d table metadata JSON", tbl.Metadata().FormatVersion()),
 			},
 		},
 		TableRowCount:            rows,
@@ -360,7 +360,7 @@ func stacCollectionOf(ctx context.Context, tbl *table.Table, project StacProject
 		IcebergAuthorizationType: "none",
 		IcebergTableID:           strings.Join(tbl.Identifier(), "."),
 		IcebergMetadataLocation:  metadataLocation,
-		IcebergFormatVersion:     tbl.Metadata().Version(),
+		IcebergFormatVersion:     tbl.Metadata().FormatVersion(),
 		IcebergCurrentSnapshotID: strconv.FormatInt(current.SnapshotID, 10),
 	}
 	collection.Extent.Spatial.BBox = [][]float64{bbox}
@@ -377,7 +377,7 @@ func stacCollectionOf(ctx context.Context, tbl *table.Table, project StacProject
 		collection.IcebergPartitionSpec = append(collection.IcebergPartitionSpec, stacPartitionField{
 			Name:      field.Name,
 			Transform: field.Transform.String(),
-			SourceID:  field.SourceID(),
+			SourceID:  field.FirstSourceID(),
 			FieldID:   field.FieldID,
 		})
 	}

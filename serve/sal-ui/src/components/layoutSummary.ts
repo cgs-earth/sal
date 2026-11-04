@@ -57,7 +57,7 @@ export function layoutNotes(layout: TableLayout, outliers: FileOutlier[]): Note[
 
 const plural = (count: number, noun: string) => `${formatCount(count)} ${noun}${count === 1 ? '' : 's'}`
 
-export type Verdict = { grade: 'good' | 'fair' | 'poor' | 'none'; tone: 'good' | 'warn' | 'plain'; detail: string }
+export type Verdict = { grade: 'good' | 'fair' | 'poor' | 'investigate' | 'none'; tone: 'good' | 'warn' | 'plain'; detail: string }
 
 /**
  * How well a filter on the column skips files, graded from how many files one
@@ -67,11 +67,17 @@ export type Verdict = { grade: 'good' | 'fair' | 'poor' | 'none'; tone: 'good' |
 export function pruningVerdict(column: ColumnPruning, dataFiles: number): Verdict {
   const files = (count: number) => `${count} of the ${dataFiles} data files`
   if (column.type.toUpperCase().startsWith('GEOMETRY')) {
-    return {
-      grade: 'none',
-      tone: 'plain',
-      detail: `Iceberg records a bounding box per file for a geometry, which DuckDB does not use to skip files, so a spatial filter reads every one of the ${dataFiles} data files.`,
-    }
+    const unprovable = column.maxFilesPerValue - column.filesWithBounds
+    const share = column.maxFilesPerValue / dataFiles
+    const detail =
+      `A spatial filter skips a file whose recorded bounding box misses the query (${files(column.filesWithBounds)} record one) ` +
+      `or whose null count proves it holds no geometry, and must read the ${unprovable} that record neither; ` +
+      `so it reads up to ${files(column.maxFilesPerValue)}, each whole: the box and null count are recorded per file in the Iceberg manifest, and the Parquet row groups inside carry no geometry statistics of their own.` +
+      (unprovable > 0 ? ' A table rebuilt by this version of sal records the null count in every file, which lets the empty ones be skipped.' : '')
+    // a geometry that reads most files is a matter of what the files
+    // record, not of how the table is laid out, so it asks to be looked
+    // into rather than being marked poor
+    return { grade: share <= 0.1 ? 'good' : share <= 0.5 ? 'fair' : 'investigate', tone: share <= 0.1 ? 'good' : share <= 0.5 ? 'plain' : 'warn', detail }
   }
   if (column.filesWithBounds === 0) {
     return {

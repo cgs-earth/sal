@@ -45,7 +45,7 @@ func TestGetSchemasSplitsObjectsByDatatype(t *testing.T) {
 func TestNewIcebergTableRefusesATableWithTheVocabularyColumn(t *testing.T) {
 	ctx := context.Background()
 	cfg := &LoadConfig{BatchSize: 10, ParquetCompression: "snappy", Warehouse: t.TempDir(), Namespace: "default"}
-	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
+	cat, err := hadoop.NewCatalog(context.Background(), "local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
 	require.NoError(t, cat.CreateNamespace(ctx, catalog.ToIdentifier("default"), nil))
 	older := iceberg.NewSchema(1,
@@ -75,7 +75,7 @@ func TestAppendGraphIngestsSimpleWKTGeometry(t *testing.T) {
 
 	arrowSchema, icebergSchema, err := GetSchemas()
 	require.NoError(t, err)
-	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
+	cat, err := hadoop.NewCatalog(context.Background(), "local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
 	tbl, err := NewIcebergTableFromCfg(ctx, icebergSchema, cat, cfg)
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestAppendGraphIngestsSimpleWKTGeometry(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, loaded.CurrentSnapshot())
 	require.NotNil(t, loaded.CurrentSnapshot().Summary)
-	require.Equal(t, 3, loaded.Metadata().Version())
+	require.Equal(t, 3, loaded.Metadata().FormatVersion())
 	require.Equal(t, "geometry", loaded.Schema().Field(4).Type.String())
 	require.Equal(t, "1", loaded.CurrentSnapshot().Summary.Properties["added-records"])
 }
@@ -108,7 +108,7 @@ func TestProcessGraphDiffAddsAndRemovesByTripleHash(t *testing.T) {
 
 	arrowSchema, icebergSchema, err := GetSchemas()
 	require.NoError(t, err)
-	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
+	cat, err := hadoop.NewCatalog(context.Background(), "local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
 	tbl, err := NewIcebergTableFromCfg(ctx, icebergSchema, cat, cfg)
 	require.NoError(t, err)
@@ -152,7 +152,7 @@ func TestWriteGraphToIcebergDoesNotRewriteEquivalentBlankNodeGraph(t *testing.T)
 	}
 
 	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("first"), cfg, map[string]string{"sal.hash": "first"}, ""))
-	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
+	cat, err := hadoop.NewCatalog(context.Background(), "local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
 	tbl, err := cat.LoadTable(ctx, table.Identifier{"default", "triples"})
 	require.NoError(t, err)
@@ -183,7 +183,7 @@ func TestWriteGraphToIcebergStoresBlankNodesWithNTriplesPrefix(t *testing.T) {
 	}
 
 	require.NoError(t, WriteGraphToIceberg(ctx, graphWithGeometryBlankNode("b1"), cfg, map[string]string{"sal.hash": "h"}, ""))
-	cat, err := hadoop.NewCatalog("local-catalog", cfg.Warehouse, nil)
+	cat, err := hadoop.NewCatalog(context.Background(), "local-catalog", cfg.Warehouse, nil)
 	require.NoError(t, err)
 	tbl, err := cat.LoadTable(ctx, table.Identifier{"default", "triples"})
 	require.NoError(t, err)
