@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/cgs-earth/sal/pkg"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // hiddenSteps are the spans the progress pane leaves out: a DuckDB statement
@@ -16,7 +19,7 @@ var hiddenSteps = map[string]bool{"duckdb.query": true}
 // attributes say about it, both from the span's name and attributes. A step
 // the pane does not know is shown by its span name so that a new span is
 // never invisible.
-func describe(step *Step) (label string, detail string) {
+func describe(step *Step, now time.Time) (label string, detail string) {
 	var parts []string
 	count := func(key string, singular string) {
 		if value, ok := step.attrInt(key); ok {
@@ -27,6 +30,39 @@ func describe(step *Step) (label string, detail string) {
 	case "sal.build", "sal.run", "sal.validate":
 		label = "sal " + strings.TrimPrefix(step.Name, "sal.")
 		count("sal.files", "source file")
+	case "sal.push", "sal.pull", "sal.clone":
+		label = "sal " + strings.TrimPrefix(step.Name, "sal.")
+		if repository := step.attrString("sal.oci.repository"); repository != "" {
+			parts = append(parts, repository)
+		}
+	case "oci.fetch_manifest":
+		label = "Fetch the manifest"
+		if reference := step.attrString("sal.oci.reference"); reference != "" {
+			label += " of " + reference
+		}
+	case "oci.pull_layers":
+		label = "Pull layers"
+		if destination := step.attrString("sal.oci.destination"); destination != "" {
+			label += " to " + destination
+		}
+		parts = append(parts, transferDetail(step, now)...)
+	case "oci.push_layers":
+		label = "Upload layers"
+		if repository := step.attrString("sal.oci.repository"); repository != "" {
+			label += " to " + repository
+		}
+		parts = append(parts, transferDetail(step, now)...)
+	case "oci.push_manifest":
+		label = "Push the manifest"
+		if tags, ok := step.Attrs["sal.oci.tags"]; ok && tags.Type() == attribute.STRINGSLICE {
+			parts = append(parts, "tagged "+strings.Join(tags.AsStringSlice(), ", "))
+		}
+	case "clone.repository":
+		label = "Clone " + step.attrString("sal.clone.source")
+	case "clone.checkout":
+		label = "Check out " + step.attrString("sal.clone.commit")
+	case "clone.init":
+		label = "Initialize the SAL project in " + step.attrString("sal.clone.directory")
 	case "build.validate_sources":
 		label = "Validate sources"
 		if total, ok := step.attrInt("sal.documents"); ok {
@@ -160,6 +196,44 @@ func describe(step *Step) (label string, detail string) {
 		label = step.Name
 	}
 	return label, strings.Join(parts, " · ")
+}
+
+// transferBarWidth is how many cells wide the bar of a transfer is drawn.
+const transferBarWidth = 20
+
+// transferDetail says how far a transfer is from the attributes a
+// pkg.Transfer reports on its span: the files and bytes moved out of the
+// total, a bar of the bytes, and the average speed since the step started.
+// The bytes are clamped to the total, since an upload sent again after an
+// auth challenge is counted again.
+func transferDetail(step *Step, now time.Time) []string {
+	files, ok := step.attrInt(pkg.TransferFilesAttribute)
+	if !ok {
+		return nil
+	}
+	filesDone, _ := step.attrInt(pkg.TransferFilesDoneAttribute)
+	bytes, _ := step.attrInt(pkg.TransferBytesAttribute)
+	bytesDone, _ := step.attrInt(pkg.TransferBytesDoneAttribute)
+	bytesDone = min(bytesDone, bytes)
+	parts := []string{fmt.Sprintf("%d/%d files", filesDone, files)}
+	if bytes > 0 {
+		parts = append(parts, formatBytes(bytesDone)+" of "+formatBytes(bytes), transferBar(bytesDone, bytes))
+	}
+	if elapsed := step.Elapsed(now); bytesDone > 0 && !step.Started.IsZero() && elapsed > 0 {
+		parts = append(parts, formatBytes(int64(float64(bytesDone)/elapsed.Seconds()))+"/s")
+	}
+	return parts
+}
+
+// transferBar draws done out of total as a bar with its percentage.
+func transferBar(done, total int64) string {
+	filled := 0
+	if total > 0 {
+		filled = int(done * transferBarWidth / total)
+	}
+	filled = max(0, min(transferBarWidth, filled))
+	bar := strings.Repeat("▰", filled) + strings.Repeat("▱", transferBarWidth-filled)
+	return fmt.Sprintf("%s %d%%", bar, done*100/max(total, 1))
 }
 
 // plural writes a count with its noun, "1 file" or "3 files"; a noun ending

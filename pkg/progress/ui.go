@@ -44,7 +44,7 @@ type UI struct {
 func New(command string, logFile io.Writer, logPath string) *UI {
 	return &UI{
 		command: command,
-		tracker: NewTracker(),
+		tracker: NewTracker(Plan(command)),
 		logs:    &logBuffer{},
 		logFile: logFile,
 		logPath: logPath,

@@ -86,7 +86,7 @@ build_demo_data() {
 	# task in portolan_export.ttl is left for the second build to run, see
 	# below, so this one commits only its configuration.
 	git commit -qm "Add sample RDF data"
-	/app/sal build --without-sal-modules data/
+	/app/sal build --message "Add sample RDF data" --without-sal-modules data/
 
 	# A second build on top of the first, so the demo has more than one snapshot
 	# and the table shows what an edit to an existing triple looks like: the old
@@ -106,7 +106,7 @@ build_demo_data() {
 	sed -i 's/schema:name "Example Organization 001"/schema:name "Test Change"/' data/large.ttl
 	git add -A
 	git commit -qm "Rename Example Organization 001 to Test Change"
-	/app/sal build data/
+	/app/sal build --message "Rename Example Organization 001 to Test Change" data/
 }
 
 case "$DEMO_DATA" in

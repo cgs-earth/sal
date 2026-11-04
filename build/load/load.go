@@ -49,14 +49,18 @@ type LoadConfig struct {
 	Namespace string
 }
 
-// WriteGraphToIceberg writes an RDF graph into the configured Iceberg triples table.
-func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig, customMetadata map[string]string) error {
-	return writeGraphToIceberg(ctx, graph, cfg, customMetadata, nil)
+// WriteGraphToIceberg writes an RDF graph into the configured Iceberg triples
+// table. customMetadata is set as table properties, and message, when not
+// empty, is recorded in the summary of the snapshot the write commits under
+// pkg.SnapshotMessageProperty, the way a git commit carries its message. A
+// write that changes nothing commits no snapshot, so it records no message.
+func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig, customMetadata map[string]string, message string) error {
+	return writeGraphToIceberg(ctx, graph, cfg, customMetadata, message, nil)
 }
 
 // writeGraphToIceberg is WriteGraphToIceberg for a graph that may have been
 // staged first, whose data files the commit then reuses.
-func writeGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig, customMetadata map[string]string, staged *StagedGraph) (err error) {
+func writeGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig, customMetadata map[string]string, message string, staged *StagedGraph) (err error) {
 	if graph == nil {
 		return fmt.Errorf("load graph: missing graph")
 	}
@@ -87,7 +91,7 @@ func writeGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCo
 		return err
 	}
 
-	err = processGraph(ctx, graph, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, staged)
+	err = processGraph(ctx, graph, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, snapshotProperties(message), staged)
 	if err != nil {
 		return err
 	}
@@ -110,9 +114,19 @@ func writeGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadCo
 	return pkg.SetTagOfLatestSnapshot(tbl, cat)
 }
 
+// snapshotProperties is what a build's message becomes in the summary of the
+// snapshot it commits: nothing when there is no message.
+func snapshotProperties(message string) iceberg.Properties {
+	if message == "" {
+		return nil
+	}
+	return iceberg.Properties{pkg.SnapshotMessageProperty: message}
+}
+
 // processGraph writes an RDF graph to Iceberg data files, then commits them in
-// one snapshot. The data files a staged graph already wrote are committed as
-// they are, and only the triples they do not hold are written.
+// one snapshot carrying snapshotProps in its summary. The data files a staged
+// graph already wrote are committed as they are, and only the triples they do
+// not hold are written.
 func processGraph(
 	ctx context.Context,
 	graph *rdflibgo.Graph,
@@ -120,6 +134,7 @@ func processGraph(
 	tableIdent table.Identifier,
 	arrowSchema *arrow.Schema,
 	batchSize int,
+	snapshotProps iceberg.Properties,
 	staged *StagedGraph,
 ) error {
 	tbl, err := cat.LoadTable(ctx, tableIdent)
@@ -132,7 +147,11 @@ func processGraph(
 		return err
 	}
 	if len(diff.toAdd) == 0 && len(diff.toDrop) == 0 {
-		slog.Warn("No changes from last Iceberg snapshot. No new snapshot will be created")
+		if message, ok := snapshotProps[pkg.SnapshotMessageProperty]; ok {
+			slog.Warn("No changes from last Iceberg snapshot. No new snapshot will be created, so the build message is not recorded", "message", message)
+		} else {
+			slog.Warn("No changes from last Iceberg snapshot. No new snapshot will be created")
+		}
 		return nil
 	}
 	slog.Info("Applying Iceberg triple diff", "added", len(diff.toAdd), "removed", len(diff.toDrop), "unchanged", diff.unchanged)
@@ -155,7 +174,7 @@ func processGraph(
 		}
 		dataFiles = append(slices.Clone(dataFiles), written...)
 	}
-	_, err = commitGraphDelta(ctx, tbl, table.MainBranch, dataFiles, int64(len(diff.toAdd)), diff.toDrop)
+	_, err = commitGraphDelta(ctx, tbl, table.MainBranch, dataFiles, int64(len(diff.toAdd)), diff.toDrop, snapshotProps)
 	return err
 }
 
@@ -202,7 +221,7 @@ func appendGraph(
 	if err != nil {
 		return err
 	}
-	_, err = commitGraphDelta(ctx, tbl, table.MainBranch, dataFiles, rows, nil)
+	_, err = commitGraphDelta(ctx, tbl, table.MainBranch, dataFiles, rows, nil, nil)
 	return err
 }
 
@@ -355,8 +374,9 @@ func readExistingTripleHashes(ctx context.Context, tbl *table.Table) (map[string
 }
 
 // commitGraphDelta commits appended data files and equality deletes in one
-// Iceberg snapshot on a branch of the table, and returns the table as committed.
-func commitGraphDelta(ctx context.Context, tbl *table.Table, branch string, dataFiles []iceberg.DataFile, rows int64, toDrop []existingTriple) (_ *table.Table, err error) {
+// Iceberg snapshot on a branch of the table, with snapshotProps in the
+// snapshot's summary, and returns the table as committed.
+func commitGraphDelta(ctx context.Context, tbl *table.Table, branch string, dataFiles []iceberg.DataFile, rows int64, toDrop []existingTriple, snapshotProps iceberg.Properties) (_ *table.Table, err error) {
 	if len(dataFiles) == 0 && len(toDrop) == 0 {
 		return nil, fmt.Errorf("no triples found")
 	}
@@ -372,7 +392,7 @@ func commitGraphDelta(ctx context.Context, tbl *table.Table, branch string, data
 		}
 	}
 
-	rowDelta := txn.NewRowDelta(nil)
+	rowDelta := txn.NewRowDelta(snapshotProps)
 	rowDelta.AddRows(dataFiles...)
 	rowDelta.AddDeletes(deleteFiles...)
 	if err := rowDelta.Commit(ctx); err != nil {

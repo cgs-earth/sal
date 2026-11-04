@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/pkg/telemetry"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
@@ -23,7 +24,7 @@ import (
 // telemetry.Start for the rest of the test.
 func installTracker(t *testing.T) *Tracker {
 	t.Helper()
-	tracker := NewTracker()
+	tracker := NewTracker(buildPlan)
 	previous := otel.GetTracerProvider()
 	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(tracker)))
 	t.Cleanup(func() { otel.SetTracerProvider(previous) })
@@ -99,6 +100,55 @@ func TestRenderShowsTheRunningStepWithTheSpinnerAndTheDoneOnesWithTheirTime(t *t
 	require.Contains(t, text, "· Import ontologies")
 	require.Contains(t, text, "upcoming")
 	require.Contains(t, text, "· Write the Iceberg table")
+}
+
+// A transfer reports how far it is as attributes of its span while the span
+// is still running, and the pane reads them off the live span rather than
+// waiting for the span to end.
+func TestRenderFollowsATransferWhileItRuns(t *testing.T) {
+	tracker := NewTracker(Plan("pull"))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(tracker)))
+	t.Cleanup(func() { otel.SetTracerProvider(previous) })
+	ctx, _ := telemetry.Start(context.Background(), "sal.pull", attribute.String("sal.oci.repository", "ghcr.io/cgs-earth/sal"))
+	_, manifest := telemetry.Start(ctx, "oci.fetch_manifest", attribute.String("sal.oci.reference", "latest"))
+	telemetry.End(manifest, nil)
+	_, layers := telemetry.Start(ctx, "oci.pull_layers", attribute.String("sal.oci.destination", "/tmp/project/.sal/data"))
+	transfer := pkg.NewTransfer(layers, "Pulled", 4, 4*1024*1024)
+	transfer.Add(2 * 1024 * 1024)
+	transfer.FileDone()
+	transfer.FileDone()
+
+	text := plain(tracker.Render(160, time.Now(), "⠋"))
+
+	require.Contains(t, text, "✓ Fetch the manifest")
+	require.Contains(t, text, "⠋ Pull the data product")
+	require.Contains(t, text, "2/4 files · 2.0 MiB of 4.0 MiB · ▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱ 50% · ")
+	require.Regexp(t, `50% · [0-9.]+ [KMGT]?i?B/s`, text)
+
+	// a file counted after the bar was drawn moves it, without the span ending
+	transfer.Add(2 * 1024 * 1024)
+	transfer.FileDone()
+	transfer.FileDone()
+	text = plain(tracker.Render(160, time.Now(), "⠋"))
+	require.Contains(t, text, "4/4 files · 4.0 MiB of 4.0 MiB · ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰ 100%")
+}
+
+// A body the registry client sends again after an auth challenge is counted
+// again, so the bar is clamped at the total rather than running past it.
+func TestTransferBarIsClampedToTheTotal(t *testing.T) {
+	step := &Step{Name: "oci.push_layers", Attrs: attributeMap([]attribute.KeyValue{
+		attribute.Int64(pkg.TransferFilesAttribute, 2),
+		attribute.Int64(pkg.TransferBytesAttribute, 1000),
+		attribute.Int64(pkg.TransferFilesDoneAttribute, 2),
+		attribute.Int64(pkg.TransferBytesDoneAttribute, 1500),
+	})}
+
+	now := time.Now()
+	step.Started = now.Add(-2 * time.Second)
+
+	require.Equal(t, []string{"2/2 files", "1000 B of 1000 B", "▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰ 100%", "500 B/s"}, transferDetail(step, now))
+	require.Equal(t, "▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 0%", transferBar(0, 0))
 }
 
 func TestRenderFoldsCompletedStepsBeyondTheMostRecent(t *testing.T) {
@@ -292,11 +342,28 @@ func TestCtrlCInterruptsTheWork(t *testing.T) {
 }
 
 func TestDoneQuitsThePanes(t *testing.T) {
-	m := newModel(New("build", nil, ""))
+	ui := New("build", nil, "")
+	ui.started = time.Now().Add(-time.Second)
+	m := newModel(ui)
 	updated, cmd := m.Update(doneMsg{err: errors.New("validation failed")})
 	require.True(t, updated.(model).finished)
 	require.NotNil(t, cmd)
 	require.IsType(t, tea.QuitMsg{}, cmd())
+}
+
+// Work that fails the instant it starts does not close the panes before the
+// terminal has answered the queries Bubble Tea sent when they opened; the
+// quit is delayed to the minimum time the panes stay up.
+func TestDoneKeepsThePanesUpForTheMinimumTime(t *testing.T) {
+	ui := New("build", nil, "")
+	m := newModel(ui)
+	before := time.Now()
+	updated, cmd := m.Update(doneMsg{err: errors.New("--message is required")})
+	require.True(t, updated.(model).finished)
+	require.NotNil(t, cmd)
+	msg := cmd()
+	require.IsType(t, tea.QuitMsg{}, msg)
+	require.GreaterOrEqual(t, time.Since(before), minimumShown-tickInterval)
 }
 
 func TestSummaryReportsAFailedBuildAndWhereTheLogIs(t *testing.T) {

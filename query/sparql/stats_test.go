@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -96,6 +97,17 @@ func TestInfoSQLBuildsSnapshotsQueryWithTags(t *testing.T) {
 	require.Contains(t, query, "WHERE json_extract_string(ref.value, '$.type') = 'tag'")
 	require.Contains(t, query, "string_agg(ref.key, ', ' ORDER BY ref.key) AS tags")
 	require.Contains(t, query, "LEFT JOIN tags ON tags.snapshot_id = snapshots.snapshot_id")
+}
+
+func TestInfoSQLReadsTheBuildMessageOfEverySnapshot(t *testing.T) {
+	query, err := infoSQL("snapshots", "/tmp/table", "/tmp/table/metadata/v3.metadata.json")
+
+	require.NoError(t, err)
+	require.Contains(t, query, "json_each(json_extract(metadata_json, '$.snapshots')) AS snapshot")
+	require.Contains(t, query, `json_extract_string(snapshot.value, '$.summary."sal.message"') AS message`)
+	require.Contains(t, query, "LEFT JOIN messages ON messages.snapshot_id = snapshots.snapshot_id")
+	// the message sits between the snapshot's own columns and its tags
+	require.Less(t, strings.Index(query, "messages.message,"), strings.Index(query, "tags.tags"))
 }
 
 func TestInfoSQLRejectsTagsInfo(t *testing.T) {

@@ -81,11 +81,38 @@ func servePinsTestVocabulary(t *testing.T) *int {
 	return &fetches
 }
 
+// A build commits a snapshot, which carries a message the way a git commit
+// does, so a build without one is refused before anything is read or fetched,
+// and told that `sal validate` is the way to check the project without one.
+func TestBuildRequiresAMessage(t *testing.T) {
+	newPinsTestProject(t)
+	fetches := servePinsTestVocabulary(t)
+
+	_, err := (&BuildCmd{Format: GraphExportFormatNQuads}).Run()
+
+	require.ErrorIs(t, err, ErrMessageRequired)
+	require.Contains(t, err.Error(), "sal validate")
+	require.Equal(t, 0, *fetches)
+	_, err = (&BuildCmd{Message: "   ", Format: GraphExportFormatNQuads}).Run()
+	require.ErrorIs(t, err, ErrMessageRequired)
+}
+
+// `sal validate` commits nothing, so it has no snapshot to describe and
+// needs no message.
+func TestValidateNeedsNoMessage(t *testing.T) {
+	newPinsTestProject(t)
+	servePinsTestVocabulary(t)
+
+	_, err := (&ValidateCmd{}).Run()
+
+	require.NoError(t, err)
+}
+
 func TestBuildPinsEveryVocabularyItResolved(t *testing.T) {
 	project := newPinsTestProject(t)
 	fetches := servePinsTestVocabulary(t)
 
-	graph, err := (&BuildCmd{Format: GraphExportFormatNQuads}).Run()
+	graph, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatNQuads}).Run()
 	require.NoError(t, err)
 
 	require.Equal(t, 1, *fetches)
@@ -123,14 +150,14 @@ func TestBuildPinsEveryVocabularyItResolved(t *testing.T) {
 func TestASecondBuildResolvesFromThePinsAndRewritesNothing(t *testing.T) {
 	project := newPinsTestProject(t)
 	fetches := servePinsTestVocabulary(t)
-	_, err := (&BuildCmd{Format: GraphExportFormatNQuads}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatNQuads}).Run()
 	require.NoError(t, err)
 
 	lockfile := filepath.Join(project, ".sal", "config.jsonld")
 	before, err := os.Stat(lockfile)
 	require.NoError(t, err)
 
-	_, err = (&BuildCmd{Format: GraphExportFormatNQuads, Force: true}).Run()
+	_, err = (&BuildCmd{Message: "test build", Format: GraphExportFormatNQuads, Force: true}).Run()
 	require.NoError(t, err)
 
 	require.Equal(t, 1, *fetches)
@@ -142,10 +169,10 @@ func TestASecondBuildResolvesFromThePinsAndRewritesNothing(t *testing.T) {
 func TestNoCacheResolvesThePinnedVocabularyAgain(t *testing.T) {
 	newPinsTestProject(t)
 	fetches := servePinsTestVocabulary(t)
-	_, err := (&BuildCmd{Format: GraphExportFormatNQuads}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatNQuads}).Run()
 	require.NoError(t, err)
 
-	_, err = (&BuildCmd{Format: GraphExportFormatNQuads, Force: true, NoCache: true}).Run()
+	_, err = (&BuildCmd{Message: "test build", Format: GraphExportFormatNQuads, Force: true, NoCache: true}).Run()
 	require.NoError(t, err)
 
 	require.Equal(t, 2, *fetches)
@@ -160,7 +187,7 @@ func TestBuildFailsWhenADeclaredPrefixCannotBeResolved(t *testing.T) {
 @prefix unused: <https://vocab.test/unused#> .
 `), 0644))
 
-	_, err := (&BuildCmd{Format: GraphExportFormatNQuads, Force: true}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatNQuads, Force: true}).Run()
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "https://vocab.test/unused#")
@@ -200,7 +227,7 @@ func TestBuildWritesThePinButNotTheStatementsOfAVocabularyItDoesNotImport(t *tes
 	project := newPinsTestProject(t)
 	servePinsTestVocabulary(t)
 
-	graph, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	graph, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg}).Run()
 	require.NoError(t, err)
 
 	rows := tableStatements(t, project)
@@ -225,6 +252,6 @@ func TestValidateDoesNotRequireACleanWorktree(t *testing.T) {
 	_, err := (&ValidateCmd{}).Run()
 	require.NoError(t, err)
 
-	_, err = (&BuildCmd{Format: GraphExportFormatNQuads}).Run()
+	_, err = (&BuildCmd{Message: "test build", Format: GraphExportFormatNQuads}).Run()
 	require.ErrorIs(t, err, ErrUncommittedChanges)
 }

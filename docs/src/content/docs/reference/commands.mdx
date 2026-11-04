@@ -38,7 +38,7 @@ The node is the project itself, resolved against the base IRI the git remote giv
 - `~/.sal/cache` for user-level cache data.
 - `~/.sal/config.jsonld` for user-level SAL configuration.
 - `.gitignore` entries for `.sal/data` and `.sal/constructed`.
-- A `Makefile` documenting the commands a project runs: `make validate`, `make build`, `make query`, `make serve`, and so on, each one `sal` command, plus `make apply`, `make destroy`, and `make upload` for the deployment [`sal terraform`](#sal-terraform) writes. It is documentation that happens to run rather than a build system, and an existing `Makefile` is left alone.
+- A `Makefile` documenting the commands a project runs: `make validate`, `make build MESSAGE="..."`, `make query`, `make serve`, and so on, each one `sal` command, plus `make apply`, `make destroy`, and `make upload` for the deployment [`sal terraform`](#sal-terraform) writes. It is documentation that happens to run rather than a build system, and an existing `Makefile` is left alone.
 
 ![sal init running in a repository that already has a remote](/sal/demos/sal-init.gif)
 
@@ -328,14 +328,20 @@ Run with a single directory argument, `sal validate path/to/module`, the directo
 Validates RDF source files and writes the merged graph into the local data product.
 
 ```sh
-sal build data/
+sal build --message "Add the 2024 stream gauges" data/
 ```
+
+Every build takes a `--message` (`-m` for short) saying what it changes, the way every Git commit takes one.
+It is required: a build without one is refused with an error that says so and points at [`sal validate`](#sal-validate), which checks the project without committing anything.
+The message is recorded in the summary of the Iceberg snapshot the build commits, under `sal.message`, so it is read back wherever the snapshots are listed: `sal query --info snapshots`, the **Snapshots** table of the UI's Stats tab, and the description of the artifact [`sal push`](#sal-push) publishes, which carries the latest one.
+A build that finds no new triples commits no snapshot and so records no message; it warns that it dropped it.
 
 By default, `sal build` requires a clean Git working tree.
 Use `--force` only for test or debugging builds.
 
 Important flags:
 
+- `--message`, `-m`: what this build changes; required.
 - `--prefix-maps`: apply prefix mappings before validation.
 - `--format`: choose `iceberg` or `nq`; defaults to `iceberg`.
 - `--force`: build even when the Git working tree has uncommitted changes.
@@ -426,7 +432,7 @@ The validation, every module built or run, and the Iceberg diff and write are re
 
 ### Progress and log panes
 
-In a terminal, `sal build` and `sal run` work under two panes, one on screen at a time:
+In a terminal, `sal build` and `sal run` work under two panes, one on screen at a time, and so do [`sal push`](#sal-push), [`sal pull`](#sal-pull), and [`sal clone`](#sal-clone), with the phases of a transfer in place of a build's:
 
 - **Progress** lists the phases of the build in the order they happen, validating the sources, importing ontologies, running SAL module tasks, running `CONSTRUCT` queries, and writing the Iceberg table, each marked upcoming, running, done, failed, or skipped, with how long it has taken so far.
   Under a running phase are the steps inside it as they happen, each with its own time: every document validated and vocabulary loaded, every module cloned, built, or reused from a cached image, every task run with how much it has written and how many files it has copied, every query, and the diff, Parquet write, and commit of the table.
@@ -449,8 +455,10 @@ Re-runs every SAL module task the project's RDF declares on top of the last buil
 snapshot of the data product:
 
 ```sh
-sal run
+sal run --message "Rerun the gauge harvester after fixing its pagination"
 ```
+
+It takes the same `--message` a build does, and is refused without one, since the snapshot it commits is a build's.
 
 `sal run` is a debugging command, and it says so in a warning every time it starts.
 [`sal build`](#sal-build) runs the same tasks as part of every build, so a data product never needs `sal run` to be complete;
@@ -519,7 +527,7 @@ Info modes:
 
 - `head`: show the first rows from `triples`.
 - `properties`: show Iceberg table properties.
-- `snapshots`: show Iceberg snapshots and SAL Git tags.
+- `snapshots`: show Iceberg snapshots, the `--message` each build was given, and SAL Git tags.
 - `column-stats`: show Iceberg column statistics.
 
 To compare snapshots:
@@ -874,7 +882,14 @@ sal push ghcr.io/my-org/my-data-product --username "$OCI_USERNAME" --password "$
 ```
 
 SAL uploads generated data files as OCI layers and annotates the artifact with the source Git remote and current commit hash.
+The artifact's `org.opencontainers.image.description` names the remote and commit and ends with the `--message` of the build that committed the table's latest snapshot, so a registry's listing says what the latest build changed.
+The project's own description, from the project node of `.sal/config.jsonld`, is annotated as `sal.description`, which is what [`sal pull`](#sal-pull) and [`sal clone`](#sal-clone) initialize the project with.
 See [Publishing Data](/sal/guides/publishing-data/#push-to-an-oci-registry).
+
+In a terminal, the push works under the [progress and log panes](#progress-and-log-panes): checking which snapshots the remote already has, uploading the data product, and pushing the manifest.
+The upload phase counts the files and bytes sent out of the total, with a bar and the average speed so far, as the registry reads them.
+`--no-tui` writes the log to stderr instead, where the upload reports every five files.
+`--parallel` is how many files are uploaded at once, 16 by default; most files of a data product are small, so the latency of each request to the registry counts for more than bandwidth, and more in flight is faster.
 
 ## `sal clone`
 
@@ -884,7 +899,9 @@ Restores a published OCI artifact and its source repository:
 sal clone ghcr.io/my-org/my-data-product:latest
 ```
 
-SAL reads the artifact metadata, clones the recorded source repository, checks out the recorded commit, runs `sal init`, and restores the artifact layers into `.sal/data`.
+SAL reads the artifact metadata, clones the recorded source repository, checks out the recorded commit, runs `sal init` with the description the artifact carries, and restores the artifact layers into `.sal/data`.
+In a terminal, those are the phases of the [progress and log panes](#progress-and-log-panes) it works under, and the last one counts the files and bytes pulled out of the total, with a bar and the average speed so far, as they arrive; `--no-tui` writes the log to stderr instead.
+`--parallel` is how many files are pulled at once, 16 by default, as for [`sal pull`](#sal-pull).
 
 Use `--destination` to choose the local clone path.
 
@@ -892,6 +909,21 @@ Use `--destination` to choose the local clone path.
 
 Pulls data from an OCI artifact.
 It uses the same artifact retrieval command shape as `sal clone`.
+
+```sh
+sal pull ghcr.io/my-org/my-data-product:latest
+```
+
+Only an artifact holding snapshots the local data product lacks is pulled; one that holds the same snapshots, or fewer, is skipped with a message saying so.
+
+`sal pull` does not need `sal init` first.
+Run in an empty directory, it initializes the directory as a SAL project for the artifact from what the manifest records: a git repository whose `origin` is the source repository the artifact names (`org.opencontainers.image.source`), so the data product sits under the same project name and base it was built with, initialized with the description the artifact carries (`sal.description`, the project's own description as [`sal init`](#sal-init) recorded it; an artifact pushed before that was recorded gets one naming the registry repository).
+No source is checked out, so the directory holds the data product and nothing to build; [`sal clone`](#sal-clone) is what restores the sources with it.
+A directory that is neither a SAL project nor empty is refused.
+In a terminal, the pull works under the [progress and log panes](#progress-and-log-panes): fetching the manifest, initializing the project when there is none, then pulling the data product, which counts the files and bytes pulled out of the total, with a bar and the average speed so far, as they arrive.
+`--no-tui` writes the log to stderr instead, where the pull reports every five files with the speed.
+A file whose download fails partway, as when the registry or the CDN it redirects to drops the connection on a long pull, is fetched again from the start, up to four attempts with a wait that doubles from one second, and only the attempt that succeeds counts toward the bytes shown; the pull fails once a file has failed four times.
+`--parallel` is how many files are pulled at once, 16 by default; most files of a data product are small, so the latency of each request to the registry counts for more than bandwidth, and raising it is what speeds a pull up.
 
 ## `sal upload`
 

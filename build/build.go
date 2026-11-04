@@ -83,6 +83,7 @@ func (cfg *ValidateCmd) moduleDir() string {
 
 type BuildCmd struct {
 	Paths                           []string          `arg:"positional" help:"RDF files to validate"`
+	Message                         string            `arg:"--message,-m" help:"required: what this build changes, recorded in the Iceberg snapshot the way a git commit message is"`
 	PrefixMaps                      []string          `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
 	Format                          GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
 	Force                           bool              `arg:"--force" help:"force build even if there are uncommitted changes in the git repository"`
@@ -122,6 +123,18 @@ var ErrConflictingPrefixes = errors.New("build: a vocabulary is declared under n
 
 var ErrUncommittedChanges = fmt.Errorf("git repository has uncommitted changes; please commit and finalize changes before creating a new build snapshot")
 
+// ErrMessageRequired is returned by a build or run asked to commit a
+// snapshot without a --message. Every snapshot carries one, the way every
+// git commit carries a message, so a snapshot is never without a reason; a
+// user who only wants the sources checked is pointed at `sal validate`.
+var ErrMessageRequired = errors.New("--message is required: describe what this build changes, the way a git commit message does, for example `sal build --message \"Add foo\"`. To check the project without committing a snapshot, run `sal validate` instead")
+
+// MissingMessage reports whether the build was given no --message, which
+// Run refuses before doing anything and main therefore opens no panes for.
+func (cfg *BuildCmd) MissingMessage() bool {
+	return strings.TrimSpace(cfg.Message) == ""
+}
+
 // confirmPrefixesWithoutTerminator warns about every declared prefix whose
 // namespace ends in neither / nor #, and asks before including each one unless
 // the user passed --allow-prefixes-without-slash-or-hash. It runs once every file is parsed and before any
@@ -159,10 +172,15 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 	ctx, span := telemetry.Start(context.Background(), traceName)
 	defer func() { telemetry.End(span, err) }()
 
-	// only a build that commits a snapshot needs the worktree to be clean, so
-	// that the snapshot maps to a commit; `sal validate` writes nothing, not
-	// even a pin, so it validates the sources as they stand
+	// only a build that commits a snapshot needs a message and a clean
+	// worktree, so that the snapshot says why it was made and maps to a
+	// commit; `sal validate` writes nothing, not even a pin, so it validates
+	// the sources as they stand. The message is checked first, since it is
+	// the cheapest thing to be missing.
 	if !cfg.skipCommit {
+		if cfg.MissingMessage() {
+			return nil, ErrMessageRequired
+		}
 		hasChanges, err := uncommittedChangesInGit()
 		if err != nil {
 			return nil, err
@@ -441,7 +459,7 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 
 	// every module downloaded so far, both the ones validation dereferenced for
 	// their vocabulary and the ones materialization ran, is recorded in the table
-	if err := ExportGraph(ctx, finalGraph, cfg.Format, hash, resolver.Downloaded(), staged); err != nil {
+	if err := ExportGraph(ctx, finalGraph, cfg.Format, hash, resolver.Downloaded(), staged, strings.TrimSpace(cfg.Message)); err != nil {
 		return nil, err
 	}
 

@@ -10,6 +10,12 @@ import (
 
 const SalIcebergSnapshotsAnnotation = "sal.iceberg-snapshots"
 
+// SalDescriptionAnnotation is the manifest annotation carrying the project's
+// own description, the dcterms:description of the project node in
+// .sal/config.jsonld, so that `sal pull` into an empty directory and `sal
+// clone` can initialize the project with the description it was given.
+const SalDescriptionAnnotation = "sal.description"
+
 func GetSnapshotsFromManifest(manifest ocispec.Manifest) ([]string, error) {
 	for key, value := range manifest.Annotations {
 		if key == SalIcebergSnapshotsAnnotation {

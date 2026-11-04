@@ -72,9 +72,32 @@ func TestRunRefusesADirtyWorktree(t *testing.T) {
 	uncommittedChangesInGit = func() (bool, error) { return true, nil }
 	t.Cleanup(func() { uncommittedChangesInGit = original })
 
-	_, err := (&RunCmd{}).Run()
+	_, err := (&RunCmd{Message: "test run"}).Run()
 
 	require.ErrorIs(t, err, ErrRunUncommittedChanges)
+}
+
+// A run commits a snapshot the way a build does, so it needs the message a
+// build needs; the checks that the table matches the worktree come first.
+func TestRunRequiresAMessage(t *testing.T) {
+	originalChanges := uncommittedChangesInGit
+	uncommittedChangesInGit = func() (bool, error) { return false, nil }
+	snapshot := &table.Snapshot{SnapshotID: 7}
+	originalHead := salTableHead
+	salTableHead = func() (tableHead, error) {
+		return &fakeTableHead{current: snapshot, tags: map[string]*table.Snapshot{"abc123": snapshot}}, nil
+	}
+	originalCommit := gitCommitHash
+	gitCommitHash = func() (string, error) { return "abc123", nil }
+	t.Cleanup(func() {
+		uncommittedChangesInGit = originalChanges
+		salTableHead = originalHead
+		gitCommitHash = originalCommit
+	})
+
+	_, err := (&RunCmd{}).Run()
+
+	require.ErrorIs(t, err, ErrMessageRequired)
 }
 
 func TestRunTellsTheUserToBuildWhenThereIsNoTable(t *testing.T) {
@@ -89,7 +112,7 @@ func TestRunTellsTheUserToBuildWhenThereIsNoTable(t *testing.T) {
 		salTableHead = originalHead
 	})
 
-	_, err := (&RunCmd{}).Run()
+	_, err := (&RunCmd{Message: "test run"}).Run()
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "sal build")
@@ -111,7 +134,7 @@ func TestRunRefusesWhenTheTableWasBuiltFromAnotherCommit(t *testing.T) {
 		gitCommitHash = originalCommit
 	})
 
-	_, err := (&RunCmd{}).Run()
+	_, err := (&RunCmd{Message: "test run"}).Run()
 
 	require.ErrorIs(t, err, ErrStaleDataProduct)
 }
@@ -193,11 +216,11 @@ func installFakeModuleRunner(t *testing.T, runner *testContainerRunner) {
 func buildAndCommitPins(t *testing.T, git func(args ...string)) {
 	t.Helper()
 
-	_, err := (&BuildCmd{Format: GraphExportFormatIceberg, WithoutSalModules: true}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg, WithoutSalModules: true}).Run()
 	require.NoError(t, err)
 	git("add", "-A")
 	git("commit", "-m", "pin vocabularies")
-	_, err = (&BuildCmd{Format: GraphExportFormatIceberg, WithoutSalModules: true}).Run()
+	_, err = (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg, WithoutSalModules: true}).Run()
 	require.NoError(t, err)
 }
 
@@ -213,7 +236,7 @@ func TestBuildRunsModuleTasksByDefault(t *testing.T) {
 	}
 	installFakeModuleRunner(t, runner)
 
-	graph, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	graph, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg}).Run()
 
 	require.NoError(t, err)
 	require.Equal(t, 1, runner.runs)
@@ -254,7 +277,7 @@ func TestBuildPinsTheVocabulariesModuleOutputUses(t *testing.T) {
 	}
 	installFakeModuleRunner(t, runner)
 
-	graph, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	graph, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg}).Run()
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(".sal", "config.jsonld"))
@@ -287,7 +310,7 @@ func TestBuildWithoutSalModulesCommitsOnlyTheTaskConfiguration(t *testing.T) {
 	}
 	installFakeModuleRunner(t, runner)
 
-	graph, err := (&BuildCmd{Format: GraphExportFormatIceberg, WithoutSalModules: true}).Run()
+	graph, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg, WithoutSalModules: true}).Run()
 
 	require.NoError(t, err)
 	require.Equal(t, 0, runner.runs)
@@ -303,7 +326,7 @@ func TestBuildWithoutTasksDoesNotFailForHavingNothingToRun(t *testing.T) {
 	servePinsTestVocabulary(t)
 	installFakeModuleRunner(t, &testContainerRunner{})
 
-	_, err := (&BuildCmd{Format: GraphExportFormatIceberg}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg}).Run()
 
 	require.NoError(t, err)
 }
@@ -324,7 +347,7 @@ func TestRunCommitsModuleOutputOnTopOfABuild(t *testing.T) {
 	buildAndCommitPins(t, git)
 	require.Equal(t, 0, runner.runs)
 
-	graph, err := (&RunCmd{}).Run()
+	graph, err := (&RunCmd{Message: "test run"}).Run()
 
 	require.NoError(t, err)
 	require.Equal(t, 1, runner.runs)
@@ -343,13 +366,13 @@ func TestRunForceRunsWithADirtyWorktree(t *testing.T) {
 	}
 	installFakeModuleRunner(t, runner)
 
-	_, err := (&BuildCmd{Format: GraphExportFormatIceberg, WithoutSalModules: true}).Run()
+	_, err := (&BuildCmd{Message: "test build", Format: GraphExportFormatIceberg, WithoutSalModules: true}).Run()
 	require.NoError(t, err)
 
-	_, err = (&RunCmd{}).Run()
+	_, err = (&RunCmd{Message: "test run"}).Run()
 	require.ErrorIs(t, err, ErrRunUncommittedChanges)
 
-	graph, err := (&RunCmd{Force: true}).Run()
+	graph, err := (&RunCmd{Message: "test run", Force: true}).Run()
 
 	require.NoError(t, err)
 	require.Equal(t, 1, runner.runs)
@@ -363,7 +386,7 @@ func TestRunFailsWhenTheProjectDeclaresNoTasks(t *testing.T) {
 
 	buildAndCommitPins(t, git)
 
-	_, err := (&RunCmd{}).Run()
+	_, err := (&RunCmd{Message: "test run"}).Run()
 
 	require.ErrorIs(t, err, ErrNoModuleTasks)
 }

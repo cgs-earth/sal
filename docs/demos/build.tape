@@ -8,13 +8,13 @@ Source docs/demos/common.tape
 Set Height 680
 Source docs/demos/prompt.tape
 
-Type "sal build data/"
+Type "sal build --message 'Add the station data' data/"
 Sleep 300ms
 Enter
 Wait
 Sleep 2s
 
-Type "sal build data/"
+Type "sal build --message 'Rebuild with nothing changed' data/"
 Sleep 300ms
 Enter
 Wait

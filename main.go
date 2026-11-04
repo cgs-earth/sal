@@ -135,7 +135,7 @@ func main() {
 		closeLog()
 		os.Exit(code)
 	}
-	// runUnderPanes runs a build or run under the panes when they are up,
+	// runUnderPanes runs a command under the panes when they are up,
 	// printing the summary once they close so the terminal keeps a record,
 	// and directly otherwise
 	runUnderPanes := func(work func() error) error {
@@ -199,9 +199,9 @@ func main() {
 	case cli.SalModule != nil:
 		err = cli.SalModule.Run()
 	case cli.Push != nil:
-		err = cli.Push.Run()
+		err = runUnderPanes(cli.Push.Run)
 	case cli.Clone != nil:
-		err = cli.Clone.RunClone()
+		err = runUnderPanes(cli.Clone.RunClone)
 	case cli.Rewrite != nil:
 		err = cli.Rewrite.Run()
 	case cli.Edit != nil:
@@ -213,7 +213,7 @@ func main() {
 	case cli.Test != nil:
 		err = cli.Test.Run()
 	case cli.Pull != nil:
-		err = cli.Pull.RunPull()
+		err = runUnderPanes(cli.Pull.RunPull)
 	case cli.DuckDBExtensions != nil:
 		err = cli.DuckDBExtensions.Run()
 	case cli.Validate != nil:
@@ -231,14 +231,22 @@ func main() {
 }
 
 // progressCommand names the subcommand that works under the progress and
-// log panes, "build" or "run", and whether it was asked not to with --no-tui.
+// log panes, the ones progress.Plan knows, and whether it was asked not to
+// with --no-tui. A build or run without a --message is refused before it
+// does anything, so the panes are not opened only to close again on it.
 // Every other subcommand logs to stderr.
 func progressCommand(cli args) (command string, noTUI bool) {
 	switch {
 	case cli.Build != nil:
-		return "build", cli.Build.NoTUI
+		return "build", cli.Build.NoTUI || cli.Build.MissingMessage()
 	case cli.RunTasks != nil:
-		return "run", cli.RunTasks.NoTUI
+		return "run", cli.RunTasks.NoTUI || cli.RunTasks.MissingMessage()
+	case cli.Push != nil:
+		return "push", cli.Push.NoTUI
+	case cli.Pull != nil:
+		return "pull", cli.Pull.NoTUI
+	case cli.Clone != nil:
+		return "clone", cli.Clone.NoTUI
 	}
 	return "", false
 }

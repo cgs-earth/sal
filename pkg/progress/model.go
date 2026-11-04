@@ -22,6 +22,13 @@ const (
 // the last tick is shown.
 const tickInterval = 100 * time.Millisecond
 
+// minimumShown is the least time the panes stay open once up. Bubble Tea
+// queries the terminal for its capabilities when the panes open, and the
+// terminal answers on stdin; a command that fails the instant it starts
+// would otherwise quit before the answers arrive and leave the shell to
+// print them as stray escape sequences after the prompt.
+const minimumShown = 250 * time.Millisecond
+
 type tickMsg time.Time
 
 // doneMsg is sent when the work the panes were opened for has returned.
@@ -81,6 +88,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.finished = true
 		m.now = time.Now()
 		m.pullLogs()
+		// work that ended before the panes have been up for minimumShown
+		// keeps them up for the rest of it, reading the terminal's answers
+		// to the startup queries meanwhile
+		if remaining := minimumShown - m.now.Sub(m.ui.started); remaining > 0 {
+			return m, tea.Tick(remaining, func(time.Time) tea.Msg { return tea.QuitMsg{} })
+		}
 		return m, tea.Quit
 	case promptMsg:
 		pending := msg

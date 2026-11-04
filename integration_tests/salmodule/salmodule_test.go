@@ -139,11 +139,11 @@ func (s *SalModuleSuite) newSalProject(source string) string {
 // .sal/config.jsonld, committing that moves HEAD, and the second build tags the
 // table with the commit the worktree now sits at.
 func (s *SalModuleSuite) buildForRun(project string) {
-	_, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, WithoutSalModules: true}).Run()
+	_, err := (&build.BuildCmd{Message: "test build", Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, WithoutSalModules: true}).Run()
 	s.Require().NoError(err)
 	s.git(project, "add", "-A")
 	s.git(project, "-c", "user.email=sal@example.test", "-c", "user.name=SAL", "commit", "-m", "pin vocabularies")
-	_, err = (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, WithoutSalModules: true}).Run()
+	_, err = (&build.BuildCmd{Message: "test build", Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, WithoutSalModules: true}).Run()
 	s.Require().NoError(err)
 }
 
@@ -206,7 +206,7 @@ func (s *SalModuleSuite) TestModuleImplementsSalModuleCli() {
 func (s *SalModuleSuite) TestBuildMaterializesModuleTriples() {
 	s.newSalProject(projectReferencing())
 
-	graph, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, Force: true}).Run()
+	graph, err := (&build.BuildCmd{Message: "test build", Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, Force: true}).Run()
 
 	s.Require().NoError(err)
 	s.Require().NotNil(graph)
@@ -227,7 +227,7 @@ func (s *SalModuleSuite) TestRunMaterializesModuleTriplesOnTopOfABuild() {
 	// the builds committed the configuration but ran nothing
 	s.Empty(s.builtObjectsForPredicate("https://schema.org/name"))
 
-	graph, err := (&build.RunCmd{Paths: []string{"module.ttl"}}).Run()
+	graph, err := (&build.RunCmd{Message: "test run", Paths: []string{"module.ttl"}}).Run()
 
 	s.Require().NoError(err)
 	s.Require().NotNil(graph)
@@ -245,7 +245,7 @@ func (s *SalModuleSuite) TestRunConfiguresTheTaskWithItsRDFProperties() {
 	project := s.newSalProject(projectReferencing(`fixture:region "west"`))
 	s.buildForRun(project)
 
-	graph, err := (&build.RunCmd{Paths: []string{"module.ttl"}}).Run()
+	graph, err := (&build.RunCmd{Message: "test run", Paths: []string{"module.ttl"}}).Run()
 
 	s.Require().NoError(err)
 	s.Require().NotNil(graph)
@@ -262,7 +262,7 @@ func (s *SalModuleSuite) TestRunConfiguresTheTaskWithTypedLiterals() {
 	project := s.newSalProject(projectReferencing(`fixture:region "east"`, `fixture:labelled "true"^^xsd:boolean`))
 	s.buildForRun(project)
 
-	graph, err := (&build.RunCmd{Paths: []string{"module.ttl"}}).Run()
+	graph, err := (&build.RunCmd{Message: "test run", Paths: []string{"module.ttl"}}).Run()
 
 	s.Require().NoError(err)
 	s.Require().NotNil(graph)
@@ -277,7 +277,7 @@ func (s *SalModuleSuite) TestRunConfiguresTheTaskWithTypedLiterals() {
 func (s *SalModuleSuite) TestBuildRejectsConfigurationTheModuleDoesNotDefine() {
 	s.newSalProject(projectReferencing(`fixture:regionn "west"`))
 
-	_, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, Force: true}).Run()
+	_, err := (&build.BuildCmd{Message: "test build", Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg, Force: true}).Run()
 
 	s.Require().Error(err)
 	s.Contains(err.Error(), "regionn")
@@ -290,7 +290,7 @@ func (s *SalModuleSuite) TestRunReportsModuleErrors() {
 	project := s.newSalProject(projectReferencing(`fixture:fail "true"^^xsd:boolean`))
 	s.buildForRun(project)
 
-	_, err := (&build.RunCmd{Paths: []string{"module.ttl"}}).Run()
+	_, err := (&build.RunCmd{Message: "test run", Paths: []string{"module.ttl"}}).Run()
 
 	s.Require().Error(err)
 	s.Contains(err.Error(), "the task instance asked this module to fail")
@@ -306,7 +306,7 @@ func (s *SalModuleSuite) TestRunStopsATaskWhoseOutputViolatesItsStdoutShape() {
 	s.buildForRun(project)
 
 	started := time.Now()
-	_, err := (&build.RunCmd{Paths: []string{"module.ttl"}}).Run()
+	_, err := (&build.RunCmd{Message: "test run", Paths: []string{"module.ttl"}}).Run()
 
 	var shapeErr salmodule.StreamShapeError
 	s.Require().ErrorAs(err, &shapeErr)
@@ -329,11 +329,11 @@ func (s *SalModuleSuite) TestRunHasNothingToDoForClassesThatAreNotTasks() {
 `, moduleNamespace))
 	s.buildForRun(project)
 
-	_, err := (&build.BuildCmd{Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg}).Run()
+	_, err := (&build.BuildCmd{Message: "test build", Paths: []string{"module.ttl"}, Format: build.GraphExportFormatIceberg}).Run()
 	s.Require().NoError(err)
 	s.Empty(s.builtObjectsForPredicate("https://schema.org/name"))
 
-	_, err = (&build.RunCmd{Paths: []string{"module.ttl"}}).Run()
+	_, err = (&build.RunCmd{Message: "test run", Paths: []string{"module.ttl"}}).Run()
 
 	s.Require().ErrorIs(err, build.ErrNoModuleTasks)
 }

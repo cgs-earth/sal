@@ -46,12 +46,13 @@ If you need to remap vocabulary prefixes while validating, pass one or more `--p
 
 ## Build the data product
 
-After source changes are committed, build the local Iceberg table:
+After source changes are committed, build the local Iceberg table, saying what the build changes the way a Git commit message does:
 
 ```sh
-sal build data/
+sal build --message "Add the station data" data/
 ```
 
+The message is required, and is recorded in the snapshot the build commits.
 By default, SAL writes an Iceberg table.
 For validation-only workflows or debugging, see [`sal validate`](/sal/reference/commands/#sal-validate) and the `--format` option in [`sal build`](/sal/reference/commands/#sal-build).
 

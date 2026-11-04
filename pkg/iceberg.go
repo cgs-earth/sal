@@ -16,6 +16,13 @@ import (
 
 const DefaultSalIcebergTable = "triples"
 
+// SnapshotMessageProperty is the snapshot summary property a build records
+// its --message under, the way a git commit carries its message. It is read
+// back from the table metadata by `sal query --info snapshots`, the UI's
+// Stats tab, and `sal push`, which puts the latest one in the artifact's
+// description.
+const SnapshotMessageProperty = "sal.message"
+
 // IcebergTablePaths returns the root directory of every Iceberg table under
 // root. A table root is the parent of a `metadata` directory holding at least
 // one metadata JSON file. A root that does not exist holds no tables rather
