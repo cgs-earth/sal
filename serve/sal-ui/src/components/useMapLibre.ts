@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
-import maplibregl, { type LngLat, type MapGeoJSONFeature, type MapOptions } from 'maplibre-gl'
+import * as maplibregl from 'maplibre-gl'
+import type { LngLat, MapGeoJSONFeature, MapOptions } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { BASEMAP } from '../basemap'
 import { mapPalette, useTheme, type MapPalette } from '../theme'
+
+// MapLibre 6 is ES modules only and loads its worker by URL, which a bundler
+// has to be told: Vite emits the worker as an asset of its own and this is
+// its path under the server root.
+maplibregl.setWorkerUrl(workerUrl)
 
 export type MapLibreOptions = {
   /**

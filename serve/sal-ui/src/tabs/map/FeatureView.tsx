@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type maplibregl from 'maplibre-gl'
+import type * as maplibregl from 'maplibre-gl'
 import type { LngLat } from 'maplibre-gl'
 import type { Feature, FeatureCollection } from 'geojson'
 import {
