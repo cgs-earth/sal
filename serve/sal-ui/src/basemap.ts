@@ -1,4 +1,4 @@
-import type maplibregl from 'maplibre-gl'
+import type * as maplibregl from 'maplibre-gl'
 import type { Theme } from './theme'
 
 /** A dark and a light basemap, so a map follows the page theme; both are neutral grays rather than tinted. */
