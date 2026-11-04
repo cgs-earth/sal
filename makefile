@@ -1,8 +1,13 @@
+# Builds sal from this tree into ~/.local/bin, with whatever UI serve/sal-ui/dist
+# holds: run `make ui` first for a binary that serves the web UI. Users install
+# a release binary with install.sh instead; see the README.
 install:
 	go build -o ~/.local/bin
 
-# Rebuilds the React UI that `sal serve --with-ui` serves. serve/ui.go embeds
-# serve/sal-ui/dist, so the output is committed; rerun this after editing the UI.
+# Builds the React UI that `sal serve --with-ui` serves into serve/sal-ui/dist,
+# which serve/ui.go embeds. The output is not committed: the release workflow
+# and the Dockerfile build it before building sal, and the Go tests that serve
+# the UI skip themselves until it has been built. Rerun this after editing the UI.
 ui:
 	cd serve/sal-ui && npm ci && npm run build
 

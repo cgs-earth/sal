@@ -17,6 +17,7 @@ import (
 // tests do not have to hardcode a Vite fingerprint that changes on every UI build.
 func largestUIAsset(t *testing.T) (string, []byte) {
 	t.Helper()
+	requireBuiltUI(t)
 	dist, err := fs.Sub(uiAssets, "sal-ui/dist")
 	require.NoError(t, err)
 
@@ -39,8 +40,18 @@ func largestUIAsset(t *testing.T) (string, []byte) {
 	return name, content
 }
 
+// requireBuiltUI skips a test that serves the UI when this tree has not built
+// it, since the build output is not committed.
+func requireBuiltUI(t *testing.T) {
+	t.Helper()
+	if !UIBuilt() {
+		t.Skip("the UI is not built; run `make ui` to run this test")
+	}
+}
+
 func newUIOnlyServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	requireBuiltUI(t)
 	handler, err := uiHandler("index.html")
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
@@ -149,6 +160,7 @@ func TestIsBrowserNavigationTellsATabApartFromTheAPI(t *testing.T) {
 }
 
 func TestCompressUIAssetsSkipsIncompressibleAndTinyFiles(t *testing.T) {
+	requireBuiltUI(t)
 	dist, err := fs.Sub(uiAssets, "sal-ui/dist")
 	require.NoError(t, err)
 

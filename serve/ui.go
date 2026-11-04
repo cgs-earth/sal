@@ -14,11 +14,24 @@ import (
 	"strings"
 )
 
-// uiAssets holds the compiled `serve/sal-ui` React app. It is built by `make ui`
-// and committed so that `go install` produces a binary with the UI baked in.
+// uiAssets holds the compiled `serve/sal-ui` React app, which `make ui` writes
+// to sal-ui/dist. The directory is build output and is not committed; the
+// release workflow and the Dockerfile build it before building sal, so a
+// release binary and the image carry the UI, while a binary built from a tree
+// where it was never built (`go install`, or `go build` before `make ui`)
+// embeds only the .gitkeep that keeps this directive compiling. UIBuilt tells
+// the two apart.
 //
 //go:embed all:sal-ui/dist
 var uiAssets embed.FS
+
+// UIBuilt reports whether this binary carries the compiled UI, which is false
+// for a binary built from a tree where `make ui` was never run. Tests that
+// serve the UI skip themselves when it is false.
+func UIBuilt() bool {
+	_, err := fs.Stat(uiAssets, "sal-ui/dist/index.html")
+	return err == nil
+}
 
 // Go's built-in MIME table has no entry for the self-hosted display font under
 // dist/fonts, and the system table is not guaranteed one either, so it is
@@ -53,7 +66,7 @@ func uiHandler(page string) (http.Handler, error) {
 	}
 	index, err := fs.ReadFile(dist, page)
 	if err != nil {
-		return nil, fmt.Errorf("embedded UI is missing %s; run `make ui` to build it: %w", page, err)
+		return nil, fmt.Errorf("this sal binary was built without the web UI (%s is not embedded); install a release binary from https://github.com/cgs-earth/sal/releases, or run `make ui` before building sal: %w", page, err)
 	}
 	files := http.FileServer(http.FS(dist))
 	compressed, err := compressUIAssets(dist)

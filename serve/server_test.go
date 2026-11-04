@@ -131,6 +131,7 @@ func (r *endpointUIRunner) Translate(query string) (string, error) {
 
 func newUIServer(t *testing.T, runner *endpointUIRunner) *httptest.Server {
 	t.Helper()
+	requireBuiltUI(t)
 	handler, err := NewEndpointWithUI(runner, "", "")
 	require.NoError(t, err)
 	return httptest.NewServer(handler)
@@ -329,6 +330,7 @@ func TestEndpointWithUIStillServesBlobsToANonBrowser(t *testing.T) {
 	body := []byte("@prefix ex: <https://example.org/> .")
 	digest := writeBlob(t, dir, body)
 
+	requireBuiltUI(t)
 	handler, err := NewEndpointWithUI(&endpointUIRunner{}, dir, "")
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
@@ -354,6 +356,7 @@ func TestEndpointWithUIServesBlobsToTheUIsOwnFetch(t *testing.T) {
 	body := []byte("some vocabulary bytes")
 	digest := writeBlob(t, dir, body)
 
+	requireBuiltUI(t)
 	handler, err := NewEndpointWithUI(&endpointUIRunner{}, dir, "")
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
@@ -1295,6 +1298,7 @@ func TestStacEndpointRefusesOtherMethods(t *testing.T) {
 }
 
 func TestEndpointWithUIServesTheStacCatalogRatherThanTheApp(t *testing.T) {
+	requireBuiltUI(t)
 	handler, err := NewEndpointWithUI(&endpointUIRunner{}, "", newStacDir(t))
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
@@ -1461,6 +1465,7 @@ func TestBlobEndpointDoesNotServeOutsideTheBlobStore(t *testing.T) {
 func TestEndpointWithUIServesAFileInACopiedDirectoryToABrowser(t *testing.T) {
 	dir := t.TempDir()
 	writeDirectoryBlob(t, dir)
+	requireBuiltUI(t)
 	handler, err := NewEndpointWithUI(&endpointUIRunner{}, dir, "")
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)

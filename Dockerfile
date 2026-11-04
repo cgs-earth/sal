@@ -28,6 +28,18 @@ RUN GOPROXY=off go list -e -f '{{join .Imports "\n"}}' ./... 2>/dev/null \
 # target platform is what keeps that simple: BuildKit runs this stage under
 # emulation for a cross build rather than needing a cross compiler installed. The
 # push_to_ghcr workflow only builds linux/amd64, so nothing is emulated in CI.
+# The web UI that `sal serve --with-ui` serves, built from its sources since
+# the Vite output is not committed. It only needs the UI's own directory, so
+# a change anywhere else in the repository leaves this stage cached.
+FROM node:22-bookworm-slim AS ui-builder
+
+WORKDIR /ui
+COPY serve/sal-ui/package.json serve/sal-ui/package-lock.json ./
+RUN npm ci
+COPY serve/sal-ui/ ./
+RUN npm run build
+
+
 FROM golang:1.26-bookworm AS go-builder
 
 WORKDIR /app
@@ -45,6 +57,9 @@ COPY --from=imports /imports.txt /imports.txt
 RUN CGO_ENABLED=1 go build -trimpath $(cat /imports.txt)
 
 COPY . .
+# serve/ui.go embeds serve/sal-ui/dist, which is build output rather than a
+# committed directory, so the UI built above is put where the embed reads it.
+COPY --from=ui-builder /ui/dist ./serve/sal-ui/dist
 
 # -trimpath removes local filesystem paths from the binary.
 # -ldflags="-s -w" strips symbol and debug tables to keep the image smaller.

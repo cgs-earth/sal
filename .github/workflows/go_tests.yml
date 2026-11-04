@@ -24,6 +24,16 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: 1.26
+      # The tests that serve the web UI skip themselves when serve/sal-ui/dist
+      # is not built, since it is not committed; building it here is what keeps
+      # them running in CI.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: serve/sal-ui/package-lock.json
+      - name: Build the web UI
+        run: cd serve/sal-ui && npm ci && npm run build
       - name: Go tests
         shell: bash 
         run: |

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"time"
 
 	"github.com/cgs-earth/sal/build"
@@ -67,6 +68,23 @@ type args struct {
 
 func (args) Description() string {
 	return "Validate and process RDF data"
+}
+
+// version is the release tag a binary was built from, set by the release
+// workflow with -ldflags "-X main.version=v1.2.3". A binary built any other
+// way reports the module version `go install` recorded, which is a tag for
+// `@v1.2.3` and a pseudo-version for `@latest` of an untagged commit, and
+// "dev" for a plain `go build`.
+var version = ""
+
+func (args) Version() string {
+	if version != "" {
+		return "sal " + version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return "sal " + info.Main.Version
+	}
+	return "sal dev"
 }
 
 func main() {

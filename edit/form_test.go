@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cgs-earth/sal/serve"
 	"github.com/cgs-earth/sal/specs"
 	"github.com/stretchr/testify/require"
 )
@@ -60,6 +61,9 @@ const validModuleOntology = `{
 // and returns the server and the root, counting how often the form wrote.
 func newForm(t *testing.T, mode string) (*httptest.Server, string, *int) {
 	t.Helper()
+	if !serve.UIBuilt() {
+		t.Skip("the UI is not built; run `make ui` to run this test")
+	}
 	dir := t.TempDir()
 	writes := 0
 	form := &Form{Dir: dir, Namespace: testModuleNamespace, Title: "example", Creator: "Ada Lovelace", Mode: mode, Written: func() { writes++ }}

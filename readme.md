@@ -11,8 +11,12 @@ This repository is currently a work in progress.
 
 ## Installation
 
-To install the latest version of SAL, run the following command:
+To install the latest release of SAL, or update the one you have, run:
 
+```sh
+curl -fsSL https://raw.githubusercontent.com/cgs-earth/sal/main/install.sh | sh
 ```
-go install -a github.com/cgs-earth/sal@latest
-```
+
+This downloads or updates the prebuilt binary for your machine (Linux amd64 or macOS Apple Silicon) from the [latest release](https://github.com/cgs-earth/sal/releases/latest), verifies its checksum, and puts it in `~/.local/bin`.
+
+To build from source instead, run `go install github.com/cgs-earth/sal@latest`. Note this needs cgo and a C toolchain, since DuckDB is linked in, and the resulting binary has no web UI for `sal serve --with-ui`, since the UI is built separately from its sources.
