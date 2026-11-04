@@ -68,6 +68,7 @@ Under it:
 `sal construct` produces one trace, named `sal.construct`, with a `construct.query` and a `sparql.construct` span per query under it.
 
 `sal push`, `sal pull`, and `sal clone` each produce one trace, named `sal.push`, `sal.pull`, or `sal.clone`, carrying `sal.oci.repository`.
+A `sal.pull` that pulled nothing, because the local data product already holds every snapshot the artifact does or is ahead of it, carries why as `sal.pull.skipped`, and has no `oci.pull_layers` span.
 The transfer spans update their attributes while they run, which is what the [progress pane](/sal/reference/commands/#progress-and-log-panes) draws the transfer from; an exporter sees the final counts.
 
 | Span | What it covers | Attributes |

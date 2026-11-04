@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -82,19 +83,51 @@ func servePinsTestVocabulary(t *testing.T) *int {
 }
 
 // A build commits a snapshot, which carries a message the way a git commit
-// does, so a build without one is refused before anything is read or fetched,
-// and told that `sal validate` is the way to check the project without one.
-func TestBuildRequiresAMessage(t *testing.T) {
+// does. A build of a clean worktree is a build of the commit HEAD is at, so
+// a build given no message records that commit's.
+func TestBuildWithoutAMessageRecordsTheCommitMessage(t *testing.T) {
 	newPinsTestProject(t)
-	fetches := servePinsTestVocabulary(t)
+	servePinsTestVocabulary(t)
+	cfg := &BuildCmd{Message: "   ", Format: GraphExportFormatNQuads}
 
-	_, err := (&BuildCmd{Format: GraphExportFormatNQuads}).Run()
+	_, err := cfg.Run()
+
+	require.NoError(t, err)
+	require.Equal(t, "project source", cfg.Message)
+}
+
+// A worktree with uncommitted changes, which only --force builds, matches no
+// commit, so a build of it without a message is refused before anything is
+// read or fetched, and told that `sal validate` is the way to check the
+// project without one.
+func TestBuildOfUncommittedChangesRequiresAMessage(t *testing.T) {
+	project := newPinsTestProject(t)
+	fetches := servePinsTestVocabulary(t)
+	require.NoError(t, os.WriteFile(filepath.Join(project, "data.ttl"), []byte(pinsTestSource+"\n"), 0644))
+
+	_, err := (&BuildCmd{Force: true, Format: GraphExportFormatNQuads}).Run()
 
 	require.ErrorIs(t, err, ErrMessageRequired)
 	require.Contains(t, err.Error(), "sal validate")
 	require.Equal(t, 0, *fetches)
-	_, err = (&BuildCmd{Message: "   ", Format: GraphExportFormatNQuads}).Run()
+}
+
+// A repository with no commit yet has no message to take, so the build has to
+// be given one.
+func TestBuildWithoutACommitRequiresAMessage(t *testing.T) {
+	newPinsTestProject(t)
+	fetches := servePinsTestVocabulary(t)
+	original := gitCommitMessage
+	gitCommitMessage = func() (string, error) {
+		return "", errors.New("fatal: your current branch 'main' does not have any commits yet")
+	}
+	t.Cleanup(func() { gitCommitMessage = original })
+
+	_, err := (&BuildCmd{Format: GraphExportFormatNQuads}).Run()
+
 	require.ErrorIs(t, err, ErrMessageRequired)
+	require.Contains(t, err.Error(), "does not have any commits yet")
+	require.Equal(t, 0, *fetches)
 }
 
 // `sal validate` commits nothing, so it has no snapshot to describe and

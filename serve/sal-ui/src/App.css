@@ -1050,6 +1050,52 @@ kbd {
   color: var(--text-disabled);
 }
 
+/* ---------- snapshots ---------- */
+
+/* The Stats tab's snapshot listing is a result table whose cells are drawn
+   by hand: the triple change in two colours, each git commit as its short
+   hash, and the metadata file as its name with the copy button beside it. */
+.snapshots-table td {
+  max-width: 360px;
+}
+
+.snapshots-table .snapshot-message {
+  white-space: normal;
+  min-width: 180px;
+}
+
+.snapshots-table .snapshot-triples {
+  white-space: nowrap;
+}
+
+.snapshots-table .triples-added {
+  color: var(--success);
+}
+
+.snapshots-table .triples-removed {
+  color: var(--danger);
+}
+
+.snapshots-table .git-commit {
+  display: block;
+}
+
+.snapshots-table .snapshot-metadata {
+  overflow: visible;
+}
+
+.snapshots-table .snapshot-metadata code {
+  vertical-align: middle;
+}
+
+.snapshots-table .copy-button {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 /* ---------- forms and code blocks ---------- */
 
 /* The one-line form the header's table input, the map's bounding box, and the

@@ -265,6 +265,17 @@ func GitCommitHash() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// GitCommitMessage returns the full message of the commit HEAD is at, which
+// a build records on its snapshot when it is given no --message of its own.
+// A repository with no commit yet is an error.
+func GitCommitMessage() (string, error) {
+	out, err := exec.Command("git", "log", "-1", "--pretty=%B").Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get the message of the git commit HEAD is at: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // UncommittedChangesInGit returns true if the current git worktree contains
 // uncommitted changes
 func UncommittedChangesInGit() (bool, error) {

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cgs-earth/sal/pkg"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -111,6 +112,12 @@ type Phase struct {
 	// Step is the span the phase is bound to, nil until it starts.
 	Step    *Step
 	Skipped bool
+	// SkippedAttribute names the attribute the root span carries when the
+	// command decided there was nothing for the phase to do, holding why:
+	// a pull of a data product that is up to date. A phase skipped with a
+	// reason is shown as done with that reason, since what the command was
+	// for is already so, rather than as skipped.
+	SkippedAttribute string
 }
 
 // buildPlan is the order a `sal build` or `sal run` goes through its phases.
@@ -133,7 +140,7 @@ var pushPlan = []Phase{
 var pullPlan = []Phase{
 	{Span: "oci.fetch_manifest", Label: "Fetch the manifest"},
 	{Span: "clone.init", Label: "Initialize the SAL project"},
-	{Span: "oci.pull_layers", Label: "Pull the data product"},
+	{Span: "oci.pull_layers", Label: "Pull the data product", SkippedAttribute: pkg.PullSkippedAttribute},
 }
 
 // clonePlan is the order a `sal clone` goes through its phases.
@@ -304,6 +311,31 @@ func (t *Tracker) Root() *Step {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.root
+}
+
+// skipReason is why a phase was not run, from the root span's attribute the
+// phase names, and empty for a phase that ran, or was skipped without the
+// command saying why. It is called with the lock held.
+func (t *Tracker) skipReason(phase *Phase) string {
+	if phase.Step != nil || phase.SkippedAttribute == "" || t.root == nil {
+		return ""
+	}
+	return t.root.attrString(phase.SkippedAttribute)
+}
+
+// Outcome is what the command said about the phase it decided not to run,
+// which the summary's headline carries so that a pull that pulled nothing
+// says so on its first line; empty when every phase ran or none said why.
+func (t *Tracker) Outcome() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.refresh()
+	for _, phase := range t.phases {
+		if reason := t.skipReason(phase); reason != "" {
+			return reason
+		}
+	}
+	return ""
 }
 
 // Phases returns the plan as it stands: which phases have started, ended, or

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { STAC_COLLECTION_PATH, hasStacCatalog, stacViewerURL, type TableStats } from '../api'
 import { ResultTable } from '../components/ResultTable'
+import { SnapshotsTable } from '../components/SnapshotsTable'
 import { LoadingState } from '../components/LoadingState'
 
 type StatsTabProps = {
@@ -132,8 +133,11 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
             </Suspense>
           </section>
 
-          <Section title="Snapshots" caption="Every commit written to the Iceberg table, newest first.">
-            <ResultTable header={stats.snapshots.header} rows={stats.snapshots.rows} empty="No snapshots yet" />
+          <Section
+            title="Snapshots"
+            caption="Every build committed to the Iceberg table, newest first, with the triples it added and removed, its message, the git commit it was built from, and the metadata file that reads the table at that snapshot."
+          >
+            <SnapshotsTable header={stats.snapshots.header} rows={stats.snapshots.rows} />
           </Section>
 
           <Section title="Vocabularies" caption="Every RDF vocabulary that is imported or pinned in the project">

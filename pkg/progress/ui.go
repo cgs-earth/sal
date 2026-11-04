@@ -181,6 +181,9 @@ func (ui *UI) Summary() string {
 		headline = styleFailed.Render("✗") + " sal " + ui.command + " failed after " + formatDuration(elapsed)
 	default:
 		headline = styleDone.Render("✓") + " sal " + ui.command + " finished in " + formatDuration(elapsed)
+		if outcome := ui.tracker.Outcome(); outcome != "" {
+			headline += " · " + outcome
+		}
 	}
 	lines := []string{headline}
 	lines = append(lines, ui.tracker.Render(ui.width, now, "→")...)

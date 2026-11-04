@@ -28,6 +28,12 @@ func GetSnapshotsFromManifest(manifest ocispec.Manifest) ([]string, error) {
 var ErrLocalHasDiverged = fmt.Errorf("local data product has diverged from remote")
 var ErrNothingToPull = fmt.Errorf("no snapshots to pull")
 
+// PullSkippedAttribute is the attribute a `sal.pull` span carries when the
+// pull found nothing to pull, holding why in the words the progress pane
+// shows for the phase it did not run: the data product is up to date, or the
+// local one is ahead of the remote.
+const PullSkippedAttribute = "sal.pull.skipped"
+
 type SnapshotDiffReport struct {
 	Diverged                  bool
 	SnapshotsInRemoteNotLocal []string

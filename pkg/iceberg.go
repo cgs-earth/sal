@@ -23,6 +23,17 @@ const DefaultSalIcebergTable = "triples"
 // description.
 const SnapshotMessageProperty = "sal.message"
 
+// SnapshotTriplesAddedProperty and SnapshotTriplesRemovedProperty are the
+// snapshot summary properties a commit records the triples it added and
+// removed under, which is what the snapshot changed in the table's own
+// terms. They are read back next to the message; a snapshot written before
+// they were recorded falls back to Iceberg's own `added-records` and
+// `added-equality-deletes` counts, which say the same for sal's writes.
+const (
+	SnapshotTriplesAddedProperty   = "sal.triples.added"
+	SnapshotTriplesRemovedProperty = "sal.triples.removed"
+)
+
 // IcebergTablePaths returns the root directory of every Iceberg table under
 // root. A table root is the parent of a `metadata` directory holding at least
 // one metadata JSON file. A root that does not exist holds no tables rather

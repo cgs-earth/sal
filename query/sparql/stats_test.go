@@ -87,7 +87,7 @@ func TestInfoSQLRejectsUnknownInfo(t *testing.T) {
 	require.NotContains(t, err.Error(), "tags")
 }
 
-func TestInfoSQLBuildsSnapshotsQueryWithTags(t *testing.T) {
+func TestInfoSQLBuildsSnapshotsQueryWithGitCommits(t *testing.T) {
 	query, err := infoSQL("snapshots", "/tmp/table", "/tmp/table/metadata/v3.metadata.json")
 
 	require.NoError(t, err)
@@ -95,19 +95,50 @@ func TestInfoSQLBuildsSnapshotsQueryWithTags(t *testing.T) {
 	require.Contains(t, query, "read_text('/tmp/table/metadata/v3.metadata.json')")
 	require.Contains(t, query, "json_each(json_extract(metadata_json, '$.refs'))")
 	require.Contains(t, query, "WHERE json_extract_string(ref.value, '$.type') = 'tag'")
-	require.Contains(t, query, "string_agg(ref.key, ', ' ORDER BY ref.key) AS tags")
-	require.Contains(t, query, "LEFT JOIN tags ON tags.snapshot_id = snapshots.snapshot_id")
+	require.Contains(t, query, "string_agg(ref.key, ', ' ORDER BY ref.key) AS git_commits")
+	require.Contains(t, query, "LEFT JOIN git_commits ON git_commits.snapshot_id = snapshots.snapshot_id")
+	// the manifest list and the raw summary are left out: the columns are
+	// the snapshot, what it changed, its message, its commits, and its file
+	require.NotContains(t, query, "snapshots.*")
+	require.NotContains(t, query, "manifest_list")
 }
 
-func TestInfoSQLReadsTheBuildMessageOfEverySnapshot(t *testing.T) {
+func TestInfoSQLReadsTheBuildMessageAndTripleCountsOfEverySnapshot(t *testing.T) {
 	query, err := infoSQL("snapshots", "/tmp/table", "/tmp/table/metadata/v3.metadata.json")
 
 	require.NoError(t, err)
 	require.Contains(t, query, "json_each(json_extract(metadata_json, '$.snapshots')) AS snapshot")
 	require.Contains(t, query, `json_extract_string(snapshot.value, '$.summary."sal.message"') AS message`)
-	require.Contains(t, query, "LEFT JOIN messages ON messages.snapshot_id = snapshots.snapshot_id")
-	// the message sits between the snapshot's own columns and its tags
-	require.Less(t, strings.Index(query, "messages.message,"), strings.Index(query, "tags.tags"))
+	// a snapshot written before sal recorded its own counts falls back to
+	// Iceberg's, which say the same for sal's writes
+	require.Contains(t, query, `COALESCE(json_extract_string(snapshot.value, '$.summary."sal.triples.added"'), json_extract_string(snapshot.value, '$.summary."added-records"'), '0')::BIGINT AS triples_added`)
+	require.Contains(t, query, `COALESCE(json_extract_string(snapshot.value, '$.summary."sal.triples.removed"'), json_extract_string(snapshot.value, '$.summary."added-equality-deletes"'), '0')::BIGINT AS triples_removed`)
+	require.Contains(t, query, "LEFT JOIN summaries ON summaries.snapshot_id = snapshots.snapshot_id")
+	// the message sits between the counts and the commits
+	require.Less(t, strings.Index(query, "summaries.triples_removed,"), strings.Index(query, "summaries.message,"))
+	require.Less(t, strings.Index(query, "summaries.message,"), strings.Index(query, "git_commits.git_commits"))
+}
+
+// The metadata file a snapshot was committed in is the lowest version naming
+// it as current, found over every metadata file of a table that can be
+// listed; an https table cannot be, so only its latest file is read.
+func TestInfoSQLFindsTheMetadataFileOfEverySnapshot(t *testing.T) {
+	query, err := infoSQL("snapshots", "/tmp/table", "/tmp/table/metadata/v3.metadata.json")
+
+	require.NoError(t, err)
+	require.Contains(t, query, "read_text('/tmp/table/metadata/*.metadata.json')")
+	require.Contains(t, query, `json_extract(content::JSON, '$."current-snapshot-id"')::BIGINT AS snapshot_id`)
+	require.Contains(t, query, "arg_min(filename, regexp_extract(filename, 'v([0-9]+)\\.metadata\\.json', 1)::BIGINT) AS metadata_file")
+	require.Contains(t, query, "LEFT JOIN metadata_files ON metadata_files.snapshot_id = snapshots.snapshot_id")
+
+	query, err = infoSQL("snapshots", "gs://bucket/sal/triples", "gs://bucket/sal/triples/metadata/v3.metadata.json")
+	require.NoError(t, err)
+	require.Contains(t, query, "read_text('gs://bucket/sal/triples/metadata/*.metadata.json')")
+
+	query, err = infoSQL("snapshots", "https://storage.googleapis.com/bucket/sal/triples", "https://storage.googleapis.com/bucket/sal/triples/metadata/v3.metadata.json")
+	require.NoError(t, err)
+	require.NotContains(t, query, "*.metadata.json")
+	require.Equal(t, 2, strings.Count(query, "read_text('https://storage.googleapis.com/bucket/sal/triples/metadata/v3.metadata.json')"))
 }
 
 func TestInfoSQLRejectsTagsInfo(t *testing.T) {

@@ -76,9 +76,18 @@ func (cmd *OciArtifactRetrievalCmd) RunPull() (err error) {
 		return err
 	}
 
-	_, err = pkg.SnapshotDiff(localSnapshots, remoteSnapshots)
+	diff, err := pkg.SnapshotDiff(localSnapshots, remoteSnapshots)
 	if errors.Is(err, pkg.ErrNothingToPull) {
-		pkg.Infof("Skipping pull: %s", err.Error())
+		// the root span says why nothing was pulled, which is what the
+		// progress pane shows for the pull phase in place of "skipped"
+		reason := "up to date, nothing to pull"
+		if ahead := len(diff.SnapshotsInLocalNotRemote); ahead == 1 {
+			reason = "local is ahead of the remote by 1 snapshot, nothing to pull"
+		} else if ahead > 1 {
+			reason = fmt.Sprintf("local is ahead of the remote by %d snapshots, nothing to pull", ahead)
+		}
+		span.SetAttributes(attribute.String(pkg.PullSkippedAttribute, reason))
+		pkg.Infof("Nothing to pull: %s", err.Error())
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("skipping pull: %w", err)

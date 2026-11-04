@@ -232,15 +232,13 @@ func main() {
 
 // progressCommand names the subcommand that works under the progress and
 // log panes, the ones progress.Plan knows, and whether it was asked not to
-// with --no-tui. A build or run without a --message is refused before it
-// does anything, so the panes are not opened only to close again on it.
-// Every other subcommand logs to stderr.
+// with --no-tui. Every other subcommand logs to stderr.
 func progressCommand(cli args) (command string, noTUI bool) {
 	switch {
 	case cli.Build != nil:
-		return "build", cli.Build.NoTUI || cli.Build.MissingMessage()
+		return "build", cli.Build.NoTUI
 	case cli.RunTasks != nil:
-		return "run", cli.RunTasks.NoTUI || cli.RunTasks.MissingMessage()
+		return "run", cli.RunTasks.NoTUI
 	case cli.Push != nil:
 		return "push", cli.Push.NoTUI
 	case cli.Pull != nil:

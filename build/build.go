@@ -83,7 +83,7 @@ func (cfg *ValidateCmd) moduleDir() string {
 
 type BuildCmd struct {
 	Paths                           []string          `arg:"positional" help:"RDF files to validate"`
-	Message                         string            `arg:"--message,-m" help:"required: what this build changes, recorded in the Iceberg snapshot the way a git commit message is"`
+	Message                         string            `arg:"--message,-m" help:"what this build changes, recorded in the Iceberg snapshot the way a git commit message is; defaults to the message of the git commit HEAD is at, and is required with uncommitted changes"`
 	PrefixMaps                      []string          `arg:"--prefix-maps" help:"prefix mappings to apply as source target pairs or source=target entries"`
 	Format                          GraphExportFormat `arg:"--format" help:"output format: nq or iceberg" default:"iceberg"`
 	Force                           bool              `arg:"--force" help:"force build even if there are uncommitted changes in the git repository"`
@@ -124,15 +124,44 @@ var ErrConflictingPrefixes = errors.New("build: a vocabulary is declared under n
 var ErrUncommittedChanges = fmt.Errorf("git repository has uncommitted changes; please commit and finalize changes before creating a new build snapshot")
 
 // ErrMessageRequired is returned by a build or run asked to commit a
-// snapshot without a --message. Every snapshot carries one, the way every
-// git commit carries a message, so a snapshot is never without a reason; a
-// user who only wants the sources checked is pointed at `sal validate`.
-var ErrMessageRequired = errors.New("--message is required: describe what this build changes, the way a git commit message does, for example `sal build --message \"Add foo\"`. To check the project without committing a snapshot, run `sal validate` instead")
+// snapshot without a --message when there is no git commit to take one
+// from: the worktree has uncommitted changes, which only --force builds, so
+// the sources match no commit, or the repository has no commit yet. Every
+// snapshot carries a message, the way every git commit carries one, so a
+// snapshot is never without a reason; a user who only wants the sources
+// checked is pointed at `sal validate`.
+var ErrMessageRequired = errors.New("--message is required: the sources match no git commit whose message could describe this build, so describe what it changes yourself, the way a git commit message does, for example `sal build --message \"Add foo\"`. To check the project without committing a snapshot, run `sal validate` instead")
 
 // MissingMessage reports whether the build was given no --message, which
-// Run refuses before doing anything and main therefore opens no panes for.
+// Run then takes from the git commit HEAD is at.
 func (cfg *BuildCmd) MissingMessage() bool {
 	return strings.TrimSpace(cfg.Message) == ""
+}
+
+// resolveMessage settles the message the snapshot of a build records: the
+// --message it was given, else the message of the commit HEAD is at, since
+// a build of a clean worktree is a build of that commit. A build of a dirty
+// worktree, which only --force allows, matches no commit, and a repository
+// without a commit has none to take, so both are refused without a
+// --message. The message is written back to cfg.Message so that what the
+// snapshot recorded can be read off the command afterwards.
+func (cfg *BuildCmd) resolveMessage(hasChanges bool) error {
+	if !cfg.MissingMessage() {
+		return nil
+	}
+	if hasChanges {
+		return ErrMessageRequired
+	}
+	message, err := gitCommitMessage()
+	if err != nil {
+		return fmt.Errorf("%w (%v)", ErrMessageRequired, err)
+	}
+	if strings.TrimSpace(message) == "" {
+		return fmt.Errorf("%w (the commit HEAD is at has an empty message)", ErrMessageRequired)
+	}
+	cfg.Message = strings.TrimSpace(message)
+	slog.Info("No --message given; recording the message of the git commit HEAD is at", "message", cfg.Message)
+	return nil
 }
 
 // confirmPrefixesWithoutTerminator warns about every declared prefix whose
@@ -175,12 +204,9 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 	// only a build that commits a snapshot needs a message and a clean
 	// worktree, so that the snapshot says why it was made and maps to a
 	// commit; `sal validate` writes nothing, not even a pin, so it validates
-	// the sources as they stand. The message is checked first, since it is
-	// the cheapest thing to be missing.
+	// the sources as they stand. Both are settled before anything is read or
+	// fetched, since they are the cheapest things to be missing.
 	if !cfg.skipCommit {
-		if cfg.MissingMessage() {
-			return nil, ErrMessageRequired
-		}
 		hasChanges, err := uncommittedChangesInGit()
 		if err != nil {
 			return nil, err
@@ -190,6 +216,9 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 		}
 		if cfg.Force {
 			slog.Warn("Creating build with modified source tree. This should only be done for testing purposes.")
+		}
+		if err := cfg.resolveMessage(hasChanges); err != nil {
+			return nil, err
 		}
 	}
 
