@@ -3,6 +3,7 @@
   SAL
 </h1>
 
+<p align="center">The Semantic Accessibility Layer</p>
 <p align="center">Build, validate, query, and publish RDF data products from source-controlled datasets stored as Apache Iceberg tables</p>
 
 <p align="center">
