@@ -290,6 +290,42 @@ export async function translateSparql(query: string, signal?: AbortSignal): Prom
   return ((await response.json()) as { sql: string }).sql
 }
 
+/** One operator of a DuckDB query plan with the operators it reads from. */
+export interface PlanNode {
+  name: string
+  /** What DuckDB says about the operator, in the order it wrote it; a value written on several lines arrives as several values. */
+  details: { key: string; values: string[] }[]
+  children: PlanNode[]
+}
+
+/**
+ * How DuckDB would answer a statement, at the three stages its EXPLAIN
+ * reports: the logical plan bound from the statement, that plan after the
+ * optimizer, and the physical operators that would run. Each is the roots of
+ * a tree, one per statement.
+ */
+export interface QueryPlan {
+  logical: PlanNode[]
+  optimized: PlanNode[]
+  physical: PlanNode[]
+}
+
+/**
+ * The plans DuckDB would run a statement as. The statement is bound and
+ * optimized, which reads the table's metadata, but never run; the SPARQL tab
+ * shows them beside the SQL its query translates to.
+ */
+export async function explainSql(sql: string, signal?: AbortSignal): Promise<QueryPlan> {
+  const response = await fetch('/api/sql/explain', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sql }),
+    signal,
+  })
+  if (!response.ok) throw await failure(response)
+  return (await response.json()) as QueryPlan
+}
+
 /**
  * Fetches a document the project pinned: a vocabulary or imported ontology by
  * its SHA-256 digest, or a salmodule:// vocabulary by the git commit hash of

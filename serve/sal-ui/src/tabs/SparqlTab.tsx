@@ -561,7 +561,6 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
   // The help note is closed until asked for and not remembered, since it only
   // explains the header's controls.
   const [showHelp, setShowHelp] = useState(false)
-  const [editorHeight, setEditorHeight] = useState<number | null>(null)
   const translateTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const translateAbort = useRef<AbortController | null>(null)
 
@@ -710,25 +709,18 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
     instance.on('tabAdd', syncShareHost)
     instance.on('tabClose', syncShareHost)
 
-    // The SQL pane follows the active tab's query, and matches the height of
-    // its editor so the two line up when they sit side by side. Yasgui emits
-    // tabChange for every edit of a tab's query, and tabSelect when another
-    // tab's query comes on screen; the editor element is read back a microtask
-    // later for the same reason the share host is. The Definitions pane is
-    // docked into each editor as it comes on screen the same way, and the
-    // caret of every editor is watched from then on, once each.
-    const editorObserver = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (entry) setEditorHeight(Math.round(entry.contentRect.height))
-    })
+    // The SQL pane follows the active tab's query. Yasgui emits tabChange for
+    // every edit of a tab's query, and tabSelect when another tab's query
+    // comes on screen; the editor element is read back a microtask later for
+    // the same reason the share host is. The Definitions pane is docked into
+    // each editor as it comes on screen that way, and the caret of every
+    // editor is watched from then on, once each.
     const caretWatchers = new Map<object, () => void>()
     const followActiveTab = () => {
       queueMicrotask(() => {
         if (disposed) return
-        editorObserver.disconnect()
         const yasqe = instance.getTab()?.getYasqe()
         if (yasqe) {
-          editorObserver.observe(yasqe.getWrapperElement())
           definitionsHost.className = 'sal-term-panel'
           dockDefinitions(yasqe)
           if (!caretWatchers.has(yasqe)) caretWatchers.set(yasqe, watchCaretTerm(yasqe, setCaretTerm))
@@ -749,7 +741,11 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
         if (disposed) return
         const results = tab.getYasr()?.results
         if (!results || results.hasError()) return
-        const vars = results.getVariables()
+        // An ASK answers a boolean, with no head.vars for Yasr to report (its
+        // getVariables() is undefined then, whatever its type says) and no rows
+        // for the Geospatial tab to draw.
+        const vars: string[] | undefined = results.getVariables()
+        if (!vars) return
         const rows = results.getBindings().map((binding) => vars.map((name) => binding[name]?.value ?? ''))
         publishResult({ source: 'SPARQL', query: tab.getQuery(), header: vars, rows })
       })
@@ -766,7 +762,6 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
 
     return () => {
       disposed = true
-      editorObserver.disconnect()
       for (const stop of caretWatchers.values()) stop()
       definitionsHost.remove()
       if (translateTimer.current) clearTimeout(translateTimer.current)
@@ -817,7 +812,7 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
               />
               Show RDF Definitions
             </label>
-            <label className="toggle sql-toggle" title="Show the DuckDB SQL the query translates to">
+            <label className="toggle sql-toggle" title="Show the DuckDB SQL the query translates to and the plans it runs as">
               <input type="checkbox" checked={showSql} onChange={(event) => toggleShowSql(event.target.checked)} />
               Show SQL
             </label>
@@ -838,7 +833,9 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
             <ul>
               <li>
                 Queries run against the local <code>/sparql</code> endpoint, which translates SPARQL to DuckDB SQL rather
-                than evaluating it in a triplestore. <strong>Show SQL</strong> opens that translation beside the editor.
+                than evaluating it in a triplestore. <strong>Show SQL</strong> opens that translation under the results,
+                with the strip in its header switching to the plans DuckDB would run it as: the logical plan bound
+                from the SQL, that plan after the optimizer, and the physical operators that run.
               </li>
               <li>
                 <strong>Prefixes</strong> lists the vocabularies the project pins, the ones the Stats tab shows, plus the
@@ -877,12 +874,11 @@ export function SparqlTab({ sharedQuery, snapshots }: { sharedQuery: string | nu
           </div>
         )}
         {/* The host stays mounted whether or not the SQL pane is shown, since
-            the Yasgui instance lives in it. With the pane on, the workspace
-            puts the two side by side when it is wide enough and stacks them
-            otherwise; see .sparql-workspace in App.css. */}
+            the Yasgui instance lives in it. The pane goes under the host, below
+            whatever results Yasgui is showing. */}
         <div className={`sparql-workspace${showSql ? ' with-sql' : ''}`}>
           <div className="yasgui-host" ref={container} />
-          {showSql && <SqlPreview translation={translation} height={editorHeight} />}
+          {showSql && <SqlPreview translation={translation} />}
         </div>
         {/* The host is appended last to Yasr's header, so Yasr's own flex spacer
             pushes it to the right of the Table/Graph/Response plugin buttons. */}

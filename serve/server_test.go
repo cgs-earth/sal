@@ -89,6 +89,9 @@ type endpointUIRunner struct {
 	sqlResult  salsparql.Result
 	sqlErr     error
 	sql        string
+	// explained is the statement Explain was last asked about, answered with plan.
+	explained  string
+	plan       salsparql.QueryPlan
 	geometries salsparql.GeometryQuery
 	blobs      salsparql.BlobListing
 	// blobLimit is the limit Blobs was last asked for.
@@ -117,6 +120,11 @@ func (r *endpointUIRunner) Extent(_ context.Context) (salsparql.Feature, error) 
 func (r *endpointUIRunner) RunSQL(_ context.Context, sql string) (salsparql.Result, error) {
 	r.sql = sql
 	return r.sqlResult, r.sqlErr
+}
+
+func (r *endpointUIRunner) Explain(_ context.Context, sql string) (salsparql.QueryPlan, error) {
+	r.explained = sql
+	return r.plan, r.sqlErr
 }
 
 func (r *endpointUIRunner) Stats(_ context.Context) (salsparql.TableStats, error) {
@@ -484,6 +492,76 @@ func TestEndpointWithUIRejectsEmptySPARQLTranslation(t *testing.T) {
 	}()
 
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestEndpointWithUIExplainsSQLWithoutRunningIt(t *testing.T) {
+	scan := salsparql.PlanNode{Name: "SEQ_SCAN", Details: []salsparql.PlanDetail{{Key: "Table", Values: []string{"triples"}}}, Children: []salsparql.PlanNode{}}
+	runner := &endpointUIRunner{plan: salsparql.QueryPlan{
+		Logical:   []salsparql.PlanNode{{Name: "PROJECTION", Details: []salsparql.PlanDetail{}, Children: []salsparql.PlanNode{scan}}},
+		Optimized: []salsparql.PlanNode{scan},
+		Physical:  []salsparql.PlanNode{scan},
+	}}
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/sql/explain", "application/json", strings.NewReader(`{"sql":"SELECT subject FROM triples;  "}`))
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+	var body salsparql.QueryPlan
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, runner.plan, body)
+	require.Equal(t, "SELECT subject FROM triples", runner.explained, "the statement is trimmed like one /api/sql runs")
+	require.Empty(t, runner.sql, "explaining must not run anything")
+}
+
+func TestEndpointWithUIReportsSQLExplainErrorsAsJSON(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{sqlErr: errors.New("Table with name nope does not exist")})
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/sql/explain", "application/json", strings.NewReader(`{"sql":"SELECT * FROM nope"}`))
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Contains(t, body["error"], "nope")
+}
+
+func TestEndpointWithUIRejectsEmptySQLExplain(t *testing.T) {
+	runner := &endpointUIRunner{}
+	server := newUIServer(t, runner)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/sql/explain", "application/json", strings.NewReader(`{"sql":" ; "}`))
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	require.Empty(t, runner.explained)
+}
+
+func TestEndpointWithUIOnlyExplainsOnPOST(t *testing.T) {
+	server := newUIServer(t, &endpointUIRunner{})
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/sql/explain")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+	require.Equal(t, "POST", resp.Header.Get("Allow"))
 }
 
 func TestEndpointWithUIOnlyTranslatesOnPOST(t *testing.T) {
