@@ -2300,30 +2300,12 @@ kbd {
 }
 
 /* The workspace holds Yasgui and, when asked for, the read-only pane showing
-   the SQL the query translates to. The pane goes beside the editor when the
-   workspace is wide enough for both to be read, and below it otherwise; the
-   decision is made on the workspace's own width rather than the viewport's, so
-   it holds whatever else the page is doing. */
+   the SQL the query translates to, under the editor and its results. */
 .sparql-workspace {
-  container-type: inline-size;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   flex: none;
-}
-
-@container (min-width: 1100px) {
-  .sparql-workspace.with-sql {
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-    align-items: start;
-  }
-
-  /* Yasgui's results grow the left column past the editor; sticking the pane
-     keeps it beside the editor it explains as the tab scrolls. */
-  .sparql-workspace.with-sql > .sql-preview {
-    position: sticky;
-    top: 0;
-  }
 }
 
 .sql-preview {
@@ -2357,17 +2339,116 @@ kbd {
   font-size: 11px;
 }
 
-/* Sized to the SPARQL editor by SqlPreview; this is the height before it has
-   been measured. */
+/* As tall as the SQL or the plan it shows, never a box to scroll inside, so
+   nothing is cut off; a long plan makes the tab longer. */
 .sql-preview-editor {
   flex: none;
-  height: 280px;
+  min-height: 120px;
 }
 
 .sql-preview-editor .error-banner {
   margin: 12px;
   white-space: pre-wrap;
   overflow: auto;
+}
+
+/* The strip choosing between the SQL and the three plans, sized to the pane's
+   header rather than a panel's. */
+.sql-preview-views .subtab {
+  padding: 2px 9px;
+  font-size: 11px;
+}
+
+/* A plan is a tree of operators, laid out whole. */
+.sql-preview-plan {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.plan-tree,
+.plan-children {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* An operator's inputs hang under it, off a line that says what feeds what. */
+.plan-children {
+  margin: 2px 0 0 9px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line-strong);
+}
+
+.plan-node + .plan-node {
+  margin-top: 6px;
+}
+
+.plan-node > details > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.plan-node > details > summary:hover {
+  background: var(--bg-hover);
+}
+
+/* A flex summary loses its native marker, so the fold is drawn by hand. */
+.plan-node > details > summary::before {
+  content: '▾';
+  flex: none;
+  width: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.plan-node > details:not([open]) > summary::before {
+  content: '▸';
+}
+
+.plan-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+
+.plan-cardinality {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.plan-details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px 10px;
+  margin: 2px 0 4px 22px;
+}
+
+.plan-details > div {
+  display: contents;
+}
+
+.plan-details dt {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.plan-details dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.plan-details code {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* ---------- sparql: graph tab ---------- */

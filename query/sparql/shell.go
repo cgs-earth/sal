@@ -44,6 +44,12 @@ type SQLTranslator interface {
 	Translate(query string) (string, error)
 }
 
+// PlanRunner reports how DuckDB would run a statement, without running it,
+// which the web UI's SQL pane shows beside the SQL a SPARQL query translates to.
+type PlanRunner interface {
+	Explain(ctx context.Context, sql string) (QueryPlan, error)
+}
+
 type StatsRunner interface {
 	Stats(ctx context.Context) (TableStats, error)
 }

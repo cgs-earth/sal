@@ -40,7 +40,11 @@ export default class GraphPlugin implements Plugin<GraphPluginConfig> {
   }
 
   canHandleResults() {
-    return !!this.yasr.results && this.yasr.results.getVariables().length > 0
+    // An ASK result has no head.vars, and Yasr's getVariables() then returns
+    // undefined whatever its type says, which is why Yasr's own table plugin
+    // guards the same read; the Boolean plugin draws that result.
+    const vars: string[] | undefined = this.yasr.results?.getVariables()
+    return (vars?.length ?? 0) > 0
   }
 
   getIcon() {

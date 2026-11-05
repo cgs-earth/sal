@@ -93,6 +93,7 @@ Under a request:
 | --- | --- | --- |
 | `sparql.query` | Translating a SPARQL query and running the SQL. | `sal.sparql.query` |
 | `duckdb.query` | One DuckDB statement, which is also what `/api/sql`, `/api/stats`, and the geometry endpoints run. | `db.system.name`, `db.query.text`, `db.response.returned_rows` |
+| `duckdb.explain` | Planning one DuckDB statement without running it, which is what `/api/sql/explain` does. | `db.system.name`, `db.query.text` |
 | `duckdb.open` | Opening DuckDB and loading the Iceberg extension, once per process on the first query. | |
 | `duckdb.load_spatial` | Loading the spatial extension the first time a query needs it. | |
 

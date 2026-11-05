@@ -128,6 +128,10 @@ func (s *tableSwitch) Translate(query string) (string, error) {
 	return s.current().Translate(query)
 }
 
+func (s *tableSwitch) Explain(ctx context.Context, sql string) (salsparql.QueryPlan, error) {
+	return s.current().Explain(ctx, sql)
+}
+
 func (s *tableSwitch) Stats(ctx context.Context) (salsparql.TableStats, error) {
 	return s.current().Stats(ctx)
 }

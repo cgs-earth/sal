@@ -81,7 +81,7 @@ export function StorageLayout({ layout, error, tablePath, snapshots }: StorageLa
               </th>
               <th
                 scope="col"
-                title="How well a filter on this column skips files: good when one value falls in few files, poor when the files' ranges overlap so much that most are read. Hover a grade for the detail."
+                title="How well a filter on this column skips files: good when one value falls in few files, investigate when the files' ranges overlap so much that most are read, which matters only when queries filter on it. Hover a grade for the detail."
               >
                 Filter performance
               </th>

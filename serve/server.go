@@ -43,6 +43,7 @@ type UIRunner interface {
 	salsparql.GeometryRunner
 	salsparql.SQLRunner
 	salsparql.SQLTranslator
+	salsparql.PlanRunner
 	salsparql.StatsRunner
 	salsparql.BlobRunner
 	salsparql.VocabularyRunner
@@ -148,6 +149,7 @@ func NewEndpointWithUI(local UIRunner, blobDir string, stacDir string) (http.Han
 	mux.Handle("/geometries/extent", extentHandler{runner: runner})
 	mux.Handle("/api/sql", sqlHandler{runner: runner})
 	mux.Handle("/api/sparql/translate", translateHandler{translator: runner})
+	mux.Handle("/api/sql/explain", explainHandler{runner: runner})
 	mux.Handle("/api/stats", statsHandler{runner: runner})
 	mux.Handle("/api/blobs", blobListHandler{runner: runner})
 	mux.Handle("/api/vocabularies", vocabularyHandler{runner: runner})
@@ -538,6 +540,45 @@ func (h translateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, struct {
 		SQL string `json:"sql"`
 	}{SQL: sql})
+}
+
+// explainHandler answers the DuckDB plans a statement would run as, so the
+// UI's SQL pane can show how the SQL a SPARQL query translates to is answered.
+// The statement is bound and optimized, never run.
+type explainHandler struct {
+	runner salsparql.PlanRunner
+}
+
+func (h explainHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "the SQL explain endpoint only supports POST requests", http.StatusMethodNotAllowed)
+		return
+	}
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			slog.Error("failed to close SQL explain request body", "error", err)
+		}
+	}()
+	var request struct {
+		SQL string `json:"sql"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("parse SQL explain request: %v", err))
+		return
+	}
+	statement := strings.TrimRight(strings.TrimSpace(request.SQL), ";")
+	if statement == "" {
+		writeJSONError(w, http.StatusBadRequest, "SQL explain request is missing a sql field")
+		return
+	}
+
+	plan, err := h.runner.Explain(r.Context(), statement)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, plan)
 }
 
 type statsHandler struct {
