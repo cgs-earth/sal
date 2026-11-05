@@ -50,11 +50,7 @@ func (cmd *ServeCmd) locate() (salsparql.TriplesTable, string, string, error) {
 		if err != nil {
 			return salsparql.TriplesTable{}, "", "", err
 		}
-		dataDir, err := filepath.Abs(cmd.Data)
-		if err != nil {
-			return salsparql.TriplesTable{}, "", "", err
-		}
-		return table, filepath.Join(dataDir, "blobs"), filepath.Join(dataDir, "stac"), nil
+		return table, filepath.Join(table.DataRoot, "blobs"), filepath.Join(table.DataRoot, "stac"), nil
 	}
 	table, err := salsparql.LocateTriplesTable()
 	if err != nil {

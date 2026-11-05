@@ -178,7 +178,7 @@ func TestInitializeSALProjectPassesTheDescription(t *testing.T) {
 
 	sal, err := os.Executable()
 	require.NoError(t, err)
-	require.Equal(t, []string{"/tmp/sal:" + sal + " init --description A project"}, calls)
+	require.Equal(t, []string{"/tmp/sal:" + sal + " init --description A project --no-vocabularies"}, calls)
 }
 
 func TestProjectDescriptionComesFromTheArtifactOrNamesTheRepository(t *testing.T) {
@@ -209,7 +209,7 @@ func TestInitializeEmptyDirectoryMakesTheDirectoryAProjectForTheArtifact(t *test
 	require.Equal(t, []string{
 		dir + ":git init",
 		dir + ":git remote add origin https://github.com/org/gauges.git",
-		dir + ":" + sal + " init --description Stream gauges",
+		dir + ":" + sal + " init --description Stream gauges --no-vocabularies",
 	}, calls)
 }
 

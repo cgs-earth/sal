@@ -91,7 +91,7 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 	// the vocabulary listing comes from the project's own .sal/config.jsonld,
 	// which says nothing about a table on object storage
 	if !isRemoteTablePath(r.TablePath) {
-		stats.Vocabularies = vocabulariesResult()
+		stats.Vocabularies = r.vocabulariesResult()
 		project := r.Project()
 		stats.Title, stats.Description = project.Title, project.Description
 	} else {
@@ -107,6 +107,22 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 	return stats, nil
 }
 
+// standaloneBase stands in for the project base when a data directory is
+// served with no git repository around it. The config's own node is named
+// "." and so resolves against it, but nothing served reads that IRI, only the
+// title, description, imports, and pins.
+const standaloneBase = "https://sal.invalid/"
+
+// projectBase is the base the project's config resolves against: the git
+// remote's, or standaloneBase for a served data directory without one.
+func projectBase(standalone bool) (string, error) {
+	base, err := pkg.DefaultSalBase()
+	if err != nil && standalone {
+		return standaloneBase, nil
+	}
+	return base, err
+}
+
 // projectOntology reads the project's own node out of .sal/config.jsonld:
 // its title and description name the data product, and its owl:imports IRIs
 // are the imported artifacts. They come from disk rather than from the table
@@ -114,13 +130,8 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 // were fetched from. A directory that is not a SAL project, or a project that
 // has never imported anything, simply has none rather than failing the whole
 // stats view.
-func projectOntology() *importation.Ontology {
-	path, err := pkg.SalConfigPath()
-	if err != nil {
-		slog.Debug("not reporting the project ontology", "error", err)
-		return nil
-	}
-	base, err := pkg.DefaultSalBase()
+func projectOntology(path string, standalone bool) *importation.Ontology {
+	base, err := projectBase(standalone)
 	if err != nil {
 		slog.Debug("not reporting the project ontology", "error", err)
 		return nil
@@ -138,14 +149,14 @@ func projectOntology() *importation.Ontology {
 // `sal query --info` result gets. A directory that is not a SAL project, or
 // one with nothing pinned or imported yet, simply reports no rows rather
 // than failing the whole stats view.
-func vocabulariesResult() Result {
+func (r DuckDBRunner) vocabulariesResult() Result {
 	header := importation.VocabularyTableHeader
-	path, err := pkg.SalConfigPath()
+	path, _, err := r.projectFiles()
 	if err != nil {
 		slog.Debug("not reporting project vocabularies", "error", err)
 		return Result{Header: header}
 	}
-	base, err := pkg.DefaultSalBase()
+	base, err := projectBase(r.DataRoot != "")
 	if err != nil {
 		slog.Debug("not reporting project vocabularies", "error", err)
 		return Result{Header: header}
@@ -368,7 +379,7 @@ LEFT JOIN git_commits ON git_commits.snapshot_id = snapshots.snapshot_id
 LEFT JOIN metadata_files ON metadata_files.snapshot_id = snapshots.snapshot_id
 ORDER BY snapshots.sequence_number DESC`, escapedTablePath, escapedMetadataFile, pkg.SnapshotTriplesAddedProperty, pkg.SnapshotTriplesRemovedProperty, pkg.SnapshotMessageProperty, escapeSQLLiteral(metadataFiles(tablePath, metadataFile))), nil
 	case "column-stats":
-		return fmt.Sprintf("SELECT * FROM iceberg_column_stats('%s')", escapedTablePath), nil
+		return fmt.Sprintf("SELECT * FROM iceberg_column_stats('%s', allow_moved_paths = true)", escapedTablePath), nil
 	default:
 		return "", fmt.Errorf("unknown info option %q; expected one of: head, properties, snapshots, column-stats", info)
 	}

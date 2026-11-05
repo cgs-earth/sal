@@ -104,6 +104,11 @@ type ColumnPruning struct {
 	Upper            string `json:"upper"`
 }
 
+// Every read here passes allow_moved_paths, like every iceberg_scan: `sal
+// upload` rewrites the metadata to name absolute gs:// paths, and without the
+// option DuckDB follows them off the machine (and fails with a 403 without
+// credentials) instead of reading the copy it was pointed at.
+
 // layoutFilesSQL lists the table's live files: the entries of the current
 // snapshot's manifests that are not marked deleted, each with the partition
 // and the byte size the column statistics record for it, since
@@ -118,10 +123,10 @@ SELECT
 	files.file_sequence_number,
 	sizes.partition,
 	sizes.bytes
-FROM iceberg_metadata('%s') AS files
+FROM iceberg_metadata('%s', allow_moved_paths = true) AS files
 LEFT JOIN (
 	SELECT file_path, any_value(partition) AS partition, sum(column_size) AS bytes
-	FROM iceberg_column_stats('%s')
+	FROM iceberg_column_stats('%s', allow_moved_paths = true)
 	GROUP BY file_path
 ) AS sizes USING (file_path)
 WHERE files.status <> 'DELETED'
@@ -133,7 +138,7 @@ ORDER BY files.file_path`, escaped, escaped)
 func layoutBoundsSQL(tablePath string) string {
 	return fmt.Sprintf(`
 SELECT file_path, column_name, column_type, lower_bound, upper_bound, value_count, null_value_count
-FROM iceberg_column_stats('%s')
+FROM iceberg_column_stats('%s', allow_moved_paths = true)
 WHERE status <> 'DELETED' AND content = 'DATA'
 ORDER BY file_path, column_name`, escapeSQLLiteral(tablePath))
 }

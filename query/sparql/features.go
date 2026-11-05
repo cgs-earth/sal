@@ -156,9 +156,11 @@ func (r DuckDBRunner) FeaturesExtent(ctx context.Context, snapshotID int64) (Fea
 func (r DuckDBRunner) Project() ProjectInfo {
 	info := ProjectInfo{TablePath: r.TablePath}
 	if !isRemoteTablePath(r.TablePath) {
-		if ontology := projectOntology(); ontology != nil {
-			info.Title = ontology.Title
-			info.Description = ontology.Description
+		if path, _, err := r.projectFiles(); err == nil {
+			if ontology := projectOntology(path, r.DataRoot != ""); ontology != nil {
+				info.Title = ontology.Title
+				info.Description = ontology.Description
+			}
 		}
 	}
 	return info

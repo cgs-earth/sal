@@ -68,6 +68,10 @@ type PinnedVocabularies struct {
 	Fetch func(context.Context, string) ([]byte, string, PinnedVersion, error)
 
 	entries map[string]pinnedVocabulary
+	// seeds are the documents `sal init` stored under blobDir without pinning
+	// them (SeedVocabularies), keyed by namespace. Document pins one the first
+	// time a build asks for its namespace, instead of fetching it.
+	seeds map[string]pinnedVocabulary
 	// fetched memoizes by source URL so two namespaces that resolve to the same
 	// document are only dereferenced once
 	fetched map[string]fetchedDocument
@@ -129,6 +133,9 @@ func LoadPinnedVocabularies(path string, blobDir string) (*PinnedVocabularies, e
 	if err := pins.unmarshal(pinnedNodes); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	if blobDir != "" {
+		pins.seeds = loadSeeds(filepath.Join(blobDir, SeedFile))
+	}
 	return pins, nil
 }
 
@@ -150,6 +157,16 @@ func (p *PinnedVocabularies) Document(ctx context.Context, id string, source str
 			// failing the run: .sal/data is not in git, so a fresh clone has the
 			// pins before it has the documents they name
 			slog.Warn("Pinned vocabulary " + id + " is not available locally, so it is being fetched again: " + err.Error())
+		}
+	}
+
+	if !p.Refresh {
+		if entry, ok := p.seeds[id]; ok {
+			if body, err := p.readDocument(entry); err == nil {
+				slog.Info("Using the seeded document for " + id + " instead of fetching it")
+				p.Pin(id, body, entry.MediaType, PinnedVersion{})
+				return body, entry.MediaType, false, nil
+			}
 		}
 	}
 

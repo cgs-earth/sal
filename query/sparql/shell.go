@@ -74,6 +74,10 @@ type DuckDBRunner struct {
 	// SnapshotID is the Iceberg snapshot a SPARQL query reads the table at.
 	// Zero, the default, reads the current snapshot through the `triples` view.
 	SnapshotID int64
+	// DataRoot is the directory holding the blobs/ and config.jsonld of a
+	// served copy of .sal/data (`sal serve --data`), which has no SAL project
+	// above it. Empty reads the project the working directory belongs to.
+	DataRoot string
 }
 
 // RunShell opens an interactive SPARQL prompt against the Iceberg triples table.

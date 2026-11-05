@@ -193,8 +193,8 @@ func TestMaxOverlapCountsAnInclusiveTouchAsShared(t *testing.T) {
 }
 
 func TestLayoutSQLEscapesTheTablePath(t *testing.T) {
-	require.Contains(t, layoutFilesSQL("/tmp/o'brien/triples"), "iceberg_metadata('/tmp/o''brien/triples')")
-	require.Contains(t, layoutFilesSQL("/tmp/o'brien/triples"), "iceberg_column_stats('/tmp/o''brien/triples')")
-	require.Contains(t, layoutBoundsSQL("/tmp/o'brien/triples"), "iceberg_column_stats('/tmp/o''brien/triples')")
+	require.Contains(t, layoutFilesSQL("/tmp/o'brien/triples"), "iceberg_metadata('/tmp/o''brien/triples', allow_moved_paths = true)")
+	require.Contains(t, layoutFilesSQL("/tmp/o'brien/triples"), "iceberg_column_stats('/tmp/o''brien/triples', allow_moved_paths = true)")
+	require.Contains(t, layoutBoundsSQL("/tmp/o'brien/triples"), "iceberg_column_stats('/tmp/o''brien/triples', allow_moved_paths = true)")
 	require.Contains(t, layoutBoundsSQL("/tmp/o'brien/triples"), "content = 'DATA'")
 }

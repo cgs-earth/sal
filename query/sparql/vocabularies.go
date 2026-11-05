@@ -2,8 +2,11 @@ package sparql
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 
 	"github.com/cgs-earth/sal/build/validate"
@@ -59,6 +62,28 @@ type VocabularyRunner interface {
 	Vocabularies(ctx context.Context) (VocabularyListing, error)
 }
 
+// projectFiles returns the config file and blob directory the project's pins
+// live in: those of the served data directory when there is one, else those
+// of the SAL project the working directory belongs to. A data directory
+// without a config.jsonld is an error, so that it is reported rather than
+// read as a project that pins nothing.
+func (r DuckDBRunner) projectFiles() (configPath string, blobDir string, err error) {
+	if r.DataRoot != "" {
+		configPath = filepath.Join(r.DataRoot, "config.jsonld")
+		if _, err := os.Stat(configPath); err != nil {
+			return "", "", fmt.Errorf("the data directory has no project config: %w", err)
+		}
+		return configPath, filepath.Join(r.DataRoot, "blobs"), nil
+	}
+	if configPath, err = pkg.SalConfigPath(); err != nil {
+		return "", "", err
+	}
+	if blobDir, err = pkg.SalBlobsDir(); err != nil {
+		return "", "", err
+	}
+	return configPath, blobDir, nil
+}
+
 // Vocabularies lists every vocabulary the project pins in .sal/config.jsonld
 // with the terms its pinned document defines, read from the blob store and
 // never fetched, and then the built-in ones. A remote table has no project on
@@ -71,14 +96,13 @@ func (r DuckDBRunner) Vocabularies(_ context.Context) (VocabularyListing, error)
 	if isRemoteTablePath(r.TablePath) {
 		return withBuiltinVocabularies(listing), nil
 	}
-	path, err := pkg.SalConfigPath()
+	path, blobDir, err := r.projectFiles()
 	if err != nil {
-		slog.Debug("not reporting project vocabularies", "error", err)
-		return withBuiltinVocabularies(listing), nil
-	}
-	blobDir, err := pkg.SalBlobsDir()
-	if err != nil {
-		slog.Debug("not reporting project vocabularies", "error", err)
+		if r.DataRoot != "" {
+			slog.Warn("serving a data directory without a project config; pinned vocabularies are not listed (sal upload writes config.jsonld beside the data; re-upload, or copy .sal/config.jsonld into the data directory)", "error", err)
+		} else {
+			slog.Debug("not reporting project vocabularies", "error", err)
+		}
 		return withBuiltinVocabularies(listing), nil
 	}
 	pins, err := validate.LoadPinnedVocabularies(path, blobDir)
@@ -86,7 +110,7 @@ func (r DuckDBRunner) Vocabularies(_ context.Context) (VocabularyListing, error)
 		return VocabularyListing{}, err
 	}
 	var imports []string
-	if ontology := projectOntology(); ontology != nil {
+	if ontology := projectOntology(path, r.DataRoot != ""); ontology != nil {
 		imports = ontology.Imports
 	}
 	for _, id := range pins.IDs() {

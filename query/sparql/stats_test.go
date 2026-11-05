@@ -149,7 +149,7 @@ func TestInfoSQLEscapesSingleQuotesInTablePath(t *testing.T) {
 	query, err := infoSQL("column-stats", "/tmp/o'brien/triples", "")
 
 	require.NoError(t, err)
-	require.Contains(t, query, "iceberg_column_stats('/tmp/o''brien/triples')")
+	require.Contains(t, query, "iceberg_column_stats('/tmp/o''brien/triples', allow_moved_paths = true)")
 }
 
 func TestCountsSQLCountsDistinctObjectsAcrossTheTypedColumns(t *testing.T) {
