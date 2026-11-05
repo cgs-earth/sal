@@ -2,6 +2,7 @@ package initialization
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,9 +13,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	_ "embed"
 
+	"github.com/cgs-earth/sal/build/validate"
 	"github.com/cgs-earth/sal/edit"
 	"github.com/cgs-earth/sal/importation"
 	"github.com/cgs-earth/sal/pkg"
@@ -26,14 +29,15 @@ import (
 var salConfigTemplate string
 
 type InitCmd struct {
-	Description string `arg:"--description" help:"a sentence or two describing the project, recorded in .sal/config.jsonld; asked for when not given"`
-	SalModule   bool   `arg:"--salmodule" help:"also scaffold the files a SAL module needs: ontology.jsonld, Dockerfile, and .dockerignore"`
-	Bare        bool   `arg:"--bare" help:"with --salmodule, answer no questions and leave the task class blank"`
-	UI          bool   `arg:"--ui" help:"with --salmodule, open the browser form that writes ontology.jsonld even where sal would not on its own (CI, an SSH session, no terminal or display)"`
-	NoUI        bool   `arg:"--no-ui" help:"with --salmodule, answer the questions at the prompt instead of opening the browser form"`
-	WithIaC     bool   `arg:"--with-iac" help:"also write the Terraform configuration sal terraform generates, deploying the data product on Google Cloud, into terraform/"`
-	Skills      bool   `arg:"--skills" help:"in a project that is already initialized, only install (or update) the SAL agent skills in .claude/skills and .agents/skills; a new project or module gets them anyway"`
-	NoSkills    bool   `arg:"--no-skills" help:"do not install the SAL agent skills"`
+	Description    string `arg:"--description" help:"a sentence or two describing the project, recorded in .sal/config.jsonld; asked for when not given"`
+	SalModule      bool   `arg:"--salmodule" help:"also scaffold the files a SAL module needs: ontology.jsonld, Dockerfile, and .dockerignore"`
+	Bare           bool   `arg:"--bare" help:"with --salmodule, answer no questions and leave the task class blank"`
+	UI             bool   `arg:"--ui" help:"with --salmodule, open the browser form that writes ontology.jsonld even where sal would not on its own (CI, an SSH session, no terminal or display)"`
+	NoUI           bool   `arg:"--no-ui" help:"with --salmodule, answer the questions at the prompt instead of opening the browser form"`
+	WithIaC        bool   `arg:"--with-iac" help:"also write the Terraform configuration sal terraform generates, deploying the data product on Google Cloud, into terraform/"`
+	Skills         bool   `arg:"--skills" help:"in a project that is already initialized, only install (or update) the SAL agent skills in .claude/skills and .agents/skills; a new project or module gets them anyway"`
+	NoSkills       bool   `arg:"--no-skills" help:"do not install the SAL agent skills"`
+	NoVocabularies bool   `arg:"--no-vocabularies" help:"do not download the common vocabularies (schema.org, Dublin Core, SOSA, QUDT, ...) into .sal/data/blobs for offline builds"`
 }
 
 // ErrIaCWithSalModule is returned when --with-iac is passed with --salmodule,
@@ -208,6 +212,10 @@ func (cmd *InitCmd) Run() error {
 		}
 	}
 
+	if !cmd.SalModule && !cmd.NoVocabularies {
+		seedVocabularies(cwd)
+	}
+
 	home, err = os.UserHomeDir()
 	if err != nil {
 		return err
@@ -270,6 +278,24 @@ func (cmd *InitCmd) Run() error {
 
 	slog.Info("SAL project initialized at " + cwd)
 	return nil
+}
+
+// seedVocabularies downloads the common vocabularies into the project's blob
+// directory (validate.SeedVocabularies), so that a build using one needs no
+// network and a flaky vocabulary host cannot fail it. They are not pinned:
+// .sal/config.jsonld lists only the vocabularies a build actually uses. The
+// project is initialized by now, so a failure only warns; a build fetches
+// whatever was not seeded.
+func seedVocabularies(dir string) {
+	blobDir := filepath.Join(dir, ".sal", "data", "blobs")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	seeded, err := validate.SeedVocabularies(ctx, blobDir)
+	if err != nil {
+		slog.Warn("could not store the common vocabularies for offline builds; a build fetches each vocabulary it uses", "error", err)
+		return
+	}
+	slog.Info("Stored common vocabularies for offline builds", "count", len(seeded), "directory", blobDir)
 }
 
 // installSkills installs the named agent skill into the project or module,

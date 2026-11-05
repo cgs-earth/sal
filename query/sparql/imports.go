@@ -37,8 +37,10 @@ func LocateImportedTables() []ImportedTable {
 		return nil
 	}
 	var imports []string
-	if ontology := projectOntology(); ontology != nil {
-		imports = ontology.Imports
+	if path, err := pkg.SalConfigPath(); err == nil {
+		if ontology := projectOntology(path, false); ontology != nil {
+			imports = ontology.Imports
+		}
 	}
 	return importedTables(importsDir, imports)
 }

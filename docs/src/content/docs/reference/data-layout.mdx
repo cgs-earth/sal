@@ -261,4 +261,15 @@ The artifact metadata records the source repository and commit, which lets [`sal
 For object stores, SAL rewrites a staged copy of the Iceberg metadata so table paths point to the remote table root.
 The local `.sal/data` directory is not changed by upload.
 
+An upload to a bare bucket (`gs://my-bucket/`) keeps the layout of `.sal/data` and adds the project's config:
+
+```text
+config.jsonld              copy of .sal/config.jsonld (project node and pins)
+<project>/triples/         the Iceberg table (metadata/ and data/)
+blobs/                     pinned vocabulary documents and files modules handed over
+stac/                      the STAC catalog
+```
+
+[`sal serve --data`](/sal/reference/commands/#serving-an-uploaded-copy) accepts a copy of that directory, a copy of `.sal/data`, and an upload to an explicit table root.
+
 For examples, see [Publishing Data](/sal/guides/publishing-data/).

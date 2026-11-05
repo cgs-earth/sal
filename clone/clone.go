@@ -108,7 +108,7 @@ func initializeSALProject(ctx context.Context, repoDir string, description strin
 	if err != nil {
 		return fmt.Errorf("locate sal executable: %w", err)
 	}
-	return run(ctx, repoDir, salPath, "init", "--description", description)
+	return run(ctx, repoDir, salPath, "init", "--description", description, "--no-vocabularies")
 }
 
 // projectDescription is the description the project pulled from an

@@ -50,37 +50,23 @@ func (cfg *RewriteCmd) Run() error {
 	return nil
 }
 
-// IcebergTablePaths finds Iceberg table directories inside a built SAL data product.
+// IcebergTablePaths finds Iceberg table directories inside a built SAL data
+// product, at any depth: the data product itself when it is a table root, or
+// the `<namespace>/<table>` directories `sal build` and `sal upload` lay out.
+// It is pkg.IcebergTablePaths with an error for a directory holding none, so
+// every command agrees on what a table is.
 func IcebergTablePaths(dataProductPath string) ([]string, error) {
-	if hasMetadataDir(dataProductPath) {
-		return []string{dataProductPath}, nil
-	}
-
-	entries, err := os.ReadDir(dataProductPath)
-	if err != nil {
+	if _, err := os.Stat(dataProductPath); err != nil {
 		return nil, fmt.Errorf("read SAL data product %s: %w", dataProductPath, err)
 	}
-
-	var tables []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		candidate := filepath.Join(dataProductPath, entry.Name())
-		if hasMetadataDir(candidate) {
-			tables = append(tables, candidate)
-		}
+	tables, err := pkg.IcebergTablePaths(dataProductPath)
+	if err != nil {
+		return nil, err
 	}
 	if len(tables) == 0 {
 		return nil, fmt.Errorf("no Iceberg table metadata found in %s", dataProductPath)
 	}
-
 	return tables, nil
-}
-
-func hasMetadataDir(tablePath string) bool {
-	info, err := os.Stat(filepath.Join(tablePath, "metadata"))
-	return err == nil && info.IsDir()
 }
 
 // RewriteIcebergTableRoot updates Iceberg metadata files so a copied table can be read from newRoot.

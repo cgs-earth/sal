@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,9 @@ type TriplesTable struct {
 	Warehouse string
 	Namespace string
 	Path      string
+	// DataRoot is set for a table found in a copy of .sal/data: the directory
+	// holding its blobs/, stac/, and config.jsonld.
+	DataRoot string
 	// Imports are the triples tables of the OCI artifacts the project imports,
 	// which queries reach through a view named after each artifact.
 	Imports []ImportedTable
@@ -61,8 +65,11 @@ func LocateTriplesTable() (TriplesTable, error) {
 
 // LocateDataDirTable resolves the triples table inside a copy of a project's
 // .sal/data directory that is not the project's own, such as a bucket `sal
-// upload` wrote mounted into a container: the one directory under it, or
-// the directory itself, that holds an Iceberg metadata directory. The table
+// upload` wrote mounted into a container: the one directory, at any depth
+// (`<project>/triples` in a bucket-root upload), or the directory itself when
+// it is a table root, that holds an Iceberg metadata directory. Tables under
+// `blobs/` (files a module handed over) and `imports/` (imported data
+// products) are not the one being served. The table
 // is named by its path alone, like a table on object storage, so Runner
 // verifies it through DuckDB rather than through a catalog over the
 // warehouse, and iceberg_scan's allow_moved_paths reads it wherever the
@@ -72,14 +79,27 @@ func LocateDataDirTable(dataDir string) (TriplesTable, error) {
 	if err != nil {
 		return TriplesTable{}, err
 	}
-	tables, err := rewrite.IcebergTablePaths(dataDir)
+	found, err := rewrite.IcebergTablePaths(dataDir)
 	if err != nil {
 		return TriplesTable{}, err
+	}
+	var tables []string
+	for _, table := range found {
+		rel, err := filepath.Rel(dataDir, table)
+		if err != nil {
+			return TriplesTable{}, err
+		}
+		if top, _, _ := strings.Cut(filepath.ToSlash(rel), "/"); top != "blobs" && top != "imports" {
+			tables = append(tables, table)
+		}
+	}
+	if len(tables) == 0 {
+		return TriplesTable{}, fmt.Errorf("no Iceberg table metadata found in %s", dataDir)
 	}
 	if len(tables) > 1 {
 		return TriplesTable{}, fmt.Errorf("%s holds %d Iceberg tables, %s; a data directory serves one", dataDir, len(tables), strings.Join(tables, ", "))
 	}
-	return TriplesTable{Path: tables[0]}, nil
+	return TriplesTable{Path: tables[0], DataRoot: dataRoot(dataDir, tables[0])}, nil
 }
 
 // Runner opens a DuckDB runner over the table, after checking that the table
@@ -90,7 +110,7 @@ func (t TriplesTable) Runner(ctx context.Context, limit int) (DuckDBRunner, erro
 		if err := VerifyRemoteObjectColumns(ctx, t.Path); err != nil {
 			return DuckDBRunner{}, err
 		}
-		return DuckDBRunner{TablePath: t.Path, Limit: limit}, nil
+		return DuckDBRunner{TablePath: t.Path, Limit: limit, DataRoot: t.DataRoot}, nil
 	}
 	if err := VerifyObjectColumns(ctx, t.Warehouse, t.Namespace); errors.Is(err, catalog.ErrNoSuchTable) {
 		return DuckDBRunner{}, NoTriplesTableError{Path: t.Path}
@@ -136,4 +156,28 @@ func joinRemote(base string, parts ...string) string {
 		return strings.TrimSuffix(base, "/")
 	}
 	return strings.TrimSuffix(base, "/") + "/" + joined
+}
+
+// dataRoot finds the directory that holds the blobs/ and stac/ of the data
+// product whose table is at tablePath inside dataDir. A copy of .sal/data or
+// a bucket-root upload has them beside the namespace directory, above the
+// table (`<root>/<project>/triples`), while an explicit-table-root upload has
+// the table at dataDir itself. It is the nearest directory from the table up
+// to dataDir that holds either one, and dataDir when none does.
+func dataRoot(dataDir string, tablePath string) string {
+	dir := tablePath
+	if dir != dataDir {
+		dir = filepath.Dir(dir)
+	}
+	for {
+		for _, name := range []string{"blobs", "stac"} {
+			if info, err := os.Stat(filepath.Join(dir, name)); err == nil && info.IsDir() {
+				return dir
+			}
+		}
+		if dir == dataDir || dir == filepath.Dir(dir) {
+			return dataDir
+		}
+		dir = filepath.Dir(dir)
+	}
 }

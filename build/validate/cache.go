@@ -3,12 +3,16 @@ package validate
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/pkg/telemetry"
@@ -317,26 +321,72 @@ func fetchVocabularyDocument(ctx context.Context, u string) ([]byte, string, Pin
 		return document, mediaType, PinnedVersion{Scheme: gitCommitVersionScheme, Value: commitHash}, nil
 	}
 
+	var lastErr error
+	for attempt := 1; attempt <= vocabularyFetchAttempts; attempt++ {
+		body, mediaType, retry, err := fetchOnce(ctx, u)
+		if err == nil {
+			return body, mediaType, PinnedVersion{}, nil
+		}
+		lastErr = err
+		if !retry || attempt == vocabularyFetchAttempts || ctx.Err() != nil {
+			break
+		}
+		wait := vocabularyFetchBackoff << (attempt - 1)
+		slog.Warn("fetching a vocabulary failed; trying again", "url", u, "attempt", attempt, "retry_in", wait, "error", err)
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+		}
+	}
+	if isNetworkError(lastErr) {
+		return nil, "", PinnedVersion{}, fmt.Errorf("the vocabulary host for %s could not be reached after %d attempts: %w; run `sal init` on a network that can reach it to seed the common vocabularies, or place the document under .sal/data/blobs and pin it in .sal/config.jsonld", u, vocabularyFetchAttempts, lastErr)
+	}
+	return nil, "", PinnedVersion{}, lastErr
+}
+
+// vocabularyFetchAttempts and vocabularyFetchBackoff bound how a vocabulary
+// fetch is retried: a connection error, a timeout, or a 5xx or 429 answer is
+// tried again after one, then two, then four times the backoff, and any other
+// answer is final. Tests zero the backoff.
+const vocabularyFetchAttempts = 4
+
+var (
+	vocabularyFetchBackoff = time.Second
+	vocabularyFetchTimeout = 30 * time.Second
+)
+
+// fetchOnce makes one request for a vocabulary document. retry reports
+// whether a failure is worth another attempt.
+func fetchOnce(ctx context.Context, u string) (body []byte, mediaType string, retry bool, err error) {
+	ctx, cancel := context.WithTimeout(ctx, vocabularyFetchTimeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, http.NoBody)
 	if err != nil {
-		return nil, "", PinnedVersion{}, err
+		return nil, "", false, err
 	}
 	req.Header.Set("Accept", "application/ld+json, application/json;q=0.9, text/turtle;q=0.8, application/rdf+xml;q=0.7, text/plain;q=0.6, */*;q=0.1")
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, "", PinnedVersion{}, err
+		return nil, "", true, err
 	}
 	defer func() { _ = res.Body.Close() }()
 
-	body, err := io.ReadAll(res.Body)
+	body, err = io.ReadAll(res.Body)
 	if err != nil {
-		return nil, "", PinnedVersion{}, err
+		return nil, "", true, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, "", PinnedVersion{}, fmt.Errorf("bad response status code: %d", res.StatusCode)
+		return nil, "", res.StatusCode >= 500 || res.StatusCode == http.StatusTooManyRequests, fmt.Errorf("bad response status code: %d", res.StatusCode)
 	}
-	return body, res.Header.Get("Content-Type"), PinnedVersion{}, nil
+	return body, res.Header.Get("Content-Type"), false, nil
+}
+
+// isNetworkError reports whether err is the transport failing to reach the
+// host, rather than the host answering with an error.
+func isNetworkError(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func looksLikeJSON(body []byte) bool {

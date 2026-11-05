@@ -2,13 +2,16 @@ package initialization
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/cgs-earth/sal/build/validate"
 	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/pkg/skillstest"
 	"github.com/cgs-earth/sal/salmodule"
@@ -42,6 +45,13 @@ func newGitRepo(t *testing.T) string {
 	if pkg.SkillsRepository == skillsRepositoryDefault {
 		skillstest.NewRepository(t, "sal", "salmodule")
 	}
+	// the common vocabularies are never downloaded; a test about them serves
+	// its own through seedVocabularies
+	previousSeedFetch := validate.SeedFetch
+	validate.SeedFetch = func(context.Context, string) ([]byte, string, validate.PinnedVersion, error) {
+		return nil, "", validate.PinnedVersion{}, errors.New("offline in tests")
+	}
+	t.Cleanup(func() { validate.SeedFetch = previousSeedFetch })
 	// the prompts read nothing rather than the terminal unless a test answers
 	// them, and a module is initialized at the prompt rather than in a browser
 	answerPrompts(t)
@@ -588,4 +598,49 @@ func TestInitInstallsSkillsIntoAnInitializedProject(t *testing.T) {
 	require.NoError(t, (&InitCmd{Skills: true}).Run())
 
 	require.True(t, skillInstalled(t, dir, "sal"))
+}
+
+// serveEveryVocabulary serves one document that defines a class in every
+// common namespace, whichever of them is asked for.
+func serveEveryVocabulary(context.Context, string) ([]byte, string, validate.PinnedVersion, error) {
+	var doc strings.Builder
+	doc.WriteString("@prefix owl: <http://www.w3.org/2002/07/owl#> .\n")
+	for _, namespace := range validate.CommonVocabularies {
+		doc.WriteString("<" + namespace + "Thing> a owl:Class .\n")
+	}
+	return []byte(doc.String()), "text/turtle", validate.PinnedVersion{}, nil
+}
+
+// Init stores the common vocabularies under .sal/data/blobs for offline
+// builds, but pins none of them: the vocabularies listed in
+// .sal/config.jsonld are the ones a build uses.
+func TestInitSeedsTheCommonVocabulariesWithoutPinningThem(t *testing.T) {
+	dir := newGitRepo(t)
+	validate.SeedFetch = serveEveryVocabulary
+	require.NoError(t, (&InitCmd{Description: "A test project showing off sal features on a small dataset"}).Run())
+
+	blobDir := filepath.Join(dir, ".sal", "data", "blobs")
+	require.FileExists(t, filepath.Join(blobDir, validate.SeedFile))
+	entries, err := os.ReadDir(blobDir)
+	require.NoError(t, err)
+	require.Len(t, entries, 2, "the one document every vocabulary was served as, and the seed index")
+
+	doc := readProjectConfig(t, dir)
+	require.Len(t, doc.Graph, 1, "only the project node; nothing is pinned until a build uses a vocabulary")
+}
+
+func TestInitStillSucceedsWhenTheVocabulariesCannotBeDownloaded(t *testing.T) {
+	dir := newGitRepo(t)
+	require.NoError(t, (&InitCmd{Description: "A test project showing off sal features on a small dataset"}).Run())
+	require.FileExists(t, filepath.Join(dir, ".sal", "config.jsonld"))
+}
+
+func TestInitWithNoVocabulariesDownloadsNothing(t *testing.T) {
+	dir := newGitRepo(t)
+	validate.SeedFetch = func(context.Context, string) ([]byte, string, validate.PinnedVersion, error) {
+		require.Fail(t, "nothing should be downloaded")
+		return nil, "", validate.PinnedVersion{}, nil
+	}
+	require.NoError(t, (&InitCmd{Description: "A test project showing off sal features on a small dataset", NoVocabularies: true}).Run())
+	require.NoDirExists(t, filepath.Join(dir, ".sal", "data", "blobs"))
 }

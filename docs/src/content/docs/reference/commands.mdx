@@ -46,6 +46,10 @@ The node is the project itself, resolved against the base IRI the git remote giv
 
 `sal init` also installs the [agent skill](/sal/guides/agent-skills/) that teaches Claude Code, Codex, and other coding agents how to work with the repository: the `sal` skill for a project, the `salmodule` skill for a module. The skill is downloaded from the sal repository with git and copied into both `.claude/skills/<name>` (where Claude Code reads it) and `.agents/skills/<name>` (where agents following the Agent Skills convention read it); the copies are identical, and both belong in git so the whole team's agents see them. `--no-skills` skips it. A download that fails, offline say, is a warning rather than a failed init; `sal init --skills` in an initialized project installs the skill and nothing else, which is also how to update it.
 
+### Common vocabularies
+
+A new project also gets the common vocabularies downloaded into `.sal/data/blobs`, so a build that uses one needs no network and a vocabulary publisher that is slow or unreachable from where the build runs cannot fail it: RDF, RDFS, OWL, Dublin Core terms and elements, schema.org, SOSA, SSN, QUDT, SKOS, FOAF, PROV-O, DCAT, GeoSPARQL, OWL-Time, and SHACL. They are **seeded, not pinned**: `.sal/data/blobs/seed.jsonld` indexes the documents by digest, and `.sal/config.jsonld` lists a vocabulary only once a build uses it, at which point the build pins the seeded document instead of fetching it (`--no-cache` ignores the seeds and fetches from the publisher). A document that cannot be downloaded or is not RDF is skipped with a warning and fetched by a build if it is ever used. `--no-vocabularies` skips the download. A fetch a build does make is retried up to four times with backoff on a network error, timeout, or 5xx answer, and an unreachable host is reported with how to seed the vocabulary instead.
+
 ### `sal init --with-iac`
 
 `--with-iac` also writes the Terraform configuration [`sal terraform`](#sal-terraform) generates into `terraform/`, so a project starts with the deployment the `Makefile`'s `make apply` runs. A `terraform/` that already holds a configuration is left alone.
@@ -873,7 +877,16 @@ Enabling the UI also exposes the JSON endpoints it reads:
 sal serve --data /mnt/sal
 ```
 
-The directory holds one Iceberg table, found by its `metadata` directory under the project's name, plus the `blobs` and `stac` directories beside it, which is the layout `sal upload` writes to a bucket root. The table is read through DuckDB's `iceberg_scan` with `allow_moved_paths`, so the paths its metadata records, the bucket's, need no rewriting. This is what the Cloud Run service [`sal terraform`](#sal-terraform) deploys runs.
+The directory is any of the three layouts an upload or a copy of `.sal/data` has, and `sal serve` finds the table and the files beside it for each:
+
+| Layout | Where the table is | `blobs/`, `stac/`, `config.jsonld` |
+| --- | --- | --- |
+| a copy of `.sal/data`, or a bucket-root upload (`sal upload --bucket gs://my-bucket/`) | `<project>/triples`, two levels down | at the directory's top, beside `<project>/` |
+| an upload to an explicit table root (`--bucket gs://my-bucket/sal/triples`, or a `file://` destination) | the directory itself | only what the upload carried: the table, and `config.jsonld` |
+
+The table is the one directory, at any depth, holding a `metadata/` directory with a `*.metadata.json` file; tables under `blobs/` and `imports/` are not it, and more than one table is an error. `blobs/` and `stac/` are looked for beside the table's namespace directory and then upward to the directory named. The table is read through DuckDB's `iceberg_scan`, `iceberg_metadata`, and `iceberg_column_stats` with `allow_moved_paths`, so the `gs://` paths its uploaded metadata records need no rewriting (`sal rewrite` is not needed) and no credentials or network.
+
+`sal upload` also copies the project's `.sal/config.jsonld` to the top of the upload. A served data directory reads it for the project's title and description and for the vocabularies the project pins, which the Vocabularies tab and `/api/vocabularies` list from the `blobs/` beside it; there is no project above the directory to read them from otherwise. A copy without it, such as one uploaded by an older sal, lists only the built-in vocabularies and logs a warning saying so. This is what the Cloud Run service [`sal terraform`](#sal-terraform) deploys runs.
 
 ## `sal push`
 
@@ -935,7 +948,7 @@ Uploads the built data product to an object store:
 sal upload --bucket gs://my-bucket/sal/triples
 ```
 
-SAL stages a temporary copy, rewrites staged Iceberg metadata to point at the target location, then uploads data and metadata in reader-friendly order.
+SAL stages a temporary copy, rewrites staged Iceberg metadata to point at the target location, then uploads data and metadata in reader-friendly order. The project's `.sal/config.jsonld`, which sits beside `.sal/data`, is uploaded at the top of the destination so [`sal serve --data`](#serving-an-uploaded-copy) can name the project and list its pinned vocabularies; a bare bucket (`gs://my-bucket/`) gets the whole `.sal/data` layout, `<project>/triples/` with `blobs/` and `stac/` beside it.
 See [Publishing Data](/sal/guides/publishing-data/#upload-to-object-storage).
 
 ## `sal rewrite`

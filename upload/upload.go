@@ -171,11 +171,38 @@ func stagedDataDirForDeploy(dataDir string, bucketURL string) (string, func(), e
 		cleanup()
 		return "", func() {}, err
 	}
+	if err := stageProjectConfig(dataDir, stagedDataDir); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
 	if err := rewriteStagedIcebergRoots(stagedDataDir, bucketURL); err != nil {
 		cleanup()
 		return "", func() {}, err
 	}
 	return stagedDataDir, cleanup, nil
+}
+
+// stageProjectConfig copies the project's .sal/config.jsonld, which sits
+// beside .sal/data rather than in it, to the top of the staged copy so the
+// bucket carries it next to the table: it names the vocabularies the project
+// pins and the project's title and description, which a server of the copy
+// (`sal serve --data`) has no project around it to read them from. A data
+// directory that is not a project's .sal/data, or a project without the file,
+// stages nothing.
+func stageProjectConfig(dataDir string, stagedDataDir string) error {
+	configDir := filepath.Dir(dataDir)
+	if filepath.Base(configDir) != ".sal" {
+		return nil
+	}
+	source := filepath.Join(configDir, "config.jsonld")
+	info, err := os.Stat(source)
+	if os.IsNotExist(err) || (err == nil && !info.Mode().IsRegular()) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return copyFile(source, filepath.Join(stagedDataDir, "config.jsonld"), info.Mode())
 }
 
 // deployUploadRoot returns the directory whose contents should be uploaded to the provided bucket URL.
