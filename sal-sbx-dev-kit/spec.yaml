@@ -1,67 +1,101 @@
+# syntax=docker/sandbox-kit:3
 # This is a minimal kit specification for the Docker sandbox
 # that allows sal to test against real live ontologies
 # without giving full network access.
-schemaVersion: "2"
+#
+# Schema version 3: everything beyond the kit's identity is a capability,
+# `type: com.docker.sandbox/<name>@<version>`, replacing v2's top-level
+# `permissions` and `setup` blocks. Network entries are `host:port`.
+schemaVersion: "3"
 kind: mixin
-name: sal-sbx-dev-kit
 displayName: SAL Dev Kit
 description: "Network access for the RDF vocabularies sal's tests dereference"
 
-permissions:
-  network:
-    allow:
-      # RDF/OWL/RDFS/SHACL/XSD, and the SKOS, DCAT, PROV, SOSA and SSN namespaces.
-      # www.w3.org is what every http://www.w3.org/... namespace redirects to over
-      # https, and is what currently fails TestValidateSALModuleOntology.
-      - www.w3.org
-      - w3.org
+capabilities:
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      # The install phase has its own allowlist: it is open only while the
+      # install hooks run and closed before the agent starts, so the runtime
+      # list below does not cover `apt-get`.
+      install:
+        allow:
+          # Debian and Docker Hardened Images apt mirrors, both plain http.
+          - deb.debian.org:80
+          - dhi.io:80
+      runtime:
+        allow:
+          # RDF/OWL/RDFS/SHACL/XSD, and the SKOS, DCAT, PROV, SOSA and SSN namespaces.
+          # www.w3.org is what every http://www.w3.org/... namespace redirects to over
+          # https, and is what currently fails TestValidateSALModuleOntology.
+          # The namespaces are dereferenced over http first, so both ports are open.
+          - www.w3.org:80
+          - www.w3.org:443
+          - w3.org:80
+          - w3.org:443
 
-      # Dublin Core. purl.org 303s to dublincore.org for /dc/elements and /dc/terms.
-      - purl.org
-      - purl.archive.org
-      - dublincore.org
-      - www.dublincore.org
+          # Dublin Core. purl.org 303s to dublincore.org for /dc/elements and /dc/terms.
+          - purl.org:80
+          - purl.org:443
+          - purl.archive.org:443
+          - dublincore.org:80
+          - dublincore.org:443
+          - www.dublincore.org:80
+          - www.dublincore.org:443
 
-      # w3id.org is a redirector; the SAL Module spec it serves is hosted on
-      # GitHub Pages, so the target host has to be allowed as well as w3id.org.
-      - w3id.org
-      - cgs-earth.github.io
-      - raw.githubusercontent.com
-      - github.com
+          # w3id.org is a redirector; the SAL Module spec it serves is hosted on
+          # GitHub Pages, so the target host has to be allowed as well as w3id.org.
+          - w3id.org:80
+          - w3id.org:443
+          - cgs-earth.github.io:443
+          - raw.githubusercontent.com:443
+          - github.com:443
 
-      # schema.org serves HTML to SAL's Accept header, so validation falls back to
-      # the bundled copy in build/vocab. Allowed anyway so the fetch fails on
-      # content type rather than on policy.
-      - schema.org
+          # schema.org serves HTML to SAL's Accept header, so validation falls back to
+          # the bundled copy in build/vocab. Allowed anyway so the fetch fails on
+          # content type rather than on policy.
+          - schema.org:80
+          - schema.org:443
 
-      # GeoSPARQL, Simple Features, and the HY_Features application schema.
-      - www.opengis.net
-      - opengis.net
-      - schemas.opengis.net
-      - docs.opengeospatial.org
+          # GeoSPARQL, Simple Features, and the HY_Features application schema.
+          - www.opengis.net:80
+          - www.opengis.net:443
+          - opengis.net:80
+          - opengis.net:443
+          - schemas.opengis.net:80
+          - schemas.opengis.net:443
+          - docs.opengeospatial.org:443
 
-      # Vocabularies used by the example projects and build testdata.
-      - geoconnex.us
-      - qudt.org
-      - vocabulary.odm2.org
-      - hyfo.spatialai.org
-      - nhdplusv2.spatialai.org
+          # Vocabularies used by the example projects and build testdata.
+          - geoconnex.us:80
+          - geoconnex.us:443
+          - qudt.org:80
+          - qudt.org:443
+          - vocabulary.odm2.org:443
+          - hyfo.spatialai.org:443
+          - nhdplusv2.spatialai.org:443
 
-      # DuckDB downloads its extensions on first use; `sal duckdb-extensions`
-      # primes that cache and every query path depends on it.
-      - extensions.duckdb.org
+          # DuckDB downloads its extensions on first use; `sal duckdb-extensions`
+          # primes that cache and every query path depends on it.
+          - extensions.duckdb.org:443
 
-      # Headless Chromium, for screenshotting the docs site and the `sal serve`
-      # UI. cdn.playwright.dev is what `playwright install` resolves first; it
-      # redirects to the prss.microsoft.com CDN that serves the actual build,
-      # and falls back to azureedge.net on older releases.
-      - cdn.playwright.dev
-      - playwright.download.prss.microsoft.com
-      - playwright.azureedge.net
+          # Headless Chromium, for screenshotting the docs site and the `sal serve`
+          # UI. cdn.playwright.dev is what `playwright install` resolves first; it
+          # redirects to the prss.microsoft.com CDN that serves the actual build,
+          # and falls back to azureedge.net on older releases.
+          - cdn.playwright.dev:443
+          - playwright.download.prss.microsoft.com:443
+          - playwright.azureedge.net:443
 
-setup:
-  install:
-    - command: "sudo apt-get install -y gcc libc6-dev g++ ripgrep"
-    # default agent user
-      user: "1000"
-      description: Install build dependencies
+          # Codex, used as a background reviewer. chatgpt.com serves the install
+          # script and the ChatGPT backend, api.openai.com the Responses API, and
+          # auth.openai.com the login flow.
+          - chatgpt.com:443
+          - api.openai.com:443
+          - auth.openai.com:443
+
+  - type: com.docker.sandbox/lifecycle@1
+    config:
+      install:
+        # install hooks run as root by default, so no sudo
+        - command: "apt-get update -qq && apt-get install -y gcc libc6-dev g++ ripgrep"
+          description: Install build dependencies

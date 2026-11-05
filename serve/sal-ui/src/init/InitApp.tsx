@@ -45,7 +45,7 @@ export function InitApp() {
       <header className="app-header">
         <div className="brand">
           <a className="brand-mark" href="https://cgs-earth.github.io/sal/" target="_blank" rel="noreferrer" title="SAL documentation">
-            SAL
+            <img className="brand-logo" src="/logo.svg" alt="SAL" />
           </a>
           <span className="brand-sub">{status?.mode === 'edit' ? 'module edit' : 'module init'}</span>
         </div>

@@ -30,18 +30,26 @@
   min-width: 0;
 }
 
-/* The mark wears the brand gradient, Fluvial Blue into Continental Green, with
-   Cream lettering; the same in both themes, since the gradient is the brand. */
+/* The mark is the SAL logo with "SAL UI" beside it, drawn straight on the header; the logo's blue and
+   teal read the same on both themes. */
 .brand-mark {
-  font-family: var(--font-display);
-  font-size: 20px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  color: var(--cgs-cream);
-  background: var(--gradient-brand);
-  padding: 2px 10px;
-  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   text-decoration: none;
+}
+
+.brand-name {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.brand-logo {
+  height: 36px;
+  width: 36px;
 }
 
 /* The mark links to the documentation; it brightens rather than underlining. */
