@@ -62,7 +62,8 @@ export function App() {
       <header className="app-header">
         <div className="brand">
           <a className="brand-mark" href="https://cgs-earth.github.io/sal/" target="_blank" rel="noreferrer" title="SAL documentation">
-            SAL
+            <img className="brand-logo" src="/logo.svg" alt="SAL" />
+            <span className="brand-name">SAL UI</span>
           </a>
         </div>
         <div className="header-actions">

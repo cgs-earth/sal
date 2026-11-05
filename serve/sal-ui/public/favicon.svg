@@ -1,17 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <defs>
-    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#2c84b9" />
-      <stop offset="1" stop-color="#46ab9d" />
-    </linearGradient>
-  </defs>
-  <rect width="64" height="64" rx="14" fill="url(#brand)" />
-  <g stroke="#fefcf5" stroke-opacity="0.55" stroke-width="3" stroke-linecap="round">
-    <line x1="20" y1="20" x2="44" y2="26" />
-    <line x1="20" y1="20" x2="26" y2="46" />
-    <line x1="44" y1="26" x2="26" y2="46" />
-  </g>
-  <circle cx="20" cy="20" r="7" fill="#fefcf5" />
-  <circle cx="44" cy="26" r="7" fill="#f9c609" />
-  <circle cx="26" cy="46" r="7" fill="#c9dee8" />
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><g transform="translate(16 23) scale(1.13) translate(-16.4 -23)"><path fill="#2C84B9" d="M5.5 23 12.6 11.4 14.9 13.4 18.4 5.6 26.5 23Z"/><path stroke="#FEFCF5" stroke-width="1.4" stroke-linecap="round" d="M18.4 9.2 14.4 16.6M18.4 9.2l2.6 8M14.4 16.6l6.6.4"/><circle fill="#FEFCF5" cx="14.4" cy="16.6" r="1.75"/><circle fill="#FEFCF5" cx="21" cy="17" r="1.75"/><circle fill="#FEFCF5" stroke="#2C84B9" stroke-width="1.6" cx="18.4" cy="7.4" r="2.35"/></g><path fill="#C9DEE8" d="M1.5 23.2c4.2-1.9 8.6-.9 14.5-1.3s10.2-.9 14.5 1v2.9a1.4 1.4 0 0 1-1.4 1.4H2.9a1.4 1.4 0 0 1-1.4-1.4Z"/><path fill="none" stroke="#46AB9D" stroke-width="1.6" stroke-linecap="round" d="M1.5 23.2c4.2-1.9 8.6-.9 14.5-1.3s10.2-.9 14.5 1"/></svg>

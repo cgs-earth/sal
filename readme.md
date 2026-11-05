@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/public/favicon.svg" alt="SAL logo" width="80" height="80">
+  <img src="docs/public/logo.svg" alt="SAL logo" width="80" height="80">
 </p>
 
 <h1 align="center">SAL</h1>
