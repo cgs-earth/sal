@@ -1,10 +1,9 @@
-<p align="center">
-  <img src="docs/public/logo.svg" alt="SAL logo" width="80" height="80">
-</p>
+<h1 align="center">
+  <img src="docs/public/logo.svg" alt="SAL logo" width="64" height="64" align="absmiddle">
+  SAL
+</h1>
 
-<h1 align="center">SAL</h1>
-
-<p align="center">The Semantic Accessibility Layer — build, validate, and deploy RDF data products.</p>
+<p align="center">Build, validate, query, and publish RDF data products from source-controlled datasets stored as Apache Iceberg tables</p>
 
 <p align="center">
   <a href="https://cgs-earth.github.io/sal/">Documentation</a> ·
