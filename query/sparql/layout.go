@@ -149,6 +149,11 @@ func (r DuckDBRunner) Layout(ctx context.Context) (*TableLayout, error) {
 	if err != nil {
 		return nil, err
 	}
+	return r.layoutAt(ctx, metadataFile)
+}
+
+// layoutAt reads the table's layout at the given metadata file.
+func (r DuckDBRunner) layoutAt(ctx context.Context, metadataFile string) (*TableLayout, error) {
 	metadata, err := r.RunSQL(ctx, fmt.Sprintf(`
 SELECT content FROM read_text('%s')
 ORDER BY regexp_extract(filename, 'v([0-9]+)\.metadata\.json', 1)::BIGINT DESC

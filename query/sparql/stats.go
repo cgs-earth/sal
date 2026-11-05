@@ -8,10 +8,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/cgs-earth/sal/importation"
 	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/salmodule"
+	"golang.org/x/sync/singleflight"
 )
 
 // TableStats summarizes an Iceberg triples table for the `sal serve --with-ui` stats view.
@@ -57,15 +59,51 @@ var statsSections = []string{"snapshots", "properties"}
 
 // Stats collects the counts, snapshots, table properties, and layout of the triples table.
 //
-// The four queries run one after another on the shared DuckDB handle. They used
-// to be batched into a single duckdb process because starting one cost far more
-// than running them; with DuckDB linked in there is no per query startup left to
-// amortize.
+// What is read from the table is cached per table under the metadata file
+// that is current (statsCache), so a refresh costs one read of the version
+// hint until a build commits a new snapshot; counting the distinct terms of a
+// large table and listing its files is what made every visit to the Stats tab
+// slow. The project's own title, description, and vocabularies come from
+// small files on disk and are read fresh each time.
 func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
+	metadataFile, err := r.latestMetadataFile(ctx)
+	if err != nil {
+		return TableStats{}, err
+	}
+	stats, err := tableStatsCache.get(ctx, r.TablePath, metadataFile, func(ctx context.Context) (TableStats, error) {
+		return r.tableStats(ctx, metadataFile)
+	})
+	if err != nil {
+		return TableStats{}, err
+	}
+	// the vocabulary listing comes from the project's own .sal/config.jsonld,
+	// which says nothing about a table on object storage
+	if !isRemoteTablePath(r.TablePath) {
+		stats.Vocabularies = r.vocabulariesResult()
+		project := r.Project()
+		stats.Title, stats.Description = project.Title, project.Description
+	} else {
+		stats.Vocabularies = Result{Header: importation.VocabularyTableHeader}
+	}
+	stats.ImportedTables = r.Imports
+	if len(r.Imports) > 0 {
+		// cloned so that appending never writes into the cached entry's array
+		stats.SampleQueries = append(slices.Clone(stats.SampleQueries), NamedQuery{
+			Name: "Imported data products",
+			SQL:  ImportedTablesSQL,
+		})
+	}
+	return stats, nil
+}
+
+// tableStats reads everything the stats view reports from the table itself,
+// at the given metadata file: the counts, snapshots, properties, and layout.
+// The statements run one after another on the shared DuckDB handle.
+func (r DuckDBRunner) tableStats(ctx context.Context, metadataFile string) (TableStats, error) {
 	statements := make([]string, 0, len(statsSections)+1)
 	statements = append(statements, countsSQL())
 	for _, section := range statsSections {
-		sql, err := r.InfoSQL(ctx, section)
+		sql, err := infoSQL(section, r.TablePath, metadataFile)
 		if err != nil {
 			return TableStats{}, err
 		}
@@ -84,27 +122,60 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 	if err != nil {
 		return TableStats{}, err
 	}
-	if stats.Layout, err = r.Layout(ctx); err != nil {
+	if stats.Layout, err = r.layoutAt(ctx, metadataFile); err != nil {
 		slog.Warn("reading the table layout for the stats view", "error", err)
 		stats.LayoutError = err.Error()
 	}
-	// the vocabulary listing comes from the project's own .sal/config.jsonld,
-	// which says nothing about a table on object storage
-	if !isRemoteTablePath(r.TablePath) {
-		stats.Vocabularies = r.vocabulariesResult()
-		project := r.Project()
-		stats.Title, stats.Description = project.Title, project.Description
-	} else {
-		stats.Vocabularies = Result{Header: importation.VocabularyTableHeader}
-	}
-	stats.ImportedTables = r.Imports
-	if len(r.Imports) > 0 {
-		stats.SampleQueries = append(stats.SampleQueries, NamedQuery{
-			Name: "Imported data products",
-			SQL:  ImportedTablesSQL,
-		})
-	}
 	return stats, nil
+}
+
+// tableStatsCache is the process-wide cache of what Stats reads from a table.
+var tableStatsCache = &statsCache{entries: map[string]cachedStats{}}
+
+// statsCache holds, per table path, the stats read at the metadata file that
+// was current when they were read. A build commits a new metadata file, so a
+// different current file is what makes an entry stale; only the latest entry
+// per table is kept. A glob, which a local table without a version hint is
+// read through, names no version and is never cached. Concurrent requests for
+// the same table and version share one read.
+type statsCache struct {
+	mu      sync.Mutex
+	entries map[string]cachedStats
+	flight  singleflight.Group
+}
+
+type cachedStats struct {
+	metadataFile string
+	stats        TableStats
+}
+
+// get returns the stats cached for the table at metadataFile, reading them
+// with read when there are none. A failed read is not cached.
+func (c *statsCache) get(ctx context.Context, tablePath string, metadataFile string, read func(context.Context) (TableStats, error)) (TableStats, error) {
+	if strings.Contains(metadataFile, "*") {
+		return read(ctx)
+	}
+	c.mu.Lock()
+	entry, ok := c.entries[tablePath]
+	c.mu.Unlock()
+	if ok && entry.metadataFile == metadataFile {
+		return entry.stats, nil
+	}
+	value, err, _ := c.flight.Do(tablePath+"\x00"+metadataFile, func() (any, error) {
+		// one request giving up must not fail the others waiting on the read
+		stats, err := read(context.WithoutCancel(ctx))
+		if err != nil {
+			return TableStats{}, err
+		}
+		c.mu.Lock()
+		c.entries[tablePath] = cachedStats{metadataFile: metadataFile, stats: stats}
+		c.mu.Unlock()
+		return stats, nil
+	})
+	if err != nil {
+		return TableStats{}, err
+	}
+	return value.(TableStats), nil
 }
 
 // standaloneBase stands in for the project base when a data directory is
