@@ -2,6 +2,7 @@ package sparql
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,4 +182,75 @@ func TestLatestMetadataFileFailsForARemoteTableWithoutAHint(t *testing.T) {
 
 	require.Error(t, err)
 	require.ErrorContains(t, err, "read the current metadata version of the triples table at gs://sal-no-such-bucket-for-tests/sal/triples")
+}
+
+func TestStatsCacheReusesStatsWhileTheMetadataFileIsCurrent(t *testing.T) {
+	cache := &statsCache{entries: map[string]cachedStats{}}
+	reads := 0
+	read := func(context.Context) (TableStats, error) {
+		reads++
+		return TableStats{Triples: int64(reads)}, nil
+	}
+
+	first, err := cache.get(context.Background(), "/table", "/table/metadata/v3.metadata.json", read)
+	require.NoError(t, err)
+	second, err := cache.get(context.Background(), "/table", "/table/metadata/v3.metadata.json", read)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, reads)
+	require.Equal(t, first, second)
+}
+
+func TestStatsCacheReadsAgainOnceANewMetadataFileIsCurrent(t *testing.T) {
+	cache := &statsCache{entries: map[string]cachedStats{}}
+	reads := 0
+	read := func(context.Context) (TableStats, error) {
+		reads++
+		return TableStats{Triples: int64(reads)}, nil
+	}
+
+	_, err := cache.get(context.Background(), "/table", "/table/metadata/v3.metadata.json", read)
+	require.NoError(t, err)
+	stats, err := cache.get(context.Background(), "/table", "/table/metadata/v4.metadata.json", read)
+	require.NoError(t, err)
+
+	require.Equal(t, 2, reads)
+	require.Equal(t, int64(2), stats.Triples)
+	require.Len(t, cache.entries, 1)
+}
+
+func TestStatsCacheDoesNotCacheAFailedRead(t *testing.T) {
+	cache := &statsCache{entries: map[string]cachedStats{}}
+	reads := 0
+	read := func(context.Context) (TableStats, error) {
+		reads++
+		if reads == 1 {
+			return TableStats{}, errors.New("table unreachable")
+		}
+		return TableStats{Triples: 5}, nil
+	}
+
+	_, err := cache.get(context.Background(), "/table", "/table/metadata/v3.metadata.json", read)
+	require.ErrorContains(t, err, "table unreachable")
+	stats, err := cache.get(context.Background(), "/table", "/table/metadata/v3.metadata.json", read)
+	require.NoError(t, err)
+
+	require.Equal(t, int64(5), stats.Triples)
+}
+
+func TestStatsCacheNeverCachesAGlob(t *testing.T) {
+	cache := &statsCache{entries: map[string]cachedStats{}}
+	reads := 0
+	read := func(context.Context) (TableStats, error) {
+		reads++
+		return TableStats{}, nil
+	}
+
+	for range 2 {
+		_, err := cache.get(context.Background(), "/table", "/table/metadata/*.metadata.json", read)
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, 2, reads)
+	require.Empty(t, cache.entries)
 }
