@@ -154,7 +154,15 @@ func TestInfoSQLEscapesSingleQuotesInTablePath(t *testing.T) {
 }
 
 func TestCountsSQLCountsDistinctObjectsAcrossTheTypedColumns(t *testing.T) {
-	require.Contains(t, countsSQL(), "COUNT(DISTINCT "+objectText("triples")+")")
+	require.Contains(t, countsSQL(), "approx_count_distinct("+objectText("triples")+")")
+}
+
+func TestCountsSQLEstimatesSubjectsAndObjectsButCountsPredicatesExactly(t *testing.T) {
+	query := countsSQL()
+
+	require.Contains(t, query, "approx_count_distinct(triples.subject) AS subjects")
+	require.Contains(t, query, "COUNT(DISTINCT triples.predicate) AS predicates")
+	require.NotContains(t, query, "COUNT(DISTINCT triples.subject)")
 }
 
 func TestLatestMetadataFileReadsTheVersionHint(t *testing.T) {
@@ -253,4 +261,14 @@ func TestStatsCacheNeverCachesAGlob(t *testing.T) {
 
 	require.Equal(t, 2, reads)
 	require.Empty(t, cache.entries)
+}
+
+func TestCountsSQLRunsOverTheTriplesTable(t *testing.T) {
+	header, rows, err := queryRows(context.Background(), sampleTriples(t), countsSQL())
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"triples", "subjects", "predicates", "objects"}, header)
+	// the estimate is exact for a handful of terms; the geometry renders as no
+	// text, so it is not counted among the objects
+	require.Equal(t, [][]string{{"9", "3", "6", "8"}}, rows)
 }
