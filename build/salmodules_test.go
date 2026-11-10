@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/iceberg-go/table"
 	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/salmodule"
 	"github.com/stretchr/testify/require"
@@ -190,7 +192,7 @@ func TestMaterializeSalModulesMergesTaskOutput(t *testing.T) {
 		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
 	}
 
-	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -208,7 +210,7 @@ func TestMaterializeSalModulesReportsTheVocabulariesTheOutputUses(t *testing.T) 
 		runOutput: `{"@context":{"dcterms":"http://purl.org/dc/terms/"},"@id":"https://example.test/person/bob","@type":["schema:Person","http://stko-kwg.geog.ucsb.edu/lod/ontology/S2Cell_Level11"],"dcterms:title":"Bob"}`,
 	}
 
-	_, vocabularies, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, vocabularies, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	// dcterms is bound by the node's own @context and schema by the module's;
@@ -228,7 +230,7 @@ func TestMaterializeSalModulesNamesRelativeOutputUnderTheProject(t *testing.T) {
 		runOutput: `{"@id":"person/bob","@type":"schema:Person","schema:name":"Bob"}`,
 	}
 
-	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.True(t, graphHasTriple(graph, "https://example.test/project/person/bob", "https://schema.org/name", "Bob"))
@@ -241,7 +243,7 @@ func TestMaterializeSalModulesNamesRelativeOutputUnderTheProject(t *testing.T) {
 func TestMaterializeSalModulesPassesTheInstanceConfiguredInRDF(t *testing.T) {
 	runner := &testContainerRunner{ontology: testModuleOntology}
 
-	_, _, err := MaterializeSalModules(context.Background(), parseTestProject(t, testProject), testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), parseTestProject(t, testProject), nil, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Len(t, runner.runEnv, 1)
@@ -264,7 +266,7 @@ func TestMaterializeSalModulesSkipsClassesThatAreNotTasks(t *testing.T) {
 	`)
 	runner := &testContainerRunner{ontology: testModuleOntology}
 
-	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Equal(t, 0, tasksRun)
@@ -278,7 +280,7 @@ func TestMaterializeSalModulesFailsWhenTheModuleReportsAnError(t *testing.T) {
 		runOutput: `{"@type":"salmodule:Error","rdfs:label":"Unreachable","rdfs:comment":"reference feature server is unreachable"}`,
 	}
 
-	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Unreachable: reference feature server is unreachable")
@@ -293,7 +295,7 @@ func TestMaterializeSalModulesPrefersTheModuleErrorOverTheContainerExitStatus(t 
 		runErr:    fmt.Errorf("container exited with status 1"),
 	}
 
-	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reference feature server is unreachable")
@@ -306,7 +308,7 @@ func TestMaterializeSalModulesReportsContainerFailuresWithoutModuleErrors(t *tes
 		runErr:   fmt.Errorf("container exited with status 137"),
 	}
 
-	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "container exited with status 137")
@@ -325,7 +327,7 @@ func TestMaterializeSalModulesCopiesTheFilesATaskNames(t *testing.T) {
 		containerFiles: map[string]string{"/tmp/test.txt": "hello\n"},
 	}
 
-	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), blobDir)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -351,10 +353,40 @@ func TestMaterializeSalModulesFailsWhenANamedFileIsMissingFromTheContainer(t *te
 		runOutput: `{"@id":"https://example.test/dataset","schema:hasPart":{"@id":"file:///tmp/missing.txt"}}`,
 	}
 
-	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no such file /tmp/missing.txt")
+}
+
+// tableHasTriple reports whether the triples table of the SAL project the
+// test runs in holds a row with the subject, predicate, and literal lexical
+// form given, which is where an Iceberg build puts what a module produced,
+// since it never holds that in the graph it returns.
+func tableHasTriple(t *testing.T, subject, predicate, object string) bool {
+	t.Helper()
+	tbl, err := pkg.GetSalIcebergTable()
+	require.NoError(t, err)
+	_, records, err := tbl.Scan(table.WithSelectedFields("subject", "predicate", "object_string", "object_integer")).ToArrowRecords(context.Background())
+	require.NoError(t, err)
+	found := false
+	for rec, err := range records {
+		require.NoError(t, err)
+		subjects := rec.Column(0).(*array.String)
+		predicates := rec.Column(1).(*array.String)
+		literals := rec.Column(2).(*array.String)
+		integers := rec.Column(3).(*array.Int64)
+		for i := 0; i < int(rec.NumRows()); i++ {
+			if subjects.Value(i) != subject || predicates.Value(i) != predicate {
+				continue
+			}
+			if (literals.IsValid(i) && literals.Value(i) == object) || (integers.IsValid(i) && fmt.Sprint(integers.Value(i)) == object) {
+				found = true
+			}
+		}
+		rec.Release()
+	}
+	return found
 }
 
 func graphHasTriple(graph *rdflibgo.Graph, subject, predicate, object string) bool {
@@ -388,7 +420,7 @@ func TestMaterializeSalModulesCopiesADirectoryATaskNames(t *testing.T) {
 		},
 	}
 
-	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), blobDir)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -433,7 +465,7 @@ func TestMaterializeSalModulesLeavesDirectoriesEarlierRunsCopied(t *testing.T) {
 		containerFiles: map[string]string{"/out/catalog/catalog.json": `{"links":[]}`},
 	}
 
-	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), blobDir)
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), blobDir)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -486,7 +518,7 @@ func TestMaterializeSalModulesWarnsWhenTheTaskClassHasNoStdoutShape(t *testing.T
 		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
 	}
 
-	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -501,7 +533,7 @@ func TestMaterializeSalModulesIsQuietWhenTheTaskClassHasAStdoutShape(t *testing.
 		runOutput: `{"@id":"person/alice","@type":"schema:Person","schema:name":"Alice"}` + "\n",
 	}
 
-	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.NotContains(t, logs.String(), "stdoutShape")
@@ -531,7 +563,7 @@ func TestMaterializeSalModulesFailsWhenOutputViolatesTheStdoutShape(t *testing.T
 			`{"@id":"person/bob","@type":"schema:Person"}` + "\n",
 	}
 
-	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), t.TempDir())
 
 	var shapeErr salmodule.StreamShapeError
 	require.ErrorAs(t, err, &shapeErr)
@@ -548,7 +580,7 @@ func TestMaterializeSalModulesMergesOutputThatConformsToTheStdoutShape(t *testin
 		runOutput: `{"@id":"person/alice","@type":"schema:Person","schema:name":"Alice"}` + "\n",
 	}
 
-	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -568,7 +600,7 @@ func TestMaterializeSalModulesSpanCountsTheTasksAndModules(t *testing.T) {
 		runOutput: `{"@id":"https://example.test/person/bob","@type":"schema:Person","schema:name":"Bob"}`,
 	}
 
-	_, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), t.TempDir())
 	require.NoError(t, err)
 
 	var names []string
@@ -599,7 +631,7 @@ func TestMaterializeSalModulesReportsErrorsATaskWritesToStderr(t *testing.T) {
 		runErr:    fmt.Errorf("container exited with status 1"),
 	}
 
-	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), t.TempDir())
 
 	var taskErr salmodule.TaskError
 	require.ErrorAs(t, err, &taskErr)
@@ -617,7 +649,7 @@ func TestMaterializeSalModulesKeepsStderrOutOfTheGraph(t *testing.T) {
 		runStderr: "progress 1/1\n" + `{"@id":"https://example.test/person/eve","@type":"schema:Person","schema:name":"Eve"}` + "\n",
 	}
 
-	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), t.TempDir())
 
 	require.NoError(t, err)
 	require.Equal(t, 1, tasksRun)
@@ -639,7 +671,7 @@ func TestMaterializeSalModulesFailsWhenStderrViolatesTheStderrShape(t *testing.T
 		runStderr: `{"@type":"salmodule:Error","rdfs:comment":"no label here"}` + "\n",
 	}
 
-	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, testResolver(runner), t.TempDir())
+	tasksRun, _, err := MaterializeSalModules(context.Background(), graph, nil, testResolver(runner), t.TempDir())
 
 	var shapeErr salmodule.StreamShapeError
 	require.ErrorAs(t, err, &shapeErr)
@@ -663,7 +695,7 @@ func TestMaterializeSalModulesFailsWhenTheModuleBindsSalmoduleToAnotherNamespace
 		]
 	}`}
 
-	_, _, err := MaterializeSalModules(context.Background(), parseTestProject(t, testProject), testResolver(runner), t.TempDir())
+	_, _, err := MaterializeSalModules(context.Background(), parseTestProject(t, testProject), nil, testResolver(runner), t.TempDir())
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "binds the salmodule prefix to https://w3id.org/sal/cgs-earth/sal/ontology/salmodule#")

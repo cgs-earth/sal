@@ -237,8 +237,12 @@ func TestBuildRunsModuleTasksByDefault(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, 1, runner.runs)
-	require.True(t, graphHasTriple(graph, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
+	// an Iceberg build commits what a module produced without ever holding it
+	// in the graph it returns
+	require.True(t, tableHasTriple(t, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
+	require.False(t, graphHasTriple(graph, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
 	require.True(t, graphHasTriple(graph, "https://github.com/cgs-earth/sal-run-test-project/finder/1", testModuleNamespace+"maxRetries", "5"))
+	require.True(t, tableHasTriple(t, "https://github.com/cgs-earth/sal-run-test-project/finder/1", testModuleNamespace+"maxRetries", "5"))
 }
 
 // TestBuildPinsTheVocabulariesModuleOutputUses checks that a vocabulary whose
@@ -311,7 +315,7 @@ func TestBuildWithoutSalModulesCommitsOnlyTheTaskConfiguration(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, 0, runner.runs)
-	require.False(t, graphHasTriple(graph, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
+	require.False(t, tableHasTriple(t, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
 	require.True(t, graphHasTriple(graph, "https://github.com/cgs-earth/sal-run-test-project/finder/1", testModuleNamespace+"maxRetries", "5"))
 }
 
@@ -344,11 +348,11 @@ func TestRunCommitsModuleOutputOnTopOfABuild(t *testing.T) {
 	buildAndCommitPins(t, git)
 	require.Equal(t, 0, runner.runs)
 
-	graph, err := (&RunCmd{Message: "test run"}).Run()
+	_, err := (&RunCmd{Message: "test run"}).Run()
 
 	require.NoError(t, err)
 	require.Equal(t, 1, runner.runs)
-	require.True(t, graphHasTriple(graph, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
+	require.True(t, tableHasTriple(t, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
 }
 
 // TestRunForceRunsWithADirtyWorktree checks the testing escape hatch: the pins
@@ -369,11 +373,11 @@ func TestRunForceRunsWithADirtyWorktree(t *testing.T) {
 	_, err = (&RunCmd{Message: "test run"}).Run()
 	require.ErrorIs(t, err, ErrRunUncommittedChanges)
 
-	graph, err := (&RunCmd{Message: "test run", Force: true}).Run()
+	_, err = (&RunCmd{Message: "test run", Force: true}).Run()
 
 	require.NoError(t, err)
 	require.Equal(t, 1, runner.runs)
-	require.True(t, graphHasTriple(graph, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
+	require.True(t, tableHasTriple(t, "https://example.test/person/bob", "https://schema.org/name", "Bob"))
 }
 
 func TestRunFailsWhenTheProjectDeclaresNoTasks(t *testing.T) {

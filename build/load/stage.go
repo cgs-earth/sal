@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 
 	"github.com/apache/iceberg-go"
 	"github.com/apache/iceberg-go/catalog"
@@ -21,23 +22,37 @@ import (
 // committed to it.
 const StagingBranch = "sal-staging"
 
-// StagedGraph is a graph written to a triples table without being committed
+// StagedGraph is a build written to a triples table without being committed
 // to its main branch, so that it can be queried before the build that holds
 // it is complete. Only what differs from the table is written, and Commit
 // reuses those data files rather than writing them again.
 type StagedGraph struct {
-	// TablePath is the root of the table the graph is staged in.
+	// TablePath is the root of the table the build is staged in.
 	TablePath string
-	// SnapshotID is the snapshot that holds the staged graph. It is the
-	// table's current snapshot when the graph is what the table already holds.
+	// SnapshotID is the snapshot that holds the staged build. It is the
+	// table's current snapshot when the build is what the table already holds.
 	SnapshotID int64
 
 	cat   catalog.Catalog
 	ident table.Identifier
 	cfg   *LoadConfig
-	// dataFiles hold the triples in hashes, the ones the table lacked
-	dataFiles []iceberg.DataFile
-	hashes    map[tripleDigest]struct{}
+
+	// spool holds the rows of the build; segment is the last of its segments
+	// the staging covered, so the ones after it are what was added since
+	spool   *Spool
+	segment int
+	// ownSpool is whether the spool was made for the staging, by StageGraph,
+	// and so is removed with it
+	ownSpool bool
+	// diff is kept open from staging to commit, since the table's hashes it
+	// read are what the commit is diffed against too
+	diff *spoolDiff
+	// dataFiles hold the rows the table lacked, and removedPath the pairs of
+	// the rows it held that the build does not
+	dataFiles   []iceberg.DataFile
+	added       int64
+	removedPath string
+	removed     int64
 	// onBranch is whether a snapshot was committed to the staging branch
 	onBranch bool
 	// createdTable is whether staging is what created the table
@@ -45,23 +60,37 @@ type StagedGraph struct {
 	discarded    bool
 }
 
-// StageGraph writes what of a graph the triples table does not hold yet, and
-// the deletes for what the table holds that the graph does not, as a snapshot
-// on the staging branch. The main branch is left where it was. A graph the
-// table already holds is staged as the table's current snapshot, with nothing
-// written.
-func StageGraph(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig) (_ *StagedGraph, err error) {
+// StageGraph stages a graph, its blank nodes stabilized, the way StageSpool
+// stages a spool. The spool it is written to is the staged graph's own, and
+// removed with it.
+func StageGraph(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig) (*StagedGraph, error) {
 	if graph == nil || cfg == nil {
+		return nil, fmt.Errorf("stage graph: missing arguments")
+	}
+	spool, err := spoolGraph(graph, cfg)
+	if err != nil {
+		return nil, err
+	}
+	staged, err := StageSpool(ctx, spool, cfg)
+	if err != nil {
+		return nil, errors.Join(err, spool.Remove())
+	}
+	staged.ownSpool = true
+	return staged, nil
+}
+
+// StageSpool writes what of a spool the triples table does not hold yet, and
+// the deletes for what the table holds that the spool does not, as a snapshot
+// on the staging branch. The main branch is left where it was. A spool the
+// table already holds is staged as the table's current snapshot, with nothing
+// written. Rows added to the spool after it was staged are committed with it.
+func StageSpool(ctx context.Context, spool *Spool, cfg *LoadConfig) (_ *StagedGraph, err error) {
+	if spool == nil || cfg == nil {
 		return nil, fmt.Errorf("stage graph: missing arguments")
 	}
 	ctx, span := telemetry.Start(ctx, "iceberg.stage", attribute.String("sal.iceberg.warehouse", cfg.Warehouse), attribute.String("sal.iceberg.namespace", cfg.Namespace))
 	defer func() { telemetry.End(span, err) }()
 
-	graph = StabilizeBlankNodes(graph)
-	arrowSchema, tableSchema, err := GetSchemas()
-	if err != nil {
-		return nil, err
-	}
 	cat, err := hadoop.NewCatalog(ctx, "local-catalog", cfg.Warehouse, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create catalog: %w", err)
@@ -76,6 +105,7 @@ func StageGraph(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig) (_ 
 		cat:          cat,
 		ident:        ident,
 		cfg:          cfg,
+		spool:        spool,
 		createdTable: !existed,
 	}
 	defer func() {
@@ -84,27 +114,30 @@ func StageGraph(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig) (_ 
 		}
 	}()
 
-	tbl, err := NewIcebergTableFromCfg(ctx, tableSchema, cat, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Iceberg table: %w", err)
-	}
-	if err := applyWriteProperties(ctx, tbl, cfg); err != nil {
+	if _, _, err = openTable(ctx, cfg); err != nil {
 		return nil, err
 	}
 	// a build that was killed while it was staging left its branch behind
 	if err := removeStagingBranch(ctx, cat, ident); err != nil {
 		return nil, err
 	}
-	if tbl, err = cat.LoadTable(ctx, ident); err != nil {
+	tbl, err := cat.LoadTable(ctx, ident)
+	if err != nil {
 		return nil, fmt.Errorf("load table: %w", err)
 	}
 
-	diff, err := diffGraphAgainstTable(ctx, tbl, graph)
+	if staged.segment, err = spool.Mark(); err != nil {
+		return nil, err
+	}
+	if staged.diff, err = openSpoolDiff(ctx, spool, tbl); err != nil {
+		return nil, err
+	}
+	change, err := staged.diff.diff(ctx, tbl, spool, 0, staged.segment, staged.diff.existing, 0)
 	if err != nil {
 		return nil, err
 	}
 	current := tbl.CurrentSnapshot()
-	if len(diff.toAdd) == 0 && len(diff.toDrop) == 0 {
+	if change.empty() {
 		if current == nil {
 			return nil, fmt.Errorf("no triples found")
 		}
@@ -112,12 +145,7 @@ func StageGraph(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig) (_ 
 		return staged, nil
 	}
 
-	if len(diff.toAdd) > 0 {
-		staged.hashes = diff.toAdd
-		if staged.dataFiles, _, err = writeGraph(ctx, tbl, graph, arrowSchema, cfg.BatchSize, diff.toAdd); err != nil {
-			return nil, err
-		}
-	}
+	staged.dataFiles, staged.added, staged.removedPath, staged.removed = change.dataFiles, change.added, change.removedPath, change.removed
 	// a branch that does not exist yet starts from nothing, so it is made to
 	// start from main for the staged snapshot to hold the table plus the diff
 	if current != nil {
@@ -130,7 +158,7 @@ func StageGraph(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig) (_ 
 			return nil, fmt.Errorf("load table: %w", err)
 		}
 	}
-	committed, err := commitGraphDelta(ctx, tbl, StagingBranch, staged.dataFiles, int64(len(diff.toAdd)), diff.toDrop, nil)
+	committed, err := commitGraphDelta(ctx, tbl, StagingBranch, staged.dataFiles, change.added, change.removedPath, change.removed, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -140,42 +168,70 @@ func StageGraph(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig) (_ 
 		return nil, fmt.Errorf("stage graph: the staging branch has no snapshot")
 	}
 	staged.SnapshotID = snapshot.SnapshotID
-	slog.Info("Staged the build on a branch of the Iceberg table", "branch", StagingBranch, "added", len(diff.toAdd), "removed", len(diff.toDrop), "unchanged", diff.unchanged)
+	slog.Info("Staged the build on a branch of the Iceberg table", "branch", StagingBranch, "added", change.added, "removed", change.removed, "unchanged", change.unchanged)
 	return staged, nil
 }
 
-// Commit writes the graph to the main branch of the table it was staged in,
-// the way WriteGraphToIceberg does, reusing the data files staging wrote.
-func (s *StagedGraph) Commit(ctx context.Context, graph *rdflibgo.Graph, customMetadata map[string]string, message string) error {
-	return writeGraphToIceberg(ctx, graph, s.cfg, customMetadata, message, s)
-}
+// Spool is the spool the build was staged from. What is added to it before
+// Commit is committed with the staged rows.
+func (s *StagedGraph) Spool() *Spool { return s.spool }
 
-// reusableFiles returns the data files staging wrote when every triple in
-// them is one the commit adds. A staged triple the final graph no longer
-// holds, which is a blank node renamed because it gained a triple, cannot be
-// deleted in the snapshot that adds its file, so such files are not reused.
-func (s *StagedGraph) reusableFiles(toAdd map[tripleDigest]struct{}) []iceberg.DataFile {
-	if s == nil {
-		return nil
+// Commit writes the staged build to the main branch of the table it was
+// staged in, reusing the data files staging wrote, together with whatever was
+// added to the spool since: those rows are diffed against the table and the
+// staged rows alone, so only what neither holds is written, and a row of the
+// table they hold is no longer deleted. customMetadata and message are what
+// WriteSpoolToIceberg records.
+func (s *StagedGraph) Commit(ctx context.Context, customMetadata map[string]string, message string) (err error) {
+	ctx, span := telemetry.Start(ctx, "iceberg.write", attribute.String("sal.iceberg.warehouse", s.cfg.Warehouse), attribute.String("sal.iceberg.namespace", s.cfg.Namespace))
+	defer func() { telemetry.End(span, err) }()
+
+	tbl, err := s.cat.LoadTable(ctx, s.ident)
+	if err != nil {
+		return fmt.Errorf("load table: %w", err)
 	}
-	for digest := range s.hashes {
-		if _, ok := toAdd[digest]; !ok {
-			slog.Info("Writing the staged triples again since some of them changed after the build was staged")
-			return nil
+	if err := s.spool.Flush(); err != nil {
+		return err
+	}
+	dataFiles, added, removedPath, removed := s.dataFiles, s.added, s.removedPath, s.removed
+	if len(dataFiles) > 0 {
+		slog.Info("Reusing the data files the build was staged in", "data_files", len(dataFiles), "triples", s.added)
+	}
+	if extra := s.spool.Files(s.segment+1, s.spool.Segment()); len(extra) > 0 {
+		// the rows spooled since staging, which a build's CONSTRUCT queries
+		// made, are added when neither the table nor the staged rows hold
+		// them, and a row the staging deleted that they hold again is kept
+		change, err := s.diff.diff(ctx, tbl, s.spool, s.segment+1, s.spool.Segment(), s.removedPath, s.added)
+		if err != nil {
+			return err
 		}
+		dataFiles = append(slices.Clone(dataFiles), change.dataFiles...)
+		added += change.added
+		removedPath, removed = change.removedPath, change.removed
 	}
-	return s.dataFiles
+	if added == 0 && removed == 0 {
+		warnNoChanges(message)
+	} else if _, err := commitGraphDelta(ctx, tbl, table.MainBranch, dataFiles, added, removedPath, removed, snapshotProperties(message)); err != nil {
+		return err
+	}
+	return finishWrite(ctx, s.cat, s.ident, customMetadata)
 }
 
 // Discard removes the staging branch and its snapshot, and every file only
 // that snapshot refers to. After Commit that leaves the data files the
 // commit reused; without one it leaves the table as it was before staging,
 // and a table staging created is dropped again.
-func (s *StagedGraph) Discard(ctx context.Context) error {
+func (s *StagedGraph) Discard(ctx context.Context) (err error) {
 	if s == nil || s.discarded {
 		return nil
 	}
 	s.discarded = true
+	defer func() {
+		err = errors.Join(err, s.diff.Close())
+		if s.ownSpool {
+			err = errors.Join(err, s.spool.Remove())
+		}
+	}()
 
 	tbl, err := s.cat.LoadTable(ctx, s.ident)
 	if errors.Is(err, catalog.ErrNoSuchTable) {
