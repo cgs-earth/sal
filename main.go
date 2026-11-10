@@ -21,6 +21,7 @@ import (
 	"github.com/cgs-earth/sal/get"
 	"github.com/cgs-earth/sal/importation"
 	"github.com/cgs-earth/sal/initialization"
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/pkg/progress"
 	"github.com/cgs-earth/sal/pkg/telemetry"
 	"github.com/cgs-earth/sal/push"
@@ -93,6 +94,11 @@ func main() {
 	}
 	var cli args
 	arg.MustParse(&cli)
+
+	// the garbage collector is held to a share of the memory the machine or
+	// the container has, so that nobody has to work out a GOMEMLIMIT before a
+	// large build; one the user set wins
+	pkg.ApplyGoMemoryLimit()
 
 	logFile, logPath := openLogFile(os.Stderr, "/tmp")
 	closeLog := func() {

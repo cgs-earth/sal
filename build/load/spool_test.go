@@ -1,19 +1,96 @@
 package load
 
 import (
+	"context"
 	"fmt"
+	"iter"
 	"testing"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/cgs-earth/sal/pkg"
 	geoarrow "github.com/geoarrow/geoarrow-go"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
-func TestGraphRecordReaderStreamsGraphTriples(t *testing.T) {
+// spooledRecords reads back, in batches, the rows a spool wrote for a graph,
+// the way a build hands them on.
+type spooledRecords struct {
+	next    func() (arrow.RecordBatch, error, bool)
+	stop    func()
+	closeFn func() error
+	current arrow.RecordBatch
+	err     error
+	rows    int64
+}
+
+// spoolRecordReader spools graph as a build does and reads the Parquet it
+// wrote back as record batches of batchSize rows in schema.
+func spoolRecordReader(t *testing.T, graph *rdflibgo.Graph, schema *arrow.Schema, batchSize int) *spooledRecords {
+	t.Helper()
+	spool, err := NewSpool(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spool.Remove()) })
+	require.NoError(t, spool.AddGraph(graph))
+	require.NoError(t, spool.Flush())
+	files := spool.Files(0, spool.Segment())
+	require.Len(t, files, 1)
+
+	reader, err := file.OpenParquetFile(files[0], false)
+	require.NoError(t, err)
+	arrowReader, err := pqarrow.NewFileReader(reader, pqarrow.ArrowReadProperties{BatchSize: int64(batchSize)}, memory.DefaultAllocator)
+	require.NoError(t, err)
+	recordReader, err := arrowReader.GetRecordReader(context.Background(), nil, nil)
+	require.NoError(t, err)
+	records := &spooledRecords{}
+	next, stop := iter.Pull2(func(yield func(arrow.RecordBatch, error) bool) {
+		for recordReader.Next() {
+			record := recordReader.RecordBatch()
+			columns := make([]arrow.Array, record.NumCols())
+			for i := range columns {
+				columns[i] = asSchemaColumn(record.Column(i), schema.Field(i).Type)
+			}
+			if !yield(array.NewRecordBatch(schema, columns, record.NumRows()), nil) {
+				return
+			}
+		}
+		if err := recordReader.Err(); err != nil {
+			yield(nil, err)
+		}
+	})
+	records.next, records.stop = next, stop
+	records.closeFn = func() error {
+		recordReader.Release()
+		return reader.Close()
+	}
+	return records
+}
+
+func (r *spooledRecords) Next() bool {
+	record, err, ok := r.next()
+	if !ok || err != nil {
+		r.err = err
+		return false
+	}
+	r.current = record
+	r.rows += record.NumRows()
+	return true
+}
+
+func (r *spooledRecords) RecordBatch() arrow.RecordBatch { return r.current }
+func (r *spooledRecords) Err() error                     { return r.err }
+func (r *spooledRecords) RowsRead() int64                { return r.rows }
+func (r *spooledRecords) Release() {
+	r.stop()
+	_ = r.closeFn()
+}
+
+func TestSpoolWritesGraphTriples(t *testing.T) {
 	graph := rdflibgo.NewGraph()
 	predicate := rdflibgo.NewURIRefUnsafe("http://example.com/p")
 	pkg.AddTriple(graph,
@@ -34,7 +111,7 @@ func TestGraphRecordReaderStreamsGraphTriples(t *testing.T) {
 
 	arrowSchema, _, err := GetSchemas()
 	require.NoError(t, err)
-	rdr := newGraphRecordReader(graph, arrowSchema, 2)
+	rdr := spoolRecordReader(t, graph, arrowSchema, 2)
 	defer rdr.Release()
 
 	var batches int
@@ -76,7 +153,7 @@ func TestGraphRecordReaderStreamsGraphTriples(t *testing.T) {
 	}, rows)
 }
 
-func TestGraphRecordReaderSerializesObjectColumns(t *testing.T) {
+func TestSpoolSerializesObjectColumns(t *testing.T) {
 	graph := rdflibgo.NewGraph()
 	predicate := rdflibgo.NewURIRefUnsafe("http://example.com/p")
 	pkg.AddTriple(graph,
@@ -117,7 +194,7 @@ func TestGraphRecordReaderSerializesObjectColumns(t *testing.T) {
 
 	arrowSchema, _, err := GetSchemas()
 	require.NoError(t, err)
-	rdr := newGraphRecordReader(graph, arrowSchema, 10)
+	rdr := spoolRecordReader(t, graph, arrowSchema, 10)
 	defer rdr.Release()
 
 	require.True(t, rdr.Next())
@@ -230,7 +307,7 @@ func TestAppendObjectFieldsKeepsUnparseableTypedLiteralsAsStrings(t *testing.T) 
 
 	arrowSchema, _, err := GetSchemas()
 	require.NoError(t, err)
-	rdr := newGraphRecordReader(graph, arrowSchema, 10)
+	rdr := spoolRecordReader(t, graph, arrowSchema, 10)
 	defer rdr.Release()
 
 	require.True(t, rdr.Next())

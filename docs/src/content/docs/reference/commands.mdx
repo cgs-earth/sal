@@ -388,12 +388,22 @@ The clone never prompts for credentials: a private repository is cloned only whe
 The newline delimited JSON the module writes to stdout is converted to triples and committed alongside the
 sources. A relative IRI in that output resolves against the project's namespace, not the module's, so a task's
 output is named as the project's own data unless the module wrote absolute IRIs.
-The output is converted as the task writes it, in batches of lines, and is never held whole, so what a task costs
-in memory is what its triples cost in the graph being built rather than what its JSON costs on top of them. A
-task that produces tens of millions of triples still needs the graph to fit in memory, since a build validates,
-diffs, and writes the whole graph at once; setting Go's `GOMEMLIMIT` environment variable, for example
-`GOMEMLIMIT=24GiB sal build`, makes the garbage collector work harder as that limit nears rather than let the
-process grow past it.
+The output is converted as the task writes it, in batches of lines, and written straight to Parquet files in
+`.sal/data/.scratch` rather than held in memory, so a task may produce far more triples than the machine has
+memory for. The build then compares those files, and everything else it gathered, with the table in an embedded
+[DuckDB](https://duckdb.org/) database that spills to the same directory once its memory is used, writes the
+triples the table lacks, and deletes the ones it no longer holds. What a build needs in memory is therefore bounded
+by the project's own sources and not by what its modules produce; what grows with the data is disk, roughly the
+size of the module output as Parquet, which is removed again once the build is done. A blank node a module writes
+is local to the line, the node, it is written on: it is named from that node alone, so the same output gives the
+same names whatever surrounds it, and two nodes alike in every statement, IRIs included, are stored once.
+
+`sal build` works out how much memory it may use on its own: the memory limit of the container it runs in (its
+cgroup), else the machine's physical memory. It holds the Go heap to 70% of that and the DuckDB database to 50%,
+since the two are rarely busy at once, and logs the figures when it starts. A `GOMEMLIMIT` you set wins over the Go
+share, and `SAL_MEMORY_LIMIT`, a size such as `8GiB`, replaces the budget itself where sal detects the wrong one.
+In a JSON-LD-heavy project the progress pane shows, once a task passes 20,000 nodes, how many JSON-LD documents it
+has read so far, and the log says so every 20,000.
 A `file:///` IRI in that output names a file inside the container; `sal build` copies it into `.sal/data/blobs`
 under its SHA-256 digest while the task runs, rewrites the reference to `urn:sha256:{digest}`, and describes the
 copy with the `file:///` IRI the task wrote as `rdfs:label`, its modification time as `dcterms:modified`, its digest as `owl:versionIRI`,

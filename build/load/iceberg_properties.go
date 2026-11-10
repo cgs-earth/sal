@@ -154,9 +154,16 @@ func NewIcebergTableFromCfg(ctx context.Context, tableSchema *iceberg.Schema, ca
 	)
 }
 
+// rowGroupRows is how many rows a row group of a data or delete file holds at
+// most. A row group is buffered whole before it is written, so it is kept to
+// the size DuckDB itself writes rather than iceberg-go's default of a million
+// rows, which for rows carrying geometries is gigabytes.
+const rowGroupRows = 122880
+
 func applyWriteProperties(ctx context.Context, tbl *table.Table, cfg *LoadConfig) error {
 	writeProps := iceberg.Properties{
 		"write.parquet.compression-codec": cfg.ParquetCompression,
+		table.ParquetRowGroupLimitKey:     strconv.Itoa(rowGroupRows),
 	}
 	for k, v := range geometryMetricsProperty() {
 		writeProps[k] = v
