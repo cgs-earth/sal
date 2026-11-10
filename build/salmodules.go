@@ -83,20 +83,10 @@ func findSalModuleTasks(graph *rdflibgo.Graph) ([]salModuleTask, error) {
 	return tasks, nil
 }
 
-// documentsProgressStep is how many JSON-LD documents, the nodes a task writes
-// one per line, a task reads between two reports of how far it has got: the
-// progress pane shows the count once a task passes it, and the log says so
-// every time it grows by that much, which is what gives a task harvesting
-// millions of nodes a sense of scale.
-const documentsProgressStep = 20000
-
 // MaterializeSalModules runs every SAL module task instance the graph declares
-// and hands the RDF each module produced to sink, or merges it back into the
-// graph when sink is nil, reporting how many tasks it ran and, sorted, the
-// namespaces the tasks' output stated its triples in (see
-// TaskOutputParser.Vocabularies), which the build pins. A build hands it a
-// load.Spool, so that what a module produces goes to disk as it is parsed and
-// never has to fit in memory. A relative IRI a task emits resolves against the graph's
+// and merges the RDF each module produced back into the graph, reporting how
+// many tasks it ran and, sorted, the namespaces the tasks' output stated its
+// triples in (see TaskOutputParser.Vocabularies), which the build pins. A relative IRI a task emits resolves against the graph's
 // base, which is the project namespace, so what a module materializes is named
 // as the project's own instance data unless the module wrote absolute IRIs.
 // A file a task names with a file:/// IRI is copied out of the container
@@ -105,7 +95,7 @@ const documentsProgressStep = 20000
 // blobDir's prov.jsonld, and the graph refers to either as urn:sha256:<digest>
 // in place of the container path. Nothing an earlier run copied is removed;
 // the blob store only grows until the user clears it.
-func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, sink salmodule.TripleSink, resolver *salmodule.Resolver, blobDir string) (tasksRun int, vocabularies []string, err error) {
+func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, resolver *salmodule.Resolver, blobDir string) (tasksRun int, vocabularies []string, err error) {
 	tasks, err := findSalModuleTasks(graph)
 	if err != nil {
 		return 0, nil, err
@@ -121,7 +111,7 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, sink salm
 
 	used := map[string]bool{}
 	for _, task := range tasks {
-		ran, taskVocabularies, err := materializeTask(ctx, graph, sink, resolver, blobDir, task)
+		ran, taskVocabularies, err := materializeTask(ctx, graph, resolver, blobDir, task)
 		if err != nil {
 			return tasksRun, nil, err
 		}
@@ -139,11 +129,11 @@ func MaterializeSalModules(ctx context.Context, graph *rdflibgo.Graph, sink salm
 	return tasksRun, vocabularies, nil
 }
 
-// materializeTask runs one task instance and hands what it produced to sink,
-// or merges it into graph when sink is nil, reporting whether it ran at all,
-// an instance whose class neither the project nor the module's ontology
-// declares a task is left alone, and the namespaces its output used.
-func materializeTask(ctx context.Context, graph *rdflibgo.Graph, sink salmodule.TripleSink, resolver *salmodule.Resolver, blobDir string, task salModuleTask) (_ bool, _ []string, err error) {
+// materializeTask runs one task instance and merges what it produced into
+// graph, reporting whether it ran at all, an instance whose class neither the
+// project nor the module's ontology declares a task is left alone, and the
+// namespaces its output used.
+func materializeTask(ctx context.Context, graph *rdflibgo.Graph, resolver *salmodule.Resolver, blobDir string, task salModuleTask) (_ bool, _ []string, err error) {
 	ctx, span := telemetry.Start(ctx, "salmodule.task",
 		attribute.String("sal.module", task.ref.Namespace),
 		attribute.String("sal.module.task_class", task.classIRI),
@@ -191,37 +181,16 @@ func materializeTask(ctx context.Context, graph *rdflibgo.Graph, sink salmodule.
 	if stderrValidator != nil {
 		slog.Info("Validating the nodes " + task.classIRI + " writes to stderr against its salmodule:stderrShape")
 	}
-	// the output is parsed as the task writes it, never held whole, and handed
-	// to the sink, which writes it to disk, so a task may produce more than
-	// fits in memory; a task that fails leaves what it wrote so far in a
-	// spool the failed build discards anyway. Stderr is parsed apart from it,
-	// since what a task reports there is about the run, not data for the build
-	var materialized int64
-	if sink == nil {
-		sink = func(triple rdflibgo.Triple) error {
-			pkg.AddTriple(graph, triple.Subject, triple.Predicate, triple.Object)
-			return nil
-		}
-	}
-	counted := func(triple rdflibgo.Triple) error {
-		materialized++
-		return sink(triple)
-	}
-	parser := ontology.NewTaskOutputStream(counted, graph.Base())
+	// the output is parsed into the graph being built as the task writes it,
+	// never held whole, so a task may produce more than fits in memory as
+	// JSON; a task that fails leaves what it wrote so far in a graph the
+	// failed build discards anyway. Stderr is parsed apart from it, since
+	// what a task reports there is about the run, not data for the graph
+	before := pkg.GraphLen(graph)
+	parser := ontology.NewTaskOutputParser(graph, graph.Base())
 	reports := ontology.NewTaskStderrParser(graph.Base())
-	documents := 0
-	readDocument := func(line []byte, lineNumber int) error {
-		if err := parser.Line(line, lineNumber); err != nil {
-			return err
-		}
-		if documents++; documents%documentsProgressStep == 0 {
-			span.SetAttributes(attribute.Int("sal.module.documents", documents), attribute.Int64("sal.triples.materialized", materialized))
-			slog.Info(fmt.Sprintf("Read %d JSON-LD documents from %s", documents, task.classIRI), "triples", materialized)
-		}
-		return nil
-	}
 	result, runErr := resolver.RunTask(ctx, task.ref, taskInstance, blobDir,
-		salmodule.TaskStream{Validator: stdoutValidator, Sink: readDocument},
+		salmodule.TaskStream{Validator: stdoutValidator, Sink: parser.Line},
 		salmodule.TaskStream{Validator: stderrValidator, Sink: reports.Line})
 	// whatever was read before the task ended is parsed even when it failed:
 	// a line that violates a shape stopped the task, so nothing after it was
@@ -245,12 +214,13 @@ func materializeTask(ctx context.Context, graph *rdflibgo.Graph, sink salmodule.
 	case err != nil:
 		return false, nil, fmt.Errorf("run: %w", err)
 	}
-	if err := salmodule.LinkCopiedFilesTo(counted, parser.FileTriples(), result.Files, blobDir); err != nil {
+	if err := salmodule.LinkCopiedFiles(graph, parser.FileTriples(), result.Files, blobDir); err != nil {
 		return false, nil, fmt.Errorf("run: %w", err)
 	}
 
-	span.SetAttributes(attribute.Int64("sal.triples.materialized", materialized), attribute.Int("sal.module.files_copied", len(result.Files)), attribute.Int("sal.module.documents", documents))
-	slog.Info(fmt.Sprintf("Materialized %d triples from %d JSON-LD documents written by %s", materialized, documents, task.classIRI))
+	materialized := pkg.GraphLen(graph) - before
+	span.SetAttributes(attribute.Int("sal.triples.materialized", materialized), attribute.Int("sal.module.files_copied", len(result.Files)))
+	slog.Info(fmt.Sprintf("Materialized %d triples from %s", materialized, task.classIRI))
 	if materialized == 0 && len(result.Files) == 0 {
 		slog.Warn(task.classIRI + " produced no triples and copied no files; the task ran and exited cleanly but wrote nothing to stdout, so check its configuration in " + task.subject.String())
 	}

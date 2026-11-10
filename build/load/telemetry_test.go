@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/apache/iceberg-go/catalog/hadoop"
 	"github.com/cgs-earth/sal/pkg"
 	"github.com/stretchr/testify/require"
 	rdflibgo "github.com/tggo/goRDFlib"
@@ -23,16 +24,22 @@ func TestDiffSpanReportsHowManyTriplesChanged(t *testing.T) {
 
 	ctx := context.Background()
 	cfg := &LoadConfig{BatchSize: 10, ParquetCompression: "snappy", Warehouse: t.TempDir(), Namespace: "default"}
+	arrowSchema, icebergSchema, err := GetSchemas()
+	require.NoError(t, err)
+	cat, err := hadoop.NewCatalog(context.Background(), "local-catalog", cfg.Warehouse, nil)
+	require.NoError(t, err)
+	tbl, err := NewIcebergTableFromCfg(ctx, icebergSchema, cat, cfg)
+	require.NoError(t, err)
 
 	predicate := rdflibgo.NewURIRefUnsafe("http://example.com/p")
 	first := rdflibgo.NewGraph()
 	pkg.AddTriple(first, rdflibgo.NewURIRefUnsafe("http://example.com/keep"), predicate, rdflibgo.NewLiteral("same"))
 	pkg.AddTriple(first, rdflibgo.NewURIRefUnsafe("http://example.com/drop"), predicate, rdflibgo.NewLiteral("old"))
-	require.NoError(t, WriteGraphToIceberg(ctx, first, cfg, nil, ""))
+	require.NoError(t, processGraph(ctx, first, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, nil, nil))
 	second := rdflibgo.NewGraph()
 	pkg.AddTriple(second, rdflibgo.NewURIRefUnsafe("http://example.com/keep"), predicate, rdflibgo.NewLiteral("same"))
 	pkg.AddTriple(second, rdflibgo.NewURIRefUnsafe("http://example.com/add"), predicate, rdflibgo.NewLiteral("new"))
-	require.NoError(t, WriteGraphToIceberg(ctx, second, cfg, nil, ""))
+	require.NoError(t, processGraph(ctx, second, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, nil, nil))
 
 	var names []string
 	var lastDiff attribute.Set
@@ -43,8 +50,8 @@ func TestDiffSpanReportsHowManyTriplesChanged(t *testing.T) {
 		}
 	}
 	require.Equal(t, []string{
-		"iceberg.write_data_files", "iceberg.diff", "iceberg.commit", "iceberg.write",
-		"iceberg.read_existing", "iceberg.write_data_files", "iceberg.diff", "iceberg.commit", "iceberg.write",
+		"iceberg.diff", "iceberg.write_data_files", "iceberg.commit",
+		"iceberg.diff", "iceberg.write_data_files", "iceberg.commit",
 	}, names)
 	for key, want := range map[attribute.Key]int64{
 		"sal.triples.existing":  2,

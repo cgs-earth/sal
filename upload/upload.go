@@ -232,11 +232,6 @@ func copyDir(src string, dst string) error {
 			return nil
 		}
 		target := filepath.Join(dst, rel)
-		// what a killed build left in its scratch directory is not part of
-		// the data product
-		if entry.IsDir() && rel == pkg.ScratchDirName {
-			return filepath.SkipDir
-		}
 
 		info, err := entry.Info()
 		if err != nil {

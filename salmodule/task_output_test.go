@@ -155,8 +155,6 @@ func TestTaskOutputParserReportsAnErrorSplitAcrossBatches(t *testing.T) {
 	require.Equal(t, []string{"Upstream: upstream is down"}, taskErr.Messages)
 }
 
-// A triple naming a file:/// IRI is held back rather than handed on, since it
-// is handed on under the copy's IRI once the copy has landed.
 func TestTaskOutputParserCollectsTheTriplesNamingFiles(t *testing.T) {
 	output := `{"@id":"https://example.test/dataset","schema:hasPart":{"@id":"file:///tmp/test.txt"},"schema:name":"a dataset"}`
 	graph := rdflibgo.NewGraph(rdflibgo.WithBase(testProjectBase))
@@ -167,7 +165,7 @@ func TestTaskOutputParserCollectsTheTriplesNamingFiles(t *testing.T) {
 
 	require.Len(t, parser.FileTriples(), 1)
 	require.Equal(t, "file:///tmp/test.txt", parser.FileTriples()[0].Object.(rdflibgo.URIRef).Value())
-	require.Equal(t, 1, pkg.GraphLen(graph))
+	require.Equal(t, 2, pkg.GraphLen(graph))
 }
 
 func TestTaskOutputParserRejectsALineThatIsNotAnObject(t *testing.T) {

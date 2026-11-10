@@ -18,7 +18,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/iceberg-go"
 	"github.com/apache/iceberg-go/table"
-	"github.com/cgs-earth/sal/build/load"
 	"github.com/cgs-earth/sal/importation"
 	"github.com/cgs-earth/sal/pkg"
 	"github.com/twpayne/go-geom"
@@ -429,17 +428,30 @@ var worldBBox = []float64{-180, -90, 180, 90}
 // scanRowsAndExtent reads the geometry column of the table once, counting every
 // row and extending a bounding box over every geometry it finds. A scan rather
 // than the snapshot summary is what makes the count exact: the summary's
-// total-records does not subtract the equality deletes a rebuild writes. The
-// scan goes through load.ScanLiveRows, which has DuckDB apply those deletes,
-// so a table whose builds have deleted millions of rows is read in bounded
-// memory; its scratch files go in the warehouse the table is in.
+// total-records does not subtract the equality deletes a rebuild writes.
 func scanRowsAndExtent(ctx context.Context, tbl *table.Table) (int64, []float64, error) {
-	warehouse := filepath.Dir(filepath.Dir(strings.TrimPrefix(tbl.Location(), "file://")))
+	_, records, err := tbl.Scan(
+		table.WithSelectedFields("object_geometry"),
+		table.WithCaseSensitive(true),
+	).ToArrowRecords(ctx)
+	if err != nil {
+		return 0, nil, fmt.Errorf("scan the geometry column: %w", err)
+	}
+
+	var rows int64
 	bounds := geom.NewBounds(geom.XY)
-	rows, err := load.ScanLiveRows(ctx, tbl, filepath.Join(warehouse, load.ScratchDir), []string{"object_geometry"}, func(record arrow.RecordBatch) error {
+	for record, err := range records {
+		if err != nil {
+			return 0, nil, fmt.Errorf("read the geometry column: %w", err)
+		}
+		if record == nil {
+			continue
+		}
+		rows += record.NumRows()
 		column, err := binaryColumn(record)
 		if err != nil {
-			return err
+			record.Release()
+			return 0, nil, err
 		}
 		for i := 0; i < column.Len(); i++ {
 			if column.IsNull(i) {
@@ -447,15 +459,14 @@ func scanRowsAndExtent(ctx context.Context, tbl *table.Table) (int64, []float64,
 			}
 			geometry, err := wkb.Unmarshal(column.Value(i))
 			if err != nil {
-				return fmt.Errorf("read a geometry from the table: %w", err)
+				record.Release()
+				return 0, nil, fmt.Errorf("read a geometry from the table: %w", err)
 			}
 			bounds.Extend(geometry)
 		}
-		return nil
-	})
-	if err != nil {
-		return 0, nil, fmt.Errorf("scan the geometry column: %w", err)
+		record.Release()
 	}
+
 	if bounds.IsEmpty() {
 		return rows, worldBBox, nil
 	}

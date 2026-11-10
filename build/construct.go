@@ -21,21 +21,20 @@ import (
 // that does not write the project's table stages its graph in.
 const stagedNamespace = "staged"
 
-// stageGraph writes a build where the project's CONSTRUCT queries can read it
-// before it is committed, and returns a runner over it plus what removes
-// anything that was written outside the project. An Iceberg build is staged
-// from its spool on a branch of the project's own table, where only what the
-// table does not hold yet is written, and the staged graph returned is what
-// the build then commits and discards. Any other format has no table to stage
-// in and no spool, so the whole graph goes to a temporary warehouse. Tests
-// replace it.
-var stageGraph = func(ctx context.Context, graph *rdflibgo.Graph, spool *load.Spool, format GraphExportFormat) (construct.Runner, *load.StagedGraph, func(), error) {
+// stageGraph writes a graph where the project's CONSTRUCT queries can read it
+// before the build is committed, and returns a runner over it plus what
+// removes anything that was written outside the project. An Iceberg build is
+// staged on a branch of the project's own table, where only what the table
+// does not hold yet is written, and the staged graph returned is what the
+// build then commits and discards. Any other format has no table to stage in,
+// so the whole graph goes to a temporary warehouse. Tests replace it.
+var stageGraph = func(ctx context.Context, graph *rdflibgo.Graph, format GraphExportFormat) (construct.Runner, *load.StagedGraph, func(), error) {
 	if format == GraphExportFormatIceberg {
 		cfg, err := projectLoadConfig()
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		staged, err := load.StageSpool(ctx, spool, cfg)
+		staged, err := load.StageGraph(ctx, graph, cfg)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("stage the build: %w", err)
 		}
@@ -64,33 +63,33 @@ var stageGraph = func(ctx context.Context, graph *rdflibgo.Graph, spool *load.Sp
 	return salsparql.DuckDBRunner{TablePath: filepath.Join(warehouse, stagedNamespace, "triples")}, nil, cleanup, nil
 }
 
-// MaterializeConstructs runs the project's CONSTRUCT queries over the build
-// and returns the triples they constructed, which the build commits in the
-// same snapshot as everything else. The queries are answered by the same
-// SPARQL to SQL translation `sal construct` and `sal serve` use, which reads
-// a table, so the build is staged first: an Iceberg build from its spool, on
+// MaterializeConstructs runs the project's CONSTRUCT queries over the graph
+// being built and returns the graph with the triples they constructed added,
+// so that a build commits them in the same snapshot as everything else. The
+// queries are answered by the same SPARQL to SQL translation `sal construct`
+// and `sal serve` use, which reads a table, so the graph is staged first: on
 // a branch of the project's table, which leaves the table's main branch
-// untouched until the build commits, and any other from graph. Every query
-// reads the build as it stood before any of them ran, so the order they run
-// in does not change what they construct. graph's blank nodes must be stable
-// already, since a constructed triple refers to one by the label the staged
-// table gives it, and nothing is renamed afterwards.
+// untouched until the build commits. Every query reads the graph as it stood
+// before any of them ran, so the order they run in does not change what they
+// construct.
 //
-// The staged graph returned is nil when nothing was staged in the project's
-// table; otherwise the caller commits the build through it, with the
-// constructed triples added to the spool, and discards it.
-func MaterializeConstructs(ctx context.Context, graph *rdflibgo.Graph, spool *load.Spool, projectDir string, queries []construct.Query, format GraphExportFormat) (_ *rdflibgo.Graph, _ *load.StagedGraph, err error) {
+// The graph returned has its blank nodes renamed the way the table names
+// them, since that is how a constructed triple refers to one. The staged
+// graph returned is nil when nothing was staged in the project's table;
+// otherwise the caller commits the build through it and discards it.
+func MaterializeConstructs(ctx context.Context, graph *rdflibgo.Graph, projectDir string, queries []construct.Query, format GraphExportFormat) (_ *rdflibgo.Graph, _ *load.StagedGraph, err error) {
 	if len(queries) == 0 {
 		// nothing to run, but the directory is still wiped of what an earlier
 		// build constructed
 		_, err := construct.Run(ctx, nil, projectDir, nil)
-		return nil, nil, err
+		return graph, nil, err
 	}
 	ctx, span := telemetry.Start(ctx, "build.construct", attribute.Int("sal.construct.queries", len(queries)))
 	defer func() { telemetry.End(span, err) }()
 
 	slog.Info(fmt.Sprintf("Staging the build for %d SPARQL CONSTRUCT queries to read; the project's table is committed once they have run", len(queries)))
-	runner, stagedGraph, cleanup, err := stageGraph(ctx, graph, spool, format)
+	staged := load.StabilizeBlankNodes(graph)
+	runner, stagedGraph, cleanup, err := stageGraph(ctx, staged, format)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build: %w", err)
 	}
@@ -100,7 +99,9 @@ func MaterializeConstructs(ctx context.Context, graph *rdflibgo.Graph, spool *lo
 	if err != nil {
 		return nil, nil, errors.Join(err, stagedGraph.Discard(ctx))
 	}
-	span.SetAttributes(attribute.Int("sal.triples.constructed", pkg.GraphLen(constructed)))
-	slog.Info(fmt.Sprintf("Constructed %d triples with %d SPARQL CONSTRUCT queries", pkg.GraphLen(constructed), len(queries)))
-	return constructed, stagedGraph, nil
+	before := pkg.GraphLen(staged)
+	mergeGraph(staged, constructed)
+	span.SetAttributes(attribute.Int("sal.triples.constructed", pkg.GraphLen(staged)-before))
+	slog.Info(fmt.Sprintf("Added %d triples constructed by %d SPARQL CONSTRUCT queries", pkg.GraphLen(staged)-before, len(queries)))
+	return staged, stagedGraph, nil
 }

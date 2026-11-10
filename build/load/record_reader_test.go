@@ -2,13 +2,10 @@ package load
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
-	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/iceberg-go"
 	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/catalog/hadoop"
@@ -67,7 +64,7 @@ func TestNewIcebergTableRefusesATableWithTheVocabularyColumn(t *testing.T) {
 	require.ErrorContains(t, err, "sal clean --wipe")
 }
 
-func TestWriteGraphToIcebergIngestsSimpleWKTGeometry(t *testing.T) {
+func TestAppendGraphIngestsSimpleWKTGeometry(t *testing.T) {
 	ctx := context.Background()
 	cfg := &LoadConfig{
 		BatchSize:          10,
@@ -75,6 +72,13 @@ func TestWriteGraphToIcebergIngestsSimpleWKTGeometry(t *testing.T) {
 		Warehouse:          t.TempDir(),
 		Namespace:          "default",
 	}
+
+	arrowSchema, icebergSchema, err := GetSchemas()
+	require.NoError(t, err)
+	cat, err := hadoop.NewCatalog(context.Background(), "local-catalog", cfg.Warehouse, nil)
+	require.NoError(t, err)
+	tbl, err := NewIcebergTableFromCfg(ctx, icebergSchema, cat, cfg)
+	require.NoError(t, err)
 
 	graph := rdflibgo.NewGraph()
 	pkg.AddTriple(graph,
@@ -83,30 +87,17 @@ func TestWriteGraphToIcebergIngestsSimpleWKTGeometry(t *testing.T) {
 		rdflibgo.NewLiteral("POINT (1 2)", rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(geoSPARQLWKTLiteral))),
 	)
 
-	require.NoError(t, WriteGraphToIceberg(ctx, graph, cfg, nil, ""))
-	loaded := stageTestTable(t, cfg)
+	require.NoError(t, appendGraph(ctx, tbl, graph, arrowSchema, cfg.BatchSize, nil))
+	loaded, err := cat.LoadTable(ctx, tbl.Identifier())
+	require.NoError(t, err)
 	require.NotNil(t, loaded.CurrentSnapshot())
 	require.NotNil(t, loaded.CurrentSnapshot().Summary)
 	require.Equal(t, 3, loaded.Metadata().FormatVersion())
 	require.Equal(t, "geometry", loaded.Schema().Field(4).Type.String())
 	require.Equal(t, "1", loaded.CurrentSnapshot().Summary.Properties["added-records"])
-
-	// the geometry round trips through the spool and the diff as WKB
-	_, records, err := loaded.Scan(table.WithSelectedFields("object_geometry")).ToArrowRecords(ctx)
-	require.NoError(t, err)
-	var geometries int
-	for rec, err := range records {
-		require.NoError(t, err)
-		for i := 0; i < int(rec.NumRows()); i++ {
-			require.True(t, rec.Column(0).IsValid(i))
-			geometries++
-		}
-		rec.Release()
-	}
-	require.Equal(t, 1, geometries)
 }
 
-func TestWriteGraphToIcebergDiffAddsAndRemovesByTripleHash(t *testing.T) {
+func TestProcessGraphDiffAddsAndRemovesByTripleHash(t *testing.T) {
 	ctx := context.Background()
 	cfg := &LoadConfig{
 		BatchSize:          10,
@@ -115,24 +106,32 @@ func TestWriteGraphToIcebergDiffAddsAndRemovesByTripleHash(t *testing.T) {
 		Namespace:          "default",
 	}
 
+	arrowSchema, icebergSchema, err := GetSchemas()
+	require.NoError(t, err)
+	cat, err := hadoop.NewCatalog(context.Background(), "local-catalog", cfg.Warehouse, nil)
+	require.NoError(t, err)
+	tbl, err := NewIcebergTableFromCfg(ctx, icebergSchema, cat, cfg)
+	require.NoError(t, err)
+
 	predicate := rdflibgo.NewURIRefUnsafe("http://example.com/p")
 	first := rdflibgo.NewGraph()
 	pkg.AddTriple(first, rdflibgo.NewURIRefUnsafe("http://example.com/keep"), predicate, rdflibgo.NewLiteral("same"))
 	pkg.AddTriple(first, rdflibgo.NewURIRefUnsafe("http://example.com/drop"), predicate, rdflibgo.NewLiteral("old"))
-	require.NoError(t, WriteGraphToIceberg(ctx, first, cfg, nil, ""))
-	firstSnapshotID := stageTestTable(t, cfg).CurrentSnapshot().SnapshotID
+	require.NoError(t, processGraph(ctx, first, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, nil, nil))
+	loaded, err := cat.LoadTable(ctx, tbl.Identifier())
+	require.NoError(t, err)
+	firstSnapshotID := loaded.CurrentSnapshot().SnapshotID
 
 	second := rdflibgo.NewGraph()
 	pkg.AddTriple(second, rdflibgo.NewURIRefUnsafe("http://example.com/keep"), predicate, rdflibgo.NewLiteral("same"))
 	pkg.AddTriple(second, rdflibgo.NewURIRefUnsafe("http://example.com/add"), predicate, rdflibgo.NewLiteral("new"))
-	require.NoError(t, WriteGraphToIceberg(ctx, second, cfg, nil, ""))
+	require.NoError(t, processGraph(ctx, second, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, nil, nil))
 
-	loaded := stageTestTable(t, cfg)
+	loaded, err = cat.LoadTable(ctx, tbl.Identifier())
+	require.NoError(t, err)
 	require.NotNil(t, loaded.CurrentSnapshot().ParentSnapshotID)
 	require.Equal(t, firstSnapshotID, *loaded.CurrentSnapshot().ParentSnapshotID)
 	require.Equal(t, table.OpOverwrite, loaded.CurrentSnapshot().Summary.Operation)
-	require.Equal(t, "1", loaded.CurrentSnapshot().Summary.Properties[pkg.SnapshotTriplesAddedProperty])
-	require.Equal(t, "1", loaded.CurrentSnapshot().Summary.Properties[pkg.SnapshotTriplesRemovedProperty])
 	hashes, err := readExistingTripleHashes(ctx, loaded)
 	require.NoError(t, err)
 
@@ -141,70 +140,6 @@ func TestWriteGraphToIcebergDiffAddsAndRemovesByTripleHash(t *testing.T) {
 	require.Contains(t, hashes, tripleHash("http://example.com/add", "http://example.com/p", "new", xsdString, ""))
 	require.NotContains(t, hashes, tripleHash("http://example.com/drop", "http://example.com/p", "old", xsdString, ""))
 	require.Len(t, hashes, 2)
-}
-
-// TestWriteSpoolToIcebergKeepsOneRowPerTriple checks that a triple the spool
-// holds more than once, which a module writing the same node twice does, is
-// one row of the table.
-func TestWriteSpoolToIcebergKeepsOneRowPerTriple(t *testing.T) {
-	ctx := context.Background()
-	cfg := stageTestConfig(t)
-	spool, err := NewSpool(t.TempDir())
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, spool.Remove()) })
-	triple := rdflibgo.Triple{Subject: rdflibgo.NewURIRefUnsafe("http://example.com/s"), Predicate: stageTestPredicate, Object: rdflibgo.NewLiteral("o")}
-	require.NoError(t, spool.Add(triple))
-	_, err = spool.Mark()
-	require.NoError(t, err)
-	require.NoError(t, spool.Add(triple))
-
-	require.NoError(t, WriteSpoolToIceberg(ctx, spool, cfg, nil, ""))
-
-	hashes, err := readExistingTripleHashes(ctx, stageTestTable(t, cfg))
-	require.NoError(t, err)
-	require.Len(t, hashes, 1)
-	require.Equal(t, "1", stageTestTable(t, cfg).CurrentSnapshot().Summary.Properties["added-records"])
-}
-
-// TestWriteSpoolToIcebergWritesFilesSortedByPredicate checks that rows reach
-// the table grouped by predicate, which is its sort order and what lets the
-// writer keep one partition open at a time, whatever order they were spooled
-// in.
-func TestWriteSpoolToIcebergWritesFilesSortedByPredicate(t *testing.T) {
-	ctx := context.Background()
-	cfg := stageTestConfig(t)
-	spool, err := NewSpool(t.TempDir())
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, spool.Remove()) })
-	for i := range 50 {
-		for _, predicate := range []string{"https://example.com/zebra", "https://example.com/apple", "https://other.example.com/mango"} {
-			require.NoError(t, spool.Add(rdflibgo.Triple{
-				Subject:   rdflibgo.NewURIRefUnsafe(fmt.Sprintf("http://example.com/s%d", i)),
-				Predicate: rdflibgo.NewURIRefUnsafe(predicate),
-				Object:    rdflibgo.NewLiteral(fmt.Sprint(i)),
-			}))
-		}
-	}
-
-	require.NoError(t, WriteSpoolToIceberg(ctx, spool, cfg, nil, ""))
-
-	tbl := stageTestTable(t, cfg)
-	require.Equal(t, "150", tbl.CurrentSnapshot().Summary.Properties["added-records"])
-	// one data file per partition, since the clustered writer refuses a
-	// partition it has already closed
-	require.Equal(t, "2", tbl.CurrentSnapshot().Summary.Properties["added-data-files"])
-	// the spool was written a partition at a time, and each partition's files
-	// were dropped once its data files were written
-	require.Empty(t, spool.Files(0, spool.Segment()))
-}
-
-// A spool partitions its rows the way the table does, by the first twenty
-// characters of the predicate, counted as characters rather than bytes.
-func TestPartitionKeyIsTheFirstTwentyCharactersOfThePredicate(t *testing.T) {
-	require.Equal(t, "https://schema.org/n", partitionKey("https://schema.org/name"))
-	require.Equal(t, "https://example.com/", partitionKey("https://example.com/zebra"))
-	require.Equal(t, "short", partitionKey("short"))
-	require.Equal(t, "https://例え.jp/述語/あいう", partitionKey("https://例え.jp/述語/あいうえお"))
 }
 
 func TestWriteGraphToIcebergDoesNotRewriteEquivalentBlankNodeGraph(t *testing.T) {
@@ -278,37 +213,4 @@ func TestWriteGraphToIcebergStoresBlankNodesWithNTriplesPrefix(t *testing.T) {
 	require.NotEmpty(t, blankID, "expected the hasGeometry object to be stored as a _:sal_ blank node, got objects %v", objects)
 	require.Contains(t, subjects, blankID)
 	require.NotContains(t, subjects, strings.TrimPrefix(blankID, "_:"))
-}
-
-// distinctRows keeps the first of every run of rows with one hash, including
-// a run that carries over from the end of one batch to the start of the next.
-func TestDistinctRowsDropsARepeatAcrossBatches(t *testing.T) {
-	schema := arrow.NewSchema([]arrow.Field{{Name: "triple_hash", Type: arrow.BinaryTypes.String}}, nil)
-	batch := func(hashes ...string) arrow.RecordBatch {
-		builder := array.NewStringBuilder(memory.DefaultAllocator)
-		builder.AppendValues(hashes, nil)
-		column := builder.NewArray()
-		return array.NewRecordBatch(schema, []arrow.Array{column}, int64(len(hashes)))
-	}
-	records := func(yield func(arrow.RecordBatch, error) bool) {
-		for _, b := range []arrow.RecordBatch{batch("a", "b", "b"), batch("b", "c"), batch("d")} {
-			if !yield(b, nil) {
-				return
-			}
-		}
-	}
-
-	var rows int64
-	var kept []string
-	for b, err := range distinctRows(context.Background(), records, 0, &rows) {
-		require.NoError(t, err)
-		column := b.Column(0).(*array.String)
-		for i := 0; i < column.Len(); i++ {
-			kept = append(kept, column.Value(i))
-		}
-		b.Release()
-	}
-
-	require.Equal(t, []string{"a", "b", "c", "d"}, kept)
-	require.Equal(t, int64(4), rows)
 }

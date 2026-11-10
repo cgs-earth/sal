@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cgs-earth/sal/build/load"
 	"github.com/cgs-earth/sal/build/validate"
 	"github.com/cgs-earth/sal/construct"
 	"github.com/cgs-earth/sal/pkg"
@@ -223,10 +222,6 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 		}
 	}
 
-	if !cfg.skipCommit {
-		pkg.LogMemoryBudget()
-	}
-
 	pins, err := projectVocabularies(cfg.NoCache)
 	if err != nil {
 		return nil, err
@@ -428,26 +423,6 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 		return nil, err
 	}
 
-	// an Iceberg build spools what it commits to Parquet as it goes rather
-	// than holding it in the graph: what the module tasks produce is written
-	// there as it is parsed, and the graph of everything else joins it at the
-	// end, so the build's memory is bounded by the sources and not by what the
-	// modules produce. N-Quads are serialized from a graph, so that format
-	// keeps everything in it.
-	var spool *load.Spool
-	var sink salmodule.TripleSink
-	if cfg.Format == GraphExportFormatIceberg {
-		if spool, err = newBuildSpool(); err != nil {
-			return nil, err
-		}
-		defer func() {
-			if err := spool.Remove(); err != nil {
-				slog.Warn("failed to remove the build's scratch files", "path", spool.Dir(), "error", err)
-			}
-		}()
-		sink = spool.Add
-	}
-
 	// a build runs every module task the project declares and commits what
 	// the tasks produced in the same snapshot as the sources, so that a build
 	// is the one operation that produces a snapshot; --without-sal-modules
@@ -460,7 +435,7 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 		if err != nil {
 			return nil, err
 		}
-		tasksRun, vocabularies, err := MaterializeSalModules(ctx, finalGraph, sink, resolver, blobDir)
+		tasksRun, vocabularies, err := MaterializeSalModules(ctx, finalGraph, resolver, blobDir)
 		if err != nil {
 			return nil, err
 		}
@@ -496,20 +471,10 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 		return nil, err
 	}
 
-	// the graph's blank nodes get their stable labels before it joins the
-	// spool, which is also what the CONSTRUCT queries refer to them by;
-	// nothing is renamed after this
-	load.StabilizeBlankNodes(finalGraph)
-	if spool != nil {
-		if err := spool.AddGraph(finalGraph); err != nil {
-			return nil, fmt.Errorf("build: %w", err)
-		}
-	}
-
 	// the CONSTRUCT queries run last, over everything the build has gathered,
-	// and what they construct joins the build before it is committed, so the
+	// and what they construct joins the graph before it is committed, so the
 	// sources, the module output, and the constructed triples are one snapshot
-	constructed, staged, err := MaterializeConstructs(ctx, finalGraph, spool, projectDir, constructs, cfg.Format)
+	finalGraph, staged, err := MaterializeConstructs(ctx, finalGraph, projectDir, constructs, cfg.Format)
 	if err != nil {
 		return nil, err
 	}
@@ -520,18 +485,10 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 			slog.Warn("failed to remove the staged build", "error", err)
 		}
 	}()
-	if constructed != nil {
-		if spool != nil {
-			if err := spool.AddGraph(constructed); err != nil {
-				return nil, fmt.Errorf("build: %w", err)
-			}
-		}
-		mergeGraph(finalGraph, constructed)
-	}
 
 	// every module downloaded so far, both the ones validation dereferenced for
 	// their vocabulary and the ones materialization ran, is recorded in the table
-	if err := ExportGraph(ctx, finalGraph, spool, cfg.Format, hash, resolver.Downloaded(), staged, strings.TrimSpace(cfg.Message)); err != nil {
+	if err := ExportGraph(ctx, finalGraph, cfg.Format, hash, resolver.Downloaded(), staged, strings.TrimSpace(cfg.Message)); err != nil {
 		return nil, err
 	}
 
@@ -544,22 +501,6 @@ func (cfg *BuildCmd) Run() (_ *rdflibgo.Graph, err error) {
 	}
 
 	return finalGraph, err
-}
-
-// newBuildSpool makes the spool an Iceberg build commits from, in the scratch
-// directory of the project's data directory, which is on the disk the table
-// is and is gitignored with it. Whatever a build that was killed left there
-// is removed first, since builds of one project never run at once.
-func newBuildSpool() (*load.Spool, error) {
-	dataDir, err := pkg.SalDataDir()
-	if err != nil {
-		return nil, err
-	}
-	scratch := filepath.Join(dataDir, load.ScratchDir)
-	if err := os.RemoveAll(scratch); err != nil {
-		return nil, fmt.Errorf("build: remove the scratch files of an earlier build: %w", err)
-	}
-	return load.NewSpool(scratch)
 }
 
 // appendBlobProvenance adds the record of every file and directory a SAL

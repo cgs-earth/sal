@@ -215,34 +215,6 @@ func TestRenderCountsTasksAndModulesAndSaysHowAModuleWasResolved(t *testing.T) {
 	require.Contains(t, text, "skipped")
 }
 
-// A task harvesting millions of nodes reports how many JSON-LD documents it
-// has read every 20,000, and the pane shows the count on the running task as
-// it grows, so a long harvest has a sense of scale; a task that has read
-// fewer shows no count at all.
-func TestRenderCountsTheJSONLDDocumentsALargeTaskHasRead(t *testing.T) {
-	tracker := installTracker(t)
-	ctx, _ := telemetry.Start(context.Background(), "sal.build")
-	tasksCtx, _ := telemetry.Start(ctx, "build.materialize_modules", attribute.Int("sal.module.tasks", 2), attribute.Int("sal.modules", 1))
-	_, large := telemetry.Start(tasksCtx, "salmodule.task", attribute.String("sal.module.task_class", "salmodule://github.com/cgs-earth/geoconnex/Harvest"))
-	large.SetAttributes(attribute.Int("sal.module.documents", 40000), attribute.Int64("sal.triples.materialized", 500000))
-
-	text := plain(tracker.Render(160, time.Now(), "⠋"))
-	require.Contains(t, text, "⠋ Task salmodule://github.com/cgs-earth/geoconnex/Harvest")
-	require.Contains(t, text, "40,000 JSON-LD documents · 500000 triples")
-
-	large.SetAttributes(attribute.Int("sal.module.documents", 1740000))
-	text = plain(tracker.Render(160, time.Now(), "⠋"))
-	require.Contains(t, text, "1,740,000 JSON-LD documents")
-	telemetry.End(large, nil)
-
-	_, small := telemetry.Start(tasksCtx, "salmodule.task", attribute.String("sal.module.task_class", "salmodule://github.com/cgs-earth/geoconnex/Small"))
-	small.SetAttributes(attribute.Int("sal.module.documents", 1200))
-	telemetry.End(small, nil)
-	text = plain(tracker.Render(160, time.Now(), "⠋"))
-	require.NotContains(t, text, "1200 JSON-LD")
-	require.NotContains(t, text, "1,200 JSON-LD")
-}
-
 func TestRenderSaysWhenTheTableHadNoChanges(t *testing.T) {
 	tracker := installTracker(t)
 	ctx, root := telemetry.Start(context.Background(), "sal.build")

@@ -51,11 +51,6 @@ For the main triples table, SAL writes an Apache Iceberg table under the project
 The `metadata` directory contains Iceberg table metadata, manifest lists, manifests, and `version-hint.text`.
 The `data` directory contains the table's data files.
 
-While a build runs, `.sal/data/.scratch` holds what it is about to commit, as Parquet, and the files DuckDB spills
-to while it compares the build with the table; it can grow to roughly the size of the module output as Parquet, and
-it is removed when the build ends. One a build that was killed left behind is cleared by the next build, never
-uploaded, and removed by `sal clean --wipe`.
-
 The files named by a hash under `.sal/data/blobs` are the vocabulary documents the project pins, described in
 [Pinned vocabularies](#pinned-vocabularies) below, and the files SAL module tasks produce, which
 [`sal build`](/sal/reference/commands/#sal-module-tasks) copies out of the module's container under the SHA-256 digest of

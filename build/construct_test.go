@@ -50,7 +50,7 @@ func installStagedConstructRunner(t *testing.T) *stagedConstructRunner {
 	t.Helper()
 	runner := &stagedConstructRunner{}
 	original := stageGraph
-	stageGraph = func(_ context.Context, graph *rdflibgo.Graph, _ *load.Spool, _ GraphExportFormat) (construct.Runner, *load.StagedGraph, func(), error) {
+	stageGraph = func(_ context.Context, graph *rdflibgo.Graph, _ GraphExportFormat) (construct.Runner, *load.StagedGraph, func(), error) {
 		runner.staged = graph
 		return runner, nil, func() {}, nil
 	}
@@ -170,8 +170,8 @@ func installRealStaging(t *testing.T, runner construct.Runner) *load.StagedGraph
 	t.Helper()
 	last := &load.StagedGraph{}
 	original := stageGraph
-	stageGraph = func(ctx context.Context, graph *rdflibgo.Graph, spool *load.Spool, format GraphExportFormat) (construct.Runner, *load.StagedGraph, func(), error) {
-		_, staged, cleanup, err := original(ctx, graph, spool, format)
+	stageGraph = func(ctx context.Context, graph *rdflibgo.Graph, format GraphExportFormat) (construct.Runner, *load.StagedGraph, func(), error) {
+		_, staged, cleanup, err := original(ctx, graph, format)
 		if err != nil {
 			return nil, nil, nil, err
 		}
