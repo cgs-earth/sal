@@ -959,6 +959,17 @@ sal upload --bucket gs://my-bucket/sal/triples
 ```
 
 SAL stages a temporary copy, rewrites staged Iceberg metadata to point at the target location, then uploads data and metadata in reader-friendly order. The project's `.sal/config.jsonld`, which sits beside `.sal/data`, is uploaded at the top of the destination so [`sal serve --data`](#serving-an-uploaded-copy) can name the project and list its pinned vocabularies; a bare bucket (`gs://my-bucket/`) gets the whole `.sal/data` layout, `<project>/triples/` with `blobs/` and `stac/` beside it.
+Every object of the layout is written on every upload; none is skipped as already there.
+
+An upload only adds and overwrites objects. What an earlier upload wrote under the destination and this one does not, such as the data and metadata files of a table built from other sources, the blobs a module handed over then, or the metadata objects every object-store upload names afresh, stays in the bucket. Readers that follow `metadata/version-hint.text`, which `sal serve` and DuckDB's `iceberg_scan` do, never read those objects, but a reader that lists the bucket sees them, and they are paid for. `--delete` removes them:
+
+```sh
+sal upload --bucket gs://my-bucket/ --delete
+sal upload --bucket gs://my-bucket/ --delete --dry-run   # list what would be uploaded and deleted
+```
+
+The objects to delete are listed before anything is uploaded, are every object under the destination (the bucket, or the prefix the URL names) that is not part of the new layout, and are deleted only once every upload, the version hint last, has succeeded, so a failed upload deletes nothing and the bucket is never left without a table. Deleting needs permission to delete objects: on Google Cloud `storage.objects.delete`, which `roles/storage.objectCreator` lacks and `roles/storage.objectAdmin` has. Point `--delete` only at a destination that holds nothing but the data product, since everything else under it goes too. `--dry-run` prints each object that would be uploaded and deleted, and changes nothing.
+
 See [Publishing Data](/sal/guides/publishing-data/#upload-to-object-storage).
 
 ## `sal rewrite`

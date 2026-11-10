@@ -60,7 +60,7 @@ func TestDeployUploadsAllFilesToBucket(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "project", "triples", "metadata", "v1.metadata.json"), []byte(`{"location":"`+filepath.ToSlash(filepath.Join(dataDir, "project", "triples"))+`"}`), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "project", "triples", "data", "file.parquet"), []byte("parquet bytes"), 0644))
 
-	err := deploy(ctx, dataDir, "file://"+destination, blob.OpenBucket)
+	err := deploy(ctx, dataDir, "file://"+destination, blob.OpenBucket, deployOptions{})
 	require.NoError(t, err)
 
 	metadata, err := os.ReadFile(filepath.Join(destination, "metadata", "v1.metadata.json"))
@@ -77,7 +77,7 @@ func TestDeployUploadsAllFilesToBucket(t *testing.T) {
 }
 
 func TestDeployReturnsErrorWhenDataDirIsEmpty(t *testing.T) {
-	err := deploy(context.Background(), t.TempDir(), "mem://", blob.OpenBucket)
+	err := deploy(context.Background(), t.TempDir(), "mem://", blob.OpenBucket, deployOptions{})
 	require.ErrorContains(t, err, "no files found")
 }
 
@@ -89,7 +89,7 @@ func TestDeployNormalizesGCSBucketURL(t *testing.T) {
 	err := deploy(context.Background(), dataDir, "gs://my-bucket?prefix=data/", func(_ context.Context, url string) (*blob.Bucket, error) {
 		openedURL = url
 		return nil, fmt.Errorf("stop after URL capture")
-	})
+	}, deployOptions{})
 	require.ErrorContains(t, err, "stop after URL capture")
 	require.Equal(t, "gs://my-bucket?prefix=data/", openedURL)
 }
@@ -102,7 +102,7 @@ func TestDeployConvertsGCSPathToUploadPrefix(t *testing.T) {
 	err := deploy(context.Background(), dataDir, "gs://my-bucket/sal/", func(_ context.Context, url string) (*blob.Bucket, error) {
 		openedURL = url
 		return nil, fmt.Errorf("stop after URL capture")
-	})
+	}, deployOptions{})
 	require.ErrorContains(t, err, "stop after URL capture")
 	require.Equal(t, "gs://my-bucket?prefix=sal%2F", openedURL)
 }
@@ -115,7 +115,7 @@ func TestDeployConvertsStorageGoogleapisURLToGCSUploadURL(t *testing.T) {
 	err := deploy(context.Background(), dataDir, "https://storage.googleapis.com/my-bucket/sal/", func(_ context.Context, url string) (*blob.Bucket, error) {
 		openedURL = url
 		return nil, fmt.Errorf("stop after URL capture")
-	})
+	}, deployOptions{})
 	require.ErrorContains(t, err, "stop after URL capture")
 	require.Equal(t, "gs://my-bucket?prefix=sal%2F", openedURL)
 }

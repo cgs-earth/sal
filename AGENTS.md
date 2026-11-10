@@ -168,6 +168,7 @@ SAL, (semantic accessibility layer), is a CLI tool for creating RDF data and met
 
 - upload copies `.sal/data` to a temporary staging directory, rewrites the staged Iceberg metadata, and uploads the staged files. The local `.sal/data` directory must remain unchanged.
     - `stageProjectConfig` also copies `.sal/config.jsonld`, which sits beside `.sal/data`, to the top of the staged copy, so a bucket-root upload carries the project's title, description, and pins for `sal serve --data`. It does nothing for a data directory that is not a project's `.sal/data`.
+- An upload writes every object of the layout every time (nothing is skipped as unchanged) and by default deletes nothing. `--delete` lists the objects under the destination that the layout does not include before uploading (`staleObjects`) and deletes them only after every upload has succeeded, so a failed upload deletes nothing; `--dry-run` prints the uploads and deletions instead of making them. Deleting is opt-in because a destination may hold objects that are not the data product's.
 - upload uses the rewrite package for Iceberg metadata rewrites. Do not duplicate JSON or Avro metadata traversal logic in upload unless the rewrite package cannot represent the operation.
 - Bucket URL semantics are important:
     - A bare object-store bucket like `gs://my-bucket/` uploads the full `.sal/data` layout. If the local table is `.sal/data/sal/triples`, the uploaded table root is `gs://my-bucket/sal/triples`.

@@ -61,7 +61,7 @@ func uploadedCopy(t *testing.T, withConfig bool) string {
 	opener := func(ctx context.Context, _ string) (*blob.Bucket, error) {
 		return fileblob.OpenBucket(bucket, &fileblob.Options{Metadata: fileblob.MetadataDontWrite})
 	}
-	require.NoError(t, deploy(ctx, dataDir, "gs://my-bucket/", opener))
+	require.NoError(t, deploy(ctx, dataDir, "gs://my-bucket/", opener, deployOptions{}))
 	return bucket
 }
 

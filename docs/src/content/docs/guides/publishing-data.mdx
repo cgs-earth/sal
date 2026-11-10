@@ -40,6 +40,8 @@ sal upload --bucket https://storage.googleapis.com/my-bucket/sal/triples
 During upload, SAL stages a temporary copy of `.sal/data`, rewrites Iceberg metadata paths to the destination, and uploads the staged files.
 The local `.sal/data` directory is left unchanged.
 
+An upload never deletes anything, so objects from earlier uploads stay under the destination. When a project is rebuilt and uploaded to the same place, add `--delete` to remove every object the new layout does not include, once the upload has succeeded, and `--dry-run` to see what that would be first. See [`sal upload`](/sal/reference/commands/#sal-upload).
+
 ## Query a deployed table
 
 After uploading to object storage, query the table with DuckDB's Iceberg extension:

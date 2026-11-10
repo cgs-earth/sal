@@ -20,6 +20,7 @@ import (
 	_ "gocloud.dev/blob/gcsblob"
 	_ "gocloud.dev/blob/memblob"
 	_ "gocloud.dev/blob/s3blob"
+	"gocloud.dev/gcerrors"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -36,8 +37,15 @@ const maxConcurrentDeployUploads = 4
 //	'gs://bucket/git-project/iceberg-table'
 //
 // )LIMIT 5;
+//
+// An upload only adds and overwrites objects. Objects an earlier upload left
+// under the destination stay there unless --delete removes them; nothing is
+// ever skipped as already uploaded, so every object of the new layout is
+// written on every run.
 type UploadCmd struct {
 	Bucket string `arg:"--bucket" help:"The scheme and name of the bucket to upload a built SAL data product to. Example: s3://my-bucket/sal/triples or gs://my-bucket/sal/triples"`
+	Delete bool   `arg:"--delete" help:"After uploading, delete every object under the destination that is not part of the uploaded layout, so the bucket matches .sal/data exactly. Without it, objects from earlier uploads are left in place. Needs permission to delete objects (storage.objects.delete on GCS)"`
+	DryRun bool   `arg:"--dry-run" help:"Print the objects that would be uploaded, and with --delete deleted, without changing the bucket"`
 }
 
 func (c *UploadCmd) Run() error {
@@ -54,7 +62,17 @@ func (c *UploadCmd) Run() error {
 	}
 
 	ctx := context.Background()
-	return deploy(ctx, salDataDir, c.Bucket, blob.OpenBucket)
+	return deploy(ctx, salDataDir, c.Bucket, blob.OpenBucket, deployOptions{Delete: c.Delete, DryRun: c.DryRun, Out: os.Stdout})
+}
+
+// deployOptions are the flags of `sal upload` that change what deploy does
+// to the bucket rather than where it writes.
+type deployOptions struct {
+	// Delete removes the objects under the destination the upload did not write.
+	Delete bool
+	// DryRun prints the uploads and deletions to Out without making them.
+	DryRun bool
+	Out    io.Writer
 }
 
 type bucketOpener func(context.Context, string) (*blob.Bucket, error)
@@ -65,8 +83,17 @@ type deployFile struct {
 	size int64
 }
 
-// deploy uploads every file under dataDir to bucketURL, preserving relative paths as blob keys.
-func deploy(ctx context.Context, dataDir string, bucketURL string, openBucket bucketOpener) error {
+// deploy uploads every file under dataDir to bucketURL, preserving relative
+// paths as blob keys. With opts.Delete it then removes every object under the
+// destination the upload did not write; the deletions only start once every
+// upload, the version hint last, has succeeded, so a failure leaves the bucket
+// holding the previous table or the new one, never neither.
+func deploy(ctx context.Context, dataDir string, bucketURL string, openBucket bucketOpener, opts deployOptions) error {
+	if opts.Delete {
+		if u, err := url.Parse(bucketURL); err != nil || u.Scheme == "" || u.Host == "" && strings.Trim(u.Path, "/") == "" {
+			return fmt.Errorf("--delete needs a bucket URL with a scheme and a bucket name, got %q", bucketURL)
+		}
+	}
 	openedBucketURL, err := bucketOpenURL(bucketURL)
 	if err != nil {
 		return err
@@ -107,6 +134,25 @@ func deploy(ctx context.Context, dataDir string, bucketURL string, openBucket bu
 		}
 	}()
 
+	var stale []string
+	if opts.Delete {
+		slog.Info("Objects under the destination that are not part of the upload will be deleted", "destination", objectBaseURL(bucketURL))
+		if stale, err = staleObjects(ctx, bucket, files); err != nil {
+			return fmt.Errorf("list objects under %s: %w", bucketURL, err)
+		}
+	}
+
+	if opts.DryRun {
+		for _, file := range files {
+			_, _ = fmt.Fprintf(opts.Out, "upload %s\n", joinRemote(objectBaseURL(bucketURL), file.key))
+		}
+		for _, key := range stale {
+			_, _ = fmt.Fprintf(opts.Out, "delete %s\n", joinRemote(objectBaseURL(bucketURL), key))
+		}
+		slog.Info("Dry run: nothing was uploaded or deleted", "bucket", bucketURL, "uploads", len(files), "deletions", len(stale))
+		return nil
+	}
+
 	deployedFiles, deployedBytes, err := uploadFiles(ctx, bucket, files)
 	if err != nil {
 		return err
@@ -118,7 +164,44 @@ func deploy(ctx context.Context, dataDir string, bucketURL string, openBucket bu
 		"files", deployedFiles,
 		"bytes", deployedBytes,
 	)
+
+	if !opts.Delete {
+		return nil
+	}
+	for _, key := range stale {
+		if err := bucket.Delete(ctx, key); err != nil {
+			if gcerrors.Code(err) == gcerrors.PermissionDenied {
+				return fmt.Errorf("delete %s: %w; the upload succeeded, but --delete needs permission to delete objects (storage.objects.delete on GCS, which roles/storage.objectCreator lacks; roles/storage.objectAdmin has it)", key, err)
+			}
+			return fmt.Errorf("delete %s: %w", key, err)
+		}
+	}
+	slog.Info("Deleted objects that are not part of the upload", "destination", objectBaseURL(bucketURL), "deleted", len(stale))
 	return nil
+}
+
+// staleObjects lists the keys under the opened bucket, which is already scoped
+// to the destination prefix, that are not among the files being uploaded.
+// It is computed before the upload, so nothing the upload writes is deleted.
+func staleObjects(ctx context.Context, bucket *blob.Bucket, files []deployFile) ([]string, error) {
+	uploaded := make(map[string]bool, len(files))
+	for _, file := range files {
+		uploaded[file.key] = true
+	}
+	var stale []string
+	iter := bucket.List(nil)
+	for {
+		object, err := iter.Next(ctx)
+		if err == io.EOF {
+			return stale, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !object.IsDir && !uploaded[object.Key] {
+			stale = append(stale, object.Key)
+		}
+	}
 }
 
 // bucketOpenURL converts user-facing bucket URLs into the format expected by Go Cloud blob drivers.
