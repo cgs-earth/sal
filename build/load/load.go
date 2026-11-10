@@ -2,15 +2,18 @@ package load
 
 import (
 	"context"
-	"errors"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
+	"sort"
 	"strconv"
+	"strings"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/iceberg-go"
 	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/catalog/hadoop"
@@ -20,6 +23,8 @@ import (
 	rdflibgo "github.com/tggo/goRDFlib"
 	"go.opentelemetry.io/otel/attribute"
 )
+
+const deleteHashChunkSize = 100
 
 type LoadConfig struct {
 	// BatchSize is the number of Arrow records to write per batch.
@@ -46,137 +51,69 @@ type LoadConfig struct {
 	Namespace string
 }
 
-// ScratchDir is the directory, under a warehouse, that a build's spool and
-// the DuckDB diff over it write their scratch files to. It is on the same
-// disk as the table the rows end up in, and removed once the build is done.
-const ScratchDir = pkg.ScratchDirName
-
 // WriteGraphToIceberg writes an RDF graph into the configured Iceberg triples
-// table: the graph's blank nodes are stabilized, its triples spooled, and the
-// spool committed with WriteSpoolToIceberg.
+// table. customMetadata is set as table properties, and message, when not
+// empty, is recorded in the summary of the snapshot the write commits under
+// pkg.SnapshotMessageProperty, the way a git commit carries its message. A
+// write that changes nothing commits no snapshot, so it records no message.
 func WriteGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig, customMetadata map[string]string, message string) error {
+	return writeGraphToIceberg(ctx, graph, cfg, customMetadata, message, nil)
+}
+
+// writeGraphToIceberg is WriteGraphToIceberg for a graph that may have been
+// staged first, whose data files the commit then reuses.
+func writeGraphToIceberg(ctx context.Context, graph *rdflibgo.Graph, cfg *LoadConfig, customMetadata map[string]string, message string, staged *StagedGraph) (err error) {
 	if graph == nil {
 		return fmt.Errorf("load graph: missing graph")
 	}
 	if cfg == nil {
 		return fmt.Errorf("load graph: missing arguments")
 	}
-	spool, err := spoolGraph(graph, cfg)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := spool.Remove(); err != nil {
-			slog.Warn("failed to remove the spool", "path", spool.Dir(), "error", err)
-		}
-	}()
-	return WriteSpoolToIceberg(ctx, spool, cfg, customMetadata, message)
-}
-
-// spoolGraph spools a graph, its blank nodes stabilized, in the warehouse's
-// scratch directory.
-func spoolGraph(graph *rdflibgo.Graph, cfg *LoadConfig) (*Spool, error) {
-	spool, err := NewSpool(filepath.Join(cfg.Warehouse, ScratchDir))
-	if err != nil {
-		return nil, err
-	}
-	if err := spool.AddGraph(StabilizeBlankNodes(graph)); err != nil {
-		return nil, errors.Join(err, spool.Remove())
-	}
-	return spool, nil
-}
-
-// WriteSpoolToIceberg commits the rows of a spool as the next snapshot of the
-// main branch of the configured triples table: every row the table does not
-// hold yet is added, once, and every row of the table the spool does not hold
-// is removed with an equality delete, so the snapshot holds exactly what the
-// spool does. The diff is a pair of anti joins DuckDB runs over Parquet files
-// (see spoolDiff), so a build's memory does not grow with the table or with
-// what it writes. customMetadata is set as table properties, and message,
-// when not empty, is recorded in the summary of the snapshot under
-// pkg.SnapshotMessageProperty, the way a git commit carries its message. A
-// write that changes nothing commits no snapshot, so it records no message.
-func WriteSpoolToIceberg(ctx context.Context, spool *Spool, cfg *LoadConfig, customMetadata map[string]string, message string) (err error) {
-	if spool == nil || cfg == nil {
-		return fmt.Errorf("load graph: missing arguments")
-	}
 	ctx, span := telemetry.Start(ctx, "iceberg.write", attribute.String("sal.iceberg.warehouse", cfg.Warehouse), attribute.String("sal.iceberg.namespace", cfg.Namespace))
 	defer func() { telemetry.End(span, err) }()
 
-	tbl, cat, err := openTable(ctx, cfg)
-	if err != nil {
-		return err
-	}
-	if err := spool.Flush(); err != nil {
-		return err
-	}
-	diff, err := openSpoolDiff(ctx, spool, tbl)
-	if err != nil {
-		return err
-	}
-	defer func() { err = joinClose(err, diff.Close()) }()
+	graph = StabilizeBlankNodes(graph)
 
-	change, err := diff.diff(ctx, tbl, spool, 0, spool.Segment(), diff.existing, 0)
+	arrowSchema, tableSchema, err := GetSchemas()
 	if err != nil {
 		return err
 	}
-	if change.empty() {
-		warnNoChanges(message)
-	} else if _, err := commitGraphDelta(ctx, tbl, table.MainBranch, change.dataFiles, change.added, change.removedPath, change.removed, snapshotProperties(message)); err != nil {
-		return err
-	}
-	return finishWrite(ctx, cat, tbl.Identifier(), customMetadata)
-}
 
-// openTable opens the configured triples table, creating it when there is
-// none, with the build's write properties applied.
-func openTable(ctx context.Context, cfg *LoadConfig) (*table.Table, catalog.Catalog, error) {
-	_, tableSchema, err := GetSchemas()
-	if err != nil {
-		return nil, nil, err
-	}
 	cat, err := hadoop.NewCatalog(ctx, "local-catalog", cfg.Warehouse, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create catalog: %w", err)
+		return fmt.Errorf("failed to create catalog: %w", err)
 	}
+
 	tbl, err := NewIcebergTableFromCfg(ctx, tableSchema, cat, cfg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create Iceberg table: %w", err)
+		return fmt.Errorf("failed to create Iceberg table: %w", err)
 	}
-	if err := applyWriteProperties(ctx, tbl, cfg); err != nil {
-		return nil, nil, err
-	}
-	if tbl, err = cat.LoadTable(ctx, tbl.Identifier()); err != nil {
-		return nil, nil, fmt.Errorf("load table: %w", err)
-	}
-	return tbl, cat, nil
-}
 
-// finishWrite sets the build's properties on the table and tags its current
-// snapshot with the commit HEAD is at, which a build does whether or not it
-// committed a snapshot.
-func finishWrite(ctx context.Context, cat catalog.Catalog, ident table.Identifier, customMetadata map[string]string) error {
-	tbl, err := cat.LoadTable(ctx, ident)
+	if err := applyWriteProperties(ctx, tbl, cfg); err != nil {
+		return err
+	}
+
+	err = processGraph(ctx, graph, cat, tbl.Identifier(), arrowSchema, cfg.BatchSize, snapshotProperties(message), staged)
+	if err != nil {
+		return err
+	}
+
+	tbl, err = cat.LoadTable(ctx, tbl.Identifier())
 	if err != nil {
 		return fmt.Errorf("reload table before setting metadata: %w", err)
 	}
-	tx := tbl.NewTransaction()
-	if err := tx.SetProperties(customMetadata); err != nil {
-		return err
-	}
-	if _, err := tx.Commit(ctx); err != nil {
-		return err
-	}
-	return pkg.SetTagOfLatestSnapshot(tbl, cat)
-}
 
-// warnNoChanges says that a write found nothing to commit.
-func warnNoChanges(message string) {
-	if message != "" {
-		slog.Warn("No changes from last Iceberg snapshot. No new snapshot will be created, so the build message is not recorded", "message", message)
-	} else {
-		slog.Warn("No changes from last Iceberg snapshot. No new snapshot will be created")
+	tx := tbl.NewTransaction()
+	if err = tx.SetProperties(customMetadata); err != nil {
+		return err
 	}
+
+	_, err = tx.Commit(ctx)
+	if err != nil {
+		return err
+	}
+
+	return pkg.SetTagOfLatestSnapshot(tbl, cat)
 }
 
 // snapshotProperties is what a build's message becomes in the summary of the
@@ -188,95 +125,264 @@ func snapshotProperties(message string) iceberg.Properties {
 	return iceberg.Properties{pkg.SnapshotMessageProperty: message}
 }
 
-// tableChange is what a diff found and wrote: the data files of the rows to
-// add and a file of the pairs to delete, each with its count, plus how many
-// rows of the table stay as they are.
-type tableChange struct {
-	dataFiles   []iceberg.DataFile
-	added       int64
-	removedPath string
-	removed     int64
-	unchanged   int64
+// processGraph writes an RDF graph to Iceberg data files, then commits them in
+// one snapshot carrying snapshotProps in its summary. The data files a staged
+// graph already wrote are committed as they are, and only the triples they do
+// not hold are written.
+func processGraph(
+	ctx context.Context,
+	graph *rdflibgo.Graph,
+	cat catalog.Catalog,
+	tableIdent table.Identifier,
+	arrowSchema *arrow.Schema,
+	batchSize int,
+	snapshotProps iceberg.Properties,
+	staged *StagedGraph,
+) error {
+	tbl, err := cat.LoadTable(ctx, tableIdent)
+	if err != nil {
+		return fmt.Errorf("load table: %w", err)
+	}
+
+	diff, err := diffGraphAgainstTable(ctx, tbl, graph)
+	if err != nil {
+		return err
+	}
+	if len(diff.toAdd) == 0 && len(diff.toDrop) == 0 {
+		if message, ok := snapshotProps[pkg.SnapshotMessageProperty]; ok {
+			slog.Warn("No changes from last Iceberg snapshot. No new snapshot will be created, so the build message is not recorded", "message", message)
+		} else {
+			slog.Warn("No changes from last Iceberg snapshot. No new snapshot will be created")
+		}
+		return nil
+	}
+	slog.Info("Applying Iceberg triple diff", "added", len(diff.toAdd), "removed", len(diff.toDrop), "unchanged", diff.unchanged)
+
+	toWrite := diff.toAdd
+	dataFiles := staged.reusableFiles(diff.toAdd)
+	if len(dataFiles) > 0 {
+		toWrite = map[tripleDigest]struct{}{}
+		for digest := range diff.toAdd {
+			if _, ok := staged.hashes[digest]; !ok {
+				toWrite[digest] = struct{}{}
+			}
+		}
+		slog.Info("Reusing the data files the build was staged in", "data_files", len(dataFiles), "triples", len(staged.hashes))
+	}
+	if len(toWrite) > 0 {
+		written, _, err := writeGraph(ctx, tbl, graph, arrowSchema, batchSize, toWrite)
+		if err != nil {
+			return err
+		}
+		dataFiles = append(slices.Clone(dataFiles), written...)
+	}
+	_, err = commitGraphDelta(ctx, tbl, table.MainBranch, dataFiles, int64(len(diff.toAdd)), diff.toDrop, snapshotProps)
+	return err
 }
 
-func (c tableChange) empty() bool { return c.added == 0 && c.removed == 0 }
+// writeGraph writes all triples in graph to Iceberg data files without parallelism.
+func writeGraph(
+	ctx context.Context,
+	tbl *table.Table,
+	graph *rdflibgo.Graph,
+	arrowSchema *arrow.Schema,
+	batchSize int,
+	hashes map[tripleDigest]struct{},
+) (_ []iceberg.DataFile, _ int64, err error) {
+	ctx, span := telemetry.Start(ctx, "iceberg.write_data_files")
+	defer func() { telemetry.End(span, err) }()
+	rdr := newFilteredGraphRecordReader(graph, arrowSchema, batchSize, hashes)
+	defer rdr.Release()
 
-// diff writes the data files of every row of the spool's segments from
-// through to that neither the table nor an earlier diff of this spoolDiff
-// added, and a file of the pairs of every row of removedFrom, a file of
-// (triple_hash, predicate) pairs, that those segments do not hold, "" for
-// none. The pairs to remove are found first, over the hashes of every
-// spooled row; the rows to add are then found and written a partition at a
-// time, and each partition's spool files are dropped once its data files are
-// written, so only one partition is ever sorted and the disk the spool takes
-// shrinks as the diff goes. It is one span, the one the progress pane and the
-// telemetry read the counts from, so the rows it reports added are the ones
-// written, each triple once; staged is added to that count for a commit that
-// also carries rows staging wrote.
-func (d *spoolDiff) diff(ctx context.Context, tbl *table.Table, spool *Spool, from, to int, removedFrom string, staged int64) (_ tableChange, err error) {
+	records := retainedRecordIterator(rdr)
+	var dataFiles []iceberg.DataFile
+	for df, err := range table.WriteRecords(ctx, tbl, arrowSchema, records) {
+		if err != nil {
+			return nil, 0, fmt.Errorf("write graph: %w", err)
+		}
+		dataFiles = append(dataFiles, df)
+	}
+	if err := rdr.Err(); err != nil {
+		return nil, 0, fmt.Errorf("read graph: %w", err)
+	}
+
+	span.SetAttributes(attribute.Int("sal.iceberg.data_files", len(dataFiles)), attribute.Int64("sal.triples.written", rdr.RowsRead()))
+	slog.Info("Successfully wrote to iceberg table with " + fmt.Sprint(len(dataFiles)) + " data files and " + fmt.Sprint(rdr.RowsRead()) + " triples")
+	return dataFiles, rdr.RowsRead(), nil
+}
+
+func appendGraph(
+	ctx context.Context,
+	tbl *table.Table,
+	graph *rdflibgo.Graph,
+	arrowSchema *arrow.Schema,
+	batchSize int,
+	hashes map[tripleDigest]struct{},
+) error {
+	dataFiles, rows, err := writeGraph(ctx, tbl, graph, arrowSchema, batchSize, hashes)
+	if err != nil {
+		return err
+	}
+	_, err = commitGraphDelta(ctx, tbl, table.MainBranch, dataFiles, rows, nil, nil)
+	return err
+}
+
+type graphTableDiff struct {
+	toAdd     map[tripleDigest]struct{}
+	toDrop    []existingTriple
+	unchanged int
+}
+
+// existingTriple is a row of the table as the diff needs it: its hash and
+// predicate, which an equality delete names it by, and whether the graph being
+// written still holds it.
+type existingTriple struct {
+	hash      string
+	predicate string
+	seen      bool
+}
+
+// diffGraphAgainstTable compares new graph triple hashes against hashes already in Iceberg.
+// The graph is walked once, marking every row of the table it still holds, so
+// that the rows to drop are the ones left unmarked; no second set of the
+// graph's hashes is built, since a graph of millions of triples makes that set
+// as large as the table's own.
+func diffGraphAgainstTable(ctx context.Context, tbl *table.Table, graph *rdflibgo.Graph) (_ *graphTableDiff, err error) {
 	ctx, span := telemetry.Start(ctx, "iceberg.diff")
 	defer func() { telemetry.End(span, err) }()
-	candidates := spool.Files(from, to)
-	partitions := spool.Partitions(from, to)
-	slog.Info("Comparing the build against the Iceberg table", "spool_files", len(candidates), "partitions", len(partitions), "table_rows", d.existingRows)
+	slog.Info("Reading the triple hashes the Iceberg table already holds")
+	existing, err := readExistingTriples(ctx, tbl)
+	if err != nil {
+		return nil, err
+	}
 
-	var change tableChange
-	if change.removedPath, change.removed, err = d.removed(ctx, removedFrom, candidates); err != nil {
-		return change, err
-	}
-	exclude := slices.Clone(d.addedHashes)
-	for _, partition := range partitions {
-		addedPath, addedRows, err := d.added(ctx, partition, exclude)
-		if err != nil {
-			return change, err
+	slog.Info("Comparing the graph against the Iceberg table", "graph_triples", pkg.GraphLen(graph), "table_rows", len(existing))
+	diff := &graphTableDiff{toAdd: map[tripleDigest]struct{}{}}
+	pkg.Triples(graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+		digest := tripleDigestForTriple(triple)
+		if row, ok := existing[digest]; ok {
+			if !row.seen {
+				diff.unchanged++
+				row.seen = true
+				existing[digest] = row
+			}
+			return true
 		}
-		if addedRows > 0 {
-			// a later diff of the same build, a staged build's commit, must
-			// not add these again once their spool files are gone
-			hashes := d.next("added-hashes")
-			if _, err := d.copy(ctx, "COPY (SELECT triple_hash FROM read_parquet("+sqlString(addedPath)+")) TO "+sqlString(hashes)+" (FORMAT parquet)"); err != nil {
-				return change, err
-			}
-			d.addedHashes = append(d.addedHashes, hashes)
-			// what DuckDB held is handed back before the data files are written
-			if err := d.closeDB(); err != nil {
-				return change, err
-			}
-			dataFiles, rows, err := writeRowFiles(ctx, tbl, addedPath)
-			if err != nil {
-				return change, err
-			}
-			change.dataFiles = append(change.dataFiles, dataFiles...)
-			change.added += rows
-		}
-		if err := errors.Join(os.Remove(addedPath), spool.Drop(partition.Files)); err != nil && !os.IsNotExist(err) {
-			return change, err
+		diff.toAdd[digest] = struct{}{}
+		return true
+	})
+
+	for digest, row := range existing {
+		if !row.seen {
+			row.hash = hex.EncodeToString(digest[:])
+			diff.toDrop = append(diff.toDrop, row)
 		}
 	}
-	if err := d.closeDB(); err != nil {
-		return change, err
-	}
-	change.unchanged = d.existingRows - change.removed
 	span.SetAttributes(
-		attribute.Int64("sal.triples.existing", d.existingRows),
-		attribute.Int64("sal.triples.added", staged+change.added),
-		attribute.Int64("sal.triples.removed", change.removed),
-		attribute.Int64("sal.triples.unchanged", change.unchanged),
+		attribute.Int("sal.triples.existing", len(existing)),
+		attribute.Int("sal.triples.added", len(diff.toAdd)),
+		attribute.Int("sal.triples.removed", len(diff.toDrop)),
+		attribute.Int("sal.triples.unchanged", diff.unchanged),
 	)
-	slog.Info("Applying Iceberg triple diff", "added", staged+change.added, "removed", change.removed, "unchanged", change.unchanged)
-	return change, nil
+
+	return diff, nil
 }
 
-// commitGraphDelta commits appended data files and the equality deletes for
-// the pairs in removedPath in one Iceberg snapshot on a branch of the table,
-// with snapshotProps in the snapshot's summary, and returns the table as
-// committed. added and removed are the triples the commit adds and removes,
-// which the summary records.
-func commitGraphDelta(ctx context.Context, tbl *table.Table, branch string, dataFiles []iceberg.DataFile, added int64, removedPath string, removed int64, snapshotProps iceberg.Properties) (_ *table.Table, err error) {
-	if len(dataFiles) == 0 && removed == 0 {
+// readExistingTriples scans the minimal columns needed to diff and delete rows.
+// A hash is kept as its 32 bytes rather than the 64 hex characters the column
+// holds, and the predicates, of which a table has few, are shared between the
+// rows that carry them, so a table of millions of rows is held as compactly
+// as it can be while the graph is diffed against it.
+func readExistingTriples(ctx context.Context, tbl *table.Table) (map[tripleDigest]existingTriple, error) {
+	triples := map[tripleDigest]existingTriple{}
+	if tbl.CurrentSnapshot() == nil {
+		return triples, nil
+	}
+
+	_, records, err := tbl.Scan(
+		table.WithSelectedFields("triple_hash", "predicate"),
+		table.WithCaseSensitive(true),
+	).ToArrowRecords(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("scan existing triple hashes: %w", err)
+	}
+	predicates := map[string]string{}
+	for rec, err := range records {
+		if err != nil {
+			return nil, fmt.Errorf("read existing triple hashes: %w", err)
+		}
+		if rec == nil {
+			continue
+		}
+		hashIndex, predicateIndex, err := existingTripleColumnIndexes(rec.Schema())
+		if err != nil {
+			rec.Release()
+			return nil, err
+		}
+		hashColumn := rec.Column(hashIndex).(*array.String)
+		predicateColumn := rec.Column(predicateIndex).(*array.String)
+		for i := 0; i < int(rec.NumRows()); i++ {
+			if hashColumn.IsNull(i) || predicateColumn.IsNull(i) {
+				continue
+			}
+			var digest tripleDigest
+			if n, err := hex.Decode(digest[:], []byte(hashColumn.Value(i))); err != nil || n != len(digest) {
+				rec.Release()
+				return nil, fmt.Errorf("read existing triple hashes: %q is not a SHA-256 triple_hash", hashColumn.Value(i))
+			}
+			// the column's strings are views into the record's buffers, which
+			// a kept string would hold in memory whole
+			predicate, ok := predicates[predicateColumn.Value(i)]
+			if !ok {
+				predicate = strings.Clone(predicateColumn.Value(i))
+				predicates[predicate] = predicate
+			}
+			triples[digest] = existingTriple{predicate: predicate}
+		}
+		rec.Release()
+	}
+	return triples, nil
+}
+
+func existingTripleColumnIndexes(schema *arrow.Schema) (int, int, error) {
+	hashIndex := -1
+	predicateIndex := -1
+	for i, field := range schema.Fields() {
+		switch field.Name {
+		case "triple_hash":
+			hashIndex = i
+		case "predicate":
+			predicateIndex = i
+		}
+	}
+	if hashIndex < 0 || predicateIndex < 0 {
+		return 0, 0, fmt.Errorf("scan existing triple hashes: expected predicate and triple_hash columns")
+	}
+	return hashIndex, predicateIndex, nil
+}
+
+// readExistingTripleHashes scans triple hashes from the current Iceberg table,
+// as the hex strings the triple_hash column holds.
+func readExistingTripleHashes(ctx context.Context, tbl *table.Table) (map[string]struct{}, error) {
+	triples, err := readExistingTriples(ctx, tbl)
+	if err != nil {
+		return nil, err
+	}
+	hashes := map[string]struct{}{}
+	for digest := range triples {
+		hashes[hex.EncodeToString(digest[:])] = struct{}{}
+	}
+	return hashes, nil
+}
+
+// commitGraphDelta commits appended data files and equality deletes in one
+// Iceberg snapshot on a branch of the table, with snapshotProps in the
+// snapshot's summary, and returns the table as committed.
+func commitGraphDelta(ctx context.Context, tbl *table.Table, branch string, dataFiles []iceberg.DataFile, rows int64, toDrop []existingTriple, snapshotProps iceberg.Properties) (_ *table.Table, err error) {
+	if len(dataFiles) == 0 && len(toDrop) == 0 {
 		return nil, fmt.Errorf("no triples found")
 	}
-	ctx, span := telemetry.Start(ctx, "iceberg.commit", attribute.Int("sal.iceberg.data_files", len(dataFiles)), attribute.Int64("sal.triples.added", added), attribute.Int64("sal.triples.removed", removed))
+	ctx, span := telemetry.Start(ctx, "iceberg.commit", attribute.Int("sal.iceberg.data_files", len(dataFiles)), attribute.Int64("sal.triples.added", rows), attribute.Int("sal.triples.removed", len(toDrop)))
 	defer func() { telemetry.End(span, err) }()
 
 	// the counts go into the summary with the message, so the snapshot says
@@ -285,16 +391,16 @@ func commitGraphDelta(ctx context.Context, tbl *table.Table, branch string, data
 	if snapshotProps == nil {
 		snapshotProps = iceberg.Properties{}
 	}
-	snapshotProps[pkg.SnapshotTriplesAddedProperty] = strconv.FormatInt(added, 10)
-	snapshotProps[pkg.SnapshotTriplesRemovedProperty] = strconv.FormatInt(removed, 10)
+	snapshotProps[pkg.SnapshotTriplesAddedProperty] = strconv.FormatInt(rows, 10)
+	snapshotProps[pkg.SnapshotTriplesRemovedProperty] = strconv.Itoa(len(toDrop))
 
 	txn, err := tbl.NewTransactionOnBranch(branch)
 	if err != nil {
 		return nil, err
 	}
 	var deleteFiles []iceberg.DataFile
-	if removed > 0 {
-		deleteFiles, err = writeTripleHashDeletes(ctx, txn, tbl.Schema(), removedPath)
+	if len(toDrop) > 0 {
+		deleteFiles, err = writeTripleHashDeletes(ctx, txn, tbl.Schema(), toDrop)
 		if err != nil {
 			return nil, err
 		}
@@ -311,27 +417,80 @@ func commitGraphDelta(ctx context.Context, tbl *table.Table, branch string, data
 	if err != nil {
 		return nil, fmt.Errorf("commit row delta: %w", err)
 	}
-	slog.Info("Successfully committed iceberg row delta", "branch", branch, "added", added, "removed", removed, "data_files", len(dataFiles), "delete_files", len(deleteFiles))
+	slog.Info("Successfully committed iceberg row delta", "branch", branch, "added", rows, "removed", len(toDrop), "data_files", len(dataFiles), "delete_files", len(deleteFiles))
 	return committed, nil
 }
 
-// writeTripleHashDeletes writes the equality deletes for the (triple_hash,
-// predicate) pairs of a Parquet file the diff wrote, streamed rather than
-// collected since a build may remove millions of rows.
-func writeTripleHashDeletes(ctx context.Context, txn *table.Transaction, schema *iceberg.Schema, path string) (_ []iceberg.DataFile, err error) {
+func writeTripleHashDeletes(ctx context.Context, txn *table.Transaction, schema *iceberg.Schema, triples []existingTriple) ([]iceberg.DataFile, error) {
 	tripleHashField, ok := schema.FindFieldByName("triple_hash")
 	if !ok {
 		return nil, fmt.Errorf("triple_hash field not found in table schema")
 	}
-	var rows int64
-	records, closeRecords, err := readParquetRecords(ctx, path, deleteSchema(), &rows)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { err = joinClose(err, closeRecords()) }()
+
+	sort.Slice(triples, func(i, j int) bool {
+		return triples[i].hash < triples[j].hash
+	})
+
+	records, release := equalityDeleteRecords(triples)
+	defer release()
+
 	deleteFiles, err := txn.WriteEqualityDeletes(ctx, []int{tripleHashField.ID}, records)
 	if err != nil {
 		return nil, fmt.Errorf("write equality deletes: %w", err)
 	}
 	return deleteFiles, nil
+}
+
+func equalityDeleteRecords(triples []existingTriple) (func(func(arrow.RecordBatch, error) bool), func()) {
+	deleteSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "triple_hash", Type: arrow.BinaryTypes.String, Nullable: false},
+		{Name: "predicate", Type: arrow.BinaryTypes.String, Nullable: false},
+	}, nil)
+	var records []arrow.RecordBatch
+	for start := 0; start < len(triples); start += deleteHashChunkSize {
+		end := min(start+deleteHashChunkSize, len(triples))
+		builder := array.NewRecordBuilder(memory.NewGoAllocator(), deleteSchema)
+		hashBuilder := builder.Field(0).(*array.StringBuilder)
+		predicateBuilder := builder.Field(1).(*array.StringBuilder)
+		for _, triple := range triples[start:end] {
+			hashBuilder.Append(triple.hash)
+			predicateBuilder.Append(triple.predicate)
+		}
+		records = append(records, builder.NewRecordBatch())
+		builder.Release()
+	}
+
+	return func(yield func(arrow.RecordBatch, error) bool) {
+			for _, record := range records {
+				if !yield(record, nil) {
+					return
+				}
+			}
+		}, func() {
+			for _, record := range records {
+				record.Release()
+			}
+		}
+}
+
+type recordBatchReader interface {
+	Next() bool
+	RecordBatch() arrow.RecordBatch
+	Err() error
+}
+
+// retainedRecordIterator adapts SAL record readers to Iceberg's retained batch iterator.
+func retainedRecordIterator(rdr recordBatchReader) func(func(arrow.RecordBatch, error) bool) {
+	return func(yield func(arrow.RecordBatch, error) bool) {
+		for rdr.Next() {
+			rec := rdr.RecordBatch()
+			rec.Retain()
+			if !yield(rec, nil) {
+				return
+			}
+		}
+		if err := rdr.Err(); err != nil {
+			yield(nil, err)
+		}
+	}
 }

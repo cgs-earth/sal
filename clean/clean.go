@@ -284,11 +284,6 @@ func wipe() error {
 		return err
 	}
 
-	// a build that was killed leaves its scratch files behind
-	if err := os.RemoveAll(filepath.Join(filepath.Dir(stacDir), pkg.ScratchDirName)); err != nil {
-		return err
-	}
-
 	// what the CONSTRUCT queries in sparql/ built is an artifact of the table
 	// being wiped, and the next build or `sal construct` writes it again
 	if err := os.RemoveAll(filepath.Join(filepath.Dir(configPath), "constructed")); err != nil {

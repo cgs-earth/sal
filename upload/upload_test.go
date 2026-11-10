@@ -217,19 +217,3 @@ func TestDeployUploadRootPreservesLayoutForBareStorageGoogleapisBucket(t *testin
 	require.NoError(t, err)
 	require.Equal(t, dataDir, uploadRoot)
 }
-
-// A build that was killed leaves its scratch files in .sal/data/.scratch,
-// which are not part of the data product and are never staged for upload.
-func TestCopyDirSkipsTheScratchFilesOfAKilledBuild(t *testing.T) {
-	dataDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "project", "triples", "metadata"), 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "project", "triples", "metadata", "v1.metadata.json"), []byte("{}"), 0644))
-	require.NoError(t, os.MkdirAll(filepath.Join(dataDir, ".scratch", "spool-1"), 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(dataDir, ".scratch", "spool-1", "000000.parquet"), []byte("spool"), 0644))
-	staged := t.TempDir()
-
-	require.NoError(t, copyDir(dataDir, staged))
-
-	require.FileExists(t, filepath.Join(staged, "project", "triples", "metadata", "v1.metadata.json"))
-	require.NoDirExists(t, filepath.Join(staged, ".scratch"))
-}

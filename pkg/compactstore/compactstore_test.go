@@ -211,8 +211,7 @@ func TestNamespacesAreBoundBothWays(t *testing.T) {
 	require.Equal(t, []string{"schema=https://schema.org/"}, bound)
 	require.False(t, s.ContextAware())
 	require.False(t, s.TransactionAware())
-	for _, err := range s.Contexts(ctx, nil) {
-		require.NoError(t, err)
+	for range s.Contexts(ctx, nil) {
 		require.Fail(t, "a store with one unnamed graph has no contexts")
 	}
 }

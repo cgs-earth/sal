@@ -29,13 +29,6 @@ func (e TaskError) Error() string {
 	return fmt.Sprintf("SAL module %s reported an error: %s", e.Namespace, strings.Join(e.Messages, "; "))
 }
 
-// TripleSink receives the triples a task's output parses into, one at a time,
-// already relabelled so that its blank nodes are stable. An error it returns
-// stops the task. A build hands the parser one that writes the triples
-// straight to Parquet (load.Spool), so that what a task produces is never held
-// in memory as a graph.
-type TripleSink func(rdflibgo.Triple) error
-
 // TaskOutputSink receives each node a task writes to one of its output
 // streams, the line trimmed of surrounding whitespace, as it is read, with
 // its 1-based line number on that stream. An error it returns stops the task.
@@ -52,23 +45,11 @@ const (
 )
 
 // TaskOutputParser turns the newline delimited JSON a module task writes to
-// stdout into RDF as the lines arrive, handing the triples straight to the
-// TripleSink it was made for, or adding them to a graph. A task emits plain
-// JSON, so the module ontology's @context is injected to resolve the keys
-// against the module's vocabulary. Nothing the task wrote is kept once its
-// batch has been parsed, which is what lets a task produce far more output
-// than fits in memory.
-//
-// The blank nodes of a batch are labelled one connected component at a time
-// (pkg.StableBlankNodeComponents), so the labels a node gets depend on that
-// node alone and not on the batch it landed in or on anything else the build
-// holds. A blank node is therefore local to the line that writes it, which is
-// what the SAL Module specification's one node per line means: a label a
-// module reuses across lines does not join them.
-//
-// A triple naming a file:/// IRI is not handed on: it is kept, see
-// FileTriples, until the copy it names has landed and LinkCopiedFiles can
-// hand it on under the copy's urn:sha256: IRI.
+// stdout into RDF as the lines arrive, adding the triples straight to the
+// graph it was made for. A task emits plain JSON, so the module ontology's
+// @context is injected to resolve the keys against the module's vocabulary.
+// Nothing the task wrote is kept once its batch has been parsed, which is what
+// lets a task produce far more output than fits in memory as JSON.
 //
 // A relative IRI in the output resolves against base, the namespace of the
 // project the task was run for, not against the module's own namespace. What a
@@ -84,14 +65,8 @@ const (
 // its data, and only the salmodule:Error nodes among them are of interest.
 type TaskOutputParser struct {
 	ontology *ModuleOntology
-	// sink is where the triples go
-	sink TripleSink
-	// errors is the graph the salmodule:Error nodes are read back from, the
-	// graph the triples go to when there is one, else a scratch graph that
-	// holds only the error nodes' own triples
-	errors      *rdflibgo.Graph
-	errorsApart bool
-	base        string
+	graph    *rdflibgo.Graph
+	base     string
 	// stream is "stdout" or "stderr", which stream the lines come from, for
 	// the messages about them
 	stream string
@@ -122,15 +97,7 @@ type TaskOutputParser struct {
 // NewTaskOutputParser returns the parser that adds what a task of this module
 // writes to stdout to graph, resolving relative IRIs against base.
 func (o *ModuleOntology) NewTaskOutputParser(graph *rdflibgo.Graph, base string) *TaskOutputParser {
-	return o.newTaskOutputParser(graph, nil, base, "stdout")
-}
-
-// NewTaskOutputStream returns the parser that hands what a task of this
-// module writes to stdout to sink, resolving relative IRIs against base. No
-// graph of the output is built; only the triples of the salmodule:Error nodes
-// it reports are kept, for Finish.
-func (o *ModuleOntology) NewTaskOutputStream(sink TripleSink, base string) *TaskOutputParser {
-	return o.newTaskOutputParser(rdflibgo.NewGraph(rdflibgo.WithBase(base)), sink, base, "stdout")
+	return o.newTaskOutputParser(graph, base, "stdout")
 }
 
 // NewTaskStderrParser returns the parser for the nodes a task of this module
@@ -141,23 +108,15 @@ func (o *ModuleOntology) NewTaskOutputStream(sink TripleSink, base string) *Task
 // for the graph being built. RunTask hands Line only the lines of stderr that
 // are JSON objects; the rest are log lines it shows itself.
 func (o *ModuleOntology) NewTaskStderrParser(base string) *TaskOutputParser {
-	return o.newTaskOutputParser(rdflibgo.NewGraph(rdflibgo.WithBase(base)), nil, base, "stderr")
+	return o.newTaskOutputParser(rdflibgo.NewGraph(rdflibgo.WithBase(base)), base, "stderr")
 }
 
-// newTaskOutputParser makes the parser for one stream. Without a sink the
-// triples are added to graph; with one, graph only collects the error nodes.
-func (o *ModuleOntology) newTaskOutputParser(graph *rdflibgo.Graph, sink TripleSink, base string, stream string) *TaskOutputParser {
+func (o *ModuleOntology) newTaskOutputParser(graph *rdflibgo.Graph, base string, stream string) *TaskOutputParser {
 	head := []byte(`{"@graph":[`)
 	if len(o.Context) > 0 {
 		head = append(append([]byte(`{"@context":`), o.Context...), `,"@graph":[`...)
 	}
-	parser := &TaskOutputParser{ontology: o, sink: sink, errors: graph, errorsApart: sink != nil, base: base, stream: stream, head: head, errorNodes: map[string]rdflibgo.Subject{}, terms: map[string]bool{}, bindings: map[string]bool{}}
-	if sink == nil {
-		parser.sink = func(triple rdflibgo.Triple) error {
-			pkg.AddTriple(graph, triple.Subject, triple.Predicate, triple.Object)
-			return nil
-		}
-	}
+	parser := &TaskOutputParser{ontology: o, graph: graph, base: base, stream: stream, head: head, errorNodes: map[string]rdflibgo.Subject{}, terms: map[string]bool{}, bindings: map[string]bool{}}
 	parser.pending.Write(head)
 	if len(o.Context) > 0 {
 		var moduleContext any
@@ -230,7 +189,7 @@ func (p *TaskOutputParser) Finish() error {
 	messages := make([]string, 0, len(keys))
 	for _, key := range keys {
 		var label, comment string
-		pkg.Triples(p.errors, p.errorNodes[key], nil, nil)(func(triple rdflibgo.Triple) bool {
+		pkg.Triples(p.graph, p.errorNodes[key], nil, nil)(func(triple rdflibgo.Triple) bool {
 			literal, ok := triple.Object.(rdflibgo.Literal)
 			if !ok {
 				return true
@@ -264,8 +223,7 @@ func errorNodeMessage(label, comment string) string {
 }
 
 // FileTriples returns every triple parsed so far that names a file:/// IRI as
-// its subject or object, none of which was handed to the sink, for
-// LinkCopiedFiles to rewrite and hand on.
+// its subject or object, for LinkCopiedFiles to rewrite.
 func (p *TaskOutputParser) FileTriples() []rdflibgo.Triple { return p.fileTriples }
 
 // Vocabularies returns, sorted, the namespaces the output's triples are
@@ -388,10 +346,10 @@ func VocabularyNamespace(iri string) string {
 // noteTerm records a term the output used as a predicate, class, or datatype.
 func (p *TaskOutputParser) noteTerm(iri string) { p.terms[iri] = true }
 
-// flush parses the pending batch as one JSON-LD document and hands its
-// triples to the sink, its blank nodes relabelled a connected component at a
-// time (see TaskOutputParser) in place of the _:b0, _:b1, ... the JSON-LD
-// processor gives every document.
+// flush parses the pending batch as one JSON-LD document and adds its triples
+// to the graph. The JSON-LD processor labels the blank nodes of every
+// document from _:b0, so each batch's blank nodes are given fresh labels on
+// the way in, the same way the Turtle parser labels an unnamed one.
 func (p *TaskOutputParser) flush() error {
 	if p.pendingLines == 0 {
 		return nil
@@ -407,43 +365,40 @@ func (p *TaskOutputParser) flush() error {
 		return fmt.Errorf("parse %s lines %d-%d of SAL module %s: %w", p.stream, first, last, p.ontology.Namespace, err)
 	}
 
-	triples := make([]rdflibgo.Triple, 0, pkg.GraphLen(batch))
+	blanks := map[string]rdflibgo.BNode{}
+	relabel := func(term rdflibgo.Term) rdflibgo.Term {
+		blank, ok := term.(rdflibgo.BNode)
+		if !ok {
+			return term
+		}
+		fresh, seen := blanks[blank.Value()]
+		if !seen {
+			fresh = rdflibgo.NewBNode()
+			blanks[blank.Value()] = fresh
+		}
+		return fresh
+	}
 	pkg.Triples(batch, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
-		triples = append(triples, triple)
-		return true
-	})
-	pkg.StableBlankNodeComponents(triples)
-
-	for _, triple := range triples {
+		subject := relabel(triple.Subject).(rdflibgo.Subject)
+		object := relabel(triple.Object)
 		p.noteTerm(triple.Predicate.Value())
 		if triple.Predicate.Equal(rdflibgo.RDF.Type) {
-			if class, ok := triple.Object.(rdflibgo.URIRef); ok {
+			if class, ok := object.(rdflibgo.URIRef); ok {
 				p.noteTerm(class.Value())
 				if class.Value() == Namespace+"Error" {
-					p.errorNodes[triple.Subject.String()] = triple.Subject
+					p.errorNodes[subject.String()] = subject
 				}
 			}
 		}
-		if literal, ok := triple.Object.(rdflibgo.Literal); ok {
+		if literal, ok := object.(rdflibgo.Literal); ok {
 			p.noteTerm(literal.Datatype().Value())
 		}
-		if isFileIRI(triple.Subject) || isFileIRI(triple.Object) {
-			p.fileTriples = append(p.fileTriples, triple)
-			continue
+		if isFileIRI(subject) || isFileIRI(object) {
+			p.fileTriples = append(p.fileTriples, rdflibgo.Triple{Subject: subject, Predicate: triple.Predicate, Object: object})
 		}
-		if err := p.sink(triple); err != nil {
-			return err
-		}
-	}
-	// the error nodes' own statements are what Finish reports them with, so
-	// they are kept when the output itself is handed on rather than kept
-	if p.errorsApart && len(p.errorNodes) > 0 {
-		for _, triple := range triples {
-			if _, ok := p.errorNodes[triple.Subject.String()]; ok {
-				pkg.AddTriple(p.errors, triple.Subject, triple.Predicate, triple.Object)
-			}
-		}
-	}
+		pkg.AddTriple(p.graph, subject, triple.Predicate, object)
+		return true
+	})
 	return nil
 }
 

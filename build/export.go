@@ -22,16 +22,15 @@ const (
 	GraphExportFormatIceberg GraphExportFormat = "iceberg"
 )
 
-// ExportGraph writes a build to disk in the specified format: an N-Quads
-// file of graph, or the project's Iceberg table from spool, which holds
-// everything an Iceberg build commits, graph included. modules are the SAL modules
+// Export graph takes in a rdflib format graph struct and
+// serializes it to disk in the specified format. modules are the SAL modules
 // the build downloaded, which are recorded in the Iceberg table metadata.
 // staged is the build as MaterializeConstructs staged it in the project's
 // table, whose data files an Iceberg export commits rather than writing them
 // again; it is nil for a build that staged nothing there. message is the
 // build's --message, recorded in the summary of the snapshot an Iceberg
 // export commits; an N-Quads file has nowhere to carry it.
-func ExportGraph(ctx context.Context, graph *rdflibgo.Graph, spool *load.Spool, format GraphExportFormat, hash string, modules []string, staged *load.StagedGraph, message string) error {
+func ExportGraph(ctx context.Context, graph *rdflibgo.Graph, format GraphExportFormat, hash string, modules []string, staged *load.StagedGraph, message string) error {
 
 	switch format {
 	case "nq":
@@ -63,12 +62,9 @@ func ExportGraph(ctx context.Context, graph *rdflibgo.Graph, spool *load.Spool, 
 		if err != nil {
 			return err
 		}
-		switch {
-		case staged != nil:
-			err = staged.Commit(ctx, properties, message)
-		case spool != nil:
-			err = load.WriteSpoolToIceberg(ctx, spool, cfg, properties, message)
-		default:
+		if staged != nil {
+			err = staged.Commit(ctx, graph, properties, message)
+		} else {
 			err = load.WriteGraphToIceberg(ctx, graph, cfg, properties, message)
 		}
 		if err != nil {
