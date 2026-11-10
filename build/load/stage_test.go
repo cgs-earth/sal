@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/catalog/hadoop"
 	"github.com/apache/iceberg-go/table"
@@ -38,6 +39,30 @@ func stageTestTable(t *testing.T, cfg *LoadConfig) *table.Table {
 	tbl, err := cat.LoadTable(context.Background(), catalog.ToIdentifier(cfg.Namespace, "triples"))
 	require.NoError(t, err)
 	return tbl
+}
+
+// readExistingTripleHashes is the triple_hash of every row the table's
+// current snapshot holds.
+func readExistingTripleHashes(ctx context.Context, tbl *table.Table) (map[string]struct{}, error) {
+	hashes := map[string]struct{}{}
+	if tbl.CurrentSnapshot() == nil {
+		return hashes, nil
+	}
+	_, records, err := tbl.Scan(table.WithSelectedFields("triple_hash")).ToArrowRecords(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for rec, err := range records {
+		if err != nil {
+			return nil, err
+		}
+		column := rec.Column(0).(*array.String)
+		for i := 0; i < column.Len(); i++ {
+			hashes[column.Value(i)] = struct{}{}
+		}
+		rec.Release()
+	}
+	return hashes, nil
 }
 
 // graphHashes is the triple hash of every triple in a graph as the table
@@ -111,8 +136,9 @@ func TestCommitReusesTheDataFilesTheGraphWasStagedIn(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, staged.dataFiles, 1)
 	final := stageTestGraph("keep", "add", "constructed")
+	require.NoError(t, staged.Spool().AddGraph(stageTestGraph("constructed")))
 
-	require.NoError(t, staged.Commit(ctx, final, map[string]string{"sal.hash": "abc"}, "Add constructed"))
+	require.NoError(t, staged.Commit(ctx, map[string]string{"sal.hash": "abc"}, "Add constructed"))
 	require.NoError(t, staged.Discard(ctx))
 
 	tbl := stageTestTable(t, cfg)
@@ -198,24 +224,28 @@ func TestStageGraphRemovesTheBranchAnEarlierBuildLeft(t *testing.T) {
 	require.Len(t, tbl.Metadata().Snapshots(), 2)
 }
 
-// A blank node is named from the triples about it, so one that gains a
-// constructed triple is renamed and the rows staged under its old name are
-// not what the build commits. They cannot be deleted in the snapshot that
-// would add them, so their data files are left out of it.
-func TestCommitWritesAgainWhatChangedSinceItWasStaged(t *testing.T) {
+// What is spooled after staging, which is what a build's CONSTRUCT queries
+// produce, refers to a blank node by the label it was staged under, and the
+// commit keeps that label rather than renaming the node for the triple it
+// gained, so the staged data files are committed as they are.
+func TestCommitKeepsTheLabelsTheBuildWasStagedUnder(t *testing.T) {
 	ctx := context.Background()
 	cfg := stageTestConfig(t)
-	graph := func() *rdflibgo.Graph {
-		graph := stageTestGraph("keep")
-		pkg.AddTriple(graph, rdflibgo.NewBNode("b"), stageTestPredicate, rdflibgo.NewLiteral("blank"))
-		return graph
-	}
-	staged, err := StageGraph(ctx, graph(), cfg)
+	graph := stageTestGraph("keep")
+	pkg.AddTriple(graph, rdflibgo.NewBNode("b"), stageTestPredicate, rdflibgo.NewLiteral("blank"))
+	staged, err := StageGraph(ctx, graph, cfg)
 	require.NoError(t, err)
-	final := graph()
-	pkg.AddTriple(final, rdflibgo.NewBNode("b"), stageTestPredicate, rdflibgo.NewLiteral("constructed"))
+	var label rdflibgo.Subject
+	pkg.Triples(graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+		if isBlank(triple.Subject) {
+			label = triple.Subject
+		}
+		return true
+	})
+	constructed := rdflibgo.Triple{Subject: label, Predicate: stageTestPredicate, Object: rdflibgo.NewLiteral("constructed")}
+	require.NoError(t, staged.Spool().Add(constructed))
 
-	require.NoError(t, staged.Commit(ctx, final, nil, ""))
+	require.NoError(t, staged.Commit(ctx, nil, ""))
 	require.NoError(t, staged.Discard(ctx))
 
 	tbl := stageTestTable(t, cfg)
@@ -223,7 +253,33 @@ func TestCommitWritesAgainWhatChangedSinceItWasStaged(t *testing.T) {
 	require.Equal(t, "3", tbl.CurrentSnapshot().Summary.Properties["total-records"])
 	hashes, err := readExistingTripleHashes(ctx, tbl)
 	require.NoError(t, err)
-	require.Equal(t, graphHashes(final), hashes)
+	require.Contains(t, hashes, tripleHashForTriple(constructed))
+	requireNoStagedFiles(t, tbl)
+}
+
+// A row the table holds that staging deletes, because only a CONSTRUCT query
+// makes it, is spooled again once the query has run, and the commit then
+// neither deletes it nor adds it a second time: a rebuild of unchanged
+// sources commits nothing.
+func TestCommitKeepsARowSpooledAgainAfterStaging(t *testing.T) {
+	ctx := context.Background()
+	cfg := stageTestConfig(t)
+	require.NoError(t, WriteGraphToIceberg(ctx, stageTestGraph("keep", "constructed"), cfg, nil, ""))
+	lastBuild := stageTestTable(t, cfg).CurrentSnapshot().SnapshotID
+	staged, err := StageGraph(ctx, stageTestGraph("keep"), cfg)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), staged.removed)
+	require.NoError(t, staged.Spool().AddGraph(stageTestGraph("constructed")))
+
+	require.NoError(t, staged.Commit(ctx, nil, "Nothing changed"))
+	require.NoError(t, staged.Discard(ctx))
+
+	tbl := stageTestTable(t, cfg)
+	require.Equal(t, lastBuild, tbl.CurrentSnapshot().SnapshotID)
+	require.Len(t, tbl.Metadata().Snapshots(), 1)
+	hashes, err := readExistingTripleHashes(ctx, tbl)
+	require.NoError(t, err)
+	require.Equal(t, graphHashes(stageTestGraph("keep", "constructed")), hashes)
 	requireNoStagedFiles(t, tbl)
 }
 
@@ -249,7 +305,7 @@ func TestWriteGraphToIcebergRecordsTheMessageInTheSnapshotSummary(t *testing.T) 
 
 	staged, err := StageGraph(ctx, stageTestGraph("keep", "add"), cfg)
 	require.NoError(t, err)
-	require.NoError(t, staged.Commit(ctx, stageTestGraph("keep", "add"), nil, "Add add"))
+	require.NoError(t, staged.Commit(ctx, nil, "Add add"))
 	require.NoError(t, staged.Discard(ctx))
 	require.Equal(t, "Add add", snapshotMessage(t, cfg))
 	require.NotEqual(t, first, stageTestTable(t, cfg).CurrentSnapshot().SnapshotID)
