@@ -288,13 +288,20 @@ func modulesFromProperties(properties Result) []string {
 	return nil
 }
 
+// countsSQL counts the triples and their distinct subjects, predicates, and
+// objects for the stats view. The subjects and objects are estimated with
+// approx_count_distinct, a HyperLogLog sketch of fixed size, since an exact
+// COUNT(DISTINCT) holds every distinct term in a hash table: over a table of
+// tens of millions of triples that is gigabytes, which got a Cloud Run
+// instance killed on every visit to the Stats tab. The predicates are few, so
+// they are still counted exactly.
 func countsSQL() string {
 	return fmt.Sprintf(`
 SELECT
 	COUNT(*) AS triples,
-	COUNT(DISTINCT triples.subject) AS subjects,
+	approx_count_distinct(triples.subject) AS subjects,
 	COUNT(DISTINCT triples.predicate) AS predicates,
-	COUNT(DISTINCT %s) AS objects
+	approx_count_distinct(%s) AS objects
 FROM triples`, bindingExpr("triples", "object"))
 }
 

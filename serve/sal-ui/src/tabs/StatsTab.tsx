@@ -105,7 +105,9 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
                   <dt>Triples</dt>
                 </div>
                 <div className="figure">
-                  <dd>{formatCount(stats.subjects)}</dd>
+                  {/* estimated with DuckDB's approx_count_distinct, since an
+                      exact count of a large table's terms runs out of memory */}
+                  <dd title="Estimated">≈ {formatCount(stats.subjects)}</dd>
                   <dt>Distinct subjects</dt>
                 </div>
                 <div className="figure">
@@ -113,7 +115,9 @@ export function StatsTab({ stats, error, loading, onReload }: StatsTabProps) {
                   <dt>Distinct predicates</dt>
                 </div>
                 <div className="figure">
-                  <dd>{formatCount(stats.objects)}</dd>
+                  {/* estimated with DuckDB's approx_count_distinct, since an
+                      exact count of a large table's terms runs out of memory */}
+                  <dd title="Estimated">≈ {formatCount(stats.objects)}</dd>
                   <dt>Distinct objects</dt>
                 </div>
               </dl>
