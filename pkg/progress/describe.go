@@ -111,6 +111,11 @@ func describe(step *Step, now time.Time) (label string, detail string) {
 		count("sal.modules", "module")
 	case "salmodule.task":
 		label = "Task " + step.attrString("sal.module.task_class")
+		// the task reports its documents every 20,000 it reads, so the count
+		// only shows once a task is large enough to need a sense of scale
+		if documents, ok := step.attrInt("sal.module.documents"); ok && documents >= 20000 {
+			parts = append(parts, groupDigits(documents)+" JSON-LD documents")
+		}
 		count("sal.triples.materialized", "triple")
 		count("sal.module.files_copied", "file copied")
 	case "salmodule.run_task":
@@ -143,8 +148,11 @@ func describe(step *Step, now time.Time) (label string, detail string) {
 				parts = append(parts, fmt.Sprintf("%d added, %d removed", added, removed))
 			}
 		}
+	case "iceberg.read_existing":
+		label = "Read the triple hashes the table holds"
+		count("sal.triples.existing", "triple")
 	case "iceberg.diff":
-		label = "Diff the graph against the table"
+		label = "Diff the build against the table"
 		for _, key := range []string{"existing", "added", "removed", "unchanged"} {
 			if value, ok := step.attrInt("sal.triples." + key); ok {
 				parts = append(parts, fmt.Sprintf("%d %s", value, key))
@@ -234,6 +242,16 @@ func transferBar(done, total int64) string {
 	filled = max(0, min(transferBarWidth, filled))
 	bar := strings.Repeat("▰", filled) + strings.Repeat("▱", transferBarWidth-filled)
 	return fmt.Sprintf("%s %d%%", bar, done*100/max(total, 1))
+}
+
+// groupDigits writes a count with its thousands separated, 1,737,674, which
+// is what makes a count in the millions readable at a glance.
+func groupDigits(count int64) string {
+	digits := fmt.Sprint(count)
+	for i := len(digits) - 3; i > 0 && digits[i-1] != '-'; i -= 3 {
+		digits = digits[:i] + "," + digits[i:]
+	}
+	return digits
 }
 
 // plural writes a count with its noun, "1 file" or "3 files"; a noun ending
