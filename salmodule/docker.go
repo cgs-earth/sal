@@ -177,9 +177,19 @@ func reportBuildProgress(body io.Reader, tag string) error {
 
 // RunContainer runs cmd in a container built from image, streaming its stdout
 // and stderr to consume while it runs.
+//
+// The output is read by attaching to the container, which is created with no
+// logging driver, rather than by following its logs. A logging driver keeps
+// everything the task writes on the daemon's disk however fast it is read, and
+// a task that writes faster than sal parses (a harvest writing a hundred
+// megabytes a second) leaves the daemon holding gigabytes sal has not read
+// yet, which on an in-memory filesystem such as a Cloud Run job's is memory.
+// An attached stream holds nothing: the task's writes block until sal reads
+// them, so it runs at the pace its output is consumed.
 func (d *dockerRunner) RunContainer(ctx context.Context, image string, env []string, cmd []string, consume ContainerOutputConsumer) error {
 	created, err := d.client.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Config: &container.Config{Image: image, Cmd: cmd, Env: env},
+		Config:     &container.Config{Image: image, Cmd: cmd, Env: env, AttachStdout: true, AttachStderr: true},
+		HostConfig: &container.HostConfig{LogConfig: container.LogConfig{Type: "none"}},
 	})
 	if err != nil {
 		return fmt.Errorf("create container for %s: %w", image, err)
@@ -191,27 +201,26 @@ func (d *dockerRunner) RunContainer(ctx context.Context, image string, env []str
 	}()
 
 	// the wait must be requested before the container starts so that a container
-	// exiting immediately is not missed
+	// exiting immediately is not missed, and the attach made before it starts
+	// so that none of its output is: with no logging driver there is nothing
+	// to replay what an attach made later would have missed
 	wait := d.client.ContainerWait(ctx, created.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
+	attached, err := d.client.ContainerAttach(ctx, created.ID, client.ContainerAttachOptions{Stream: true, Stdout: true, Stderr: true})
+	if err != nil {
+		return fmt.Errorf("attach to container for %s: %w", image, err)
+	}
+	defer attached.Close()
+	// the hijacked connection outlives the request, so a cancelled context
+	// closes it here rather than leaving the demuxer blocked on it
+	stopClosing := context.AfterFunc(ctx, attached.Close)
+	defer stopClosing()
 	if _, err := d.client.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
 		return fmt.Errorf("start container for %s: %w", image, err)
 	}
+	logs := attached.Reader
 
-	// the log stream is followed rather than read once the container has exited;
-	// a single read can otherwise race the daemon's logging driver and come back
-	// empty. Following replays what the container has already written.
-	logs, err := d.client.ContainerLogs(ctx, created.ID, client.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Follow: true})
-	if err != nil {
-		return fmt.Errorf("follow output of container for %s: %w", image, err)
-	}
-	defer func() {
-		if err := logs.Close(); err != nil {
-			slog.Warn("failed to close log stream for " + image + ": " + err.Error())
-		}
-	}()
-
-	// the multiplexed log stream is demuxed into a pipe per stream the
-	// consumer reads as the container writes; the followed stream, and so the
+	// the multiplexed attach stream is demuxed into a pipe per stream the
+	// consumer reads as the container writes; the attach stream, and so the
 	// pipes, end when the container exits. The end of stderr is kept so that a
 	// container failing without a word on stdout still says why.
 	var tail stderrTail
@@ -232,8 +241,8 @@ func (d *dockerRunner) RunContainer(ctx context.Context, image string, env []str
 	_ = stderrReader.Close()
 	if consumeErr != nil {
 		// the consumer rejected the output part way through, so the task may
-		// well still be running; the followed log stream, and with it the
-		// demuxer, only ends once the container has stopped, so it is stopped
+		// well still be running; the attach stream, and with it the demuxer,
+		// only ends once the container has stopped, so it is stopped
 		// now rather than left to run on. A container that has already exited
 		// answers with a conflict, which is not a failure.
 		if _, err := d.client.ContainerKill(ctx, created.ID, client.ContainerKillOptions{}); err != nil && !cerrdefs.IsNotFound(err) && !cerrdefs.IsConflict(err) {
