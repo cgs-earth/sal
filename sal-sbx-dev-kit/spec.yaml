@@ -93,6 +93,13 @@ capabilities:
           - api.openai.com:443
           - auth.openai.com:443
 
+  # Commits made in the sandbox are attributed to the user.name and user.email
+  # of the host's Git config, rather than to the sandbox's `agent` user. It is
+  # required, so a host without an identity configured refuses the kit instead
+  # of silently committing as `agent`. Needs sbx v0.48.0 or later.
+  - type: com.docker.sandbox/git-identity@1
+    description: Attribute commits to the user's Git identity
+
   - type: com.docker.sandbox/lifecycle@1
     config:
       install:
