@@ -94,16 +94,86 @@ Exactly one of the object value columns is set on each row, chosen by the litera
 The hash identifies a triple from its subject, predicate, object, and the object's datatype and language tag, so `"chat"@en` and `"chat"@fr` are two rows.
 SAL uses this identity to avoid writing duplicate triples when the table already contains the same data, and removes a triple a later build no longer states with an equality delete on it.
 It is written without dictionary encoding, since no two rows share a value.
-
-### Parquet encodings and indexes
-
-Beyond the partitioning on `predicate`, the data files carry:
-
-- dictionary encoding on `predicate`, and none on `triple_hash` or `object_geometry`, whose values are unique or nearly so;
-- full Iceberg column metrics (untruncated lower and upper bounds) on every column, with the bounding box of `object_geometry`;
-- rows sorted by predicate and then by subject, which is also the table's declared sort order. Every row group of a predicate covers its own range of subjects, so a pattern with a constant subject, or a join on a few subjects, reads about one row group per predicate rather than nearly all of them;
-- a Parquet bloom filter on `subject` and `object_iri`, the columns a SPARQL pattern binds to a constant IRI or joins on. DuckDB probes the bloom filter of each row group the bounds could not rule out, for a constant or for the handful of keys a join pushes into the scan, and skips the row group when the IRI is not there. The object columns are not sorted, so for `object_iri` the filter is what rules row groups out. Each filter is 128 KiB whatever the row group holds, since iceberg-go does not size them to the column, which is about a 2% false positive rate for a full row group of 122,880 distinct IRIs.
 A table built before the hash was stored as bytes held it as a 64-character hex string; `sal build` refuses such a table and asks for `sal clean --wipe` and a rebuild, since Iceberg cannot change a column's type from string to fixed.
+
+## Table layout
+
+How the triples table is partitioned, sorted, encoded, and indexed, which is what decides how much of it a query can skip.
+The settings live in `build/load/iceberg_properties.go` (`NewIcebergTableFromCfg`, `columnWriteProperties`, `applyWriteProperties`), and the row order in `spoolDiff.added` in `build/load/diff.go`.
+
+| Column | Partition | Sort | Bloom filter | Dictionary | Min/max statistics |
+|---|---|---|---|---|---|
+| `predicate` | `truncate[20]` | 1st key, ASC | — | forced on | yes |
+| `subject` | — | 2nd key, ASC | 128 KiB | on (iceberg-go default) | yes |
+| `triple_hash` | — | 3rd key in the rows only, for de-duplication; not declared | — | forced off | yes |
+| `object_iri` | — | — | 128 KiB | on (iceberg-go default) | yes |
+| `object_string` | — | — | — | on (iceberg-go default) | yes |
+| `object_type` | — | — | — | on (iceberg-go default) | yes |
+| `object_geometry` | — | — | — | forced off | Parquet: bounding box only; Iceberg: bounding box |
+| `object_float` | — | — | — | forced off | yes |
+| `object_integer` | — | — | — | forced off | yes |
+| `object_byte` | — | — | — | forced off | yes |
+| `object_time` | — | — | — | forced off | yes |
+| `object_language` | — | — | — | on (iceberg-go default) | yes |
+
+### Partition
+
+There is one partition field, `predicate_partition`: the first 20 characters of the predicate (`truncate[20]`).
+
+### Sort
+
+- **Declared:** new tables declare (predicate ASC, subject ASC) as their Iceberg sort order. iceberg-go also sorts each batch it writes by that order.
+- **Physical:** the build's diff (`spoolDiff.added`) writes rows sorted by `predicate, subject, triple_hash`.
+
+Within a predicate, every row group covers its own range of subjects. A pattern with a constant subject, or a join on a few subjects, therefore reads about one row group per predicate rather than nearly all of them. This only shows once a predicate spans several row groups of 122,880 rows.
+
+#### Why `triple_hash` is the third key
+
+- **De-duplication:** the spool a build writes can hold the same triple more than once, for example when a module writes a node twice. `distinctRows` removes the copies as the sorted rows stream into the Iceberg writer, by dropping a row whose hash equals the hash of the row just before it. That only works if every copy of a triple sits next to its first copy. Copies share a predicate and a subject, but so do different triples with the same predicate and subject, so sorting by those two alone can separate them:
+
+  ```
+  s  p  "a"   kept
+  s  p  "b"   kept
+  s  p  "a"   a copy of the first row, but not next to it, so it would be written again
+  ```
+
+  With the hash as the last key, both copies of `s p "a"` are adjacent and the second is dropped. Sorting on the hash is cheaper than de-duplicating with a `DISTINCT` over whole rows, which DuckDB cannot spill to disk.
+- **Deterministic order:** the hash also fixes the order of rows that share a predicate and subject, so a rebuild of the same data writes the same rows in the same order.
+
+#### Why it is not part of the declared order
+
+- **Nothing that reads the table uses it.** Only sal's own diff needs the hash in the sort. DuckDB plans queries the same way whether or not a sort order is declared.
+- **It would cost something on every build.** iceberg-go sorts each batch it writes by the declared order, so declaring the hash would add a third key to every one of those sorts for no benefit.
+
+### Bloom filters
+
+- **`subject` and `object_iri` only,** 128 KiB per column per row group (`write.parquet.bloom-filter-max-bytes`), which is about a 2% false positive rate for a full row group of 122,880 distinct IRIs.
+- **What reads them:** DuckDB probes the filter of each row group whose bounds could not rule a value out, for a constant equality filter or for the handful of keys a join pushes into the scan, and skips the row group when the IRI is not there. The object columns are not sorted, so for `object_iri` the filter is what rules row groups out.
+- **Fixed size:** iceberg-go gives arrow-go no estimate of distinct values, so every filter is written at that size whatever the row group holds.
+
+### Dictionary encoding
+
+- **Forced on:** `predicate` (`write.parquet.dict-encoding-enabled.column.predicate`).
+- **Forced off:** `triple_hash` and `object_geometry`, whose values are unique or nearly so, and the numeric and time columns (`object_byte`, `object_integer`, `object_float`, `object_time`), which are almost always null and otherwise hold measured values that rarely repeat.
+- **On, as iceberg-go's default (`subject`, `object_iri`, `object_string`, `object_type`, `object_language`):** `parquet.enable.dictionary` defaults to `true`. iceberg-go also enables a fallback on every column: the writer switches a column chunk to plain encoding once its dictionary would outgrow the 2 MiB dictionary page (`write.parquet.dict-size-bytes`) or plain encoding would be smaller.
+
+### Min/max statistics
+
+There are two levels, both on data files:
+
+- **Iceberg file bounds** (in the manifests): full metrics on every column (`write.metadata.metrics.default` = `full`, plus `write.metadata.metrics.column.object_geometry` = `full`). That means untruncated lower and upper bounds, with null and value counts.
+- **Parquet row-group statistics** (in each file's footer): min, max, and null count for every column except `object_geometry`.
+
+`object_geometry` is the exception:
+
+- **Parquet:** no min/max, since GEOMETRY has no defined sort order. Instead each row group carries native geospatial statistics (bounding box and geometry types), written by arrow-go since [apache/arrow-go#1504](https://github.com/apache/arrow-go/pull/1504).
+- **Missing null count:** there is no `Statistics` block for the column at all, not even a null count, until [apache/arrow-go#1533](https://github.com/apache/arrow-go/pull/1533). DuckDB v2.0.0 ignores the bounding box without one.
+- **Iceberg:** the manifest bounds are a bounding box per file, which iceberg-go computes itself.
+
+### Outside the data files
+
+- **The build's spool** (temporary Parquet in `.sal/data/.scratch`): dictionaries off for `subject`, `object_string`, `object_iri`, `object_geometry`, and `triple_hash`, and no statistics.
+- **Equality delete files:** each row names a deleted row by `triple_hash`, the table's identifier field (field 12). They are partitioned by predicate like the data, and their hash column has no dictionary.
 
 ## Validation and vocabularies
 

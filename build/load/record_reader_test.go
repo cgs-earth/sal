@@ -198,6 +198,53 @@ func TestDataFilesCarryIRIBloomFiltersAndNoGeometryDictionary(t *testing.T) {
 	}
 }
 
+// The numeric and time columns are written without a dictionary even when
+// every row holds the same value, which is when iceberg-go's default would
+// keep one.
+func TestNumericAndTimeColumnsAreWrittenWithoutADictionary(t *testing.T) {
+	ctx := context.Background()
+	cfg := &LoadConfig{BatchSize: 10, ParquetCompression: "snappy", Warehouse: t.TempDir(), Namespace: "default"}
+	xsd := func(name string) rdflibgo.LiteralOption {
+		return rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe("http://www.w3.org/2001/XMLSchema#" + name))
+	}
+	graph := rdflibgo.NewGraph()
+	for i := range 500 {
+		subject := rdflibgo.NewURIRefUnsafe(fmt.Sprintf("http://example.com/s%d", i))
+		pkg.AddTriple(graph, subject, rdflibgo.NewURIRefUnsafe("http://example.com/value/byte"), rdflibgo.NewLiteral("3", xsd("byte")))
+		pkg.AddTriple(graph, subject, rdflibgo.NewURIRefUnsafe("http://example.com/value/integer"), rdflibgo.NewLiteral("7", xsd("integer")))
+		pkg.AddTriple(graph, subject, rdflibgo.NewURIRefUnsafe("http://example.com/value/float"), rdflibgo.NewLiteral("1.5", xsd("double")))
+		pkg.AddTriple(graph, subject, rdflibgo.NewURIRefUnsafe("http://example.com/value/time"), rdflibgo.NewLiteral("2020-01-01T00:00:00Z", xsd("dateTime")))
+	}
+	require.NoError(t, WriteGraphToIceberg(ctx, graph, cfg, nil, ""))
+
+	tbl := stageTestTable(t, cfg)
+	tasks, err := tbl.Scan().PlanFiles(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, tasks)
+	columns := []string{"object_byte", "object_integer", "object_float", "object_time"}
+	values := map[string]int64{}
+	for _, task := range tasks {
+		reader, err := file.OpenParquetFile(strings.TrimPrefix(task.File.FilePath(), "file://"), false)
+		require.NoError(t, err)
+		for i := range reader.NumRowGroups() {
+			rowGroup := reader.MetaData().RowGroup(i)
+			for _, name := range columns {
+				chunk, err := rowGroup.ColumnChunk(reader.MetaData().Schema.ColumnIndexByName(name))
+				require.NoError(t, err)
+				require.False(t, chunk.HasDictionaryPage(), "%s keeps a dictionary in %s", name, task.File.FilePath())
+				stats, err := chunk.Statistics()
+				require.NoError(t, err)
+				values[name] += stats.NumValues()
+			}
+		}
+		require.NoError(t, reader.Close())
+	}
+	// every column held its 500 repeated values, so a dictionary would have paid
+	for _, name := range columns {
+		require.Equal(t, int64(500), values[name], "%s values", name)
+	}
+}
+
 func TestWriteGraphToIcebergIngestsSimpleWKTGeometry(t *testing.T) {
 	ctx := context.Background()
 	cfg := &LoadConfig{
