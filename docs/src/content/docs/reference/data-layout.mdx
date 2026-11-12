@@ -84,7 +84,7 @@ SAL builds RDF into rows representing triples, with the object split across one 
 - `object_time`: an `xsd:dateTime` literal with an explicit timezone, stored as a `TIMESTAMP` normalized to UTC
 - `object_type`: the datatype IRI the literal object was written with; `NULL` for an IRI or blank node object
 - `object_language`: the language tag of an `rdf:langString` literal object, such as `en` for `"hello"@en`; `NULL` for every other object
-- `triple_hash`
+- `triple_hash`: the SHA-256 identifying the triple, stored as its 32 raw bytes (an Iceberg `fixed[32]`, a DuckDB `BLOB`); `hex(triple_hash)` renders it as hex
 
 Every row is a statement the project makes: what its source files assert, what it imports with `owl:imports`, what its modules produced, and the provenance of its pins.
 A vocabulary the project only validates against contributes no rows, so a SPARQL query reasons over exactly what the project asserted or imported; see [Reasoning over the graph](/sal/reference/sparql-engine/#reasoning-over-the-graph).
@@ -92,7 +92,18 @@ A vocabulary the project only validates against contributes no rows, so a SPARQL
 Exactly one of the object value columns is set on each row, chosen by the literal's declared datatype rather than by what its text happens to parse as. A typed literal whose lexical form does not fit its column — an out-of-range `xsd:byte`, a zoneless or sub-microsecond `xsd:dateTime` — is stored in `object_string`, and any datatype without a typed column (booleans, dates, custom types) lands there too. `object_type` keeps the exact datatype in every case, and `object_language` keeps the language tag of a language-tagged string, so exporting the table back to RDF ([`sal export`](/sal/reference/commands/#sal-export)) reproduces the original typed or tagged literal even when the value was stored as a string. The geometry column is what makes the table an Iceberg format version 3 table.
 
 The hash identifies a triple from its subject, predicate, object, and the object's datatype and language tag, so `"chat"@en` and `"chat"@fr` are two rows.
-SAL uses this identity to avoid writing duplicate triples when the table already contains the same data.
+SAL uses this identity to avoid writing duplicate triples when the table already contains the same data, and removes a triple a later build no longer states with an equality delete on it.
+It is written without dictionary encoding, since no two rows share a value.
+
+### Parquet encodings and indexes
+
+Beyond the partitioning on `predicate`, the data files carry:
+
+- dictionary encoding on `predicate`, and none on `triple_hash` or `object_geometry`, whose values are unique or nearly so;
+- full Iceberg column metrics (untruncated lower and upper bounds) on every column, with the bounding box of `object_geometry`;
+- rows sorted by predicate and then by subject, which is also the table's declared sort order. Every row group of a predicate covers its own range of subjects, so a pattern with a constant subject, or a join on a few subjects, reads about one row group per predicate rather than nearly all of them;
+- a Parquet bloom filter on `subject` and `object_iri`, the columns a SPARQL pattern binds to a constant IRI or joins on. DuckDB probes the bloom filter of each row group the bounds could not rule out, for a constant or for the handful of keys a join pushes into the scan, and skips the row group when the IRI is not there. The object columns are not sorted, so for `object_iri` the filter is what rules row groups out. Each filter is 128 KiB whatever the row group holds, since iceberg-go does not size them to the column, which is about a 2% false positive rate for a full row group of 122,880 distinct IRIs.
+A table built before the hash was stored as bytes held it as a 64-character hex string; `sal build` refuses such a table and asks for `sal clean --wipe` and a rebuild, since Iceberg cannot change a column's type from string to fixed.
 
 ## Validation and vocabularies
 

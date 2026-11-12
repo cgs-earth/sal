@@ -397,7 +397,7 @@ function sampleFilter(column: ColumnPruning): string {
     case 'object_geometry':
       return '?s geo:asWKT ?g .\nFILTER(geof:sfIntersects(?g, "POLYGON(...)"^^geo:wktLiteral))'
     case 'triple_hash':
-      return 'SELECT * FROM triples WHERE triple_hash = \'…\''
+      return 'SELECT * FROM triples WHERE triple_hash = from_hex(\'…\')'
     default:
       return `?s ?p ?o .\nFILTER(?o = …)   -- ${column.name}`
   }

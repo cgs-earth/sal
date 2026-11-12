@@ -2,6 +2,7 @@ package load
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,7 +26,8 @@ import (
 // is stored in a typed column (or when no typed column fits and it is stored
 // as a string). object_language keeps the language tag of an rdf:langString
 // literal, and is NULL for every other object, so a language-tagged literal
-// round-trips too.
+// round-trips too. triple_hash is the row's 32-byte SHA-256 itself, not its hex,
+// since it is the largest column of the table and unique per row.
 func GetSchemas() (*arrow.Schema, *iceberg.Schema, error) {
 	geoCRS, err := json.Marshal("OGC:CRS84")
 	if err != nil {
@@ -51,7 +53,7 @@ func GetSchemas() (*arrow.Schema, *iceberg.Schema, error) {
 			{Name: "object_time", Type: &arrow.TimestampType{Unit: arrow.Microsecond}, Nullable: true},
 			{Name: "object_type", Type: arrow.BinaryTypes.String, Nullable: true},
 			{Name: "object_language", Type: arrow.BinaryTypes.String, Nullable: true},
-			{Name: "triple_hash", Type: arrow.BinaryTypes.String, Nullable: false},
+			{Name: "triple_hash", Type: tripleHashArrowType, Nullable: false},
 		},
 		nil,
 	)
@@ -73,7 +75,7 @@ func GetSchemas() (*arrow.Schema, *iceberg.Schema, error) {
 		iceberg.NestedField{ID: 9, Name: "object_time", Type: iceberg.PrimitiveTypes.Timestamp, Required: false},
 		iceberg.NestedField{ID: 10, Name: "object_type", Type: iceberg.PrimitiveTypes.String, Required: false},
 		iceberg.NestedField{ID: 11, Name: "object_language", Type: iceberg.PrimitiveTypes.String, Required: false},
-		iceberg.NestedField{ID: 12, Name: "triple_hash", Type: iceberg.PrimitiveTypes.String, Required: true},
+		iceberg.NestedField{ID: 12, Name: "triple_hash", Type: iceberg.MustFixedTypeOf(sha256.Size), Required: true},
 	)
 
 	return arrowSchema, icebergSchema, nil
@@ -105,6 +107,13 @@ func NewIcebergTableFromCfg(ctx context.Context, tableSchema *iceberg.Schema, ca
 		if _, ok := tbl.Schema().FindFieldByName("vocabulary"); ok {
 			return nil, fmt.Errorf("the existing triples table was built by a sal that wrote a vocabulary column, which this version does not; run `sal clean --wipe` and `sal build` to rebuild it")
 		}
+		// a hash is a fixed[32] digest since the hex string it was cost the
+		// table more bytes than any other column; Iceberg cannot evolve a
+		// string column to fixed, and an equality delete must match the type
+		// of the rows it deletes
+		if field, ok := tbl.Schema().FindFieldByName("triple_hash"); ok && !field.Type.Equals(iceberg.MustFixedTypeOf(sha256.Size)) {
+			return nil, fmt.Errorf("the existing triples table was built by an older sal that stored triple_hash as a hex string; run `sal clean --wipe` and `sal build` to rebuild it")
+		}
 		slog.Info("Loaded existing Iceberg table")
 		return tbl, nil
 	} else if !errors.Is(err, catalog.ErrNoSuchTable) {
@@ -119,13 +128,12 @@ func NewIcebergTableFromCfg(ctx context.Context, tableSchema *iceberg.Schema, ca
 		},
 	)
 
-	sortField := table.SortField{
-		SourceIDs: []int{2},
-		Transform: iceberg.IdentityTransform{},
-		Direction: table.SortASC,
-		NullOrder: table.NullsLast,
-	}
-	sortOrder, err := table.NewSortOrder(table.InitialSortOrderID, []table.SortField{sortField})
+	// the order spoolDiff.added writes rows in; iceberg-go also sorts each
+	// batch it writes by it
+	sortOrder, err := table.NewSortOrder(table.InitialSortOrderID, []table.SortField{
+		{SourceIDs: []int{2}, Transform: iceberg.IdentityTransform{}, Direction: table.SortASC, NullOrder: table.NullsLast},
+		{SourceIDs: []int{1}, Transform: iceberg.IdentityTransform{}, Direction: table.SortASC, NullOrder: table.NullsLast},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -140,10 +148,8 @@ func NewIcebergTableFromCfg(ctx context.Context, tableSchema *iceberg.Schema, ca
 		table.WriteDeleteModeKey:                  table.WriteModeMergeOnRead,
 		// format version 3 is what the geometry type needs
 		table.PropertyFormatVersion: "3",
-		// (per-column toggle, prefix-matched; overrides the global switch)
-		"write.parquet.dict-encoding-enabled.column.predicate": "true",
 	}
-	for k, v := range geometryMetricsProperty() {
+	for k, v := range columnWriteProperties() {
 		properties[k] = v
 	}
 
@@ -165,7 +171,7 @@ func applyWriteProperties(ctx context.Context, tbl *table.Table, cfg *LoadConfig
 		"write.parquet.compression-codec": cfg.ParquetCompression,
 		table.ParquetRowGroupLimitKey:     strconv.Itoa(rowGroupRows),
 	}
-	for k, v := range geometryMetricsProperty() {
+	for k, v := range columnWriteProperties() {
 		writeProps[k] = v
 	}
 
@@ -179,6 +185,47 @@ func applyWriteProperties(ctx context.Context, tbl *table.Table, cfg *LoadConfig
 	return nil
 }
 
-func geometryMetricsProperty() iceberg.Properties {
-	return iceberg.Properties{table.MetricsModeColumnConfPrefix + ".object_geometry": "full"}
+// columnWriteProperties are the per-column write settings:
+//   - full metrics for the geometry, so its bounding box is never truncated;
+//   - dictionary encoding for the predicate, which repeats on every row of a
+//     partition, and none for triple_hash and object_geometry, whose values
+//     are unique or nearly so, so a dictionary of them is only ever started
+//     and abandoned;
+//   - a bloom filter on subject and object_iri, the columns a SPARQL pattern
+//     binds to a constant IRI (`subject = '...'`, `object_iri = '...'`) or
+//     joins on. DuckDB probes the filter of each row group its bounds could
+//     not exclude, for a constant or for the few keys of a join it pushes into
+//     the scan, and skips the row group when the IRI is not in it. Rows are
+//     sorted by predicate then subject, so a row group's object_iri bounds
+//     still span nearly every IRI and only its filter rules one out; its
+//     subject bounds are already narrow, and the subject filter only rules out
+//     a row group whose range holds an IRI that has none of its triples.
+//
+// iceberg-go gives arrow-go no estimate of a column's distinct values, so
+// every bloom filter is written at bloomFilterMaxBytes whatever the row
+// group holds; see bloomFilterMaxBytes.
+func columnWriteProperties() iceberg.Properties {
+	return iceberg.Properties{
+		table.MetricsModeColumnConfPrefix + ".object_geometry":         "full",
+		dictEncodingColumnPrefix + ".predicate":                        "true",
+		dictEncodingColumnPrefix + ".triple_hash":                      "false",
+		dictEncodingColumnPrefix + ".object_geometry":                  "false",
+		table.ParquetBloomFilterColumnEnabledKeyPrefix + ".subject":    "true",
+		table.ParquetBloomFilterColumnEnabledKeyPrefix + ".object_iri": "true",
+		table.ParquetBloomFilterMaxBytesKey:                            strconv.Itoa(bloomFilterMaxBytes),
+	}
 }
+
+// bloomFilterMaxBytes is the size of every bloom filter, since iceberg-go
+// writes each one at its maximum. 128 KiB is about 8.5 bits for each row of a
+// full row group (rowGroupRows), a false positive rate near 2% for a row group
+// of distinct IRIs; iceberg-go's default of 1 MiB per column per row group
+// would be more than the rest of a file of a few thousand rows.
+const bloomFilterMaxBytes = 128 * 1024
+
+// dictEncodingColumnPrefix is the iceberg-go property prefix that turns
+// dictionary encoding on or off for one column.
+const dictEncodingColumnPrefix = "write.parquet.dict-encoding-enabled.column"
+
+// tripleHashArrowType is the Arrow type of the triple_hash column.
+var tripleHashArrowType = &arrow.FixedSizeBinaryType{ByteWidth: sha256.Size}

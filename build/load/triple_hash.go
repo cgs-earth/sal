@@ -2,15 +2,12 @@ package load
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
 
 	rdflibgo "github.com/tggo/goRDFlib"
 )
 
-// tripleDigest is the SHA-256 that identifies a row, as its bytes. The
-// triple_hash column holds it hex encoded; the diff and the write filter keep
-// it like this, at half the size and without a pointer for the garbage
-// collector to follow, since they hold one for every triple of the build.
+// tripleDigest is the SHA-256 that identifies a row, the 32 bytes the
+// triple_hash column holds as a fixed[32].
 type tripleDigest [sha256.Size]byte
 
 // digestTriple returns a stable SHA-256 row identifier from the RDF triple
@@ -34,22 +31,6 @@ func digestTriple(subject string, predicate string, object string, datatype stri
 	var digest tripleDigest
 	hash.Sum(digest[:0])
 	return digest
-}
-
-// tripleHash is digestTriple as the hex string the triple_hash column holds.
-func tripleHash(subject string, predicate string, object string, datatype string, language string) string {
-	digest := digestTriple(subject, predicate, object, datatype, language)
-	return hex.EncodeToString(digest[:])
-}
-
-func tripleDigestForTriple(triple rdflibgo.Triple) tripleDigest {
-	object := graphTripleObject(triple.Object)
-	return digestTriple(storedSubject(triple.Subject), triple.Predicate.String(), object.o, object.oDatatype, object.oLanguage)
-}
-
-func tripleHashForTriple(triple rdflibgo.Triple) string {
-	digest := tripleDigestForTriple(triple)
-	return hex.EncodeToString(digest[:])
 }
 
 // storedSubject renders a subject the way the triples table stores it: a blank
