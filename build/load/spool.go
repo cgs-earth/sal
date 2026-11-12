@@ -1,7 +1,6 @@
 package load
 
 import (
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -144,7 +143,7 @@ func (s *Spool) Add(triple rdflibgo.Triple) error {
 	if err := appendObjectFields(builder, object); err != nil {
 		return fmt.Errorf("serialize object for %s %s: %w", triple.Subject.String(), predicate, err)
 	}
-	builder.Field(s.schema.NumFields() - 1).(*array.StringBuilder).Append(hex.EncodeToString(digest[:]))
+	builder.Field(s.schema.NumFields() - 1).(*array.FixedSizeBinaryBuilder).Append(digest[:])
 	s.rows++
 	if builder.Field(0).Len() >= spoolBatchRows {
 		return s.writeBatch(key, partition)

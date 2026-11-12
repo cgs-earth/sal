@@ -76,17 +76,24 @@ func SeedVocabularies(ctx context.Context, blobDir string) ([]string, error) {
 	seedPath := filepath.Join(blobDir, SeedFile)
 	seeded := loadSeeds(seedPath)
 
-	var (
-		mu    sync.Mutex
-		group errgroup.Group
-	)
-	group.SetLimit(seedConcurrency)
+	// what to fetch is settled before any fetch starts, since the fetches
+	// write to seeded and the map must not be read while they run
+	var missing []string
 	for _, namespace := range CommonVocabularies {
 		if entry, ok := seeded[namespace]; ok {
 			if _, err := os.Stat(filepath.Join(blobDir, entry.Version)); err == nil {
 				continue
 			}
 		}
+		missing = append(missing, namespace)
+	}
+
+	var (
+		mu    sync.Mutex
+		group errgroup.Group
+	)
+	group.SetLimit(seedConcurrency)
+	for _, namespace := range missing {
 		group.Go(func() error {
 			entry, err := seedOne(ctx, blobDir, namespace)
 			if err != nil {

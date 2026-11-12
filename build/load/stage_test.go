@@ -56,9 +56,9 @@ func readExistingTripleHashes(ctx context.Context, tbl *table.Table) (map[string
 		if err != nil {
 			return nil, err
 		}
-		column := rec.Column(0).(*array.String)
+		column := rec.Column(0).(*array.FixedSizeBinary)
 		for i := 0; i < column.Len(); i++ {
-			hashes[column.Value(i)] = struct{}{}
+			hashes[string(column.Value(i))] = struct{}{}
 		}
 		rec.Release()
 	}

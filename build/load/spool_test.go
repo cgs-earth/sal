@@ -124,7 +124,7 @@ func TestSpoolWritesGraphTriples(t *testing.T) {
 		objectStrings := rec.Column(2).(*array.String)
 		objectIRIs := rec.Column(3).(*array.String)
 		languages := rec.Column(10).(*array.String)
-		hashes := rec.Column(11).(*array.String)
+		hashes := rec.Column(11).(*array.FixedSizeBinary)
 		for i := 0; i < int(rec.NumRows()); i++ {
 			// an object lands in exactly one typed column; these triples only
 			// hold IRIs and strings
@@ -136,7 +136,7 @@ func TestSpoolWritesGraphTriples(t *testing.T) {
 			if languages.IsValid(i) {
 				language = languages.Value(i)
 			}
-			rows = append(rows, [5]string{subjects.Value(i), predicates.Value(i), object, language, hashes.Value(i)})
+			rows = append(rows, [5]string{subjects.Value(i), predicates.Value(i), object, language, string(hashes.Value(i))})
 		}
 	}
 
@@ -211,7 +211,7 @@ func TestSpoolSerializesObjectColumns(t *testing.T) {
 	objectTime := rec.Column(8).(*array.Timestamp)
 	objectType := rec.Column(9).(*array.String)
 	objectLanguage := rec.Column(10).(*array.String)
-	hashes := rec.Column(11).(*array.String)
+	hashes := rec.Column(11).(*array.FixedSizeBinary)
 
 	expectedWKB, err := wktObjectToWKB("POINT (1 2)")
 	require.NoError(t, err)
@@ -244,25 +244,25 @@ func TestSpoolSerializesObjectColumns(t *testing.T) {
 	requireOnly(iriRow, objectIRI)
 	require.Equal(t, "http://example.com/o", objectIRI.Value(iriRow))
 	require.True(t, objectType.IsNull(iriRow))
-	require.Equal(t, tripleHash("http://example.com/s1", "http://example.com/p", "http://example.com/o", "", ""), hashes.Value(iriRow))
+	require.Equal(t, tripleHash("http://example.com/s1", "http://example.com/p", "http://example.com/o", "", ""), string(hashes.Value(iriRow)))
 
 	floatRow := rowsBySubject["http://example.com/s2"]
 	requireOnly(floatRow, objectFloat)
 	require.Equal(t, 42.5, objectFloat.Value(floatRow))
 	require.Equal(t, rdflibgo.XSDDouble.Value(), objectType.Value(floatRow))
-	require.Equal(t, tripleHash("http://example.com/s2", "http://example.com/p", "42.5", rdflibgo.XSDDouble.Value(), ""), hashes.Value(floatRow))
+	require.Equal(t, tripleHash("http://example.com/s2", "http://example.com/p", "42.5", rdflibgo.XSDDouble.Value(), ""), string(hashes.Value(floatRow)))
 
 	stringRow := rowsBySubject["http://example.com/s3"]
 	requireOnly(stringRow, objectString)
 	require.Equal(t, "label", objectString.Value(stringRow))
 	require.Equal(t, rdflibgo.XSDString.Value(), objectType.Value(stringRow))
-	require.Equal(t, tripleHash("http://example.com/s3", "http://example.com/p", "label", rdflibgo.XSDString.Value(), ""), hashes.Value(stringRow))
+	require.Equal(t, tripleHash("http://example.com/s3", "http://example.com/p", "label", rdflibgo.XSDString.Value(), ""), string(hashes.Value(stringRow)))
 
 	geometryRow := rowsBySubject["http://example.com/s4"]
 	requireOnly(geometryRow, objectGeometry)
 	require.Equal(t, geoarrow.WKBBytes(expectedWKB), objectGeometry.Value(geometryRow))
 	require.Equal(t, geoSPARQLWKTLiteral, objectType.Value(geometryRow))
-	require.Equal(t, tripleHash("http://example.com/s4", "http://example.com/p", "POINT (1 2)", geoSPARQLWKTLiteral, ""), hashes.Value(geometryRow))
+	require.Equal(t, tripleHash("http://example.com/s4", "http://example.com/p", "POINT (1 2)", geoSPARQLWKTLiteral, ""), string(hashes.Value(geometryRow)))
 
 	integerRow := rowsBySubject["http://example.com/s5"]
 	requireOnly(integerRow, objectInteger)
@@ -348,7 +348,7 @@ func TestTripleHashIncludesTheDatatype(t *testing.T) {
 	hashFromTerms := tripleHash("http://example.com/s", "http://purl.org/dc/terms/created", "2026-06-02", "http://www.w3.org/2001/XMLSchema#date", "")
 
 	require.Equal(t, hashFromTerms, hashFromTriple)
-	require.Len(t, hashFromTriple, 64)
+	require.Len(t, hashFromTriple, 32)
 	require.NotEqual(t, hashFromTriple, tripleHash("http://example.com/s", "http://purl.org/dc/terms/created", "2026-06-02", rdflibgo.XSDString.Value(), ""))
 }
 

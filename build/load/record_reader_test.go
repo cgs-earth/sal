@@ -1,14 +1,19 @@
 package load
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/apache/iceberg-go"
 	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/catalog/hadoop"
@@ -65,6 +70,132 @@ func TestNewIcebergTableRefusesATableWithTheVocabularyColumn(t *testing.T) {
 
 	require.ErrorContains(t, err, "wrote a vocabulary column")
 	require.ErrorContains(t, err, "sal clean --wipe")
+}
+
+// triple_hash is the row's SHA-256 as 32 raw bytes, half the size of the hex
+// it was written as before.
+func TestGetSchemasStoresTheTripleHashAsFixedBytes(t *testing.T) {
+	arrowSchema, icebergSchema, err := GetSchemas()
+	require.NoError(t, err)
+
+	require.Equal(t, "fixed[32]", icebergSchema.Field(11).Type.String())
+	convertedType, err := table.ArrowTypeToIceberg(arrowSchema.Field(11).Type, false)
+	require.NoError(t, err)
+	require.Equal(t, "fixed[32]", convertedType.String())
+}
+
+// A table written while triple_hash was a hex string cannot hold the rows or
+// the equality deletes this sal writes, so it is refused with the way out.
+func TestNewIcebergTableRefusesATableWithAHexTripleHash(t *testing.T) {
+	ctx := context.Background()
+	cfg := &LoadConfig{BatchSize: 10, ParquetCompression: "snappy", Warehouse: t.TempDir(), Namespace: "default"}
+	cat, err := hadoop.NewCatalog(context.Background(), "local-catalog", cfg.Warehouse, nil)
+	require.NoError(t, err)
+	require.NoError(t, cat.CreateNamespace(ctx, catalog.ToIdentifier("default"), nil))
+	older := iceberg.NewSchema(1,
+		iceberg.NestedField{ID: 1, Name: "subject", Type: iceberg.PrimitiveTypes.String, Required: true},
+		iceberg.NestedField{ID: 2, Name: "object_language", Type: iceberg.PrimitiveTypes.String, Required: false},
+		iceberg.NestedField{ID: 3, Name: "triple_hash", Type: iceberg.PrimitiveTypes.String, Required: true},
+	)
+	_, err = cat.CreateTable(ctx, catalog.ToIdentifier("default", "triples"), older)
+	require.NoError(t, err)
+
+	_, icebergSchema, err := GetSchemas()
+	require.NoError(t, err)
+	_, err = NewIcebergTableFromCfg(ctx, icebergSchema, cat, cfg)
+
+	require.ErrorContains(t, err, "triple_hash as a hex string")
+	require.ErrorContains(t, err, "sal clean --wipe")
+}
+
+// requireTripleHashWithoutDictionary checks that the triple_hash column of a
+// Parquet file is 32-byte fixed length values with no dictionary page.
+func requireTripleHashWithoutDictionary(t *testing.T, path string) {
+	t.Helper()
+	reader, err := file.OpenParquetFile(strings.TrimPrefix(path, "file://"), false)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, reader.Close()) }()
+	column := reader.MetaData().Schema.ColumnIndexByName("triple_hash")
+	require.GreaterOrEqual(t, column, 0, "%s has no triple_hash column", path)
+	require.Equal(t, parquet.Types.FixedLenByteArray, reader.MetaData().Schema.Column(column).PhysicalType())
+	require.Equal(t, 32, reader.MetaData().Schema.Column(column).TypeLength())
+	for i := range reader.NumRowGroups() {
+		chunk, err := reader.MetaData().RowGroup(i).ColumnChunk(column)
+		require.NoError(t, err)
+		require.False(t, chunk.HasDictionaryPage(), "%s keeps a dictionary of triple_hash", path)
+	}
+}
+
+// Both the data files and the equality delete files store triple_hash as
+// fixed length bytes without a dictionary, since every value is unique.
+func TestTripleHashIsWrittenWithoutADictionary(t *testing.T) {
+	ctx := context.Background()
+	cfg := &LoadConfig{BatchSize: 10, ParquetCompression: "snappy", Warehouse: t.TempDir(), Namespace: "default"}
+	predicate := rdflibgo.NewURIRefUnsafe("http://example.com/p")
+	first := rdflibgo.NewGraph()
+	for i := range 5000 {
+		pkg.AddTriple(first, rdflibgo.NewURIRefUnsafe(fmt.Sprintf("http://example.com/s%d", i)), predicate, rdflibgo.NewLiteral("value"))
+	}
+	require.NoError(t, WriteGraphToIceberg(ctx, first, cfg, nil, ""))
+	second := rdflibgo.NewGraph()
+	pkg.AddTriple(second, rdflibgo.NewURIRefUnsafe("http://example.com/s0"), predicate, rdflibgo.NewLiteral("value"))
+	require.NoError(t, WriteGraphToIceberg(ctx, second, cfg, nil, ""))
+
+	tbl := stageTestTable(t, cfg)
+	require.Equal(t, "false", tbl.Properties()["write.parquet.dict-encoding-enabled.column.triple_hash"])
+	tasks, err := tbl.Scan().PlanFiles(ctx)
+	require.NoError(t, err)
+	var data, deletes int
+	for _, task := range tasks {
+		requireTripleHashWithoutDictionary(t, task.File.FilePath())
+		data++
+		for _, deleteFile := range task.EqualityDeleteFiles {
+			requireTripleHashWithoutDictionary(t, deleteFile.FilePath())
+			deletes++
+		}
+	}
+	require.Positive(t, data)
+	require.Positive(t, deletes)
+}
+
+// Data files carry a bloom filter of bloomFilterMaxBytes on subject and
+// object_iri, the columns a SPARQL pattern binds to a constant IRI, and no
+// dictionary on object_geometry, even when every geometry is the same one.
+func TestDataFilesCarryIRIBloomFiltersAndNoGeometryDictionary(t *testing.T) {
+	ctx := context.Background()
+	cfg := &LoadConfig{BatchSize: 10, ParquetCompression: "snappy", Warehouse: t.TempDir(), Namespace: "default"}
+	link := rdflibgo.NewURIRefUnsafe("http://example.com/link")
+	asWKT := rdflibgo.NewURIRefUnsafe("http://example.com/asWKT")
+	graph := rdflibgo.NewGraph()
+	for i := range 500 {
+		subject := rdflibgo.NewURIRefUnsafe(fmt.Sprintf("http://example.com/s%d", i))
+		pkg.AddTriple(graph, subject, link, rdflibgo.NewURIRefUnsafe(fmt.Sprintf("http://example.com/o%d", i)))
+		pkg.AddTriple(graph, subject, asWKT, rdflibgo.NewLiteral("POINT (1 2)", rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(geoSPARQLWKTLiteral))))
+	}
+	require.NoError(t, WriteGraphToIceberg(ctx, graph, cfg, nil, ""))
+
+	tbl := stageTestTable(t, cfg)
+	tasks, err := tbl.Scan().PlanFiles(ctx)
+	require.NoError(t, err)
+	require.Len(t, tasks, 2)
+	for _, task := range tasks {
+		reader, err := file.OpenParquetFile(strings.TrimPrefix(task.File.FilePath(), "file://"), false)
+		require.NoError(t, err)
+		schema := reader.MetaData().Schema
+		for i := range reader.NumRowGroups() {
+			rowGroup := reader.MetaData().RowGroup(i)
+			for _, name := range []string{"subject", "object_iri"} {
+				chunk, err := rowGroup.ColumnChunk(schema.ColumnIndexByName(name))
+				require.NoError(t, err)
+				require.Positive(t, chunk.BloomFilterOffset(), "%s has no bloom filter in %s", name, task.File.FilePath())
+				require.LessOrEqual(t, int(chunk.BloomFilterLength()), bloomFilterMaxBytes+64, "%s bloom filter is over its cap", name)
+			}
+			geometry, err := rowGroup.ColumnChunk(schema.ColumnIndexByName("object_geometry"))
+			require.NoError(t, err)
+			require.False(t, geometry.HasDictionaryPage(), "object_geometry keeps a dictionary in %s", task.File.FilePath())
+		}
+		require.NoError(t, reader.Close())
+	}
 }
 
 func TestWriteGraphToIcebergIngestsSimpleWKTGeometry(t *testing.T) {
@@ -198,6 +329,65 @@ func TestWriteSpoolToIcebergWritesFilesSortedByPredicate(t *testing.T) {
 	require.Empty(t, spool.Files(0, spool.Segment()))
 }
 
+// Rows reach the data files sorted by predicate and then by subject, which is
+// the table's declared sort order and what gives each row group of a
+// predicate its own range of subjects, whatever order they were spooled in.
+// There are more rows than one batch of readBatchRows, since iceberg-go
+// sorts each batch it writes by the declared order on its own, which leaves
+// a row group of several batches holding several runs that each span every
+// subject unless the diff sorted the rows first.
+func TestWriteSpoolToIcebergSortsRowsBySubjectWithinAPredicate(t *testing.T) {
+	ctx := context.Background()
+	cfg := stageTestConfig(t)
+	spool, err := NewSpool(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spool.Remove()) })
+	// subjects spooled in an order neither alphabetical nor by hash
+	const subjectCount = readBatchRows + 7000
+	for n := range subjectCount {
+		i := n * 7919 % subjectCount
+		for _, predicate := range []string{"https://example.com/b", "https://example.com/a"} {
+			require.NoError(t, spool.Add(rdflibgo.Triple{
+				Subject:   rdflibgo.NewURIRefUnsafe(fmt.Sprintf("http://example.com/s%d", i)),
+				Predicate: rdflibgo.NewURIRefUnsafe(predicate),
+				Object:    rdflibgo.NewLiteral(fmt.Sprint(i)),
+			}))
+		}
+	}
+
+	require.NoError(t, WriteSpoolToIceberg(ctx, spool, cfg, nil, ""))
+
+	tbl := stageTestTable(t, cfg)
+	var keys [][]int
+	for _, field := range tbl.SortOrder().Fields() {
+		keys = append(keys, field.SourceIDs)
+	}
+	require.Equal(t, [][]int{{2}, {1}}, keys, "the table is sorted by predicate (field 2) then subject (field 1)")
+
+	tasks, err := tbl.Scan().PlanFiles(ctx)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	reader, err := file.OpenParquetFile(strings.TrimPrefix(tasks[0].File.FilePath(), "file://"), false)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, reader.Close()) }()
+	arrowReader, err := pqarrow.NewFileReader(reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+	require.NoError(t, err)
+	written, err := arrowReader.ReadTable(ctx)
+	require.NoError(t, err)
+	defer written.Release()
+	var rows [][2]string
+	subjects, predicates := written.Column(0).Data().Chunks(), written.Column(1).Data().Chunks()
+	for c := range subjects {
+		for i := range subjects[c].Len() {
+			rows = append(rows, [2]string{predicates[c].(*array.String).Value(i), subjects[c].(*array.String).Value(i)})
+		}
+	}
+	require.Len(t, rows, 2*subjectCount)
+	require.True(t, slices.IsSortedFunc(rows, func(a, b [2]string) int {
+		return cmp.Or(strings.Compare(a[0], b[0]), strings.Compare(a[1], b[1]))
+	}), "rows are not sorted by predicate then subject")
+}
+
 // A spool partitions its rows the way the table does, by the first twenty
 // characters of the predicate, counted as characters rather than bytes.
 func TestPartitionKeyIsTheFirstTwentyCharactersOfThePredicate(t *testing.T) {
@@ -283,10 +473,14 @@ func TestWriteGraphToIcebergStoresBlankNodesWithNTriplesPrefix(t *testing.T) {
 // distinctRows keeps the first of every run of rows with one hash, including
 // a run that carries over from the end of one batch to the start of the next.
 func TestDistinctRowsDropsARepeatAcrossBatches(t *testing.T) {
-	schema := arrow.NewSchema([]arrow.Field{{Name: "triple_hash", Type: arrow.BinaryTypes.String}}, nil)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "triple_hash", Type: tripleHashArrowType}}, nil)
+	// a hash is 32 bytes; each test hash is a letter padded with zeros
+	digest := func(letter string) []byte { return append([]byte(letter), make([]byte, 31)...) }
 	batch := func(hashes ...string) arrow.RecordBatch {
-		builder := array.NewStringBuilder(memory.DefaultAllocator)
-		builder.AppendValues(hashes, nil)
+		builder := array.NewFixedSizeBinaryBuilder(memory.DefaultAllocator, tripleHashArrowType)
+		for _, hash := range hashes {
+			builder.Append(digest(hash))
+		}
 		column := builder.NewArray()
 		return array.NewRecordBatch(schema, []arrow.Array{column}, int64(len(hashes)))
 	}
@@ -302,9 +496,9 @@ func TestDistinctRowsDropsARepeatAcrossBatches(t *testing.T) {
 	var kept []string
 	for b, err := range distinctRows(context.Background(), records, 0, &rows) {
 		require.NoError(t, err)
-		column := b.Column(0).(*array.String)
+		column := b.Column(0).(*array.FixedSizeBinary)
 		for i := 0; i < column.Len(); i++ {
-			kept = append(kept, column.Value(i))
+			kept = append(kept, string(column.Value(i)[:1]))
 		}
 		b.Release()
 	}

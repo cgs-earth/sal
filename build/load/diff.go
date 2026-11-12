@@ -1,6 +1,7 @@
 package load
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -241,10 +242,13 @@ func (d *spoolDiff) dumpExisting(ctx context.Context, tbl *table.Table) (err err
 
 // added writes to a new Parquet file every row of one partition of the
 // spool whose triple neither the table nor any of the exclude files holds,
-// sorted by predicate and hash, which keeps the partitions of the table the
-// rows fall in apart for the Iceberg writer, and puts a triple the spool holds
-// more than once on adjacent rows, since the hash covers the predicate;
-// writeRowFiles keeps the first. Leaving that to the writer is what keeps the
+// sorted by predicate, subject, and hash. The predicate keeps the partitions
+// of the table the rows fall in apart for the Iceberg writer; the subject
+// gives every row group of a predicate its own range of subjects, so a lookup
+// of one subject, or a join on a few, reads about one row group per predicate
+// instead of nearly all of them; and a triple the spool holds more than once
+// lands on adjacent rows, since its copies share a predicate and subject and
+// the hash covers the whole triple; writeRowFiles keeps the first. Leaving that to the writer is what keeps the
 // query to anti joins and a sort, all of which DuckDB spills to disk, where a
 // DISTINCT over whole rows fails once they no longer fit in memory. Only the
 // table's rows with the partition's predicates are joined against. It
@@ -269,7 +273,7 @@ func (d *spoolDiff) added(ctx context.Context, partition SpoolPartition, exclude
 	SELECT candidate.*
 	FROM read_parquet(%s) candidate
 	%s
-	ORDER BY candidate.predicate, candidate.triple_hash
+	ORDER BY candidate.predicate, candidate.subject, candidate.triple_hash
 ) TO %s (FORMAT parquet, COMPRESSION snappy)`, sqlList(partition.Files), strings.Join(anti, "\n\t"), sqlString(path))
 	rows, err := d.copy(ctx, statement)
 	return path, rows, err
@@ -306,7 +310,7 @@ func (d *spoolDiff) next(name string) string {
 }
 
 // writeRowFiles writes the rows of a Parquet file added wrote, which are
-// sorted by predicate and hash, to the table's data files, one partition at a
+// sorted by predicate, subject, and hash, to the table's data files, one partition at a
 // time, keeping one row of each run of rows with the same hash. It returns
 // the files and how many rows they hold.
 func writeRowFiles(ctx context.Context, tbl *table.Table, path string) (_ []iceberg.DataFile, rows int64, err error) {
@@ -338,21 +342,22 @@ func writeRowFiles(ctx context.Context, tbl *table.Table, path string) (_ []iceb
 	return dataFiles, rows, nil
 }
 
-// distinctRows passes on the batches of records with every row whose string
+// distinctRows passes on the batches of records with every row whose hash
 // column at hashColumn repeats the row before it, in the same batch or at the
 // end of the last, filtered out, and counts the rows it passes on.
 func distinctRows(ctx context.Context, records func(func(arrow.RecordBatch, error) bool), hashColumn int, rows *int64) func(func(arrow.RecordBatch, error) bool) {
 	return func(yield func(arrow.RecordBatch, error) bool) {
-		previous := ""
+		var previous tripleDigest
+		first := true
 		for batch, err := range records {
 			if err != nil {
 				yield(nil, err)
 				return
 			}
-			hashes := batch.Column(hashColumn).(*array.String)
+			hashes := batch.Column(hashColumn).(*array.FixedSizeBinary)
 			var keep *array.BooleanBuilder
 			for i := 0; i < hashes.Len(); i++ {
-				repeated := hashes.Value(i) == previous
+				repeated := !first && bytes.Equal(hashes.Value(i), previous[:])
 				if repeated && keep == nil {
 					// a batch with a repeat is the rare one, so the mask is
 					// only built once one is found
@@ -365,7 +370,8 @@ func distinctRows(ctx context.Context, records func(func(arrow.RecordBatch, erro
 					keep.Append(!repeated)
 				}
 				if !repeated {
-					previous = strings.Clone(hashes.Value(i))
+					copy(previous[:], hashes.Value(i))
+					first = false
 				}
 			}
 			if keep != nil {
@@ -461,8 +467,28 @@ func readParquetFile(ctx context.Context, path string) (func(func(arrow.RecordBa
 // asSchemaColumn returns column, retained, as the type the schema gives it:
 // an extension column, such as the geoarrow WKB of object_geometry, is the
 // extension over the column's storage, whether the file stored it as the
-// extension or, as DuckDB writes it, as a plain blob.
+// extension or, as DuckDB writes it, as a plain blob; and a fixed size binary
+// column, triple_hash, which DuckDB writes back as a variable length blob, is
+// copied into one of its fixed width.
 func asSchemaColumn(column arrow.Array, want arrow.DataType) arrow.Array {
+	if fixed, ok := want.(*arrow.FixedSizeBinaryType); ok {
+		blobs, ok := column.(*array.Binary)
+		if !ok {
+			column.Retain()
+			return column
+		}
+		builder := array.NewFixedSizeBinaryBuilder(memory.DefaultAllocator, fixed)
+		defer builder.Release()
+		builder.Reserve(blobs.Len())
+		for i := range blobs.Len() {
+			if blobs.IsNull(i) {
+				builder.AppendNull()
+			} else {
+				builder.Append(blobs.Value(i))
+			}
+		}
+		return builder.NewArray()
+	}
 	extension, ok := want.(arrow.ExtensionType)
 	if !ok || arrow.TypeEqual(column.DataType(), extension) {
 		column.Retain()
@@ -477,7 +503,7 @@ func asSchemaColumn(column arrow.Array, want arrow.DataType) arrow.Array {
 // deleteSchema is the schema of the pairs an equality delete names a row by.
 func deleteSchema() *arrow.Schema {
 	return arrow.NewSchema([]arrow.Field{
-		{Name: "triple_hash", Type: arrow.BinaryTypes.String, Nullable: false},
+		{Name: "triple_hash", Type: tripleHashArrowType, Nullable: false},
 		{Name: "predicate", Type: arrow.BinaryTypes.String, Nullable: false},
 	}, nil)
 }
