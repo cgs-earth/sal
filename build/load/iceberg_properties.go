@@ -190,7 +190,11 @@ func applyWriteProperties(ctx context.Context, tbl *table.Table, cfg *LoadConfig
 //   - dictionary encoding for the predicate, which repeats on every row of a
 //     partition, and none for triple_hash and object_geometry, whose values
 //     are unique or nearly so, so a dictionary of them is only ever started
-//     and abandoned;
+//     and abandoned, nor for the numeric and time columns (object_byte,
+//     object_integer, object_float, object_time), which are almost always
+//     null and, where set, mostly measured values that rarely repeat; their
+//     filters are pruned by min/max statistics, which a dictionary does not
+//     change;
 //   - a bloom filter on subject and object_iri, the columns a SPARQL pattern
 //     binds to a constant IRI (`subject = '...'`, `object_iri = '...'`) or
 //     joins on. DuckDB probes the filter of each row group its bounds could
@@ -210,6 +214,10 @@ func columnWriteProperties() iceberg.Properties {
 		dictEncodingColumnPrefix + ".predicate":                        "true",
 		dictEncodingColumnPrefix + ".triple_hash":                      "false",
 		dictEncodingColumnPrefix + ".object_geometry":                  "false",
+		dictEncodingColumnPrefix + ".object_byte":                      "false",
+		dictEncodingColumnPrefix + ".object_integer":                   "false",
+		dictEncodingColumnPrefix + ".object_float":                     "false",
+		dictEncodingColumnPrefix + ".object_time":                      "false",
 		table.ParquetBloomFilterColumnEnabledKeyPrefix + ".subject":    "true",
 		table.ParquetBloomFilterColumnEnabledKeyPrefix + ".object_iri": "true",
 		table.ParquetBloomFilterMaxBytesKey:                            strconv.Itoa(bloomFilterMaxBytes),
