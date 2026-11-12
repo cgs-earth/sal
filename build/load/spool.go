@@ -302,12 +302,26 @@ func (p *spoolPartition) closeFile() error {
 	return nil
 }
 
+// spoolDictionarylessColumns are the columns of the spool whose values are
+// nearly all distinct: every row has its own hash, and subjects and object
+// values repeat a handful of times at most. A dictionary of such a column
+// holds every value once more and is then abandoned for plain encoding once
+// it outgrows its page, so building it is pure cost on the build's one
+// parsing goroutine.
+var spoolDictionarylessColumns = []string{"subject", "object_string", "object_iri", "object_geometry", "triple_hash"}
+
 // spoolWriterProperties is how scratch Parquet is written: fast to write and
-// to read back, with no statistics nobody reads.
+// to read back, with no statistics nobody reads, and no dictionary for a
+// column whose values hardly repeat. The predicate, datatype, and language
+// columns keep theirs, since a few distinct values cover millions of rows.
 func spoolWriterProperties() *parquet.WriterProperties {
-	return parquet.NewWriterProperties(
+	properties := []parquet.WriterProperty{
 		parquet.WithCompression(compress.Codecs.Snappy),
 		parquet.WithStats(false),
 		parquet.WithMaxRowGroupLength(spoolBatchRows),
-	)
+	}
+	for _, column := range spoolDictionarylessColumns {
+		properties = append(properties, parquet.WithDictionaryFor(column, false))
+	}
+	return parquet.NewWriterProperties(properties...)
 }
