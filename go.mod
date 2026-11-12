@@ -7,7 +7,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.5
 	github.com/KimMachineGun/automemlimit v1.0.1
 	github.com/alexflint/go-arg v1.6.1
-	github.com/apache/arrow-go/v18 v18.8.1-0.20261111173701-83d6e62f6c17
+	github.com/apache/arrow-go/v18 v18.8.1-0.20261112170646-06b57e0cbdb6
 	github.com/apache/iceberg-go v0.7.1-0.20261104183851-19c888720daf
 	github.com/cgs-earth/json-gold v0.0.0-20260623123334-63cdb5b88cb8
 	github.com/charmbracelet/colorprofile v0.4.3

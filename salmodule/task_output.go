@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -51,6 +52,30 @@ const (
 	taskOutputBatchBytes = 8 << 20
 )
 
+// taskOutputParseWorkers is how many batches of one stream are parsed at
+// once. Parsing JSON-LD is what bounds how fast sal reads a task's output, far
+// more than the task writing it or the spool writing it to disk, and batches
+// parse independently, so a parser keeps this many in flight. Tests set it.
+var taskOutputParseWorkers = min(runtime.GOMAXPROCS(0), 8)
+
+// taskOutputBatch is one batch of a stream's lines handed to a parse worker:
+// the JSON-LD document the lines make, and where in it each line carrying a
+// @context of its own lies.
+type taskOutputBatch struct {
+	document    []byte
+	contexts    [][2]int
+	first, last int
+}
+
+// parsedBatch is what a parse worker made of a batch: its triples with their
+// blank nodes already stable, and the namespaces the @context of its lines
+// bound.
+type parsedBatch struct {
+	triples  []rdflibgo.Triple
+	bindings map[string]bool
+	err      error
+}
+
 // TaskOutputParser turns the newline delimited JSON a module task writes to
 // stdout into RDF as the lines arrive, handing the triples straight to the
 // TripleSink it was made for, or adding them to a graph. A task emits plain
@@ -79,6 +104,14 @@ const (
 // Line is the TaskOutputSink to hand RunTask; Finish parses whatever is still
 // pending once the task has ended and reports the errors the task declared.
 //
+// Batches are parsed by up to taskOutputParseWorkers goroutines at once, but
+// everything else happens on the goroutine calling Line and Finish, in the
+// order the lines were written: the sink sees one batch's triples after the
+// previous batch's, exactly as it would were the batches parsed one by one,
+// and is never called concurrently. Since a batch is handed on once parsed
+// rather than when it fills, a batch that fails to parse, or whose triples the
+// sink refuses, fails a later call to Line, or Finish.
+//
 // The same parser reads a task's stderr, through NewTaskStderrParser, into a
 // graph of its own: the nodes there are the task's control channel, never
 // its data, and only the salmodule:Error nodes among them are of interest.
@@ -104,6 +137,18 @@ type TaskOutputParser struct {
 	pendingLines     int
 	firstPendingLine int
 	lastLine         int
+	// pendingContexts is where in pending each line carrying a @context of
+	// its own lies
+	pendingContexts [][2]int
+
+	// inflight are the batches handed to the parse workers, in the order the
+	// lines were written, each delivering its result once parsed; workers
+	// holds a slot per batch being parsed
+	inflight []chan parsedBatch
+	workers  chan struct{}
+	// failed is the first error a batch reported, after which nothing more
+	// is parsed or handed on
+	failed error
 
 	// errorNodes are the subjects typed salmodule:Error so far, by their key,
 	// whose messages Finish reports
@@ -151,7 +196,7 @@ func (o *ModuleOntology) newTaskOutputParser(graph *rdflibgo.Graph, sink TripleS
 	if len(o.Context) > 0 {
 		head = append(append([]byte(`{"@context":`), o.Context...), `,"@graph":[`...)
 	}
-	parser := &TaskOutputParser{ontology: o, sink: sink, errors: graph, errorsApart: sink != nil, base: base, stream: stream, head: head, errorNodes: map[string]rdflibgo.Subject{}, terms: map[string]bool{}, bindings: map[string]bool{}}
+	parser := &TaskOutputParser{ontology: o, sink: sink, errors: graph, errorsApart: sink != nil, base: base, stream: stream, head: head, errorNodes: map[string]rdflibgo.Subject{}, terms: map[string]bool{}, bindings: map[string]bool{}, workers: make(chan struct{}, max(taskOutputParseWorkers, 1))}
 	if sink == nil {
 		parser.sink = func(triple rdflibgo.Triple) error {
 			pkg.AddTriple(graph, triple.Subject, triple.Predicate, triple.Object)
@@ -162,7 +207,7 @@ func (o *ModuleOntology) newTaskOutputParser(graph *rdflibgo.Graph, sink TripleS
 	if len(o.Context) > 0 {
 		var moduleContext any
 		if err := json.Unmarshal(o.Context, &moduleContext); err == nil {
-			parser.noteBindings(moduleContext)
+			noteBindings(parser.bindings, moduleContext)
 		}
 	}
 	return parser
@@ -172,6 +217,9 @@ func (o *ModuleOntology) newTaskOutputParser(graph *rdflibgo.Graph, sink TripleS
 // parses the batch once it is full. A line that is not a JSON object is an
 // error, since every line of a task's output is one node.
 func (p *TaskOutputParser) Line(line []byte, lineNumber int) error {
+	if p.failed != nil {
+		return p.failed
+	}
 	if len(line) == 0 || line[0] != '{' || !json.Valid(line) {
 		// decoding into a map is what names the problem with the line
 		var node map[string]any
@@ -180,24 +228,22 @@ func (p *TaskOutputParser) Line(line []byte, lineNumber int) error {
 		}
 		return fmt.Errorf("SAL module %s wrote invalid JSON on %s line %d", p.ontology.Namespace, p.stream, lineNumber)
 	}
-	if bytes.Contains(line, []byte("@context")) {
-		// a node that carries a context of its own declares vocabularies
-		// the module's does not; the decode is paid only on such a line
-		var node any
-		if err := json.Unmarshal(line, &node); err == nil {
-			p.noteContexts(node)
-		}
-	}
 	if p.pendingLines == 0 {
 		p.firstPendingLine = lineNumber
 	} else {
 		p.pending.WriteByte(',')
 	}
+	start := p.pending.Len()
 	p.pending.Write(line)
+	if bytes.Contains(line, []byte("@context")) {
+		// a node that carries a context of its own declares vocabularies
+		// the module's does not; the worker parsing the batch decodes it
+		p.pendingContexts = append(p.pendingContexts, [2]int{start, p.pending.Len()})
+	}
 	p.pendingLines++
 	p.lastLine = lineNumber
 	if p.pendingLines >= taskOutputBatchLines || p.pending.Len() >= taskOutputBatchBytes {
-		return p.flush()
+		return p.dispatch()
 	}
 	return nil
 }
@@ -213,8 +259,20 @@ func (p *TaskOutputParser) Line(line []byte, lineNumber int) error {
 // reported, since it is the task's own account of its failure, but the
 // message names what is missing.
 func (p *TaskOutputParser) Finish() error {
-	if err := p.flush(); err != nil {
-		return err
+	if p.failed == nil {
+		_ = p.dispatch()
+	}
+	// every batch still being parsed is waited for, so no worker outlives
+	// the parser, and handed on unless an earlier one failed
+	for _, result := range p.inflight {
+		parsed := <-result
+		if p.failed == nil {
+			p.failed = p.deliver(parsed)
+		}
+	}
+	p.inflight = nil
+	if p.failed != nil {
+		return p.failed
 	}
 	if len(p.errorNodes) == 0 {
 		return nil
@@ -312,37 +370,43 @@ func (p *TaskOutputParser) boundNamespace(term string) string {
 	return longest
 }
 
-// noteContexts records the bindings of every @context the decoded JSON
-// value carries, at its top or on any node nested in it, since JSON-LD lets
-// an embedded node carry a context of its own.
-func (p *TaskOutputParser) noteContexts(value any) {
+// noteContexts records into bindings the namespaces every @context the
+// decoded JSON value carries binds, at its top or on any node nested in it,
+// since JSON-LD lets an embedded node carry a context of its own.
+func noteContexts(bindings map[string]bool, value any) {
 	switch value := value.(type) {
 	case map[string]any:
 		for key, nested := range value {
 			if key == "@context" {
-				p.noteBindings(nested)
+				noteBindings(bindings, nested)
 			} else {
-				p.noteContexts(nested)
+				noteContexts(bindings, nested)
 			}
 		}
 	case []any:
 		for _, element := range value {
-			p.noteContexts(element)
+			noteContexts(bindings, element)
 		}
 	}
 }
 
-// noteBindings records every namespace one decoded @context binds: the value
-// of a prefix or @vocab entry as it is, the namespace of the @id of an
-// expanded term definition, since that declares one term of a vocabulary,
-// and the bindings of a scoped context inside one. A keyword alias ("type":
-// "@type") binds nothing, and a remote context, a string in place of an
-// object, is not fetched.
-func (p *TaskOutputParser) noteBindings(context any) {
+// noteBindings records into bindings every namespace one decoded @context
+// binds: the value of a prefix or @vocab entry as it is, the namespace of the
+// @id of an expanded term definition, since that declares one term of a
+// vocabulary, and the bindings of a scoped context inside one. A keyword
+// alias ("type": "@type") binds nothing, and a remote context, a string in
+// place of an object, is not fetched. A keyword or a relative name is not a
+// binding.
+func noteBindings(bindings map[string]bool, context any) {
+	note := func(iri string) {
+		if !strings.HasPrefix(iri, "@") && strings.Contains(iri, ":") {
+			bindings[iri] = true
+		}
+	}
 	switch context := context.(type) {
 	case []any:
 		for _, element := range context {
-			p.noteBindings(element)
+			noteBindings(bindings, element)
 		}
 	case map[string]any:
 		for key, value := range context {
@@ -351,25 +415,17 @@ func (p *TaskOutputParser) noteBindings(context any) {
 			}
 			switch value := value.(type) {
 			case string:
-				p.noteBinding(value)
+				note(value)
 			case map[string]any:
 				if id, ok := value["@id"].(string); ok {
-					p.noteBinding(VocabularyNamespace(id))
+					note(VocabularyNamespace(id))
 				}
 				if scoped, ok := value["@context"]; ok {
-					p.noteBindings(scoped)
+					noteBindings(bindings, scoped)
 				}
 			}
 		}
 	}
-}
-
-// noteBinding records one bound IRI; a keyword or a relative name is not one.
-func (p *TaskOutputParser) noteBinding(iri string) {
-	if strings.HasPrefix(iri, "@") || !strings.Contains(iri, ":") {
-		return
-	}
-	p.bindings[iri] = true
 }
 
 // VocabularyNamespace is the namespace a term IRI belongs to: everything up
@@ -388,33 +444,82 @@ func VocabularyNamespace(iri string) string {
 // noteTerm records a term the output used as a predicate, class, or datatype.
 func (p *TaskOutputParser) noteTerm(iri string) { p.terms[iri] = true }
 
-// flush parses the pending batch as one JSON-LD document and hands its
-// triples to the sink, its blank nodes relabelled a connected component at a
-// time (see TaskOutputParser) in place of the _:b0, _:b1, ... the JSON-LD
-// processor gives every document.
-func (p *TaskOutputParser) flush() error {
-	if p.pendingLines == 0 {
-		return nil
+// dispatch hands the pending batch to a parse worker and then hands on, in
+// order, every batch at the head of the queue that has been parsed, waiting
+// for the oldest when twice as many batches as there are workers are in
+// flight, which bounds the memory the batches waiting on it hold.
+func (p *TaskOutputParser) dispatch() error {
+	if p.pendingLines > 0 {
+		p.pending.WriteString("]}")
+		batch := taskOutputBatch{document: p.pending.Bytes(), contexts: p.pendingContexts, first: p.firstPendingLine, last: p.lastLine}
+		p.pending = bytes.Buffer{}
+		p.pending.Write(p.head)
+		p.pendingLines, p.pendingContexts = 0, nil
+		result := make(chan parsedBatch, 1)
+		p.inflight = append(p.inflight, result)
+		go func() {
+			p.workers <- struct{}{}
+			defer func() { <-p.workers }()
+			result <- p.parseBatch(batch)
+		}()
 	}
-	p.pending.WriteString("]}")
-	first, last := p.firstPendingLine, p.lastLine
-	batch := rdflibgo.NewGraph(rdflibgo.WithBase(p.base))
-	err := jsonld.Parse(context.Background(), batch, bytes.NewReader(p.pending.Bytes()), jsonld.WithBase(p.base), jsonld.WithUnboundedLines())
-	p.pending.Reset()
-	p.pending.Write(p.head)
-	p.pendingLines = 0
-	if err != nil {
-		return fmt.Errorf("parse %s lines %d-%d of SAL module %s: %w", p.stream, first, last, p.ontology.Namespace, err)
+	for len(p.inflight) > 0 {
+		var parsed parsedBatch
+		if len(p.inflight) > 2*cap(p.workers) {
+			parsed = <-p.inflight[0]
+		} else {
+			select {
+			case parsed = <-p.inflight[0]:
+			default:
+				return nil
+			}
+		}
+		p.inflight = p.inflight[1:]
+		if p.failed = p.deliver(parsed); p.failed != nil {
+			return p.failed
+		}
 	}
+	return nil
+}
 
-	triples := make([]rdflibgo.Triple, 0, pkg.GraphLen(batch))
-	pkg.Triples(batch, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
+// parseBatch parses one batch as one JSON-LD document into its triples, its
+// blank nodes relabelled a connected component at a time (see
+// TaskOutputParser) in place of the _:b0, _:b1, ... the JSON-LD processor
+// gives every document, and decodes the @context its lines carry. It runs on
+// a parse worker, so it reads nothing of the parser that changes.
+func (p *TaskOutputParser) parseBatch(batch taskOutputBatch) parsedBatch {
+	graph := rdflibgo.NewGraph(rdflibgo.WithBase(p.base))
+	if err := jsonld.Parse(context.Background(), graph, bytes.NewReader(batch.document), jsonld.WithBase(p.base), jsonld.WithUnboundedLines()); err != nil {
+		return parsedBatch{err: fmt.Errorf("parse %s lines %d-%d of SAL module %s: %w", p.stream, batch.first, batch.last, p.ontology.Namespace, err)}
+	}
+	triples := make([]rdflibgo.Triple, 0, pkg.GraphLen(graph))
+	pkg.Triples(graph, nil, nil, nil)(func(triple rdflibgo.Triple) bool {
 		triples = append(triples, triple)
 		return true
 	})
 	pkg.StableBlankNodeComponents(triples)
 
-	for _, triple := range triples {
+	bindings := map[string]bool{}
+	for _, at := range batch.contexts {
+		var node any
+		if err := json.Unmarshal(batch.document[at[0]:at[1]], &node); err == nil {
+			noteContexts(bindings, node)
+		}
+	}
+	return parsedBatch{triples: triples, bindings: bindings}
+}
+
+// deliver hands the triples of one parsed batch to the sink, noting the
+// terms they use and the salmodule:Error nodes among them, and holding back
+// those naming a file:/// IRI.
+func (p *TaskOutputParser) deliver(parsed parsedBatch) error {
+	if parsed.err != nil {
+		return parsed.err
+	}
+	for binding := range parsed.bindings {
+		p.bindings[binding] = true
+	}
+	for _, triple := range parsed.triples {
 		p.noteTerm(triple.Predicate.Value())
 		if triple.Predicate.Equal(rdflibgo.RDF.Type) {
 			if class, ok := triple.Object.(rdflibgo.URIRef); ok {
@@ -438,7 +543,7 @@ func (p *TaskOutputParser) flush() error {
 	// the error nodes' own statements are what Finish reports them with, so
 	// they are kept when the output itself is handed on rather than kept
 	if p.errorsApart && len(p.errorNodes) > 0 {
-		for _, triple := range triples {
+		for _, triple := range parsed.triples {
 			if _, ok := p.errorNodes[triple.Subject.String()]; ok {
 				pkg.AddTriple(p.errors, triple.Subject, triple.Predicate, triple.Object)
 			}

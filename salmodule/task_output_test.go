@@ -325,3 +325,104 @@ func TestGraphFromTaskOutputWarnsAboutAnErrorReportedOnStdout(t *testing.T) {
 	require.ErrorContains(t, err, "Boom: boom")
 	require.Contains(t, logs.String(), "salmodule:Error on stdout")
 }
+
+// manyBatchesOfOutput is task output spanning several batches, each line with
+// a blank node and a @context of its own.
+func manyBatchesOfOutput(batches int) []string {
+	var lines []string
+	for i := 0; i < batches*taskOutputBatchLines; i++ {
+		lines = append(lines, fmt.Sprintf(`{"@context":{"ex":"https://vocab.example.test/"},"@id":"https://example.test/place/%d","schema:geo":{"schema:latitude":%d},"ex:rank":%d}`, i, i, i))
+	}
+	return lines
+}
+
+// streamTaskOutput feeds lines to a parser streaming to a sink that records
+// every triple in the order it was handed on.
+func streamTaskOutput(t *testing.T, lines []string) ([]rdflibgo.Triple, *TaskOutputParser) {
+	t.Helper()
+	var handed []rdflibgo.Triple
+	parser := testTaskOntology(t).NewTaskOutputStream(func(triple rdflibgo.Triple) error {
+		handed = append(handed, triple)
+		return nil
+	}, testProjectBase)
+	for i, line := range lines {
+		require.NoError(t, parser.Line([]byte(line), i+1))
+	}
+	require.NoError(t, parser.Finish())
+	return handed, parser
+}
+
+// Batches parsed on several workers are handed on in the order they were
+// written, triple for triple what parsing them one at a time hands on.
+func TestTaskOutputParserHandsOnBatchesInOrderWhateverTheWorkers(t *testing.T) {
+	lines := manyBatchesOfOutput(6)
+	defer func(workers int) { taskOutputParseWorkers = workers }(taskOutputParseWorkers)
+
+	taskOutputParseWorkers = 1
+	sequential, sequentialParser := streamTaskOutput(t, lines)
+	taskOutputParseWorkers = 4
+	parallel, parallelParser := streamTaskOutput(t, lines)
+
+	require.Len(t, sequential, 3*len(lines))
+	// the order within a batch is the batch graph's, which has none, so the
+	// triples are compared as a whole and the batches by their order
+	require.ElementsMatch(t, sequential, parallel)
+	batch := 0
+	for _, triple := range parallel {
+		var place int
+		if _, err := fmt.Sscanf(triple.Subject.String(), "https://example.test/place/%d", &place); err == nil {
+			require.GreaterOrEqual(t, place/taskOutputBatchLines, batch, "a batch was handed on after a later one")
+			batch = place / taskOutputBatchLines
+		}
+	}
+	require.Equal(t, 5, batch)
+	require.Equal(t, sequentialParser.Vocabularies(), parallelParser.Vocabularies())
+	require.Contains(t, parallelParser.Vocabularies(), "https://vocab.example.test/")
+}
+
+// A batch that fails to parse stops the stream: nothing written after it is
+// handed on, and the error names the lines of the batch.
+func TestTaskOutputParserStopsAtABatchThatFailsToParse(t *testing.T) {
+	lines := manyBatchesOfOutput(4)
+	lines[taskOutputBatchLines+5] = `{"@id":"https://example.test/bad","@type":{"not":"an IRI"}}`
+	defer func(workers int) { taskOutputParseWorkers = workers }(taskOutputParseWorkers)
+	taskOutputParseWorkers = 4
+
+	handed := 0
+	parser := testTaskOntology(t).NewTaskOutputStream(func(rdflibgo.Triple) error { handed++; return nil }, testProjectBase)
+	var err error
+	for i, line := range lines {
+		if err = parser.Line([]byte(line), i+1); err != nil {
+			break
+		}
+	}
+	finishErr := parser.Finish()
+
+	require.Error(t, finishErr)
+	require.Contains(t, finishErr.Error(), fmt.Sprintf("lines %d-%d", taskOutputBatchLines+1, 2*taskOutputBatchLines))
+	if err != nil {
+		require.Equal(t, err, finishErr)
+	}
+	require.Equal(t, 3*taskOutputBatchLines, handed)
+}
+
+// An error the sink returns stops the stream at the triple it refused.
+func TestTaskOutputParserStopsWhenTheSinkRefusesATriple(t *testing.T) {
+	lines := manyBatchesOfOutput(3)
+	refused := fmt.Errorf("disk full")
+	handed := 0
+	parser := testTaskOntology(t).NewTaskOutputStream(func(rdflibgo.Triple) error {
+		if handed++; handed == 10 {
+			return refused
+		}
+		return nil
+	}, testProjectBase)
+	for i, line := range lines {
+		if parser.Line([]byte(line), i+1) != nil {
+			break
+		}
+	}
+
+	require.ErrorIs(t, parser.Finish(), refused)
+	require.Equal(t, 10, handed)
+}
