@@ -88,8 +88,8 @@ github.com/andybalholm/brotli v1.2.8 h1:H9F6r7RNwzSRsx/lytpIYkbjNFMt2yNBwsJ2+0gp
 github.com/andybalholm/brotli v1.2.8/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/antlr4-go/antlr/v4 v4.13.1 h1:SqQKkuVZ+zWkMMNkjy5FZe5mr5WURWnlpmOuzYWrPrQ=
 github.com/antlr4-go/antlr/v4 v4.13.1/go.mod h1:GKmUxMtwp6ZgGwZSva4eWPC5mS6vUAmOABFgjdkM7Nw=
-github.com/apache/arrow-go/v18 v18.8.1-0.20261111173701-83d6e62f6c17 h1:yBPufunrWvGd1LfZncDCux3VQtO84H8mS8/g2HXyH1I=
-github.com/apache/arrow-go/v18 v18.8.1-0.20261111173701-83d6e62f6c17/go.mod h1:QbEIuSG88lfEwkBfq1OKoZ5/aFXLObsS2awz9F5OKak=
+github.com/apache/arrow-go/v18 v18.8.1-0.20261112170646-06b57e0cbdb6 h1:n1+8rhVd3JKQTBQ5+lHDFFNb50h0N9DuXyklxC31Yys=
+github.com/apache/arrow-go/v18 v18.8.1-0.20261112170646-06b57e0cbdb6/go.mod h1:QbEIuSG88lfEwkBfq1OKoZ5/aFXLObsS2awz9F5OKak=
 github.com/apache/iceberg-go v0.7.1-0.20261104183851-19c888720daf h1:XjmZyTlQn2F2nlwfdgKX38tTbasKVKMUdM9fdDaE0PY=
 github.com/apache/iceberg-go v0.7.1-0.20261104183851-19c888720daf/go.mod h1:7vLYZzK6bXKy1KU3NR9JZPcTTdTUBojJ0Da4fu8bLx4=
 github.com/apache/thrift v0.25.0 h1:6LLlvoPjy8Cc/0b5TYRcTR3RZa2W0at3WQRcOkDwVGs=
