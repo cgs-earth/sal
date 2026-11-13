@@ -15,6 +15,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/compute"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/apache/iceberg-go"
@@ -28,8 +29,22 @@ import (
 )
 
 // readBatchRows is how many rows a Parquet file the diff wrote is read back
-// in at a time.
-const readBatchRows = 32768
+// in at a time. It is small because a row can be large: a HUC12 polygon is
+// tens of kilobytes of WKB, so a batch of 32768 of them was most of a
+// gigabyte, and every stage of the write holds a few batches at once. A batch
+// of ordinary triples this size writes no slower.
+const readBatchRows = 1024
+
+// writeQueueBatches is how many batches iceberg-go's writer queues for a
+// partition ahead of writing them, in place of its default of 64, which at
+// a gigabyte a batch of geometries was what ran a build out of memory.
+const writeQueueBatches = 4
+
+// maxDuckDBPageBytes is the largest Parquet page readParquetFile accepts.
+// DuckDB writes a column's page once it holds about 100 MB, so a run of large
+// geometries or WKT literals makes pages past the 64 MiB that arrow-go
+// accepts by default, which it refuses as corrupt.
+const maxDuckDBPageBytes = 1 << 30
 
 // The diff's DuckDB gets at least diffMemoryFloor, and a thread per
 // diffMemoryPerThread of its memory limit, up to one per core: a sort spills
@@ -331,7 +346,7 @@ func writeRowFiles(ctx context.Context, tbl *table.Table, path string) (_ []iceb
 	defer func() { err = joinClose(err, closeRecords()) }()
 
 	var dataFiles []iceberg.DataFile
-	for dataFile, err := range table.WriteRecords(ctx, tbl, schema, distinctRows(ctx, records, schema.NumFields()-1, &rows), table.WithClusteredWrite()) {
+	for dataFile, err := range table.WriteRecords(ctx, tbl, schema, distinctRows(ctx, records, schema.NumFields()-1, &rows), table.WithClusteredWrite(), table.WithRecordBatchBufferSize(writeQueueBatches)) {
 		if err != nil {
 			return nil, 0, fmt.Errorf("write graph: %w", err)
 		}
@@ -431,7 +446,12 @@ func readParquetRecords(ctx context.Context, path string, schema *arrow.Schema, 
 // readParquetFile streams a Parquet file as the record batches it holds, each
 // one the caller's to release.
 func readParquetFile(ctx context.Context, path string) (func(func(arrow.RecordBatch, error) bool), func() error, error) {
-	reader, err := file.OpenParquetFile(path, false)
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	props.MaxCompressedPageSize, props.MaxUncompressedPageSize = maxDuckDBPageBytes, maxDuckDBPageBytes
+	// unbuffered, arrow-go reads a whole column chunk into memory, and DuckDB
+	// writes row groups of 122880 rows, whose geometry chunk can be gigabytes
+	props.BufferedStreamEnabled, props.BufferSize = true, 1<<20
+	reader, err := file.OpenParquetFile(path, false, file.WithReadProps(props))
 	if err != nil {
 		return nil, nil, fmt.Errorf("open %s: %w", path, err)
 	}
