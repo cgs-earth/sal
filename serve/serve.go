@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/cgs-earth/sal/pkg"
 	salsparql "github.com/cgs-earth/sal/query/sparql"
@@ -16,6 +17,8 @@ import (
 type ServeCmd struct {
 	WithUI bool   `arg:"--with-ui" help:"Serve the SAL web UI at / with stats, SQL, SPARQL, module, and map tabs"`
 	Data   string `arg:"--data" placeholder:"DIR" help:"Serve a copy of a project's .sal/data directory, such as a bucket sal upload wrote mounted into a container, instead of the project the current directory belongs to; it holds one Iceberg table plus the blobs and stac directories beside it"`
+	// SlowQueryAfter is QueryLanes.DemoteAfter; see salsparql.UseQueryLanes.
+	SlowQueryAfter time.Duration `arg:"--slow-query-after" placeholder:"DURATION" default:"5s" help:"Move a query still running after this long to a second DuckDB database with a smaller share of the threads and memory, so that heavy queries do not hold up quick ones; 0 runs every query on one database"`
 }
 
 func (cmd *ServeCmd) Run() error {
@@ -26,6 +29,9 @@ func (cmd *ServeCmd) Run() error {
 	// spans and metrics of the last requests are delivered before exit
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if cmd.SlowQueryAfter > 0 {
+		salsparql.UseQueryLanes(salsparql.DefaultQueryLanes(cmd.SlowQueryAfter))
+	}
 	table, blobDir, stacDir, err := cmd.locate()
 	if err != nil {
 		return err

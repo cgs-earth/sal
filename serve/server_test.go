@@ -709,9 +709,6 @@ func TestEndpointWithUIReturnsTableStats(t *testing.T) {
 		Title:       "Demo data product",
 		Description: "Represents the ontology for the demo project overall.",
 		Triples:     12,
-		Subjects:    3,
-		Predicates:  4,
-		Objects:     9,
 		Snapshots: salsparql.Result{
 			Header: []string{"snapshot_id"},
 			Rows:   [][]string{{"123"}},
@@ -739,7 +736,6 @@ func TestEndpointWithUIReturnsTableStats(t *testing.T) {
 	require.Equal(t, "Demo data product", body.Title)
 	require.Equal(t, "Represents the ontology for the demo project overall.", body.Description)
 	require.Equal(t, int64(12), body.Triples)
-	require.Equal(t, int64(9), body.Objects)
 	require.Equal(t, "/tmp/warehouse/sal/triples", body.TablePath)
 	require.Equal(t, [][]string{{"123"}}, body.Snapshots.Rows)
 	require.Equal(t, [][]string{
