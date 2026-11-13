@@ -3,18 +3,23 @@ package sparql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/cgs-earth/sal/pkg"
 	"github.com/cgs-earth/sal/pkg/telemetry"
 	// DuckDB is linked into the sal binary rather than shelled out to, so no
 	// duckdb CLI has to be installed for sal to query a built table.
 	_ "github.com/duckdb/duckdb-go/v2"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // maxQueryTextAttribute bounds the query text a span records, since a query
@@ -34,9 +39,98 @@ var Extensions = []string{"iceberg", "httpfs", "avro", "spatial"}
 // per query. `sal serve` in particular answers every request on this one handle.
 var instance = &duckdbInstance{}
 
+// slowLane is the second DuckDB database `sal serve` moves a query to once it
+// has run on instance for longer than QueryLanes.DemoteAfter (see UseQueryLanes).
+var slowLane = &duckdbInstance{}
+
+// lanes is how queries are split between instance and slowLane; the zero
+// value runs everything on instance, which is what every command but `sal
+// serve` does.
+var lanes struct {
+	sync.Mutex
+	QueryLanes
+}
+
+// QueryLanes splits the queries a server answers between two DuckDB
+// databases, so that a heavy query cannot make every other one wait.
+//
+// Every query on one database shares its threads and its memory, and DuckDB
+// has no priorities: a scan of a whole table keeps every thread busy, and a
+// lookup arriving behind it waits for threads with it. A query starts on the
+// fast database; one still running after DemoteAfter is cancelled there and
+// run again from the start on the slow one, which has its own, smaller,
+// share of threads and memory. A query that finishes within DemoteAfter, which
+// is what a lookup does, therefore never queues behind more than DemoteAfter of
+// a heavy one, and the heavy ones contend with each other instead. A demoted
+// query pays DemoteAfter again, which is small next to what a query that slow
+// takes anyway.
+type QueryLanes struct {
+	// DemoteAfter is how long a query may run on the fast database; zero
+	// runs every query there.
+	DemoteAfter time.Duration
+	// FastThreads, SlowThreads, FastMemory, and SlowMemory are each
+	// database's threads and memory_limit in bytes; zero leaves DuckDB's
+	// default, which for memory is 80% of the machine for each database.
+	FastThreads, SlowThreads int
+	FastMemory, SlowMemory   uint64
+}
+
+// DefaultQueryLanes splits a machine's cores and its memory budget
+// (pkg.Budget) between the lanes: every core and half the budget for the fast
+// database, a quarter of the cores and a quarter of the budget for the slow
+// one. The threads of both may run at once, the operating system sharing the
+// cores between them, but the slow lane's few cannot crowd out the fast
+// lane's many; the memory shares are what keep the two from claiming more
+// than the machine has between them.
+func DefaultQueryLanes(demoteAfter time.Duration) QueryLanes {
+	cores := runtime.NumCPU()
+	budget := pkg.Budget().Bytes
+	return QueryLanes{
+		DemoteAfter: demoteAfter,
+		FastThreads: cores,
+		SlowThreads: max(1, cores/4),
+		FastMemory:  budget / 2,
+		SlowMemory:  budget / 4,
+	}
+}
+
+// UseQueryLanes splits every query this process runs from now on between the
+// fast and the slow database as lanes says; see QueryLanes.
+func UseQueryLanes(config QueryLanes) {
+	lanes.Lock()
+	lanes.QueryLanes = config
+	lanes.Unlock()
+	instance.configure(databaseSettings(config.FastThreads, config.FastMemory))
+	slowLane.configure(databaseSettings(config.SlowThreads, config.SlowMemory))
+}
+
+// currentLanes is the QueryLanes in force.
+func currentLanes() QueryLanes {
+	lanes.Lock()
+	defer lanes.Unlock()
+	return lanes.QueryLanes
+}
+
+// databaseSettings are the statements that give a database its threads and
+// memory, leaving whichever is zero at DuckDB's default.
+func databaseSettings(threads int, memory uint64) []string {
+	var settings []string
+	if threads > 0 {
+		settings = append(settings, fmt.Sprintf("SET threads = %d", threads))
+	}
+	if memory > 0 {
+		settings = append(settings, fmt.Sprintf("SET memory_limit = '%dB'", memory))
+	}
+	return settings
+}
+
 type duckdbInstance struct {
 	mu sync.Mutex
 	db *sql.DB
+	// settings are the database settings UseQueryLanes gave it, applied when
+	// it opens, or on the next query when it is already open (applied).
+	settings []string
+	applied  bool
 	// spatial records that the extension has been loaded, since it is loaded on
 	// demand rather than at open.
 	spatial bool
@@ -76,6 +170,14 @@ func (d *duckdbInstance) prepare(ctx context.Context, tablePath string, imports 
 		d.db = db
 		telemetry.End(span, nil)
 	}
+	if !d.applied {
+		for _, setting := range d.settings {
+			if _, err := d.db.ExecContext(ctx, setting); err != nil {
+				return nil, fmt.Errorf("configure duckdb: %w", err)
+			}
+		}
+		d.applied = true
+	}
 
 	if withSpatial && !d.spatial {
 		// the spatial extension is tens of megabytes, downloaded on first use
@@ -100,6 +202,14 @@ func (d *duckdbInstance) prepare(ctx context.Context, tablePath string, imports 
 	}
 	d.registerImports(ctx, imports)
 	return d.db, nil
+}
+
+// configure records the settings the database is to run with, which prepare
+// applies before its next query.
+func (d *duckdbInstance) configure(settings []string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.settings, d.applied = settings, false
 }
 
 // registerImports registers a view per imported data product plus the `imports`
@@ -198,8 +308,28 @@ func queryTextAttribute(query string) string {
 	return query
 }
 
+// runSQL runs a statement on the fast database, and, when lanes are in use
+// and it is still running after QueryLanes.DemoteAfter, cancels it there and
+// runs it again on the slow one.
 func (r DuckDBRunner) runSQL(ctx context.Context, statement string, withSpatial bool) ([]string, [][]string, error) {
-	db, err := instance.prepare(ctx, r.TablePath, r.Imports, withSpatial)
+	demoteAfter := currentLanes().DemoteAfter
+	if demoteAfter <= 0 {
+		return r.runOn(ctx, instance, statement, withSpatial)
+	}
+	fastCtx, cancel := context.WithTimeout(ctx, demoteAfter)
+	header, rows, err := r.runOn(fastCtx, instance, statement, withSpatial)
+	cancel()
+	if err == nil || ctx.Err() != nil || !errors.Is(fastCtx.Err(), context.DeadlineExceeded) {
+		return header, rows, err
+	}
+	slog.Debug("moving a slow query to the slow lane", "after", demoteAfter)
+	trace.SpanFromContext(ctx).SetAttributes(attribute.Bool("sal.duckdb.demoted", true))
+	return r.runOn(ctx, slowLane, statement, withSpatial)
+}
+
+// runOn runs a statement on one database, buffering its rows as text.
+func (r DuckDBRunner) runOn(ctx context.Context, database *duckdbInstance, statement string, withSpatial bool) ([]string, [][]string, error) {
+	db, err := database.prepare(ctx, r.TablePath, r.Imports, withSpatial)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -26,10 +26,8 @@ func TestNeedsSpatialDetectsSTFunctions(t *testing.T) {
 	require.True(t, needsSpatial("SELECT ST_AsText(geom) FROM shapes"))
 }
 
-func TestNeedsSpatialSkipsTheCountsQuery(t *testing.T) {
-	// The counts query names the object columns individually, so COUNT(*) is the
-	// only star in it and nothing projects the geometry column.
-	require.False(t, needsSpatial(countsSQL()))
+func TestNeedsSpatialSkipsAProjectionOfOtherColumns(t *testing.T) {
+	require.False(t, needsSpatial("SELECT COUNT(*) FROM triples"))
 	require.False(t, needsSpatial("SELECT subject FROM triples LIMIT 20"))
 }
 

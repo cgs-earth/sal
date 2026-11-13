@@ -17,41 +17,36 @@ func tableProperties(rows ...[]string) Result {
 }
 
 // statsResults mimics what the three statements Stats issues return, in order.
-func statsResults(counts Result, properties Result) []Result {
+func statsResults(current Result, properties Result) []Result {
 	snapshots := Result{
 		Header: []string{"sequence_number", "snapshot_id"},
 		Rows:   [][]string{{"2", "222"}, {"1", "111"}},
 	}
-	return []Result{counts, snapshots, properties}
+	return []Result{current, snapshots, properties}
 }
 
-func TestStatsFromResultsPopulatesCountsAndSections(t *testing.T) {
-	counts := Result{
-		Header: []string{"triples", "subjects", "predicates", "objects"},
-		Rows:   [][]string{{"554", "120", "17", "480"}},
-	}
+func TestStatsFromResultsPopulatesTheTriplesAndSections(t *testing.T) {
+	current := Result{Header: []string{"snapshot_id", "triples"}, Rows: [][]string{{"222", "554"}}}
 	properties := tableProperties([]string{"sal.salmodules", `["salmodule://github.com/test/one"]`})
 
-	stats, err := statsFromResults("/tmp/table", statsResults(counts, properties))
+	stats, err := statsFromResults("/tmp/table", statsResults(current, properties))
 
 	require.NoError(t, err)
 	require.Equal(t, "/tmp/table", stats.TablePath)
 	require.Equal(t, int64(554), stats.Triples)
-	require.Equal(t, int64(120), stats.Subjects)
-	require.Equal(t, int64(17), stats.Predicates)
-	require.Equal(t, int64(480), stats.Objects)
 	require.Equal(t, []string{"salmodule://github.com/test/one"}, stats.Modules)
 	require.Equal(t, properties, stats.Properties)
 	require.Len(t, stats.Snapshots.Rows, 2)
 	require.NotEmpty(t, stats.SampleQueries)
 }
 
-func TestStatsFromResultsRejectsAnEmptyCountsResult(t *testing.T) {
-	counts := Result{Header: []string{"triples", "subjects", "predicates", "objects"}}
+func TestStatsFromResultsCountsNoTriplesInATableWithNoSnapshot(t *testing.T) {
+	current := Result{Header: []string{"snapshot_id", "triples"}}
 
-	_, err := statsFromResults("/tmp/table", statsResults(counts, tableProperties()))
+	stats, err := statsFromResults("/tmp/table", statsResults(current, tableProperties()))
 
-	require.ErrorContains(t, err, "no counts")
+	require.NoError(t, err)
+	require.Zero(t, stats.Triples)
 }
 
 func TestStatsFromResultsRejectsTheWrongNumberOfResults(t *testing.T) {
@@ -153,18 +148,6 @@ func TestInfoSQLEscapesSingleQuotesInTablePath(t *testing.T) {
 	require.Contains(t, query, "iceberg_column_stats('/tmp/o''brien/triples', allow_moved_paths = true)")
 }
 
-func TestCountsSQLCountsDistinctObjectsAcrossTheTypedColumns(t *testing.T) {
-	require.Contains(t, countsSQL(), "approx_count_distinct("+objectText("triples")+")")
-}
-
-func TestCountsSQLEstimatesSubjectsAndObjectsButCountsPredicatesExactly(t *testing.T) {
-	query := countsSQL()
-
-	require.Contains(t, query, "approx_count_distinct(triples.subject) AS subjects")
-	require.Contains(t, query, "COUNT(DISTINCT triples.predicate) AS predicates")
-	require.NotContains(t, query, "COUNT(DISTINCT triples.subject)")
-}
-
 func TestLatestMetadataFileReadsTheVersionHint(t *testing.T) {
 	table := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(table, "metadata"), 0o755))
@@ -263,12 +246,20 @@ func TestStatsCacheNeverCachesAGlob(t *testing.T) {
 	require.Empty(t, cache.entries)
 }
 
-func TestCountsSQLRunsOverTheTriplesTable(t *testing.T) {
-	header, rows, err := queryRows(context.Background(), sampleTriples(t), countsSQL())
+// The triples are the current snapshot's records less its equality deletes,
+// read from the newest metadata file, not from an older snapshot or file.
+func TestCurrentSnapshotSQLReadsTheLiveRecordsOfTheCurrentSnapshot(t *testing.T) {
+	metadata := filepath.Join(t.TempDir(), "metadata")
+	require.NoError(t, os.MkdirAll(metadata, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(metadata, "v1.metadata.json"), []byte(`{"current-snapshot-id": 1, "snapshots": [
+		{"snapshot-id": 1, "summary": {"total-records": "5"}}]}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(metadata, "v2.metadata.json"), []byte(`{"current-snapshot-id": 8888888888888888888, "snapshots": [
+		{"snapshot-id": 1, "summary": {"total-records": "5"}},
+		{"snapshot-id": 8888888888888888888, "summary": {"total-records": "700", "total-equality-deletes": "40"}}]}`), 0o644))
+
+	header, rows, err := queryRows(context.Background(), sampleTriples(t), currentSnapshotSQL(filepath.Join(metadata, "*.metadata.json")))
 
 	require.NoError(t, err)
-	require.Equal(t, []string{"triples", "subjects", "predicates", "objects"}, header)
-	// the estimate is exact for a handful of terms; the geometry renders as no
-	// text, so it is not counted among the objects
-	require.Equal(t, [][]string{{"9", "3", "6", "8"}}, rows)
+	require.Equal(t, []string{"snapshot_id", "triples"}, header)
+	require.Equal(t, [][]string{{"8888888888888888888", "660"}}, rows)
 }

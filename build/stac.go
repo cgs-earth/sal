@@ -449,7 +449,7 @@ func scanRowsAndExtent(ctx context.Context, tbl *table.Table) (int64, []float64,
 			if err != nil {
 				return fmt.Errorf("read a geometry from the table: %w", err)
 			}
-			bounds.Extend(geometry)
+			extendBounds(bounds, geometry)
 		}
 		return nil
 	})
@@ -460,6 +460,19 @@ func scanRowsAndExtent(ctx context.Context, tbl *table.Table) (int64, []float64,
 		return rows, worldBBox, nil
 	}
 	return rows, []float64{bounds.Min(0), bounds.Min(1), bounds.Max(0), bounds.Max(1)}, nil
+}
+
+// extendBounds extends bounds over geometry, descending into a geometry
+// collection, whose coordinates go-geom's Bounds.Extend cannot read: it calls
+// FlatCoords, which panics on one.
+func extendBounds(bounds *geom.Bounds, geometry geom.T) {
+	if collection, ok := geometry.(*geom.GeometryCollection); ok {
+		for _, member := range collection.Geoms() {
+			extendBounds(bounds, member)
+		}
+		return
+	}
+	bounds.Extend(geometry)
 }
 
 // wkbColumn is a binary Arrow column read one value at a time, which both

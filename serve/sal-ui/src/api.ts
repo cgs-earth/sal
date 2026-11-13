@@ -12,10 +12,8 @@ export type TableStats = {
   /** The dcterms:title and dcterms:description sal init records on the project node of .sal/config.jsonld; empty for a remote table or a project that recorded neither. */
   title: string
   description: string
+  /** The live row count of the current snapshot, read from its summary in the table metadata. */
   triples: number
-  subjects: number
-  predicates: number
-  objects: number
   snapshots: QueryResult
   properties: QueryResult
   /** How the table is laid out at its current snapshot, or null with layoutError saying why it could not be read. */

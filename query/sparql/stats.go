@@ -26,12 +26,12 @@ type TableStats struct {
 	// recorded neither.
 	Title       string `json:"title"`
 	Description string `json:"description"`
-	Triples     int64  `json:"triples"`
-	Subjects    int64  `json:"subjects"`
-	Predicates  int64  `json:"predicates"`
-	Objects     int64  `json:"objects"`
-	Snapshots   Result `json:"snapshots"`
-	Properties  Result `json:"properties"`
+	// Triples is the live row count of the current snapshot, read from its
+	// summary in the metadata file rather than counted by a scan, which
+	// over a table of hundreds of millions of rows took minutes.
+	Triples    int64  `json:"triples"`
+	Snapshots  Result `json:"snapshots"`
+	Properties Result `json:"properties"`
 	// Layout is how the table is laid out at its current snapshot, read from
 	// the Iceberg metadata; LayoutError says why it could not be when it is
 	// nil, so the rest of the view still answers.
@@ -54,10 +54,10 @@ type TableStats struct {
 }
 
 // statsSections are the `sal query --info` options the stats view reports, in the
-// order statsFromResults expects them after the counts.
+// order statsFromResults expects them after the current snapshot.
 var statsSections = []string{"snapshots", "properties"}
 
-// Stats collects the counts, snapshots, table properties, and layout of the triples table.
+// Stats collects the triple count, snapshots, table properties, and layout of the triples table.
 //
 // What is read from the table is cached per table under the metadata file
 // that is current (statsCache), so a refresh costs one read of the version
@@ -96,12 +96,12 @@ func (r DuckDBRunner) Stats(ctx context.Context) (TableStats, error) {
 	return stats, nil
 }
 
-// tableStats reads everything the stats view reports from the table itself,
-// at the given metadata file: the counts, snapshots, properties, and layout.
-// The statements run one after another on the shared DuckDB handle.
+// tableStats reads everything the stats view reports from the table's
+// metadata, at the given metadata file: the triple count, snapshots,
+// properties, and layout. Nothing here scans the table's data files.
 func (r DuckDBRunner) tableStats(ctx context.Context, metadataFile string) (TableStats, error) {
 	statements := make([]string, 0, len(statsSections)+1)
-	statements = append(statements, countsSQL())
+	statements = append(statements, currentSnapshotSQL(metadataFile))
 	for _, section := range statsSections {
 		sql, err := infoSQL(section, r.TablePath, metadataFile)
 		if err != nil {
@@ -127,6 +127,28 @@ func (r DuckDBRunner) tableStats(ctx context.Context, metadataFile string) (Tabl
 		stats.LayoutError = err.Error()
 	}
 	return stats, nil
+}
+
+// currentSnapshotSQL reads the current snapshot's ID and its summary's live
+// record count, total-records less total-equality-deletes, from the
+// metadata file. It is exact for what sal writes, where every equality
+// delete removes one row an earlier file holds, and costs one small file
+// read whatever the size of the table. A table with no snapshot has no row.
+func currentSnapshotSQL(metadataFile string) string {
+	return fmt.Sprintf(`
+WITH latest_metadata AS (
+	SELECT content::JSON AS metadata_json
+	FROM read_text('%s')
+	ORDER BY regexp_extract(filename, 'v([0-9]+)\.metadata\.json', 1)::BIGINT DESC
+	LIMIT 1
+)
+SELECT
+	json_extract_string(snapshot.value, '$."snapshot-id"') AS snapshot_id,
+	COALESCE(json_extract_string(snapshot.value, '$.summary."total-records"'), '0')::BIGINT
+		- COALESCE(json_extract_string(snapshot.value, '$.summary."total-equality-deletes"'), '0')::BIGINT AS triples
+FROM latest_metadata,
+json_each(json_extract(metadata_json, '$.snapshots')) AS snapshot
+WHERE json_extract_string(snapshot.value, '$."snapshot-id"') = json_extract_string(metadata_json, '$."current-snapshot-id"')`, escapeSQLLiteral(metadataFile))
 }
 
 // tableStatsCache is the process-wide cache of what Stats reads from a table.
@@ -240,25 +262,21 @@ func (r DuckDBRunner) vocabulariesResult() Result {
 	return Result{Header: header, Rows: importation.VocabularyTableRows(rows)}
 }
 
-// statsFromResults assembles the stats payload from the batched results, in the
-// order Stats issued them: counts, then one per statsSections entry.
+// statsFromResults assembles the stats payload from the results of the
+// statements tableStats issued, in order: the current snapshot, then one per
+// statsSections entry.
 func statsFromResults(tablePath string, results []Result) (TableStats, error) {
 	if len(results) != len(statsSections)+1 {
 		return TableStats{}, fmt.Errorf("expected %d stats results, got %d", len(statsSections)+1, len(results))
 	}
-	counts := results[0]
-	if len(counts.Rows) == 0 || len(counts.Rows[0]) < 4 {
-		return TableStats{}, fmt.Errorf("triples table returned no counts")
-	}
-
 	stats := TableStats{
 		TablePath:  tablePath,
-		Triples:    parseCount(counts.Rows[0][0]),
-		Subjects:   parseCount(counts.Rows[0][1]),
-		Predicates: parseCount(counts.Rows[0][2]),
-		Objects:    parseCount(counts.Rows[0][3]),
 		Snapshots:  results[1],
 		Properties: results[2],
+	}
+	// a table with no snapshot has no row and holds no triples
+	if current := results[0]; len(current.Rows) > 0 && len(current.Rows[0]) > 1 {
+		stats.Triples = parseCount(current.Rows[0][1])
 	}
 	stats.Modules = modulesFromProperties(stats.Properties)
 	stats.SampleQueries = snapshotQueries(tablePath, stats.Snapshots)
@@ -286,23 +304,6 @@ func modulesFromProperties(properties Result) []string {
 		return modules
 	}
 	return nil
-}
-
-// countsSQL counts the triples and their distinct subjects, predicates, and
-// objects for the stats view. The subjects and objects are estimated with
-// approx_count_distinct, a HyperLogLog sketch of fixed size, since an exact
-// COUNT(DISTINCT) holds every distinct term in a hash table: over a table of
-// tens of millions of triples that is gigabytes, which got a Cloud Run
-// instance killed on every visit to the Stats tab. The predicates are few, so
-// they are still counted exactly.
-func countsSQL() string {
-	return fmt.Sprintf(`
-SELECT
-	COUNT(*) AS triples,
-	approx_count_distinct(triples.subject) AS subjects,
-	COUNT(DISTINCT triples.predicate) AS predicates,
-	approx_count_distinct(%s) AS objects
-FROM triples`, bindingExpr("triples", "object"))
 }
 
 func parseCount(value string) int64 {

@@ -162,6 +162,24 @@ func TestWriteStacCatalogUsesTheWorldExtentWithoutGeometries(t *testing.T) {
 	require.Equal(t, 1.0, collection["table:row_count"])
 }
 
+// TestWriteStacCatalogExtendsTheExtentOverGeometryCollections writes a nested
+// geometry collection, whose bounds go-geom panics on reading directly, which
+// a Geoconnex public water system feature made a build do.
+func TestWriteStacCatalogExtendsTheExtentOverGeometryCollections(t *testing.T) {
+	graph := rdflibgo.NewGraph()
+	pkg.AddTriple(graph, rdflibgo.NewURIRefUnsafe("https://example.com/widgets/1"),
+		rdflibgo.NewURIRefUnsafe("http://www.opengis.net/ont/geosparql#asWKT"),
+		rdflibgo.NewLiteral("GEOMETRYCOLLECTION (POINT (1 2), GEOMETRYCOLLECTION (LINESTRING (3 4, -5 6)))", rdflibgo.WithDatatype(rdflibgo.NewURIRefUnsafe(wktLiteralDatatype))))
+	tbl := writeStacTestTable(t, graph)
+	dir := filepath.Join(t.TempDir(), "stac")
+
+	require.NoError(t, writeStacCatalog(context.Background(), tbl, dir, stacTestProject, filepath.Join(t.TempDir(), "blobs")))
+
+	collection := readStacJSON(t, filepath.Join(dir, "triples", "collection.json"))
+	bbox := collection["extent"].(map[string]any)["spatial"].(map[string]any)["bbox"].([]any)[0]
+	require.Equal(t, []any{-5.0, 2.0, 3.0, 6.0}, bbox)
+}
+
 func TestWriteStacCatalogReplacesAnEarlierCatalog(t *testing.T) {
 	tbl := writeStacTestTable(t, stacTestGraph(false))
 	dir := filepath.Join(t.TempDir(), "stac")
