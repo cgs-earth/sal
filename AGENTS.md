@@ -272,3 +272,4 @@ LIMIT 5;
 - `go test ./...` should pass after every new feature
 - For any major new user facing features, add associated documentation in the `/docs` folder
 - Use ripgrep via `rg` instead of grep if it is present to speed up searching through the codebase
+- To avoid spamming others or cluttering external projects, do not link to to external GitHub PRs / branches / issues outside this repo when adding PR / commit info to GitHub. You can refer to them, but not in a way that establishes a cross link that would show up in an external repo.
