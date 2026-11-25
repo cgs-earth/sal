@@ -197,10 +197,10 @@ func requireNothingStagedIsLeft(t *testing.T, tbl *table.Table) {
 	fs, err := tbl.FS(context.Background())
 	require.NoError(t, err)
 	for _, snapshot := range tbl.Metadata().Snapshots() {
-		manifests, err := snapshot.Manifests(fs)
+		manifests, err := snapshot.Manifests(context.Background(), fs)
 		require.NoError(t, err)
 		for _, manifest := range manifests {
-			for entry, err := range manifest.Entries(fs, false) {
+			for entry, err := range manifest.Entries(context.Background(), fs, false) {
 				require.NoError(t, err)
 				referenced[strings.TrimPrefix(entry.DataFile().FilePath(), "file://")] = struct{}{}
 			}

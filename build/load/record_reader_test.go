@@ -44,7 +44,7 @@ func TestGetSchemasSplitsObjectsByDatatype(t *testing.T) {
 		require.Equal(t, name, arrowSchema.Field(i).Name)
 		require.Equal(t, name, icebergSchema.Field(i).Name)
 	}
-	require.Equal(t, []int{12}, icebergSchema.IdentifierFieldIDs)
+	require.Equal(t, []int{12}, icebergSchema.IdentifierFieldIDs())
 }
 
 // A table from the release that marked every pinned vocabulary's rows in a

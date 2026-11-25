@@ -287,7 +287,8 @@ WHERE {
 
 	require.NoError(t, err)
 	require.NotContains(t, query, "ST_AsText")
-	require.Contains(t, query, objectText("t0")+" = t1.subject")
+	require.Contains(t, query, "COALESCE(t0.object_iri, CASE WHEN t0.object_type IS NULL THEN t0.object_string END) = t1.subject")
+	require.NotContains(t, query, "object_float", "an object joined to a subject is an IRI or a blank node")
 }
 
 func TestToSQLTranslatesGeoSPARQLIntersectsWithWKTLiteral(t *testing.T) {

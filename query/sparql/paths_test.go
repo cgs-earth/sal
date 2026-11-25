@@ -170,7 +170,7 @@ func TestToSQLTranslatesASequencePathThroughAHiddenVariable(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, sql, "FROM triples AS t0\nCROSS JOIN triples AS t1")
 	require.Contains(t, sql, "t0.predicate = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'")
-	require.Contains(t, sql, bindingExpr("t0", "object")+" = t1.subject")
+	require.Contains(t, sql, objectBinding("t0").node()+" = t1.subject")
 	require.Contains(t, sql, "t1.predicate = 'http://www.w3.org/2000/01/rdf-schema#label'")
 	// the variable the steps share is never projected
 	require.Contains(t, sql, `SELECT t0.subject AS "x", `+objectTextExpr("t1")+` AS "l"`)
