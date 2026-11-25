@@ -40,7 +40,7 @@ func currentFiles(ctx context.Context, tbl *table.Table) (liveFiles, error) {
 	if err != nil {
 		return files, err
 	}
-	manifests, err := snapshot.Manifests(fs)
+	manifests, err := snapshot.Manifests(ctx, fs)
 	if err != nil {
 		return files, fmt.Errorf("read the manifests of the triples table: %w", err)
 	}
@@ -49,7 +49,7 @@ func currentFiles(ctx context.Context, tbl *table.Table) (liveFiles, error) {
 		return files, fmt.Errorf("triple_hash field not found in table schema")
 	}
 	for _, manifest := range manifests {
-		for entry, err := range manifest.Entries(fs, true) {
+		for entry, err := range manifest.Entries(ctx, fs, true) {
 			if err != nil {
 				return files, fmt.Errorf("read the manifests of the triples table: %w", err)
 			}

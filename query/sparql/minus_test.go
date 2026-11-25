@@ -65,7 +65,7 @@ func TestToSQLDoesNotUseTheHashWhenPositionsAreSwapped(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotContains(t, sql, "triple_hash")
-	require.Contains(t, sql, "x0_0.subject = "+bindingExpr("t0", "object"))
+	require.Contains(t, sql, "x0_0.subject = "+objectBinding("t0").node())
 }
 
 func TestToSQLTranslatesTheRemovedSinceSnapshotQuery(t *testing.T) {
@@ -178,7 +178,7 @@ func TestToSQLNestsEXISTSWithAliasesOfTheirOwn(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, sql, "FROM triples AS x0_0")
 	require.Contains(t, sql, "FROM triples AS x1_0")
-	require.Contains(t, sql, "x1_0.subject = "+bindingExpr("x0_0", "object"))
+	require.Contains(t, sql, "x1_0.subject = "+objectBinding("x0_0").node())
 }
 
 func TestToSQLKeepsDISTINCTOnTheOuterSelect(t *testing.T) {

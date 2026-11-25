@@ -399,3 +399,65 @@ func TestBNODEWithALabelIsRefused(t *testing.T) {
 
 	require.ErrorContains(t, err, "BNODE with a label is not supported yet; BNODE() makes a fresh blank node per solution")
 }
+
+// joinTriples is the sample triples plus the rows that tell a join by RDF
+// term from a join by text: a blank node object, stored in object_string
+// with no object_type, a string literal spelling the IRI of a subject, and a
+// string literal spelling a number another subject has as an integer.
+func joinTriples(t *testing.T) *sql.DB {
+	t.Helper()
+	db := sampleTriples(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO triples VALUES
+	 ('http://b', 'https://schema.org/address', NULL, NULL, NULL, NULL, NULL, NULL, '_:sal_1', NULL, NULL, 'j1'),
+	 ('_:sal_1', 'https://schema.org/name', NULL, NULL, NULL, NULL, NULL, NULL, 'home', 'http://www.w3.org/2001/XMLSchema#string', NULL, 'j2'),
+	 ('http://d', 'https://schema.org/url', NULL, NULL, NULL, NULL, NULL, NULL, 'http://b', 'http://www.w3.org/2001/XMLSchema#string', NULL, 'j3'),
+	 ('http://d', 'https://schema.org/code', NULL, NULL, NULL, NULL, NULL, NULL, '30', 'http://www.w3.org/2001/XMLSchema#string', NULL, 'j4'),
+	 ('http://d', 'https://schema.org/via', 'https://schema.org/knows', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'j5')`)
+	require.NoError(t, err)
+	return db
+}
+
+func TestAnObjectJoinsASubjectAsAnIRIOrABlankNode(t *testing.T) {
+	_, rows := answer(t, joinTriples(t), samplePrefixes+`
+SELECT ?s ?o ?name WHERE { ?s ?p ?o . ?o schema:name ?name } ORDER BY ?s ?o`)
+
+	require.Equal(t, [][]string{{"http://a", "http://b", "bob"}, {"http://b", "_:sal_1", "home"}}, rows,
+		"the string \"http://b\" is not the subject <http://b>")
+}
+
+func TestAnObjectJoinedToASubjectIsReadThroughTheSubjectColumn(t *testing.T) {
+	sql, err := ToSQL(samplePrefixes + `SELECT ?o WHERE { ?s schema:knows ?o . ?o schema:name ?name } ORDER BY ?o`)
+
+	require.NoError(t, err)
+	require.Contains(t, sql, `SELECT t1.subject AS "o"`)
+	require.Contains(t, sql, "ORDER BY t1.subject")
+	require.NotContains(t, sql, "ST_AsText", "projecting a resource must not need the spatial extension")
+}
+
+func TestAnObjectJoinsAPredicateThroughObjectIRI(t *testing.T) {
+	db := joinTriples(t)
+	_, rows := answer(t, db, samplePrefixes+`SELECT DISTINCT ?s WHERE { <http://d> schema:via ?p . ?s ?p ?o }`)
+	require.Equal(t, [][]string{{"http://a"}}, rows)
+
+	sql, err := ToSQL(samplePrefixes + `SELECT ?s WHERE { <http://d> schema:via ?p . ?s ?p ?o }`)
+	require.NoError(t, err)
+	require.Contains(t, sql, "t0.object_iri = t1.predicate")
+}
+
+func TestObjectsJoinAsRDFTermsNotAsText(t *testing.T) {
+	db := joinTriples(t)
+	_, rows := answer(t, db, samplePrefixes+`
+SELECT ?a ?b WHERE { ?a schema:age ?v . ?b schema:code ?v }`)
+	require.Empty(t, rows, "the integer 30 and the string \"30\" are different terms")
+
+	_, rows = answer(t, db, samplePrefixes+`
+SELECT ?a ?b WHERE { ?a schema:name ?v . ?b schema:name ?v FILTER(?a = <http://a>) }`)
+	require.Equal(t, [][]string{{"http://a", "http://a"}}, rows)
+}
+
+func TestLangOfAnObjectJoinedToASubjectIsStillDefined(t *testing.T) {
+	_, rows := answer(t, joinTriples(t), samplePrefixes+`
+SELECT ?o WHERE { ?s schema:knows ?o . ?o schema:name ?name FILTER(isIRI(?o) && !isLiteral(?o)) }`)
+
+	require.Equal(t, [][]string{{"http://b"}}, rows)
+}

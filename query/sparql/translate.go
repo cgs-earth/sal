@@ -24,7 +24,11 @@ import (
 // a subquery or VALUES computed it. A variable a BIND binds is its expression,
 // in sql, and reads no table. nullable marks a variable a solution can leave
 // unbound: one bound inside an OPTIONAL, in some arms of a UNION but not all,
-// or by a VALUES with an UNDEF.
+// or by a VALUES with an UNDEF. resource is set on an object a pattern of
+// the same group also binds as a subject or predicate: it is that column,
+// which an inner join makes equal to the object, so the object is known to be
+// an IRI or a blank node and is read through the one column rather than
+// through the union of its typed ones.
 type sqlBinding struct {
 	alias    string
 	column   string
@@ -32,6 +36,7 @@ type sqlBinding struct {
 	sql      string
 	kind     exprKind
 	nullable bool
+	resource string
 }
 
 // valueColumn is the column kind of a variable held as text.
@@ -64,6 +69,8 @@ func (b sqlBinding) expr() string {
 	switch {
 	case b.sql != "":
 		return b.sql
+	case b.resource != "":
+		return b.resource
 	case b.column == "object":
 		return "COALESCE(" + objectScalarTextExprs(b) + ")"
 	case b.name != "":
@@ -79,7 +86,7 @@ func (b sqlBinding) expr() string {
 // keep using expr, so a query that never projects an object never pulls in the
 // spatial extension.
 func (b sqlBinding) projection() string {
-	if !b.typedObject() {
+	if !b.typedObject() || b.resource != "" {
 		return b.expr()
 	}
 	return "COALESCE(" + objectScalarTextExprs(b) + ", ST_AsText(" + b.col("object_geometry") + "))"
@@ -89,10 +96,51 @@ func (b sqlBinding) projection() string {
 // which BOUND and COUNT ask. Every stored object fills object_iri or carries
 // an object_type, a blank node excepted, which fills object_string.
 func (b sqlBinding) present() string {
-	if !b.typedObject() {
+	if !b.typedObject() || b.resource != "" {
 		return b.expr()
 	}
 	return "COALESCE(" + b.col("object_iri") + ", " + b.col("object_type") + ", " + b.col("object_string") + ")"
+}
+
+// node reads an object that is an IRI or a blank node and is NULL for a
+// literal, which is what an object is joined to a subject by. A blank node is
+// stored in object_string like a plain literal is and told from one by having
+// no object_type, so a string that happens to spell a subject never joins it.
+func (b sqlBinding) node() string {
+	return "COALESCE(" + b.col("object_iri") + ", CASE WHEN " + b.col("object_type") + " IS NULL THEN " + b.col("object_string") + " END)"
+}
+
+// isResource reports whether the binding can only hold an IRI or a blank
+// node: a subject or predicate, or an object joined to one.
+func (b sqlBinding) isResource() bool {
+	return b.sql == "" && (b.column == "subject" || b.column == "predicate" || b.resource != "")
+}
+
+// equalClause is the comparison that joins two bindings of one variable, in
+// the columns their positions allow rather than as the text every term
+// renders to. An object joined to a predicate is an IRI and one joined to a
+// subject an IRI or a blank node, so each reads only the columns holding
+// those. Two objects of unknown type are the same RDF term when their text,
+// datatype, and language tag all agree, so "1" and 1 do not join.
+func equalClause(a sqlBinding, b sqlBinding) string {
+	open := func(x sqlBinding) bool { return x.typedObject() && x.resource == "" }
+	// side is an open object read in the columns the other binding allows
+	side := func(x sqlBinding, other sqlBinding) string {
+		switch {
+		case !open(x) || !other.isResource():
+			return x.expr()
+		case other.column == "predicate":
+			return x.col("object_iri")
+		default:
+			return x.node()
+		}
+	}
+	clause := side(a, b) + " = " + side(b, a)
+	if open(a) && open(b) {
+		clause += " AND " + a.col("object_type") + " IS NOT DISTINCT FROM " + b.col("object_type") +
+			" AND " + a.col("object_language") + " IS NOT DISTINCT FROM " + b.col("object_language")
+	}
+	return clause
 }
 
 // numeric reads whichever numeric column holds an object, so a numeric
@@ -523,7 +571,7 @@ func (t *translator) orderBySQL(parsed *rdflibsparql.ParsedQuery, bindings map[s
 			if err != nil {
 				return "", err
 			}
-			if binding.typedObject() {
+			if binding.typedObject() && binding.resource == "" {
 				keys = append(keys, binding.numeric()+direction, binding.col("object_time")+direction, binding.expr()+direction)
 				continue
 			}
@@ -630,14 +678,14 @@ func (t *translator) groupSQL(parts groupParts, aliasPrefix string, outer map[st
 // specifies, so the clause holds when it is NULL as well as when the values
 // are equal.
 func joinClause(a sqlBinding, b sqlBinding) string {
-	return nullableClause(a, nullableClause(b, a.expr()+" = "+b.expr()))
+	return nullableClause(a, nullableClause(b, equalClause(a, b)))
 }
 
 func nullableClause(binding sqlBinding, clause string) string {
 	if !binding.nullable {
 		return clause
 	}
-	return "(" + binding.expr() + " IS NULL OR " + clause + ")"
+	return "(" + binding.present() + " IS NULL OR " + clause + ")"
 }
 
 // valuesSQL adds a VALUES block to the group as a derived table of its rows,
@@ -871,7 +919,11 @@ func (t *translator) patternSQL(triples []patternTriple, aliasPrefix string, out
 			if name := variableName(part.term); name != "" {
 				binding := sqlBinding{alias: alias, column: part.column}
 				if previous, ok := result.bindings[name]; ok {
-					result.where = append(result.where, previous.expr()+" = "+binding.expr())
+					result.where = append(result.where, equalClause(previous, binding))
+					if previous.typedObject() && previous.resource == "" && binding.isResource() {
+						previous.resource = binding.expr()
+						result.bindings[name] = previous
+					}
 				} else if enclosing, ok := outer[name]; ok {
 					result.bindings[name] = binding
 					result.correlated = true
@@ -952,8 +1004,8 @@ func correlationSQL(alias string, correlations []correlation) []string {
 	}
 	var clauses []string
 	for _, c := range correlations {
-		if !c.inner.typedObject() || !c.outer.typedObject() {
-			clauses = append(clauses, nullableClause(c.outer, c.inner.expr()+" = "+c.outer.expr()))
+		if !c.inner.typedObject() || !c.outer.typedObject() || c.outer.resource != "" {
+			clauses = append(clauses, nullableClause(c.outer, equalClause(c.inner, c.outer)))
 			continue
 		}
 		clauses = append(clauses,
